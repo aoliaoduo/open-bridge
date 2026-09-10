@@ -423,8 +423,8 @@ async function cmdDoctor(parsed: ParsedArgs): Promise<void> {
     lines.push(`  [${ok ? "OK" : "!!"}] ${name}: ${detail}`);
   };
 
-  const [major, minor] = process.versions.node.split(".").map(Number);
-  check("node", major > 20 || (major === 20 && minor >= 3), `${process.versions.node} (需要 >= 20.3)`);
+  const [major] = process.versions.node.split(".").map(Number);
+  check("node", major >= 22, `${process.versions.node} (需要 >= 22)`);
   try {
     fs.mkdirSync(home, { recursive: true });
     fs.accessSync(home, fs.constants.W_OK);

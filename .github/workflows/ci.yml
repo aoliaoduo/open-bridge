@@ -18,9 +18,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Lowest supported runtime (package.json engines: >=20.3.0).
+          # Lowest supported runtime (package.json engines: >=22.0.0).
+          # Node 20 left maintenance in March 2026, so it is no longer a
+          # supported floor for a tool that ships without a security net.
           - os: ubuntu-latest
-            node: "20.x"
+            node: "22.x"
           # Current runtime used for local development.
           - os: ubuntu-latest
             node: "24.x"

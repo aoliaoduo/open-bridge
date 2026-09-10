@@ -8,8 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - CI pipeline (GitHub Actions): typecheck, lint, build, unit + API integration
-  tests, and a CLI smoke test, across Ubuntu (Node 20 / 24) and Windows (Node 24).
+  tests, and a CLI smoke test, across Ubuntu (Node 22 / 24) and Windows (Node 24).
 - README section on ripgrep resolution across platforms.
+
+### Changed
+- **Minimum Node.js is now 22** (was 20.3). Node 20 reached end-of-life in
+  March 2026, so it receives no further security fixes — not a defensible
+  support floor for a tool that exposes a local workspace over HTTP. The old
+  floor was inherited from the VS Code extension, where it tracked the
+  editor's bundled runtime; a standalone CLI has no such constraint.
+
+### Fixed
+- Test suite: `path casing cannot split one file's lock on Windows` asserted a
+  Windows-only invariant on every platform, so it failed on Linux. It now pins
+  what each platform must do — fold case on Windows, keep paths distinct on POSIX.
+- Test script used a `**` glob that only Node 21+ expands for `--test`; a
+  single-star pattern lets POSIX shells expand it while Windows still globs
+  through Node.
+- CI bumped to actions/checkout@v7 and actions/setup-node@v7 (v4 targets the
+  Node 20 action runtime, which current runners have deprecated).
 
 ## [1.0.0-alpha.1] — 2026-09-11
 

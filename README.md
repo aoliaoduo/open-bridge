@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/aoliaoduo/open-bridge-app/actions/workflows/ci.yml/badge.svg)](https://github.com/aoliaoduo/open-bridge-app/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D20.3-brightgreen.svg)](package.json)
+[![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](package.json)
 
 在本机安全暴露工作区能力的独立 MCP 桥接：**一个 Node 进程，一个端口，同时提供 MCP 端点和 Web 控制台**。
 
@@ -21,7 +21,7 @@ ChatGPT 网页对话 / Claude / Cursor / 任意 MCP 客户端
 
 ## 安装与启动
 
-要求 Node.js ≥ 20.3。
+要求 Node.js ≥ 22（Node 20 已于 2026-03 结束维护，不再作为支持基线）。
 
 ```bash
 npm install -g open-bridge
