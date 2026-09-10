@@ -1,0 +1,45 @@
+{
+  "name": "open-bridge",
+  "version": "1.0.0-alpha.1",
+  "description": "Standalone Streamable HTTP MCP bridge for local workspaces. 在本机安全暴露工作区能力的独立 MCP 桥接（CLI + Web 控制台）。",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.3.0"
+  },
+  "bin": {
+    "open-bridge": "bin/open-bridge.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "vendor",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.json && vite build",
+    "build:core": "node scripts/clean.mjs && tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "lint": "eslint .",
+    "test": "tsx --test test/**/*.test.ts && node --test test/api-integration.test.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^9.39.4",
+    "globals": "^17.12.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.70.0",
+    "vite": "^6.0.0"
+  }
+}

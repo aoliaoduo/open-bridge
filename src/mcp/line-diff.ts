@@ -1,0 +1,60 @@
+/**
+ * Minimal unified-diff generation for display purposes ("what did this patch
+ * change"). Not a minimal-edit diff engine: it trims the common prefix/suffix
+ * and emits a single hunk, which is exact for the surgical edits AI clients
+ * make and always renders correctly, just occasionally with extra context.
+ * Pure module so it stays unit-testable without vscode.
+ */
+
+export interface LineDiffStats {
+  additions: number;
+  deletions: number;
+}
+
+export function unifiedDiff(before: string, after: string, contextLines = 3): string | undefined {
+  if (before === after) return undefined;
+  const a = before.split("\n");
+  const b = after.split("\n");
+  let prefix = 0;
+  while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix += 1;
+  let suffix = 0;
+  while (
+    suffix < a.length - prefix &&
+    suffix < b.length - prefix &&
+    a[a.length - 1 - suffix] === b[b.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+  const removed = a.slice(prefix, a.length - suffix);
+  const added = b.slice(prefix, b.length - suffix);
+  const contextStart = Math.max(0, prefix - contextLines);
+  const contextEnd = Math.min(a.length, a.length - suffix + contextLines);
+  const lines: string[] = [];
+  for (let index = contextStart; index < prefix; index += 1) lines.push(` ${a[index]}`);
+  for (const line of removed) lines.push(`-${line}`);
+  for (const line of added) lines.push(`+${line}`);
+  for (let index = a.length - suffix; index < contextEnd; index += 1) lines.push(` ${a[index]}`);
+  const oldCount = contextEnd - contextStart;
+  const newCount = oldCount - removed.length + added.length;
+  const header = `@@ -${contextStart + 1},${oldCount} +${contextStart + 1},${newCount} @@`;
+  return [header, ...lines].join("\n");
+}
+
+export function countDiffLines(diff: string): LineDiffStats {
+  let additions = 0;
+  let deletions = 0;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+") && !line.startsWith("+++")) additions += 1;
+    else if (line.startsWith("-") && !line.startsWith("---")) deletions += 1;
+  }
+  return { additions, deletions };
+}
+
+/** Head+tail truncation that keeps both ends readable (40% head / 60% tail). */
+export function boundedText(text: string, maxChars: number): { text: string; truncated: boolean } {
+  if (text.length <= maxChars) return { text, truncated: false };
+  const marker = "\n...[truncated]...\n";
+  const budget = Math.max(0, maxChars - marker.length);
+  const head = Math.floor(budget * 0.4);
+  return { text: `${text.slice(0, head)}${marker}${text.slice(-(budget - head))}`, truncated: true };
+}

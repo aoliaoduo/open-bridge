@@ -1,0 +1,232 @@
+/**
+ * Graphical settings page for Open Bridge — pure render layer.
+ *
+ * No vscode / bridge-state imports, so the HTML, the client script and the
+ * message normalizer stay unit-testable in plain node (same pattern as
+ * webview-script.ts / panel-format.ts).
+ *
+ * Design contract (carried over from the 0.5.11 panel rework):
+ *  - three type sizes only (11px labels / 12px body / 11px meta), no more
+ *  - rows, not boxes-in-boxes; section separators are the only chrome
+ *  - everything is a click: no QuickPick, no InputBox, no command palette.
+ *    Two-step inline confirm ("确认?" arms a button for 3s) replaces modal
+ *    warnings for destructive token actions.
+ *  - the freshly minted secret is held by the HOST (never re-rendered away),
+ *    displayed once in a full-page mask with copy + "I saved it" buttons.
+ */
+
+/** Whitelisted lifetimes for a newly created token (seconds; 0 = permanent). */
+export const TTL_CHOICES: ReadonlyArray<{ seconds: number; label: string }> = [
+  { seconds: 0, label: "永久（不过期）" },
+  { seconds: 30 * 86_400, label: "30 天" },
+  { seconds: 7 * 86_400, label: "7 天" },
+  { seconds: 86_400, label: "24 小时" },
+  { seconds: 3_600, label: "1 小时" },
+];
+
+/** Human label for any TTL value; non-listed values fall back to a generic form. */
+export function ttlLabel(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "永久";
+  const known = TTL_CHOICES.find(choice => choice.seconds === seconds);
+  if (known) return known.label.replace(/（.*/, "");
+  if (seconds % 86_400 === 0) return `${seconds / 86_400} 天`;
+  if (seconds % 3_600 === 0) return `${seconds / 3_600} 小时`;
+  if (seconds % 60 === 0) return `${seconds / 60} 分钟`;
+  return `${seconds} 秒`;
+}
+
+/** Public projection of a token record (mirrors publicTokenView in auth-core). */
+export interface SettingsTokenRow {
+  id: string;
+  label: string;
+  created_at: string;
+  expires_at: string | null;
+  permanent: boolean;
+  expired: boolean;
+  revoked: boolean;
+  last_used_at: string | null;
+  use_count: number;
+}
+
+/** Config keys the page edits beyond the managed flows (tokens/domain/concurrency). */
+export interface SettingsConfigView {
+  autoStart: boolean;
+  unrestrictedFileAccess: boolean;
+  allowedDirectories: string[];
+  tunnelProvider: string;
+  ngrokExecutable: string;
+  shellPath: string;
+  shellArgs: string[];
+  port: number;
+  publicHealthTimeoutMs: number;
+  autoReconnect: boolean;
+  ngrokUseHttpProxy: boolean;
+  toolProfile: string;
+}
+
+/** Everything the settings page shows, pushed by the host as one `state` message. */
+export interface SettingsState {
+  running: boolean;
+  statusText: string;
+  publicUrl: string;
+  configuredDomain: string;
+  authEnabled: boolean;
+  defaultTtlSeconds: number;
+  usableCount: number;
+  deadCount: number;
+  tokens: SettingsTokenRow[];
+  concurrency: { enabled: boolean; holdTimeoutMs: number; waitTimeoutMs: number };
+  config: SettingsConfigView;
+}
+
+export type SettingsAction =
+  | { command: "ready" }
+  | { command: "copyUrl" | "start" | "stop" | "rotateEndpoint" | "purgeTokens" | "revokeAll" | "copySecret" | "dismissSecret" }
+  | { command: "saveDomain"; domain: string }
+  | { command: "setAuthEnabled"; enabled: boolean }
+  | { command: "setDefaultTtl"; seconds: number }
+  | { command: "createToken"; label: string; ttlSeconds: number }
+  | { command: "rotateToken" | "revokeToken" | "deleteToken"; id: string }
+  | { command: "setConcurrency"; enabled: boolean; holdTimeoutMs: number; waitTimeoutMs: number }
+  | { command: "setConfig"; key: SettingsConfigKey; value: unknown }
+  | { command: "copyText"; text: string };
+
+const COMMANDS_WITH_ID: ReadonlySet<string> = new Set(["rotateToken", "revokeToken", "deleteToken"]);
+const TTL_SET: ReadonlySet<number> = new Set(TTL_CHOICES.map(choice => choice.seconds));
+
+/**
+ * Per-key validation for the page's generic config writes. Deliberately does
+ * NOT include auth/concurrency/domain/TTL: those have dedicated, guarded
+ * flows and must never be reachable through the generic path.
+ */
+const CONFIG_SPEC = {
+  autoStart: { kind: "boolean" },
+  unrestrictedFileAccess: { kind: "boolean" },
+  autoReconnect: { kind: "boolean" },
+  ngrokUseHttpProxy: { kind: "boolean" },
+  tunnelProvider: { kind: "enum", values: ["none", "ngrok"] },
+  toolProfile: { kind: "enum", values: ["full", "core"] },
+  ngrokExecutable: { kind: "string", max: 500 },
+  shellPath: { kind: "string", max: 500 },
+  allowedDirectories: { kind: "stringArray", maxItems: 50, maxLen: 500 },
+  shellArgs: { kind: "stringArray", maxItems: 50, maxLen: 500 },
+  port: { kind: "int", min: 0, max: 65535 },
+  publicHealthTimeoutMs: { kind: "int", min: 3000, max: 120000 },
+} as const;
+
+export type SettingsConfigKey = keyof typeof CONFIG_SPEC;
+
+type ConfigSpecEntry = (typeof CONFIG_SPEC)[SettingsConfigKey];
+
+function normalizeConfigValue(spec: ConfigSpecEntry, value: unknown): unknown | null {
+  if (spec.kind === "boolean") return value === true;
+  if (spec.kind === "enum") {
+    const v = typeof value === "string" ? value.trim() : value;
+    return (spec.values as readonly string[]).includes(v as string) ? v : null;
+  }
+  if (spec.kind === "string") {
+    return typeof value === "string" ? value.trim().slice(0, spec.max) : null;
+  }
+  if (spec.kind === "stringArray") {
+    if (!Array.isArray(value) || value.some(item => typeof item !== "string")) return null;
+    return value
+      .map(item => (item as string).trim().slice(0, spec.maxLen))
+      .filter(item => item.length > 0)
+      .slice(0, spec.maxItems);
+  }
+  // int — booleans/strings must not coerce into a valid-looking number
+  return typeof value === "number" && Number.isInteger(value) && value >= spec.min && value <= spec.max ? value : null;
+}
+
+/**
+ * Validate an inbound webview message against a strict allowlist. Anything
+ * malformed becomes `null` and is dropped — the webview is untrusted input.
+ */
+export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
+  if (!raw || typeof raw !== "object") return null;
+  const message = raw as Record<string, unknown>;
+  const command = typeof message.command === "string" ? message.command : "";
+  const allowed: ReadonlySet<string> = new Set([
+    "ready", "copyUrl", "start", "stop", "rotateEndpoint", "saveDomain",
+    "setAuthEnabled", "setDefaultTtl", "createToken", "rotateToken",
+    "revokeToken", "deleteToken", "purgeTokens", "revokeAll",
+    "setConcurrency", "setConfig", "copyText", "copySecret", "dismissSecret",
+  ]);
+  if (!allowed.has(command)) return null;
+
+  const str = (value: unknown, max: number): string =>
+    typeof value === "string" ? value.trim().slice(0, max) : "";
+
+  switch (command) {
+    case "saveDomain": {
+      // Trim only — a domain with embedded spaces must reach the host's
+      // validator as-is so the user sees the refusal instead of a silently
+      // rewritten value that can never come up as a tunnel.
+      const domain = str(message.domain, 253);
+      return domain ? { command, domain } : null;
+    }
+    case "setAuthEnabled":
+      return { command, enabled: message.enabled === true };
+    case "setDefaultTtl": {
+      const seconds = Number(message.seconds);
+      if (!Number.isFinite(seconds) || !TTL_SET.has(seconds)) return null;
+      return { command, seconds };
+    }
+    case "createToken": {
+      const label = str(message.label, 100);
+      const ttlSeconds = Number(message.ttlSeconds);
+      if (!Number.isFinite(ttlSeconds) || !TTL_SET.has(ttlSeconds)) return null;
+      return { command, label, ttlSeconds };
+    }
+    case "rotateToken":
+    case "revokeToken":
+    case "deleteToken": {
+      const id = typeof message.id === "string" ? message.id.trim() : "";
+      if (!id || id.length > 64 || !COMMANDS_WITH_ID.has(command)) return null;
+      return { command, id } as SettingsAction;
+    }
+    case "copyText": {
+      const text = str(message.text, 512);
+      return text ? { command, text } : null;
+    }
+    case "setConcurrency": {
+      const ms = (value: unknown): number | null => {
+        const n = Number(value);
+        return Number.isFinite(n) && n >= 0 && n <= 3_600_000 ? Math.floor(n) : null;
+      };
+      const holdTimeoutMs = ms(message.holdTimeoutMs);
+      const waitTimeoutMs = ms(message.waitTimeoutMs);
+      if (holdTimeoutMs === null || waitTimeoutMs === null) return null;
+      return { command, enabled: message.enabled === true, holdTimeoutMs, waitTimeoutMs };
+    }
+    case "setConfig": {
+      const key = typeof message.key === "string" ? message.key : "";
+      const spec = (CONFIG_SPEC as Record<string, ConfigSpecEntry | undefined>)[key];
+      if (!spec) return null;
+      const value = normalizeConfigValue(spec, message.value);
+      return value === null ? null : { command, key: key as SettingsConfigKey, value };
+    }
+    default:
+      return { command } as SettingsAction;
+  }
+}
+
+/**
+ * Gate for the auth toggle. Fail-closed means enabling with zero usable
+ * tokens bricks the endpoint for every client, so the host refuses and the
+ * page explains.
+ */
+export function authToggleVerdict(next: boolean, usableCount: number): { allow: boolean; reason?: string } {
+  if (!next) return { allow: true };
+  if (usableCount > 0) return { allow: true };
+  return {
+    allow: false,
+    reason: "还没有有效令牌。鉴权是「失败关闭」的：直接开启会拒绝所有客户端。先在下方新建一个令牌，再打开这个开关。",
+  };
+}
+
+// The render layer (webview HTML/CSS/client script) is gone in the standalone
+// app: the React console (ui/) re-implements it against the SAME state/action
+// contract defined above — SettingsState as GET /api/settings, SettingsAction
+// as POST /api/settings/action payloads, with normalizeSettingsMessage kept as
+// the server-side validation gate.
