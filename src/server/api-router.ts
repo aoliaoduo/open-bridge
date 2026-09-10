@@ -44,6 +44,21 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
+/**
+ * Reply to the caller with a connection that will not be reused.
+ *
+ * Used for the answers that outlive their own listener — stop, rotate, shutdown,
+ * and the settings actions that defer them. The reply is the last thing this
+ * connection carries, so declaring it non-reusable lets Node close the socket
+ * gracefully after the flush (FIN after the body), and removes it from the set
+ * the teardown later destroys. Without this the teardown raced the caller's read
+ * and a successful rotation reached the console as ECONNRESET.
+ */
+function jsonAndClose(res: ServerResponse, status: number, body: unknown): void {
+  if (!res.headersSent) res.setHeader("connection", "close");
+  json(res, status, body);
+}
+
 /** Host must name this machine; the ngrok public host is refused. */
 function isLoopbackHost(hostHeader: string | undefined, port: number): boolean {
   if (!hostHeader) return false;
@@ -75,6 +90,17 @@ function afterResponse(res: ServerResponse, task: () => void): void {
     ran = true;
     task();
   };
+  // `finish` is the flush: the body has been handed to the OS, which is the
+  // earliest moment the teardown can start without losing it. (`end()` alone is
+  // not: it returns before the bytes leave the HTTP layer, which is why acting
+  // on `writableFinished` truncated replies — measured, not assumed.)
+  //
+  // Even after the flush the bytes are only in the peer's kernel buffer, so what
+  // makes this safe is the reply itself: teardown-bound answers go out through
+  // jsonAndClose(), which marks the connection non-reusable so Node closes it
+  // gracefully (FIN after the body) instead of leaving a socket behind for
+  // stopLocalServer → closeIdleConnections() to destroy mid-read — the
+  // ECONNRESET a caller used to get for a rotation that had succeeded.
   if (res.writableFinished) {
     run();
     return;
@@ -221,7 +247,7 @@ export async function apiRouteHandler(
           // Answer first, tear down second: this response travels over the very
           // listener stop() closes, so awaiting it here handed the caller a
           // connection reset for a stop that had in fact succeeded.
-          json(res, 200, { ok: true, status: getBridgeStatus() });
+          jsonAndClose(res, 200, { ok: true, status: getBridgeStatus() });
           afterResponse(res, () => { void stop(); });
           return true;
         }
@@ -229,13 +255,14 @@ export async function apiRouteHandler(
           // Rotate in-process first so this response can carry the new endpoint,
           // then rebind the listener once the response is flushed.
           await enqueueLifecycle(async () => { await rotateRouteToken(); });
-          json(res, 200, { ok: true, status: getBridgeStatus(), reloadRequired: true });
+          jsonAndClose(res, 200, { ok: true, status: getBridgeStatus(), reloadRequired: true });
           afterResponse(res, () => { void restartListener(); });
           return true;
         }
         case "/settings/action": {
           const result = await handleSettingsAction(await readBody(req));
-          json(res, result.ok ? 200 : 400, result);
+          const closing = result.ok && (result.deferStop || result.deferRestart);
+          (closing ? jsonAndClose : json)(res, result.ok ? 200 : 400, result);
           // Stop and rebind tear down the socket this response is on, so they
           // wait for it to be fully flushed. Doing them first is what turned a
           // successful stop/rotate into an ECONNRESET with no response body —
@@ -246,8 +273,11 @@ export async function apiRouteHandler(
           return true;
         }
         case "/shutdown": {
-          json(res, 200, { ok: true, message: "Shutting down." });
-          setImmediate(() => { void gracefulShutdown(); }); return true;
+          // Same rule as stop/rotate: this reply is the last thing this listener
+          // will ever send, so the process must not exit before the client has
+          // read it.
+          jsonAndClose(res, 200, { ok: true, message: "Shutting down." });
+          afterResponse(res, () => { void gracefulShutdown(); }); return true;
         }
         default: json(res, 404, { error: "Unknown API route." }); return true;
       }

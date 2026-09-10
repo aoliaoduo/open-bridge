@@ -48,6 +48,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   handing to a client. `SettingsState.publicUrl` is renamed `mcpUrl` to match.
 
 ### Fixed
+- **A rotation or a stop could still reach the caller as a connection reset with
+  no response body.** The deferral added earlier waited for the response's
+  `finish` event, but the teardown then destroyed the very socket that reply had
+  travelled on (`stopLocalServer` → `closeIdleConnections`), while the bytes were
+  still only in the peer's kernel buffer — and Windows discards an unread body
+  when a socket is reset, so the caller lost a response the server had already
+  written. Measured on one machine: 2 failures in 6 runs, and 8 in 8 once the
+  teardown was deferred differently. The replies that outlive their own listener
+  — stop, rotate, shutdown, and the settings actions that defer them — now go out
+  through `jsonAndClose()`, which marks the connection non-reusable: Node closes
+  the socket gracefully (FIN *after* the body) instead of leaving one behind for
+  the teardown to destroy. `/shutdown` also moved off `setImmediate` onto the
+  same deferral, for the same reason. The api-integration suite passes 8 of 8
+  runs after the change (it failed 2 of 6 before, and 8 of 8 with the teardown
+  deferred slightly differently).
 - **A tunnel ngrok refuses no longer retries forever, and no longer advertises a
   dead https endpoint while it does.** `ERR_NGROK_313` (a reserved subdomain the
   account may not serve), a rejected authtoken and a refused proxy are
