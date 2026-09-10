@@ -829,6 +829,16 @@ async function startHttpInternal(): Promise<void> {
       res.end(JSON.stringify({ error: message }));
     }
   });
+  // Do not race the client's keep-alive timer. Node destroys an idle connection
+  // once keepAliveTimeout elapses (5 s by default), and a browser or pool that
+  // reuses that socket at the same instant sees ECONNRESET while writing the
+  // request — which is how a rotation failed on the busier CI runner while
+  // passing locally. The client, which decides for itself when to drop an idle
+  // socket, should always be the one to close it; leftovers are closed
+  // explicitly by stopLocalServer(). Node requires headersTimeout to exceed
+  // keepAliveTimeout.
+  state.server.keepAliveTimeout = 60_000;
+  state.server.headersTimeout = 66_000;
   await new Promise<void>((resolve, reject) => {
     state.server!.once("error", reject);
     state.server!.listen(listenPort, "127.0.0.1", () => resolve());

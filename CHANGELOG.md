@@ -48,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   handing to a client. `SettingsState.publicUrl` is renamed `mcpUrl` to match.
 
 ### Fixed
+- **The server no longer races the client's keep-alive timer.** It inherited
+  Node's 5 s `keepAliveTimeout`, which destroys idle connections; a pool that
+  owns such a connection (undici keys its own timer off the advertised
+  `Keep-Alive: timeout=5`, plus slack) would then reuse a socket the server had
+  just destroyed and fail with ECONNRESET while writing the request — an
+  intermittently red API test on CI's Windows runner, never locally. The
+  listener now advertises 60 s (`headersTimeout` 66 s, which Node requires to
+  exceed it), so the client is always the one to close an idle connection;
+  leftovers are still closed explicitly by `stopLocalServer()`. Reproduced
+  deterministically: with the default, a pooled connection idle for 6 s and then
+  reused fails with ECONNRESET; with 60 s it answers 200. The api-integration
+  suite now pins that behaviour.
 - **A rotation or a stop could still reach the caller as a connection reset with
   no response body.** The deferral added earlier waited for the response's
   `finish` event, but the teardown then destroyed the very socket that reply had

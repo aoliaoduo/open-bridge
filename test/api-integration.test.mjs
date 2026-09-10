@@ -207,6 +207,36 @@ async function waitForRebind(timeoutMs = 20_000) {
   throw new Error("the listener never came back after the rebind");
 }
 
+test("an idle pooled connection survives past Node's 5 s keep-alive default", async () => {
+  // Regression, and the reason a rotation intermittently failed on CI's Windows
+  // runner while passing locally: the server inherited Node's 5 s
+  // keepAliveTimeout and DESTROYED idle connections on that timer, while the
+  // pool that owned the connection considered it reusable (undici keys its
+  // keep-alive timer off the `Keep-Alive: timeout=` header, with slack). Reusing
+  // that socket raised ECONNRESET on write — measured here as a hard failure
+  // with the default timeout and as a clean 200 with the 60 s one.
+  const agent = new http.Agent({ keepAlive: true });
+  const send = () => new Promise((resolve, reject) => {
+    const req = http.request({ host: "127.0.0.1", port, path: "/api/status", agent }, res => {
+      res.resume();
+      res.on("end", () => resolve({ status: res.statusCode, keepAlive: res.headers["keep-alive"] }));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+  try {
+    const first = await send();
+    assert.equal(first.status, 200);
+    const advertised = Number(/(?:^|;\s*)timeout=(\d+)/.exec(first.keepAlive ?? "")?.[1] ?? "0");
+    assert.ok(advertised > 10, `the server advertises a long keep-alive window, got "${first.keepAlive}"`);
+    await delay(6_000);
+    const reused = await send();
+    assert.equal(reused.status, 200, "an idle connection must survive past the 5 s default");
+  } finally {
+    agent.destroy();
+  }
+});
+
 test("rotation answers before rebinding the listener", async () => {
   // Regression: the rotation flipped the token, rebound the listener and only
   // then replied — but the reply travels over the socket the rebind closes, so
