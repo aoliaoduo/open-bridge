@@ -7,11 +7,7 @@
  * never travels in URLs or localStorage.
  */
 
-declare global {
-  interface Window { __OPEN_BRIDGE_TOKEN__?: string }
-}
-
-export const consoleToken = (): string => window.__OPEN_BRIDGE_TOKEN__ ?? "";
+export const consoleToken = (): string => document.querySelector<HTMLMetaElement>('meta[name="open-bridge-console-token"]')?.content ?? "";
 
 export interface BridgeStatus {
   state: string;

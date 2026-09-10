@@ -138,6 +138,7 @@ test("console page is served with the token injected; ngrok Host is refused", as
   assert.equal(res.status, 200);
   const html = await res.text();
   assert.ok(html.includes("open-bridge-console-token"), "token meta injected into console html");
+  assert.ok(!html.includes("window.__OPEN_BRIDGE_TOKEN__"), "token is not exposed as inline script");
   const refusedStatus = await requestWithHost("/console/", "x.ngrok-free.dev");
   assert.equal(refusedStatus, 403);
 });
