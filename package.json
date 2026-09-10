@@ -2,6 +2,17 @@
   "name": "open-bridge",
   "version": "1.0.0-alpha.1",
   "description": "Standalone Streamable HTTP MCP bridge for local workspaces. 在本机安全暴露工作区能力的独立 MCP 桥接（CLI + Web 控制台）。",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "mcp-server",
+    "ai-agent",
+    "llm-tools",
+    "developer-tools",
+    "cli",
+    "bridge"
+  ],
+  "author": "aoliaoduo <aoliaoduo@126.com>",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -15,6 +26,7 @@
     "dist",
     "vendor",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
@@ -23,7 +35,8 @@
     "dev": "tsx src/cli.ts",
     "lint": "eslint .",
     "test": "tsx --test test/**/*.test.ts && node --test test/api-integration.test.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "verify": "npm run typecheck && npm run lint && npm run build && npm test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0"

@@ -8,7 +8,7 @@
 ChatGPT 网页对话 / Claude / Cursor / 任意 MCP 客户端
         │  （经你掌控的 ngrok 隧道或局域网）
         ▼
-  open-bridge serve  ── /mcp/<路由令牌>   Streamable HTTP MCP（56 个工具）
+  open-bridge serve  ── /mcp/<路由令牌>   Streamable HTTP MCP（54 个工具）
         │            ── /console/         Web 控制台（仅本机回环可访问）
         │            ── /api/*            控制台后端（回环 + 令牌头双门控）
         ▼
@@ -93,8 +93,9 @@ runtime.json    运行实例注册（pid / 端口，供 stop/status 使用）
 
 - 配置从 VS Code settings 迁到 `~/.open-bridge/config.json`（键名完全一致）
 - 「工作区」概念变为 `serve` 时的 `--root`（默认当前目录）
-- 编辑器专属工具（`lsp`、`get_diagnostics`）不在独立版提供——它们依赖语言服务器，`tools/list` 会自动过滤
-- 其余 56 个工具（文件/发现/补丁/进程/服务编排/网络探测/批处理/待办/统计）与扩展逐字节一致
+- 编辑器专属工具（`lsp`、`get_diagnostics`）不在独立版提供——它们依赖语言服务器，`tools/list` 会自动过滤（直接调用会得到明确的降级提示，而不是"未知工具"）
+- 工具定义共 56 个，与扩展逐字节一致；独立版对外暴露其中 54 个（文件/发现/补丁/进程/服务编排/网络探测/批处理/待办/统计）
+- 内置 ripgrep 解析按平台自适应：Windows 用 `vendor/rg.exe`，其他平台找 `vendor/rg`，都没有就回退 PATH 上的 `rg`，最后回退内置扫描器——**功能不受影响**，只是大仓库搜索会慢一些
 
 ## 开发
 

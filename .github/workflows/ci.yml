@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify · ${{ matrix.os }} · node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Lowest supported runtime (package.json engines: >=20.3.0).
+          - os: ubuntu-latest
+            node: "20.x"
+          # Current runtime used for local development.
+          - os: ubuntu-latest
+            node: "24.x"
+          # Primary target platform (Git Bash shell, bundled ripgrep).
+          - os: windows-latest
+            node: "24.x"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # Build must precede the integration test: it boots bin/open-bridge.js,
+      # which loads the compiled dist/ output.
+      - name: Build
+        run: npm run build
+
+      - name: Test (unit + API integration)
+        run: npm test
+
+      - name: CLI smoke test
+        shell: bash
+        run: |
+          node bin/open-bridge.js version
+          node bin/open-bridge.js doctor
+          node bin/open-bridge.js status
