@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through Node.
 - CI bumped to actions/checkout@v7 and actions/setup-node@v7 (v4 targets the
   Node 20 action runtime, which current runners have deprecated).
+- Three `resource-locks` tests were cancelled on Node 22 with "Promise
+  resolution is still pending but the event loop has already resolved". Every
+  timer in `resource-locks` is deliberately `unref()`d so a pending lock can
+  never pin a process open; with nothing else holding the loop in a test
+  process, it drained before the deadline fired. The test now holds the loop
+  open across the wait — the product keeps its `unref()` call, since a real
+  server always has its listening socket holding the loop open.
 
 ## [1.0.0-alpha.1] — 2026-09-11
 
