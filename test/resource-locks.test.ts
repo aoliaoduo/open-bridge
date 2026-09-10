@@ -9,6 +9,29 @@ import {
 
 const FAST = { holdTimeoutMs: 5_000, waitTimeoutMs: 2_000 };
 
+/**
+ * Run `fn` while a ref'd timer holds the event loop open.
+ *
+ * Every timer inside resource-locks is deliberately `unref()`d — a pending lock
+ * must never pin a process open — so in a test process with nothing else
+ * running, the loop can drain before those timers fire. Node then cancels the
+ * still-pending test with "Promise resolution is still pending but the event
+ * loop has already resolved" (observed on Node 20 and 22; Node 24's runner
+ * keeps the loop alive on its own).
+ *
+ * A real server always has the listening socket holding the loop open, which is
+ * why this only ever bites the tests. Waiting on a lock deadline restores that
+ * condition explicitly.
+ */
+async function whileLoopRuns<T>(fn: () => Promise<T>): Promise<T> {
+  const keepAlive = setTimeout(() => { /* hold the loop */ }, 30_000);
+  try {
+    return await fn();
+  } finally {
+    clearTimeout(keepAlive);
+  }
+}
+
 beforeEach(() => resetLocks());
 
 test("a writer excludes another writer on the same key", async () => {
@@ -109,10 +132,12 @@ test("no keys means no queueing at all", async () => {
 
 test("a wait deadline turns a stuck holder into a clear error", async () => {
   const held: LockRelease = await acquireLocks({ keys: ["file:a"], mode: "write", label: "holder" }, { ...FAST, waitTimeoutMs: 60 });
-  await assert.rejects(
+  // Nothing else is pending here, so the test has to hold the loop open for the
+  // unref'd wait timer to fire (see whileLoopRuns).
+  await whileLoopRuns(() => assert.rejects(
     acquireLocks({ keys: ["file:a"], mode: "write", label: "waiter" }, { ...FAST, waitTimeoutMs: 60 }),
     /Timed out after .*waiting for file:a/,
-  );
+  ));
   assert.equal(lockSnapshot().waiting.length, 0, "the timed-out waiter left the queue");
   held();
 });
