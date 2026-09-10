@@ -1,0 +1,16 @@
+{
+  "//": "The console (ui/) and its tests sit outside the core tsconfig, which covers src/**/*.ts only. Vite transpiles without checking types, so without this config the React app and its tests would never be type-checked at all.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["ui/src/**/*.ts", "ui/src/**/*.tsx", "vitest.config.ts"]
+}
