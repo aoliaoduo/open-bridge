@@ -19,26 +19,75 @@ ChatGPT 网页对话 / Claude / Cursor / 任意 MCP 客户端
   你的项目工作区（文件、命令、进程、服务编排）
 ```
 
-## 安装与启动
+## 运行
 
 要求 Node.js ≥ 22（Node 20 已于 2026-03 结束维护，不再作为支持基线）。
 
+### 从源码运行（现在就能用）
+
+```bash
+git clone https://github.com/aoliaoduo/open-bridge-app.git
+cd open-bridge-app
+npm ci
+npm run build
+
+npm start
+```
+
+**控制台地址：<http://127.0.0.1:18080/console/>** —— `npm start` 固定用 18080 端口并自动打开浏览器（等价于 `node bin/open-bridge.js serve --port 18080 --open --no-tunnel`）。
+
+`--no-tunnel` 是纯本机运行。要让外部客户端连进来，见下方「公网隧道」。
+
+要桥接的不是本仓库时，在**你的项目目录**里运行并指定工作区根：
+
+```bash
+cd your-project
+node <open-bridge-app>/bin/open-bridge.js serve --root . --port 18080 --open --no-tunnel
+```
+
+`serve` 是**前台运行**，Ctrl+C 停止。想在后台跑就另开一个终端：`node bin/open-bridge.js stop`。
+
+### 全局安装
+
+npm 上还没有发布（`npm install -g open-bridge` 暂时会 404）。想现在就装成全局命令，在仓库目录里：
+
+```bash
+npm install -g .        # 装的是当前源码，之后任意目录可用 open-bridge
+cd your-project
+open-bridge serve --port 18080 --open --no-tunnel
+```
+
+发布后会变成常规写法：
+
 ```bash
 npm install -g open-bridge
-
-# 在项目目录启动（前台运行，Ctrl+C 停止）
-cd your-project
 open-bridge serve --no-tunnel        # 纯本地
 open-bridge serve                    # 走 ngrok 隧道（需先配置域名）
 ```
 
-启动后终端会打印：
+### 启动后你会看到
 
 ```
-  Web 控制台:  http://127.0.0.1:<端口>/console/
-  本地 MCP URL: http://127.0.0.1:<端口>/mcp/<路由令牌>
-  公网 MCP URL: https://<你的域名>.ngrok-free.dev/mcp/<路由令牌>
+  Web 控制台:  http://127.0.0.1:18080/console/        ← 浏览器打开这个
+  本地 MCP URL: http://127.0.0.1:18080/mcp/<路由令牌>   ← 填进 MCP 客户端
+  公网 MCP URL: （未开启隧道，仅本机可用）
+
+  接入 AI 客户端：open-bridge prompt  →  复制提示词并粘贴给客户端
 ```
+
+**端口**：不传 `--port` 时默认 0（每次启动随机分配一个空闲端口），地址会变。要固定地址就显式指定，推荐 `--port 18080`。
+
+### 公网隧道
+
+只有要让 ChatGPT 网页版这类外部客户端连进来，才需要 ngrok：
+
+```bash
+open-bridge config set ngrokDomain <你预留的域名>.ngrok-free.dev
+open-bridge serve --port 18080 --open      # 注意：不带 --no-tunnel
+```
+
+- 免费 ngrok 账号只分配一个子域，**同一域名同时只能被一个实例占用**。VS Code 扩展实例在跑时先停掉它的隧道，否则新实例会因域名被占而停在本地（此时 `public_url` 不出现，控制台显示「仅本机可访问」）。
+- 必须填你账号分配到的那个域名；随便编一个会得到 `ERR_NGROK_313`（并且当前实现会一直重试同一域名）。
 
 **MCP URL 本身就是凭证**（路由令牌即鉴权），把它填进 MCP 客户端即可。可选开启 Bearer 鉴权做第二道闸（控制台「令牌」页签发，明文只显示一次）。
 
@@ -50,13 +99,14 @@ open-bridge serve                    # 走 ngrok 隧道（需先配置域名）
 | `open-bridge stop` | 停止运行中的实例 |
 | `open-bridge status` | 查看实例状态 |
 | `open-bridge url` | 打印当前 MCP URL |
+| `open-bridge prompt` | 打印「快速连接这个 MCP」接入提示词，直接粘给 AI 客户端 |
 | `open-bridge config list / get KEY / set KEY VALUE / path` | 读写配置 |
 | `open-bridge token create / list / revoke / delete / rotate` | 管理 Bearer 令牌 |
 | `open-bridge doctor` | 环境诊断 |
 
 ## Web 控制台
 
-浏览器打开 `http://127.0.0.1:<端口>/console/`：
+浏览器打开 `http://127.0.0.1:18080/console/`（端口随 `--port`）：
 
 - **状态**：MCP URL 复制、启动/停止/轮换端点、实时会话与锁
 - **设置**：隧道域名、端口、Shell、文件访问白名单、工具集、并发锁——与 MCP `get_config` / `set_config_value` 共用一套校验

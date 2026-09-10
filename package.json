@@ -38,6 +38,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "start": "node bin/open-bridge.js serve --port 18080 --open --no-tunnel",
     "build": "node scripts/clean.mjs && tsc -p tsconfig.json && vite build",
     "build:core": "node scripts/clean.mjs && tsc -p tsconfig.json",
     "dev": "tsx src/cli.ts",

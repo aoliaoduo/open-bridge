@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI pipeline (GitHub Actions): typecheck, lint, build, unit + API integration
   tests, and a CLI smoke test, across Ubuntu (Node 22 / 24) and Windows (Node 24).
 - README section on ripgrep resolution across platforms.
+- A quick start that actually works today: the README told readers to
+  `npm install -g open-bridge`, which cannot succeed until the package is
+  published. It now leads with the from-source path, names the console address
+  explicitly, and documents `npm start` as the one-command route. `npm start`
+  runs local-only (the default tunnel provider is ngrok, so an unconfigured
+  domain would otherwise warn on every start); exposing the Bridge through a
+  tunnel is its own section, including the one-session-per-domain rule.
 - Onboarding, reachable from all three surfaces: `open-bridge prompt` prints the
   ready-made opening message, `GET /api/prompt` serves it to local scripts, and
   the console's endpoint card gained a "复制接入提示词" button. `serve` now points
