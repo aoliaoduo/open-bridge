@@ -25,7 +25,7 @@ import { state } from "../bridge/state.js";
 import { getBridgeStatus, getUsageStats } from "../bridge/meta-tools.js";
 import { buildSettingsState, handleSettingsAction } from "./settings-handler.js";
 import { controlService, listServiceViews } from "../bridge/service-tools.js";
-import { start, stop, rotateRouteToken, restartListener, enqueueLifecycle, webAiPrompt } from "../bridge/lifecycle.js";
+import { start, stop, restartListener, webAiPrompt } from "../bridge/lifecycle.js";
 import { nodeHost } from "../host/node-host.js";
 import { redactSensitiveText } from "../bridge/state.js";
 
@@ -253,11 +253,12 @@ export async function apiRouteHandler(
           return true;
         }
         case "/bridge/rotate": {
-          // Rotate in-process first so this response can carry the new endpoint,
-          // then rebind the listener once the response is flushed.
-          await enqueueLifecycle(async () => { await rotateRouteToken(); });
+          // Delegates to the console's rotate action: this route used to repeat
+          // the same rotate-then-rebind dance, so a fix applied to one could
+          // silently miss the other.
+          const rotated = await handleSettingsAction({ command: "rotateEndpoint" });
           jsonAndClose(res, 200, { ok: true, status: getBridgeStatus(), reloadRequired: true });
-          afterResponse(res, () => { void restartListener(); });
+          if (rotated.ok && rotated.deferRestart) afterResponse(res, () => { void restartListener(); });
           return true;
         }
         case "/settings/action": {

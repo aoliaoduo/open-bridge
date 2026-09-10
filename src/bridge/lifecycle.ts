@@ -362,7 +362,8 @@ async function waitForPublicHealth(url: string, abort?: AbortSignal): Promise<vo
         if (deterministicFailures >= PUBLIC_HEALTH_DETERMINISTIC_FAILURE_LIMIT) {
           throw new Error(
             `Public health check aborted early: the network failure is deterministic (${last}). ` +
-            "If this machine reaches the internet through a proxy, ngrok must be able to connect directly (free plan rejects proxies, see openBridge.ngrokUseHttpProxy).",
+            "If this machine reaches the internet through a proxy, ngrok must be able to connect directly "
+            + "(the free plan rejects proxies; set ngrokUseHttpProxy off in the console settings page).",
           );
         }
       } else {
@@ -673,6 +674,31 @@ export async function startInternal(): Promise<void> {
 }
 
 /** Bind loopback, wire request handling (CORS, caps, sessions) and self-verify. */
+/**
+ * Reply to a request the bearer gate refused, and record it.
+ *
+ * Extracted from the request handler: the rejection path is the security
+ * boundary, and it is easier to audit on its own than nested three levels
+ * deep in the transport setup.
+ */
+function rejectUnauthorized(
+  res: ServerResponse,
+  gate: { status: number; reason: string; retryAfterMs?: number },
+  securityHeaders: Record<string, string>,
+): void {
+  record("bridge", "error", `Unauthenticated request rejected (${gate.reason}).`);
+  const headers: Record<string, string> = {
+    ...securityHeaders,
+    "content-type": "application/json",
+    "www-authenticate": 'Bearer realm="open-bridge", error="invalid_token"',
+  };
+  if (gate.retryAfterMs) headers["retry-after"] = String(Math.ceil(gate.retryAfterMs / 1000));
+  if (!res.headersSent) res.writeHead(gate.status, headers);
+  res.end(JSON.stringify({
+    error: gate.status === 429 ? "Too many failed attempts. Retry later." : "Unauthorized.",
+  }));
+}
+
 async function startHttpInternal(): Promise<void> {
   const configuredPort = host().config.get<number>("port", 0);
   // An ephemeral bind must not move on a rebind: the console was loaded from
@@ -744,17 +770,7 @@ async function startHttpInternal(): Promise<void> {
     // returns nothing but { ok: true }.
     const gate = await authorizeRequest(req, url);
     if (!gate.ok) {
-      record("bridge", "error", `Unauthenticated request rejected (${gate.reason}).`);
-      const headers: Record<string, string> = {
-        ...securityHeaders,
-        "content-type": "application/json",
-        "www-authenticate": 'Bearer realm="open-bridge", error="invalid_token"',
-      };
-      if (gate.retryAfterMs) headers["retry-after"] = String(Math.ceil(gate.retryAfterMs / 1000));
-      if (!res.headersSent) res.writeHead(gate.status, headers);
-      res.end(JSON.stringify({
-        error: gate.status === 429 ? "Too many failed attempts. Retry later." : "Unauthorized.",
-      }));
+      rejectUnauthorized(res, gate, securityHeaders);
       return;
     }
     try {
@@ -904,7 +920,10 @@ async function startTunnelInternal(generation: number): Promise<void> {
   }
   const configuredDomain = host().config.get<string>("ngrokDomain", "");
   if (!configuredDomain?.trim()) {
-    throw new Error("Set openBridge.ngrokDomain first.");
+    throw new Error(
+      "未配置隧道域名：请在控制台「设置」页填写 ngrokDomain，或运行 "
+      + "open-bridge config set ngrokDomain <你的域名>。",
+    );
   }
   const domain = validateNgrokDomain(configuredDomain);
   if ((await probePublicBridge(domain, state.routeToken)) !== "free") {
@@ -949,7 +968,8 @@ async function startTunnelInternal(generation: number): Promise<void> {
       // not spawn ngrok again, and a pending timer would do exactly that.
       stopReconnectChain();
       throw new NgrokSpawnError(
-        `${error.message} · 检查 openBridge.ngrokExecutable（未安装或路径不对请修正后重试；ERR_NGROK_9009 需关闭 openBridge.ngrokUseHttpProxy）。`
+        `${error.message} · 检查 ngrokExecutable（未安装或路径不对请在控制台「设置」页修正后重试；`
+        + "ERR_NGROK_9009 需关闭 ngrokUseHttpProxy）。"
         + " 这类错误与配置有关，不会自动重试：修好后点 Start，或重新运行 open-bridge serve。",
       );
     }
@@ -1017,7 +1037,12 @@ function spawnTunnel(domain: string, generation: number): ChildProcessWithoutNul
     state.tunnel = undefined;
     const code = (e as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
-      record("ngrok", "error", `ngrok executable not found (${exe}). Fix openBridge.ngrokExecutable.`);
+      record(
+        "ngrok",
+        "error",
+        `ngrok executable not found (${exe}). Set ngrokExecutable in the console settings page `
+        + "(open-bridge config set ngrokExecutable <path>).",
+      );
     } else {
       record("ngrok", "error", `ngrok failed: ${e.message}`);
     }
@@ -1065,8 +1090,9 @@ export async function stopInternal(notify = true): Promise<void> {
   state.reconnectTimer = undefined;
   const activeTunnel = state.tunnel;
   state.tunnel = undefined;
-  // The tunnel must die before any await: VS Code can hard-kill the extension
-  // host mid-deactivate and an un-terminated ngrok keeps holding the domain.
+  // The tunnel must die before any await: the hosting process can be killed
+  // without warning (Ctrl-C, an IDE shutting down, a crash) and an
+  // un-terminated ngrok keeps holding the domain.
   killTunnelTree(activeTunnel);
   // A crashed command with autoRestart may still hold a pending restart timer;
   // clear every one of them (not only live commands) so a timer cannot fire
@@ -1112,7 +1138,7 @@ function isStopped(): boolean {
 }
 
 export async function stop(notify = true): Promise<void> {
-  // VS Code runs BOTH the subscription dispose and deactivate() on shutdown,
+  // The host can run BOTH its dispose callback and deactivate() on shutdown,
   // which used to queue the full teardown twice (double "Stopped.", double
   // process-kill pass). Skip the redundant second pass.
   return enqueueLifecycle(async () => {
@@ -1138,7 +1164,7 @@ export function restartListener(): Promise<void> {
   });
 }
 
-// --- Route token management (stored in VS Code Secrets, per workspace) ---
+// --- Route token management (persisted in the host secret store, per project) ---
 
 export async function loadRouteToken(): Promise<void> {
   const key = `${ROUTE_TOKEN_KEY}.${workspaceStateSuffix()}`;

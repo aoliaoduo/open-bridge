@@ -240,8 +240,7 @@ export function workspaceBrief(): Record<string, unknown> {
  */
 function editorOnlyError(tool: string): Error {
   return new Error(
-    tool + ' requires an editor host with language-server access (the VS Code extension provides it). '
-    + 'The standalone Open Bridge does not ship a language server. '
+    tool + ' requires a language server, which this Open Bridge host does not provide. '
     + 'Use search_files / read_files as portable alternatives.',
   );
 }

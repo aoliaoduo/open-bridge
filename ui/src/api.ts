@@ -1,4 +1,21 @@
 /**
+ * Client for the local Bridge console API.
+ */
+// The settings shapes are imported, not restated: the server owns the
+// contract (src/bridge/settings-model.ts) and the console consumes it, so the
+// two cannot drift apart. Deleting the local copies also surfaced a real
+// drift - the console's token row was missing `permanent` and nothing noticed.
+import type {
+  SecretPayload,
+  SettingsActionResult,
+  SettingsState,
+  SettingsTokenRow,
+} from "../../src/bridge/settings-model.js";
+import type { ServiceView } from "../../src/bridge/service-tools.js";
+
+export type { SecretPayload, ServiceView, SettingsActionResult, SettingsState, SettingsTokenRow };
+
+/**
  * API client for the Open Bridge console.
  *
  * GET endpoints are loopback-only server-side and need no credential. Every
@@ -46,77 +63,6 @@ export interface UsageStats {
   by_tool: Record<string, number>;
   tracked_commands: number;
   active_commands: number;
-}
-
-export interface SettingsTokenRow {
-  id: string;
-  label: string;
-  created_at: string;
-  expires_at: string | null;
-  last_used_at: string | null;
-  use_count: number;
-  revoked: boolean;
-  expired: boolean;
-}
-
-export interface SettingsState {
-  running: boolean;
-  statusText: string;
-  mcpUrl: string;
-  configuredDomain: string;
-  authEnabled: boolean;
-  defaultTtlSeconds: number;
-  usableCount: number;
-  deadCount: number;
-  tokens: SettingsTokenRow[];
-  concurrency: { enabled: boolean; holdTimeoutMs: number; waitTimeoutMs: number };
-  config: {
-    unrestrictedFileAccess: boolean;
-    allowedDirectories: string[];
-    tunnelProvider: string;
-    ngrokExecutable: string;
-    shellPath: string;
-    shellArgs: string[];
-    port: number;
-    publicHealthTimeoutMs: number;
-    autoReconnect: boolean;
-    ngrokUseHttpProxy: boolean;
-    toolProfile: string;
-  };
-}
-
-export interface SecretPayload {
-  kind: "minted" | "rotated";
-  id: string;
-  label: string;
-  secret: string;
-  ttl: string;
-}
-
-/** One saved service, as the console lists it. */
-export interface ServiceView {
-  name: string;
-  group: string;
-  command: string;
-  cwd: string;
-  port: number | null;
-  health_url: string | null;
-  log_file: string | null;
-  running: boolean;
-  command_id: string | null;
-}
-
-export interface SettingsActionResult {
-  ok: boolean;
-  state: SettingsState;
-  info?: string;
-  error?: string;
-  secret?: SecretPayload;
-  copyText?: string;
-  healthLines?: string[];
-  healthOk?: boolean;
-  /** The route token rotated: this document's injected token is stale. */
-  reloadRequired?: boolean;
 }
 
 async function getJson<T>(path: string): Promise<T> {

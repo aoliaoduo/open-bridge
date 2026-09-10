@@ -1,11 +1,12 @@
 /**
- * Graphical settings page for Open Bridge — pure render layer.
+ * The settings contract: action shapes, page state, validation, labels.
  *
- * No vscode / bridge-state imports, so the HTML, the client script and the
- * message normalizer stay unit-testable in plain node (same pattern as
- * webview-script.ts / panel-format.ts).
+ * Deliberately dependency-free — no host, no bridge state, no imports at
+ * all — so it is the single definition shared by the HTTP layer (which
+ * validates and serves it) and the React console (which imports these types
+ * instead of restating them). Two copies of a contract drift; one cannot.
  *
- * Design contract (carried over from the 0.5.11 panel rework):
+ * Design contract (carried over from the original panel rework):
  *  - three type sizes only (11px labels / 12px body / 11px meta), no more
  *  - rows, not boxes-in-boxes; section separators are the only chrome
  *  - everything is a click: no QuickPick, no InputBox, no command palette.
@@ -49,6 +50,45 @@ export interface SettingsTokenRow {
 }
 
 /** Config keys the page edits beyond the managed flows (tokens/domain/concurrency). */
+/** A one-time secret returned by minting or rotating a token. */
+export interface SecretPayload {
+  kind: "minted" | "rotated";
+  id: string;
+  label: string;
+  /** Shown exactly once in this response; never stored server-side. */
+  secret: string;
+  ttl: string;
+}
+
+/**
+ * What one settings action answers with. The console renders `state`
+ * unconditionally, so it is always present, even on failure.
+ */
+export interface SettingsActionResult {
+  ok: boolean;
+  /** Fresh page state after the action (the console always re-renders). */
+  state: SettingsState;
+  info?: string;
+  error?: string;
+  secret?: SecretPayload;
+  /** Text the console should copy to the clipboard itself. */
+  copyText?: string;
+  /** Health-check detail lines, shown under the button that ran it. */
+  healthLines?: string[];
+  /** Health-check verdict; the console colours the report with it. */
+  healthOk?: boolean;
+  /**
+   * Perform the stop only after this response has been flushed. Both fields
+   * below exist because stopping, or rebinding, closes the very socket the
+   * response travels over.
+   */
+  deferStop?: boolean;
+  /** Rebind the listener after this response has been flushed. */
+  deferRestart?: boolean;
+  /** The page's injected console token is stale; the console reloads. */
+  reloadRequired?: boolean;
+}
+
 export interface SettingsConfigView {
   unrestrictedFileAccess: boolean;
   allowedDirectories: string[];

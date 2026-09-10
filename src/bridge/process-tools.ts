@@ -360,8 +360,8 @@ export function setTodos(args: Args, session?: SessionState): unknown[] {
 
 /**
  * Strict todo validation for the set_todos write path: malformed input is
- * rejected with a message the caller can fix. The panel's read path uses the
- * lenient `normalizeTodos` in panel-format.ts, which drops bad entries instead.
+ * rejected with a message the caller can fix. Reads are deliberately lenient
+ * instead — a malformed stored entry is dropped, not the whole list.
  */
 function validateTodos(value: unknown): Array<{ id: string; title: string; status: string }> {
   if (!Array.isArray(value)) throw new Error("todos must be an array. (expected 'todos': object[])");

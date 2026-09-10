@@ -82,7 +82,8 @@ function spawnSessionShell(name: string, cwd: string): { id: string; child: Chil
   if (!isBashLike(spec.file)) {
     throw new Error(
       `Persistent shell sessions currently require a bash/sh shell (configured: ${spec.file}). ` +
-      "Use run_command for one-off commands, or configure openBridge.shellPath to Git Bash.",
+      "Use run_command for one-off commands, or set shellPath to Git Bash "
+      + "(console settings page, or open-bridge config set shellPath).",
     );
   }
   const id = "shell-" + randomBytes(6).toString("hex");
@@ -187,7 +188,7 @@ export async function openShell(args: Args): Promise<Record<string, unknown>> {
     shellSessions.delete(name);
     throw new Error(
       `Shell failed to start: ${cmd.spawnError}. ` +
-      "Check openBridge.shellPath (persistent sessions require a bash/sh shell).",
+      "Check shellPath (persistent sessions require a bash/sh shell).",
     );
   }
   host().ui.update();

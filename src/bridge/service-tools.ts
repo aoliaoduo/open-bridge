@@ -185,7 +185,20 @@ export function listServices(): unknown {
  * no health probes (unlike serviceStatus, which is bounded per service and
  * meant for on-demand checks). Keeps the panel a cheap 5 s poll.
  */
-export function listServiceViews() {
+/** One saved service as the console reads it (no health probes; see serviceStatus). */
+export interface ServiceView {
+  name: string;
+  group: string;
+  command: string;
+  cwd: string;
+  port: number | null;
+  health_url: string | null;
+  log_file: string | null;
+  running: boolean;
+  command_id: string | null;
+}
+
+export function listServiceViews(): ServiceView[] {
   return [...state.services.entries()].map(([name, service]) => ({
     name,
     group: service.group ?? "",
@@ -370,7 +383,7 @@ export async function readServiceLogTool(args: Args): Promise<Record<string, unk
   return { name: serviceName, log_file: logFile, ...read };
 }
 
-/** VS Code command entry points (panel buttons). Refresh the webview after acting. */
+/** Service control for the console 服务 tab and POST /api/services/action. */
 export async function controlService(
   action: "start" | "stop" | "restart",
   name: string,

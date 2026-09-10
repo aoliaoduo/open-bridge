@@ -238,7 +238,8 @@ export function acquireLocks(request: LockRequest, tuning?: Partial<LockTuning>)
         if (index >= 0) waiting.splice(index, 1);
         reject(new Error(
           `Timed out after ${Math.round(waitTimeout / 1000)}s waiting for ${keys.join(", ")}. `
-          + "Another tool call is still holding it; retry, or raise openBridge.concurrency.waitTimeoutMs.",
+          + "Another tool call is still holding it; retry, or raise concurrency.waitTimeoutMs "
+          + "(console settings page).",
         ));
       }, waitTimeout);
       waiter.waitTimer.unref?.();

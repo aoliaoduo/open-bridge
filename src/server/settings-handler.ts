@@ -28,7 +28,9 @@ import {
   authToggleVerdict,
   normalizeSettingsMessage,
   ttlLabel,
+  type SecretPayload,
   type SettingsAction,
+  type SettingsActionResult,
   type SettingsState,
   type SettingsTokenRow,
 } from "../bridge/settings-model.js";
@@ -36,40 +38,6 @@ import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
 import { resetUsageStats } from "../bridge/usage-store.js";
 import { host } from "../host/host.js";
 import { start, rotateRouteToken, enqueueLifecycle, webAiPrompt, runHealthCheck } from "../bridge/lifecycle.js";
-
-export interface SecretPayload {
-  kind: "minted" | "rotated";
-  id: string;
-  label: string;
-  /** Shown exactly once in this response; never stored server-side. */
-  secret: string;
-  ttl: string;
-}
-
-export interface SettingsActionResult {
-  ok: boolean;
-  /** Fresh page state after the action (the console always re-renders). */
-  state: SettingsState;
-  info?: string;
-  error?: string;
-  secret?: SecretPayload;
-  /** Text the console should copy to the clipboard itself. */
-  copyText?: string;
-  /** Health-check detail lines, shown under the button that ran it. */
-  healthLines?: string[];
-  /** Health-check verdict; the console colours the report with it. */
-  healthOk?: boolean;
-  /**
-   * Perform the stop only after this response has been flushed. Both fields
-   * below exist because stopping, or rebinding, closes the very socket the
-   * response travels over.
-   */
-  deferStop?: boolean;
-  /** Rebind the listener after this response has been flushed. */
-  deferRestart?: boolean;
-  /** The page's injected console token is stale; the console reloads. */
-  reloadRequired?: boolean;
-}
 
 type AuthStatusView = { tokens: SettingsTokenRow[] };
 

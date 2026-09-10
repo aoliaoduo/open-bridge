@@ -1,8 +1,8 @@
 /**
  * Canonical configuration defaults for Open Bridge.
  *
- * The VS Code settings manifest no longer declares these keys — the graphical
- * settings page is the ONLY settings surface — so this table is the single
+ * Nothing declares these keys any more — the console settings page and
+ * `open-bridge config` are the only surfaces — so this table is the single
  * source of truth. New config read sites should read from here instead of
  * restating a literal default.
  */

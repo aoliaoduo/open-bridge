@@ -168,7 +168,7 @@ export const state = {
   services: new Map<string, ServiceDefinition>(),
 };
 
-/** The active VS Code workspace is the stable anchor for every relative path. */
+/** The active project root is the stable anchor for every relative path. */
 export const workspaceContext = new WorkspaceContext();
 
 /** Loopback MCP URL — valid exactly while the server is listening. */
