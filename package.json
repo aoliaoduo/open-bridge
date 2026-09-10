@@ -13,6 +13,14 @@
     "bridge"
   ],
   "author": "aoliaoduo <aoliaoduo@126.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aoliaoduo/open-bridge-app.git"
+  },
+  "homepage": "https://github.com/aoliaoduo/open-bridge-app#readme",
+  "bugs": {
+    "url": "https://github.com/aoliaoduo/open-bridge-app/issues"
+  },
   "type": "module",
   "license": "MIT",
   "engines": {

@@ -1,5 +1,9 @@
 # Open Bridge
 
+[![CI](https://github.com/aoliaoduo/open-bridge-app/actions/workflows/ci.yml/badge.svg)](https://github.com/aoliaoduo/open-bridge-app/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D20.3-brightgreen.svg)](package.json)
+
 在本机安全暴露工作区能力的独立 MCP 桥接：**一个 Node 进程，一个端口，同时提供 MCP 端点和 Web 控制台**。
 
 源自 VS Code 扩展 Open Bridge（0.5.17 终版）的独立化演进——核心服务器、工具集、并发锁与鉴权模型原样继承，宿主从 VS Code 换成本机 CLI + 浏览器控制台。
