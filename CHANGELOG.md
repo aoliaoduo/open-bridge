@@ -22,25 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **复制日志** (日志 tab) — the extension's `openBridge.copyLog` equivalent,
     copying the buffered stream.
 
-### Changed
-- `ConfirmButton` moved out of TokensTab into its own component: the two-step
-  destructive-action pattern now has one implementation instead of one per tab.
-- Every swallowed error now says why swallowing is safe (ten bare `catch {}`
-  blocks were documented) — a silent catch is indistinguishable from an
-  oversight.
-
-### Removed
-- **`autoStart` is gone from every surface.** The key came from the VS Code
-  extension, where the host provides activation; in the standalone app nothing
-  read it, so the settings page offered a switch that could not cause anything
-  to happen. Legacy `autoStart` values in `config.json` are simply ignored.
-- Dead code, found by scanning every export for references outside its own file:
-  `lifecycle.switchWorkspace` (VS Code workspace folders), `host.hostOrNull`,
-  `auth.resetAuthCache`, and `src/mcp/lsp-format.ts` — 106 lines kept alive
-  solely by its own test, since the Node host never advertises the editor-only
-  `lsp` / `get_diagnostics` tools.
-
-### Added
 - CI pipeline (GitHub Actions): typecheck, lint, build, unit + API integration
   tests, and a CLI smoke test, across Ubuntu (Node 22 / 24) and Windows (Node 24).
 - README section on ripgrep resolution across platforms.
@@ -67,6 +48,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   latter because it consumes the process the main suite still needs.
 
 ### Changed
+- `ConfirmButton` moved out of TokensTab into its own component: the two-step
+  destructive-action pattern now has one implementation instead of one per tab.
+- Every swallowed error now says why swallowing is safe (ten bare `catch {}`
+  blocks were documented) — a silent catch is indistinguishable from an
+  oversight.
+
 - **Minimum Node.js is now 22** (was 20.3). Node 20 reached end-of-life in
   March 2026, so it receives no further security fixes — not a defensible
   support floor for a tool that exposes a local workspace over HTTP. The old
@@ -81,7 +68,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one, `local_url` is unchanged, and a new `mcp_url` carries the URL worth
   handing to a client. `SettingsState.publicUrl` is renamed `mcpUrl` to match.
 
+### Removed
+- **`autoStart` is gone from every surface.** The key came from the VS Code
+  extension, where the host provides activation; in the standalone app nothing
+  read it, so the settings page offered a switch that could not cause anything
+  to happen. Legacy `autoStart` values in `config.json` are simply ignored.
+- Dead code, found by scanning every export for references outside its own file:
+  `lifecycle.switchWorkspace` (VS Code workspace folders), `host.hostOrNull`,
+  `auth.resetAuthCache`, and `src/mcp/lsp-format.ts` — 106 lines kept alive
+  solely by its own test, since the Node host never advertises the editor-only
+  `lsp` / `get_diagnostics` tools.
+
 ### Fixed
+- **A rotation no longer interrupts the listener.** Rotating the MCP URL flipped
+  the route token and then rebound the listening socket — but every route
+  compares `state.routeToken` per request and the port does not change, so the
+  rebind propagated nothing. What it did do was drop the listener for a moment
+  (which on a loaded Windows runner surfaced as `ECONNREFUSED`/`ECONNRESET` for a
+  rotation that had actually succeeded, leaving the console holding a dead token)
+  and, with a tunnel up, tear the tunnel down and re-publish it — an outage risk
+  on ngrok Free's one-session-per-domain budget. Rotation is now a pure token
+  swap plus a refresh of the public URL and the peer registry row, and
+  `restartListener()` / `SettingsActionResult.deferRestart` are gone with it.
+- **The shared peer registry keeps one row per instance.** It merged on the token
+  digest, so every rotation added a row whose digest could never match a token
+  again — one dead credential entry per rotation, in a file other windows read,
+  until the process exited. Publishing now replaces the row for the same pid
+  (other instances untouched, re-publishing idempotent).
+
 - **The server no longer races the client's keep-alive timer.** It inherited
   Node's 5 s `keepAliveTimeout`, which destroys idle connections; a pool that
   owns such a connection (undici keys its own timer off the advertised

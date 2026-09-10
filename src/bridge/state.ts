@@ -124,11 +124,11 @@ export const state = {
   /**
    * The port the listener last bound, remembered across rebinds.
    *
-   * The default config asks for port 0 — an ephemeral port. Without this, a
-   * rebind (the route-token rotation) would come up on a brand-new port, moving
-   * the instance out from under everything already pointing at it: the console
-   * page that issued the rotation, the port `runtime.json` advertises to the
-   * CLI, and whatever the tunnel forwards to.
+   * The default config asks for port 0 — an ephemeral port. Without this, the
+   * one rebind that remains (reclaiming the shared public domain once a peer
+   * releases it) would come up on a brand-new port, moving the instance out from
+   * under everything already pointing at it: the console page, the port
+   * `runtime.json` advertises to the CLI, and whatever the tunnel forwards to.
    */
   boundPort: 0,
   commands: new Map<string, CommandState>(),

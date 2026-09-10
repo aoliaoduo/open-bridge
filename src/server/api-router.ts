@@ -25,7 +25,7 @@ import { state } from "../bridge/state.js";
 import { getBridgeStatus, getUsageStats } from "../bridge/meta-tools.js";
 import { buildSettingsState, handleSettingsAction } from "./settings-handler.js";
 import { controlService, listServiceViews } from "../bridge/service-tools.js";
-import { start, stop, restartListener, webAiPrompt } from "../bridge/lifecycle.js";
+import { start, stop, webAiPrompt } from "../bridge/lifecycle.js";
 import { nodeHost } from "../host/node-host.js";
 import { redactSensitiveText } from "../bridge/state.js";
 
@@ -48,12 +48,12 @@ function json(res: ServerResponse, status: number, body: unknown): void {
 /**
  * Reply to the caller with a connection that will not be reused.
  *
- * Used for the answers that outlive their own listener — stop, rotate, shutdown,
- * and the settings actions that defer them. The reply is the last thing this
- * connection carries, so declaring it non-reusable lets Node close the socket
- * gracefully after the flush (FIN after the body), and removes it from the set
- * the teardown later destroys. Without this the teardown raced the caller's read
- * and a successful rotation reached the console as ECONNRESET.
+ * Used for the answers that outlive their own listener — stop, shutdown, and the
+ * settings actions that defer them. The reply is the last thing this connection
+ * carries, so declaring it non-reusable lets Node close the socket gracefully
+ * after the flush (FIN after the body), and removes it from the set the teardown
+ * later destroys. Without this the teardown raced the caller's read and a
+ * successful stop reached the console as ECONNRESET.
  */
 function jsonAndClose(res: ServerResponse, status: number, body: unknown): void {
   if (!res.headersSent) res.setHeader("connection", "close");
@@ -255,23 +255,28 @@ export async function apiRouteHandler(
         case "/bridge/rotate": {
           // Delegates to the console's rotate action: this route used to repeat
           // the same rotate-then-rebind dance, so a fix applied to one could
-          // silently miss the other.
+          // silently miss the other. It now carries that action's verdict
+          // instead of an unconditional ok — the route used to report success
+          // even when the rotation underneath had failed.
           const rotated = await handleSettingsAction({ command: "rotateEndpoint" });
-          jsonAndClose(res, 200, { ok: true, status: getBridgeStatus(), reloadRequired: true });
-          if (rotated.ok && rotated.deferRestart) afterResponse(res, () => { void restartListener(); });
+          jsonAndClose(res, rotated.ok ? 200 : 400, {
+            ok: rotated.ok,
+            status: getBridgeStatus(),
+            reloadRequired: rotated.ok,
+            error: rotated.error,
+          });
           return true;
         }
         case "/settings/action": {
           const result = await handleSettingsAction(await readBody(req));
-          const closing = result.ok && (result.deferStop || result.deferRestart);
+          const closing = result.ok && result.deferStop;
           (closing ? jsonAndClose : json)(res, result.ok ? 200 : 400, result);
-          // Stop and rebind tear down the socket this response is on, so they
-          // wait for it to be fully flushed. Doing them first is what turned a
-          // successful stop/rotate into an ECONNRESET with no response body —
-          // and doing them merely on the next tick still truncated the tail of
-          // a large body, which reached the client as a socket error.
+          // Stop tears down the socket this response is on, so it waits for the
+          // reply to be fully flushed. Doing it first is what turned a
+          // successful stop into an ECONNRESET with no response body — and doing
+          // it merely on the next tick still truncated the tail of a large body,
+          // which reached the client as a socket error.
           if (result.ok && result.deferStop) afterResponse(res, () => { void stop(); });
-          else if (result.ok && result.deferRestart) afterResponse(res, () => { void restartListener(); });
           return true;
         }
         case "/shutdown": {

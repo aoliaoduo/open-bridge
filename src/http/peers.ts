@@ -65,9 +65,14 @@ async function writePeers(filePath: string, rows: PeerRecord[]): Promise<void> {
 
 export async function publishPeer(filePath: string, input: PeerInput): Promise<void> {
   const record: PeerRecord = { hash: peerHash(input.token), port: input.port, pid: input.pid, root: input.root, at: input.at };
-  const byHash = new Map((await readPeers(filePath)).map(row => [row.hash, row]));
-  byHash.set(record.hash, record);
-  await writePeers(filePath, [...byHash.values()]);
+  // One row per live instance. A rotation mints a new token — hence a new digest
+  // — so the old row can never match a token again, and keying the merge on the
+  // hash alone left one dead digest behind per rotation until the process
+  // exited (`withdrawPeer` can only drop the row it knows the hash of). Rows for
+  // other instances are preserved; a re-publish of the same token stays
+  // idempotent because the row it replaces carries the same pid.
+  const rows = (await readPeers(filePath)).filter(row => row.pid !== input.pid);
+  await writePeers(filePath, [...rows, record]);
 }
 
 export async function withdrawPeer(filePath: string, token: string): Promise<void> {

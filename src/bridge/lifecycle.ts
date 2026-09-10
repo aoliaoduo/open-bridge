@@ -1147,23 +1147,6 @@ export async function stop(notify = true): Promise<void> {
   });
 }
 
-/**
- * Rebind the local listener so a newly rotated route token reaches every route,
- * including whatever the tunnel is forwarding to.
- *
- * Deliberately separate from the rotation itself: rotating the token is a plain
- * in-process assignment, while this closes the listening socket. Callers must
- * flush their HTTP response in between, because that response is travelling
- * over the socket this tears down — awaiting the whole thing before replying is
- * what reached the console as ECONNRESET on a rotation that had succeeded.
- */
-export function restartListener(): Promise<void> {
-  return enqueueLifecycle(async () => {
-    await stopInternal(false);
-    await startInternal();
-  });
-}
-
 // --- Route token management (persisted in the host secret store, per project) ---
 
 export async function loadRouteToken(): Promise<void> {
@@ -1181,6 +1164,24 @@ export async function rotateRouteToken(): Promise<void> {
     `${ROUTE_TOKEN_KEY}.${workspaceStateSuffix()}`,
     state.routeToken,
   );
+}
+
+/**
+ * Re-point the published surfaces at a freshly rotated token.
+ *
+ * Rotation is an in-process assignment and every route compares
+ * `state.routeToken` per request, so the listener never has to move: closing it
+ * — the old behaviour — bought nothing but a window in which the port accepted
+ * no connections, and with a tunnel up it also tore the tunnel down and
+ * re-published it (on ngrok Free's one-session-per-domain budget that is a real
+ * outage risk). What does carry the token is the public URL this instance
+ * advertises and the peer registry other instances read, so those are refreshed
+ * here, without touching traffic.
+ */
+export async function republishAfterRotate(): Promise<void> {
+  const prefix = state.tunnelUrl.split("/mcp/")[0];
+  if (prefix.startsWith("https://")) state.tunnelUrl = `${prefix}/mcp/${state.routeToken}`;
+  await publishSelf();
 }
 
 export function webAiPrompt(): string {

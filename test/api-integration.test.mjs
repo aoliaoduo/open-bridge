@@ -189,11 +189,27 @@ test("cli status/url reach the running instance and exit cleanly", async () => {
  * Without this a listener that dies mid-suite surfaces as a bare ECONNREFUSED,
  * which says nothing about the cause (that happened on CI).
  */
-function enrich(error) {
+async function probePort(target) {
+  // Is anything still accepting on that port? A refused connect right after a
+  // test that was answered a moment ago is the whole question.
+  const net = await import("node:net");
+  return await new Promise(resolve => {
+    const sock = net.connect({ host: "127.0.0.1", port: target });
+    const done = verdict => { try { sock.destroy(); } catch {} resolve(verdict); };
+    sock.setTimeout(1000);
+    sock.once("connect", () => done("accepts"));
+    sock.once("timeout", () => done("timeout"));
+    sock.once("error", e => done(`error:${e.code}`));
+  });
+}
+
+function enrich(error, portState) {
   const details = {
     cause: error?.cause?.code ?? error?.message,
     port,
     serve: serveExit,
+    portState,
+    serveOutput: serveOutput.slice(-400),
   };
   let log = "";
   try {
@@ -215,27 +231,8 @@ async function postAction(body, token = routeToken) {
       body: JSON.stringify(body),
     });
   } catch (error) {
-    throw enrich(error);
+    throw enrich(error, await probePort(port));
   }
-}
-
-/**
- * After a rotation the listener is rebound; with an ephemeral port (--port 0
- * here) that means a new port, so follow runtime.json until it answers again.
- */
-async function waitForRebind(timeoutMs = 20_000) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const info = JSON.parse(readFileSync(path.join(home, "runtime.json"), "utf8"));
-      if (info.port > 0) port = info.port;
-    } catch { /* mid-write */ }
-    try {
-      if ((await fetch(`${base()}/api/status`)).status === 200) return;
-    } catch { /* listener still down */ }
-    await delay(250);
-  }
-  throw new Error("the listener never came back after the rebind");
 }
 
 test("an idle pooled connection survives past Node's 5 s keep-alive default", async () => {
@@ -268,11 +265,13 @@ test("an idle pooled connection survives past Node's 5 s keep-alive default", as
   }
 });
 
-test("rotation answers before rebinding the listener", async () => {
-  // Regression: the rotation flipped the token, rebound the listener and only
-  // then replied — but the reply travels over the socket the rebind closes, so
-  // the console got ECONNRESET for a rotation that had succeeded, while holding
-  // a token that no longer worked.
+test("rotation swaps the token without interrupting the listener", async () => {
+  // Regression: a rotation used to flip the token, rebind the listener and
+  // reply in between. On a loaded Windows runner the caller's next connect then
+  // landed in the gap where nothing was listening (ECONNREFUSED on CI) or its
+  // reply was destroyed in flight (ECONNRESET locally) — for a rotation that had
+  // in fact succeeded, leaving the console holding a dead token. The listener
+  // never needed to move: every route compares state.routeToken per request.
   assert.equal(serveExit, null, `serve died before the rotation (${JSON.stringify(serveExit)}); last output: ${serveOutput.slice(-600)}`);
   const res = await postAction({ command: "rotateEndpoint" });
   assert.equal(res.status, 200);
@@ -282,10 +281,24 @@ test("rotation answers before rebinding the listener", async () => {
   const rotated = body.state.mcpUrl.split("/mcp/")[1];
   assert.ok(rotated && rotated !== routeToken, "the response carries the new endpoint");
 
-  await waitForRebind();
+  // No rebind and no waiting: the very next request goes to the same listener
+  // on the same port, where the old token is already dead.
   assert.equal((await postAction({ command: "ready" }, routeToken)).status, 403, "old token is dead");
   routeToken = rotated;
   assert.equal((await postAction({ command: "ready" })).status, 200, "new token works");
+  assert.equal(serveExit, null, "the listener survived the rotation, as it must");
+
+  // Deterministic proof that the listener was never restarted — no timing
+  // dependence: the whole run logs exactly one start. The old flow tore the
+  // listening socket down here (and started it again), which is what put a dead
+  // gap between the reply and the caller's next request.
+  await delay(500);
+  const log = readFileSync(path.join(home, "logs", "bridge.log"), "utf8");
+  assert.equal(
+    (log.match(/Started:/g) ?? []).length,
+    1,
+    `the rotation restarted the listener:\n${log}`,
+  );
 });
 
 test("services are listed and driven through the console API", async () => {

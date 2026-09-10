@@ -78,13 +78,10 @@ export interface SettingsActionResult {
   /** Health-check verdict; the console colours the report with it. */
   healthOk?: boolean;
   /**
-   * Perform the stop only after this response has been flushed. Both fields
-   * below exist because stopping, or rebinding, closes the very socket the
-   * response travels over.
+   * Perform the stop only after this response has been flushed: stopping closes
+   * the very socket the response travels over.
    */
   deferStop?: boolean;
-  /** Rebind the listener after this response has been flushed. */
-  deferRestart?: boolean;
   /** The page's injected console token is stale; the console reloads. */
   reloadRequired?: boolean;
 }

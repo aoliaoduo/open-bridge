@@ -37,7 +37,9 @@ import {
 import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
 import { resetUsageStats } from "../bridge/usage-store.js";
 import { host } from "../host/host.js";
-import { start, rotateRouteToken, enqueueLifecycle, webAiPrompt, runHealthCheck } from "../bridge/lifecycle.js";
+import {
+  start, rotateRouteToken, enqueueLifecycle, webAiPrompt, runHealthCheck, republishAfterRotate,
+} from "../bridge/lifecycle.js";
 
 type AuthStatusView = { tokens: SettingsTokenRow[] };
 
@@ -181,14 +183,16 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
     }
 
     case "rotateEndpoint": {
-      // Flip the token first (an in-process assignment, no socket teardown) so
-      // this response can carry the new URL; the router rebinds the listener
-      // afterwards. The page's injected console token is now stale, hence
-      // reloadRequired — without the reload every later action would 403.
+      // Flip the token — an in-process assignment, no socket teardown: every
+      // route compares state.routeToken per request — and then re-point the
+      // surfaces that carried the old one. The listener is deliberately NOT
+      // rebound; that only interrupted traffic and relaunched the tunnel for no
+      // gain. The page's injected console token is stale now, hence
+      // reloadRequired: without the reload every later action would 403.
       await enqueueLifecycle(async () => { await rotateRouteToken(); });
+      await republishAfterRotate();
       return {
         ...(await done({ info: "MCP URL 已更新，旧链接立即失效。控制台正在重新加载。" })),
-        deferRestart: true,
         reloadRequired: true,
       };
     }
