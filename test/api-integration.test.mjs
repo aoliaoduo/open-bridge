@@ -288,6 +288,55 @@ test("rotation answers before rebinding the listener", async () => {
   assert.equal((await postAction({ command: "ready" })).status, 200, "new token works");
 });
 
+test("services are listed and driven through the console API", async () => {
+  // The console had no service surface at all: a service the agent saved could
+  // only be controlled by asking the agent again.
+  const list = await fetch(`${base()}/api/services`);
+  assert.equal(list.status, 200);
+  const listed = await list.json();
+  assert.equal(listed.ok, true);
+  assert.deepEqual(listed.services, [], "a fresh data dir has no saved services");
+
+  const svc = payload => fetch(`${base()}/api/services/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-open-bridge-console": routeToken },
+    body: JSON.stringify(payload),
+  });
+
+  // Mutations keep the console-token gate; reads stay loopback-only.
+  assert.equal((await fetch(`${base()}/api/services/action`, { method: "POST" })).status, 403);
+
+  const badAction = await svc({ action: "explode", name: "x" });
+  assert.equal(badAction.status, 400);
+  const noName = await svc({ action: "start" });
+  assert.equal(noName.status, 400);
+  const unknown = await svc({ action: "start", name: "nope" });
+  assert.equal(unknown.status, 400);
+  assert.match((await unknown.json()).error, /Unknown service/);
+});
+
+test("the counters can be cleared and the instance can be health-checked", async () => {
+  // Both implementations existed (usage-store.resetUsageStats, lifecycle.runHealthCheck)
+  // with no way to reach them from the product.
+  const cleared = await postAction({ command: "clearStats" });
+  assert.equal(cleared.status, 200);
+  const clearedBody = await cleared.json();
+  assert.equal(clearedBody.ok, true);
+  assert.match(clearedBody.info, /清零/);
+
+  const health = await postAction({ command: "healthCheck" });
+  assert.equal(health.status, 200);
+  const healthBody = await health.json();
+  assert.equal(healthBody.ok, true);
+  assert.match(healthBody.info, /健康检查/);
+  assert.equal(healthBody.healthOk, true, "a healthy instance reports ok");
+  assert.ok(Array.isArray(healthBody.healthLines) && healthBody.healthLines.length >= 2);
+  const lines = healthBody.healthLines.join(" | ");
+  assert.match(lines, /本地端点 正常/);
+  assert.match(lines, /公网隧道 未开启/);
+  assert.match(lines, /Bearer 鉴权 未启用/);
+});
+
 test("shutdown endpoint stops the process", async () => {
   assert.equal(serveExit, null, `serve died before shutdown (${JSON.stringify(serveExit)}); last output: ${serveOutput.slice(-600)}`);
   let res;

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { SettingsActionResult, SettingsState, SettingsTokenRow } from "../api";
+import { ConfirmButton } from "./ConfirmButton";
 
 interface Props {
   settings: SettingsState;
@@ -17,27 +18,6 @@ const TTL_CHOICES: Array<{ seconds: number; label: string }> = [
 
 function fmtDate(iso: string | null): string {
   return iso ? iso.slice(0, 16).replace("T", " ") : "—";
-}
-
-/** Two-step confirm: arms a button for 3s before it actually fires. */
-function ConfirmButton({ label, onConfirm, className = "" }: { label: string; onConfirm: () => void; className?: string }) {
-  const [armed, setArmed] = useState(false);
-  if (armed) {
-    return (
-      <button
-        className={`small armed ${className}`}
-        onBlur={() => setArmed(false)}
-        onClick={() => { setArmed(false); onConfirm(); }}
-      >
-        确认？
-      </button>
-    );
-  }
-  return (
-    <button className={`small danger ${className}`} onClick={() => setArmed(true)}>
-      {label}
-    </button>
-  );
 }
 
 export function TokensTab({ settings, act }: Props) {

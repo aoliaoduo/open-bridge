@@ -25,7 +25,7 @@ import {
 import { root, workspaceStateSuffix } from "./paths.js";
 import { invoke } from "./dispatcher.js";
 import { loadTodoStore } from "./todo-store.js";
-import { loadUsageStats, persistUsageStats } from "./usage-store.js";
+import { persistUsageStats } from "./usage-store.js";
 import { cancelAllPendingRestarts, pruneCommands, terminateProcess } from "./processes.js";
 
 /**
@@ -186,7 +186,7 @@ function killTunnelTree(child: ChildProcessWithoutNullStreams | undefined): void
       // taskkill can refuse on an already-dead pid; fall through to kill().
     }
   }
-  try { child.kill(); } catch {}
+  try { child.kill(); } catch { /* the process was already gone */ }
 }
 
 /** A ngrok startup failure (spawn error), distinct from a health-check timeout. */
@@ -511,7 +511,7 @@ async function withdrawSelf(): Promise<void> {
   state.peersRegistered = false;
   try {
     await withdrawPeer(file, state.routeToken);
-  } catch {}
+  } catch { /* best-effort: a stale peer row must never block a shutdown */ }
 }
 
 async function adoptSharedTunnel(domain: string): Promise<boolean> {
@@ -605,7 +605,7 @@ async function stopLocalServer(): Promise<void> {
     // so it would keep stop() pending forever and wedge the lifecycle queue.
     // Force-destroy stragglers after a short grace period, then resolve.
     timer = setTimeout(() => {
-      try { activeServer.closeAllConnections?.(); } catch {}
+      try { activeServer.closeAllConnections?.(); } catch { /* very old runtimes lack it */ }
       // In the worst case (close still not signalled) resolve shortly after.
       timer = setTimeout(finish, 250);
     }, 1_500);
@@ -1005,12 +1005,12 @@ function spawnTunnel(domain: string, generation: number): ChildProcessWithoutNul
   child.stdout.on("data", d => {
     try {
       host().log(`[ngrok] ${d.toString().trim()}`);
-    } catch {}
+    } catch { /* a log write must never take the tunnel down */ }
   });
   child.stderr.on("data", d => {
     try {
       host().log(`[ngrok] ${d.toString().trim()}`);
-    } catch {}
+    } catch { /* a log write must never take the tunnel down */ }
   });
   child.once("error", e => {
     if (state.tunnel !== child) return;
@@ -1093,7 +1093,7 @@ export async function stopInternal(notify = true): Promise<void> {
   state.stopping = false;
   try {
     host().ui.refresh();
-  } catch {}
+  } catch { /* a stopped Bridge cannot update a UI */ }
   record("bridge", "completed", "Stopped.");
   if (notify) host().notify("info", "Open Bridge stopped.");
 }
@@ -1138,19 +1138,6 @@ export function restartListener(): Promise<void> {
   });
 }
 
-/** Tear down the Bridge and reset workspace-scoped state when the open folder changes. */
-export async function switchWorkspace(nextRoot: string, loadServicesFor: () => void): Promise<void> {
-  // Flush the old workspace's counters before the anchor moves (the persist key
-  // and the snapshot are derived from the still-active workspace).
-  persistUsageStats();
-  await stopInternal(false);
-  state.services.clear();
-  state.latestSession = undefined;
-  state.activeWorkspaceRoot = nextRoot;
-  loadServicesFor();
-  state.usage = loadUsageStats();
-}
-
 // --- Route token management (stored in VS Code Secrets, per workspace) ---
 
 export async function loadRouteToken(): Promise<void> {
@@ -1183,43 +1170,71 @@ export function webAiPrompt(): string {
   return `【${url}】${authNote}\n\n快速连接这个 MCP（URL），明确使用规则，熟悉可用工具，做好处理接下来一系列工作的准备。`;
 }
 
-export async function runHealthCheck(): Promise<void> {
+export interface HealthReport {
+  ok: boolean;
+  /** One line, for the console toast and the activity log. */
+  summary: string;
+  /** One line per probe, in the order they ran. */
+  details: string[];
+}
+
+/**
+ * End-to-end health check: prove the instance is what it claims to be.
+ *
+ * This existed since the VS Code port but had no caller in the standalone app,
+ * so nothing inside the product could ever verify that the tunnel it advertises
+ * answers, or that the bearer gate really refuses anonymous requests. A gate
+ * that silently fails open is worse than no gate: the operator would believe
+ * they are protected. It now returns a structured report (so the console can
+ * show it) and still records + notifies, keeping the activity-log trail.
+ */
+export async function runHealthCheck(): Promise<HealthReport> {
+  const probe = async (url: string, init?: RequestInit): Promise<{ ok: boolean; status: number; body: string }> =>
+    fetch(url, init)
+      .then(async response => ({ ok: response.ok, status: response.status, body: await response.text() }))
+      .catch(error => ({ ok: false, status: 0, body: error instanceof Error ? error.message : String(error) }));
   if (!state.server) {
-    host().notify("warn", "Bridge is not running.");
-    return;
+    const summary = "Bridge 未运行，无法体检。";
+    record("health", "error", summary);
+    host().notify("warn", summary);
+    return { ok: false, summary, details: ["实例未运行"] };
   }
-  const local = await fetch(`http://127.0.0.1:${state.port}/healthz/${state.routeToken}`)
-    .then(async response => ({ ok: response.ok, status: response.status, body: await response.text() }))
-    .catch(error => ({ ok: false, status: 0, body: error instanceof Error ? error.message : String(error) }));
+  const local = await probe(`http://127.0.0.1:${state.port}/healthz/${state.routeToken}`);
+  const details = [`本地端点 ${local.ok ? "正常" : "失败"}（${local.status || local.body}）`];
   const publicCheck = state.tunnelUrl
-    ? await fetch(state.tunnelUrl.replace(`/mcp/${state.routeToken}`, `/healthz/${state.routeToken}`), {
+    ? await probe(state.tunnelUrl.replace(`/mcp/${state.routeToken}`, `/healthz/${state.routeToken}`), {
         headers: { "ngrok-skip-browser-warning": "true" },
       })
-        .then(async response => ({ ok: response.ok, status: response.status, body: await response.text() }))
-        .catch(error => ({ ok: false, status: 0, body: error instanceof Error ? error.message : String(error) }))
     : undefined;
+  details.push(publicCheck
+    ? `公网隧道 ${publicCheck.ok ? "正常" : "失败"}（${publicCheck.status || publicCheck.body}）`
+    : "公网隧道 未开启（仅本机可用）");
   // Verify the bearer gate is actually closed. A gate that silently fails open
   // is worse than no gate: the operator would believe they are protected. An
   // anonymous initialize must come back 401 while auth is enabled.
   const gateStatus = authEnabled()
-    ? await fetch(`http://127.0.0.1:${state.port}/mcp/${state.routeToken}`, {
+    ? (await probe(`http://127.0.0.1:${state.port}/mcp/${state.routeToken}`, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
         body: JSON.stringify({
           jsonrpc: "2.0", id: 1, method: "initialize",
           params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "health", version: "1" } },
         }),
-      }).then(response => response.status).catch(() => 0)
+      })).status
     : undefined;
   const gateOk = gateStatus === undefined || gateStatus === 401;
+  details.push(gateStatus === undefined
+    ? "Bearer 鉴权 未启用"
+    : (gateOk ? "Bearer 鉴权 已生效（匿名请求 401）" : `Bearer 鉴权 异常（匿名请求返回 ${gateStatus}，预期 401）`));
+  const ok = local.ok && publicCheck?.ok !== false && gateOk;
+  const summary = `健康检查：本地 ${local.ok ? "正常" : "失败"}`
+    + (publicCheck ? ` · 公网 ${publicCheck.ok ? "正常" : "失败"}` : " · 公网未开启")
+    + (gateStatus === undefined ? " · 鉴权未启用" : ` · 鉴权${gateOk ? "已生效" : "异常"}`);
   record(
     "health",
-    local.ok && (!publicCheck || publicCheck.ok) && gateOk ? "completed" : "error",
+    ok ? "completed" : "error",
     `local=${local.status} public=${publicCheck?.status ?? "n/a"}${gateStatus === undefined ? "" : ` anonymous-mcp=${gateStatus}`}`,
   );
-  await host().notify("info", 
-    `Bridge Health · 本地 ${local.ok ? "正常" : "失败"}`
-    + `${publicCheck ? ` · 公网 ${publicCheck.ok ? "正常" : "失败"}` : ""}`
-    + `${gateStatus === undefined ? "" : ` · 鉴权${gateOk ? "已生效" : `异常（匿名请求返回 ${gateStatus}，预期 401）`}`}`,
-  );
+  await host().notify("info", summary);
+  return { ok, summary, details };
 }

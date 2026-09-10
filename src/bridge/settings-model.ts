@@ -50,7 +50,6 @@ export interface SettingsTokenRow {
 
 /** Config keys the page edits beyond the managed flows (tokens/domain/concurrency). */
 export interface SettingsConfigView {
-  autoStart: boolean;
   unrestrictedFileAccess: boolean;
   allowedDirectories: string[];
   tunnelProvider: string;
@@ -83,6 +82,7 @@ export interface SettingsState {
 export type SettingsAction =
   | { command: "ready" }
   | { command: "copyUrl" | "copyPrompt" | "start" | "stop" | "rotateEndpoint" | "purgeTokens" | "revokeAll" | "copySecret" | "dismissSecret" }
+  | { command: "clearStats" | "healthCheck" }
   | { command: "saveDomain"; domain: string }
   | { command: "setAuthEnabled"; enabled: boolean }
   | { command: "setDefaultTtl"; seconds: number }
@@ -101,7 +101,6 @@ const TTL_SET: ReadonlySet<number> = new Set(TTL_CHOICES.map(choice => choice.se
  * flows and must never be reachable through the generic path.
  */
 const CONFIG_SPEC = {
-  autoStart: { kind: "boolean" },
   unrestrictedFileAccess: { kind: "boolean" },
   autoReconnect: { kind: "boolean" },
   ngrokUseHttpProxy: { kind: "boolean" },
@@ -152,6 +151,7 @@ export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
     "setAuthEnabled", "setDefaultTtl", "createToken", "rotateToken",
     "revokeToken", "deleteToken", "purgeTokens", "revokeAll",
     "setConcurrency", "setConfig", "copyText", "copySecret", "dismissSecret",
+    "clearStats", "healthCheck",
   ]);
   if (!allowed.has(command)) return null;
 

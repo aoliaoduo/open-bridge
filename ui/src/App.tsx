@@ -5,13 +5,15 @@ import { SettingsTab } from "./components/SettingsTab";
 import { TokensTab } from "./components/TokensTab";
 import { LogsTab } from "./components/LogsTab";
 import { StatsTab } from "./components/StatsTab";
+import { ServicesTab } from "./components/ServicesTab";
 
-type TabId = "status" | "settings" | "tokens" | "logs" | "stats";
+type TabId = "status" | "settings" | "tokens" | "services" | "logs" | "stats";
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: "status", label: "状态" },
   { id: "settings", label: "设置" },
   { id: "tokens", label: "令牌" },
+  { id: "services", label: "服务" },
   { id: "logs", label: "日志" },
   { id: "stats", label: "统计" },
 ];
@@ -88,6 +90,7 @@ export function App() {
       {tab === "status" && <StatusTab settings={settings} act={act} onRefresh={refreshSettings} />}
       {tab === "settings" && <SettingsTab settings={settings} act={act} />}
       {tab === "tokens" && <SettingsStateGuard settings={settings}><TokensTab settings={settings!} act={act} /></SettingsStateGuard>}
+      {tab === "services" && <ServicesTab />}
       {tab === "logs" && <LogsTab />}
       {tab === "stats" && <StatsTab />}
 

@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- The console gained the four surfaces the VS Code panel had and the standalone
+  app was missing, each wired to the implementation that already existed:
+  - **服务 tab** — the saved services (`save_service` definitions) listed with
+    live state and 启动 / 停止 / 重启, behind `GET /api/services` and
+    `POST /api/services/action`. `controlService()` had been sitting unused, so
+    a service the agent saved could only be controlled by asking the agent again.
+  - **健康检查** (状态 tab) — `runHealthCheck()`, also previously unreachable,
+    now returns a structured report: the loopback endpoint answers, the advert-
+    ised tunnel answers, and with the bearer gate on an anonymous request is
+    really refused (a gate that silently fails open is worse than no gate).
+  - **清空统计** (统计 tab) — `usage-store.resetUsageStats()` existed with no
+    caller; cumulative counters could only ever grow.
+  - **复制日志** (日志 tab) — the extension's `openBridge.copyLog` equivalent,
+    copying the buffered stream.
+
+### Changed
+- `ConfirmButton` moved out of TokensTab into its own component: the two-step
+  destructive-action pattern now has one implementation instead of one per tab.
+- Every swallowed error now says why swallowing is safe (ten bare `catch {}`
+  blocks were documented) — a silent catch is indistinguishable from an
+  oversight.
+
+### Removed
+- **`autoStart` is gone from every surface.** The key came from the VS Code
+  extension, where the host provides activation; in the standalone app nothing
+  read it, so the settings page offered a switch that could not cause anything
+  to happen. Legacy `autoStart` values in `config.json` are simply ignored.
+- Dead code, found by scanning every export for references outside its own file:
+  `lifecycle.switchWorkspace` (VS Code workspace folders), `host.hostOrNull`,
+  `auth.resetAuthCache`, and `src/mcp/lsp-format.ts` — 106 lines kept alive
+  solely by its own test, since the Node host never advertises the editor-only
+  `lsp` / `get_diagnostics` tools.
+
+### Added
 - CI pipeline (GitHub Actions): typecheck, lint, build, unit + API integration
   tests, and a CLI smoke test, across Ubuntu (Node 22 / 24) and Windows (Node 24).
 - README section on ripgrep resolution across platforms.

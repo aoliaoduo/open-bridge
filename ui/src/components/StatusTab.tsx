@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, copyText, type BridgeStatus, type SettingsState } from "../api";
+import { api, copyText, type BridgeStatus, type SettingsActionResult, type SettingsState } from "../api";
 
 interface Props {
   settings?: SettingsState | null;
@@ -10,6 +10,7 @@ interface Props {
 export function StatusTab({ act, onRefresh }: Props) {
   const [status, setStatus] = useState<BridgeStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [health, setHealth] = useState<{ ok: boolean; info: string; lines: string[] } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,6 +37,15 @@ export function StatusTab({ act, onRefresh }: Props) {
       await fn();
       await onRefresh();
       setStatus(await api.status());
+    } catch { /* the settings action already toasted */ }
+    setBusy(false);
+  };
+
+  const checkHealth = async () => {
+    setBusy(true);
+    try {
+      const result = await act({ command: "healthCheck" }) as SettingsActionResult | null;
+      if (result) setHealth({ ok: result.healthOk !== false, info: result.info ?? "", lines: result.healthLines ?? [] });
     } catch { /* the settings action already toasted */ }
     setBusy(false);
   };
@@ -81,8 +91,20 @@ export function StatusTab({ act, onRefresh }: Props) {
           <button disabled={busy || !running} onClick={() => void run(() => act({ command: "rotateEndpoint" }))}>
             轮换端点
           </button>
+          <button disabled={busy || !running} onClick={() => void checkHealth()}>
+            健康检查
+          </button>
         </div>
         <div className="section-note">轮换端点会生成新的 URL，旧链接立即失效。</div>
+        <div className="section-note">
+          健康检查会真的去请求：本机端点、公网隧道（若已开启），并在鉴权开启时确认匿名请求确实被拒。
+        </div>
+        {health && (
+          <div className="section-note">
+            <span className={`act-status ${health.ok ? "completed" : "error"}`}>{health.info}</span>
+            {health.lines.map((line, index) => <div key={index}>· {line}</div>)}
+          </div>
+        )}
       </div>
 
       <div className="card">

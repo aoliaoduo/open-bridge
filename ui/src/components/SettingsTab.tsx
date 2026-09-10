@@ -130,12 +130,6 @@ export function SettingsTab({ settings, act }: Props) {
             <option value="core">core（精简常用）</option>
           </select>
         </div>
-        <div className="row">
-          <label className="check">
-            <input type="checkbox" checked={cfg.autoStart} onChange={e => setConfig("autoStart", e.target.checked)} />
-            open-bridge serve 时自动启动 Bridge（需已配置域名）
-          </label>
-        </div>
       </div>
 
       <div className="card">

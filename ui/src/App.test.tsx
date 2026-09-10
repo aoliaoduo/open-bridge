@@ -85,7 +85,6 @@ function settingsState(overrides: Partial<SettingsState> = {}): SettingsState {
     tokens: [],
     concurrency: { enabled: true, holdTimeoutMs: 300_000, waitTimeoutMs: 120_000 },
     config: {
-      autoStart: false,
       unrestrictedFileAccess: true,
       allowedDirectories: [],
       tunnelProvider: "none",

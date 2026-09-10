@@ -56,7 +56,7 @@ async function writePeers(filePath: string, rows: PeerRecord[]): Promise<void> {
   for (let attempt = 0; ; attempt += 1) {
     try { await rename(temp, filePath); return; }
     catch (error) {
-      if (attempt >= 4) { try { await unlink(temp); } catch {} throw error; }
+      if (attempt >= 4) { try { await unlink(temp); } catch { /* temp already reclaimed */ } throw error; }
       // Windows refuses the rename while another window has the target open for reading.
       await new Promise(resolve => setTimeout(resolve, 25 * (attempt + 1)));
     }

@@ -24,6 +24,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { state } from "../bridge/state.js";
 import { getBridgeStatus, getUsageStats } from "../bridge/meta-tools.js";
 import { buildSettingsState, handleSettingsAction } from "./settings-handler.js";
+import { controlService, listServiceViews } from "../bridge/service-tools.js";
 import { start, stop, rotateRouteToken, restartListener, enqueueLifecycle, webAiPrompt } from "../bridge/lifecycle.js";
 import { nodeHost } from "../host/node-host.js";
 import { redactSensitiveText } from "../bridge/state.js";
@@ -279,11 +280,35 @@ export async function apiRouteHandler(
           jsonAndClose(res, 200, { ok: true, message: "Shutting down." });
           afterResponse(res, () => { void gracefulShutdown(); }); return true;
         }
+        case "/services/action": {
+          // Operator-driven service control. The MCP tools stay the way an
+          // agent saves and drives services; this is the console's own path to
+          // the same functions, so the two can never disagree about state.
+          const body = await readBody(req) as { action?: unknown; name?: unknown } | undefined;
+          const action = String(body?.action ?? "");
+          const name = String(body?.name ?? "");
+          if (action !== "start" && action !== "stop" && action !== "restart") {
+            json(res, 400, { ok: false, error: "action must be start, stop or restart." });
+            return true;
+          }
+          if (!name) {
+            json(res, 400, { ok: false, error: "name is required." });
+            return true;
+          }
+          try {
+            const result = await controlService(action, name);
+            json(res, 200, { ok: true, result, services: listServiceViews() });
+          } catch (error) {
+            json(res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) });
+          }
+          return true;
+        }
         default: json(res, 404, { error: "Unknown API route." }); return true;
       }
     }
     switch (route) {
       case "/status": json(res, 200, { ok: true, status: getBridgeStatus() }); return true;
+      case "/services": json(res, 200, { ok: true, services: listServiceViews() }); return true;
       case "/activity": json(res, 200, { ok: true, activity: state.activity }); return true;
       case "/usage": json(res, 200, { ok: true, usage: getUsageStats() }); return true;
       case "/settings": json(res, 200, { ok: true, state: await buildSettingsState() }); return true;

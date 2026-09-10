@@ -75,7 +75,11 @@ test("normalize bounds copyText and setAuthEnabled payloads", () => {
 });
 
 test("normalize validates setConfig against the per-key spec", () => {
-  assert.deepEqual(normalizeSettingsMessage({ command: "setConfig", key: "autoStart", value: true }), { command: "setConfig", key: "autoStart", value: true });
+  // autoStart belonged to the VS Code host (it starts the Bridge on activation).
+  // Nothing in the standalone app read it, so the key was removed from every
+  // surface rather than kept as a switch that could not cause anything: the
+  // generic path must reject it like any other unknown key.
+  assert.equal(normalizeSettingsMessage({ command: "setConfig", key: "autoStart", value: true }), null, "removed key rejected");
   assert.deepEqual(normalizeSettingsMessage({ command: "setConfig", key: "toolProfile", value: " core " }), { command: "setConfig", key: "toolProfile", value: "core" });
   assert.deepEqual(normalizeSettingsMessage({ command: "setConfig", key: "port", value: 8080 }), { command: "setConfig", key: "port", value: 8080 });
   assert.deepEqual(normalizeSettingsMessage({ command: "setConfig", key: "port", value: 0 }), { command: "setConfig", key: "port", value: 0 }, "0 is a valid sentinel (auto port)");

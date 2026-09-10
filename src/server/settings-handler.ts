@@ -33,8 +33,9 @@ import {
   type SettingsTokenRow,
 } from "../bridge/settings-model.js";
 import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
+import { resetUsageStats } from "../bridge/usage-store.js";
 import { host } from "../host/host.js";
-import { start, rotateRouteToken, enqueueLifecycle, webAiPrompt } from "../bridge/lifecycle.js";
+import { start, rotateRouteToken, enqueueLifecycle, webAiPrompt, runHealthCheck } from "../bridge/lifecycle.js";
 
 export interface SecretPayload {
   kind: "minted" | "rotated";
@@ -54,6 +55,10 @@ export interface SettingsActionResult {
   secret?: SecretPayload;
   /** Text the console should copy to the clipboard itself. */
   copyText?: string;
+  /** Health-check detail lines, shown under the button that ran it. */
+  healthLines?: string[];
+  /** Health-check verdict; the console colours the report with it. */
+  healthOk?: boolean;
   /**
    * Perform the stop only after this response has been flushed. Both fields
    * below exist because stopping, or rebinding, closes the very socket the
@@ -93,7 +98,6 @@ export async function buildSettingsState(): Promise<SettingsState> {
       waitTimeoutMs: cfg.get("concurrency.waitTimeoutMs", 120_000),
     },
     config: {
-      autoStart: cfg.get("autoStart", CONFIG_DEFAULTS.autoStart as boolean),
       unrestrictedFileAccess: cfg.get("unrestrictedFileAccess", CONFIG_DEFAULTS.unrestrictedFileAccess as boolean),
       allowedDirectories: cfg.get("allowedDirectories", CONFIG_DEFAULTS.allowedDirectories as string[]),
       tunnelProvider: cfg.get("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string),
@@ -150,6 +154,21 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
     case "ready":
       return done();
 
+    case "clearStats": {
+      // The counters are cumulative and were previously un-resettable: the
+      // implementation existed (usage-store.resetUsageStats) but nothing could
+      // reach it - the VS Code command never got a console equivalent here.
+      // Operator-only, exactly like the extension's.
+      resetUsageStats();
+      return done({ info: "调用统计已清零（累计调用数与按工具明细）。" });
+    }
+    case "healthCheck": {
+      // End-to-end proof that the instance is what it claims: the loopback
+      // endpoint answers, the advertised tunnel answers, and - with the bearer
+      // gate on - an anonymous request is really refused.
+      const report = await runHealthCheck();
+      return done({ info: report.summary, healthLines: report.details, healthOk: report.ok });
+    }
     case "copyUrl": {
       const url = clientMcpUrl();
       if (!url) throw new Error("Bridge 未运行，还没有可复制的 URL。");
@@ -304,7 +323,6 @@ function fallbackState(): SettingsState {
     tokens: [],
     concurrency: { enabled: true, holdTimeoutMs: 300_000, waitTimeoutMs: 120_000 },
     config: {
-      autoStart: false,
       unrestrictedFileAccess: true,
       allowedDirectories: [],
       tunnelProvider: "ngrok",

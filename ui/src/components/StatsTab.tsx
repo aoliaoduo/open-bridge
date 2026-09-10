@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type ActivityEntry, type UsageStats } from "../api";
+import { ConfirmButton } from "./ConfirmButton";
 
 function fmtUptime(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -11,6 +12,7 @@ function fmtUptime(ms: number): string {
 export function StatsTab() {
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [note, setNote] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -25,6 +27,16 @@ export function StatsTab() {
     return () => { cancelled = true; clearInterval(timer); };
   }, []);
 
+  const clearStats = async () => {
+    try {
+      const result = await api.settingsAction({ command: "clearStats" });
+      setNote(result.info ?? "已清零");
+      setUsage(await api.usage());
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const topTools = usage
     ? Object.entries(usage.by_tool).sort((a, b) => b[1] - a[1]).slice(0, 12)
     : [];
@@ -34,6 +46,10 @@ export function StatsTab() {
     <>
       <div className="card">
         <h2>调用统计（本次运行 · 自 {usage ? new Date(usage.started_at).toLocaleString() : "…"} 起）</h2>
+        <div className="row" style={{ marginBottom: 10 }}>
+          <ConfirmButton label="清空统计" onConfirm={() => void clearStats()} />
+          {note && <span className="section-note" style={{ margin: 0 }}>{note}</span>}
+        </div>
         <div className="stat-grid">
           <div><div className="stat-num">{usage?.calls ?? "…"}</div><div className="cap">总调用</div></div>
           <div><div className="stat-num" style={{ color: "var(--ok)" }}>{usage?.successes ?? "…"}</div><div className="cap">成功</div></div>

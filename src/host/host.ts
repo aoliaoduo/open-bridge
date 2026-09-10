@@ -83,6 +83,4 @@ export function host(): Host {
   return active;
 }
 
-export function hostOrNull(): Host | undefined {
-  return active;
-}
+

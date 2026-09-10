@@ -87,7 +87,7 @@ export async function setConfigValue(args: Args): Promise<unknown> {
   const allowed = new Set([
     "tunnelProvider", "ngrokDomain", "ngrokExecutable", "shellPath", "shellArgs",
     "unrestrictedFileAccess", "allowedDirectories", "port", "publicHealthTimeoutMs", "autoReconnect",
-    "ngrokUseHttpProxy", "autoStart", "toolProfile",
+    "ngrokUseHttpProxy", "toolProfile",
     "auth.enabled", "auth.tokenTtlSeconds",
     "concurrency.enabled", "concurrency.holdTimeoutMs", "concurrency.waitTimeoutMs",
   ]);
@@ -109,7 +109,7 @@ export async function setConfigValue(args: Args): Promise<unknown> {
     if (!Array.isArray(value) || value.some(item => typeof item !== "string")) {
       throw new Error("shellArgs must be an array of strings.");
     }
-  } else if (["unrestrictedFileAccess", "autoReconnect", "ngrokUseHttpProxy", "autoStart", "concurrency.enabled"].includes(key)) {
+  } else if (["unrestrictedFileAccess", "autoReconnect", "ngrokUseHttpProxy", "concurrency.enabled"].includes(key)) {
     if (typeof value !== "boolean") throw new Error(`${key} must be a boolean. (expected '${key}': boolean)`);
   } else if (key === "auth.enabled") {
     if (typeof value !== "boolean") throw new Error("auth.enabled must be a boolean.");

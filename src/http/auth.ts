@@ -71,13 +71,6 @@ async function writeRecords(records: AuthTokenRecord[]): Promise<void> {
   host().ui.update();
 }
 
-/** Force a reload (used by tests and after external secret changes). */
-export function resetAuthCache(): void {
-  cache = undefined;
-  limiter.reset();
-  lastFlushAt = 0;
-}
-
 export interface MintedToken {
   id: string;
   label: string;

@@ -248,8 +248,10 @@ export function record(
   };
   state.activity.unshift({ ...entry, at: new Date(entry.at).toLocaleTimeString(), ts: Date.now() });
   state.activity.splice(40);
-  try { host().log(`[${tool}] ${status}: ${entry.message}`); } catch {}
-  try { host().ui.update(); } catch {}
+  // Activity recording must never fail a tool call: the log sink and the UI
+  // are observers of the work, not part of it.
+  try { host().log(`[${tool}] ${status}: ${entry.message}`); } catch { /* sink unavailable */ }
+  try { host().ui.update(); } catch { /* no console attached */ }
   void appendAuditEntry(entry).catch(() => undefined);
 }
 

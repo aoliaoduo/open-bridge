@@ -18,7 +18,6 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = {
   publicHealthTimeoutMs: 20_000,
   autoReconnect: true,
   ngrokUseHttpProxy: true,
-  autoStart: false,
   toolProfile: "full",
   "auth.enabled": false,
   "auth.tokenTtlSeconds": 0,

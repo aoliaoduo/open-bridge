@@ -349,7 +349,7 @@ export async function terminateProcess(
             windowsHide: true,
             timeout: 3000,
           });
-        } catch {}
+        } catch { /* taskkill refuses an already-dead pid; kill() follows */ }
       }
     } else {
       commandState.child.kill();

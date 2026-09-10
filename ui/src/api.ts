@@ -71,7 +71,6 @@ export interface SettingsState {
   tokens: SettingsTokenRow[];
   concurrency: { enabled: boolean; holdTimeoutMs: number; waitTimeoutMs: number };
   config: {
-    autoStart: boolean;
     unrestrictedFileAccess: boolean;
     allowedDirectories: string[];
     tunnelProvider: string;
@@ -94,6 +93,19 @@ export interface SecretPayload {
   ttl: string;
 }
 
+/** One saved service, as the console lists it. */
+export interface ServiceView {
+  name: string;
+  group: string;
+  command: string;
+  cwd: string;
+  port: number | null;
+  health_url: string | null;
+  log_file: string | null;
+  running: boolean;
+  command_id: string | null;
+}
+
 export interface SettingsActionResult {
   ok: boolean;
   state: SettingsState;
@@ -101,6 +113,8 @@ export interface SettingsActionResult {
   error?: string;
   secret?: SecretPayload;
   copyText?: string;
+  healthLines?: string[];
+  healthOk?: boolean;
   /** The route token rotated: this document's injected token is stale. */
   reloadRequired?: boolean;
 }
@@ -135,6 +149,9 @@ export const api = {
   bridgeRotate: () => postJson<{ status: BridgeStatus }>("/api/bridge/rotate").then(r => r.status),
   settingsAction: (action: Record<string, unknown>) =>
     postJson<SettingsActionResult>("/api/settings/action", action),
+  services: () => getJson<{ services: ServiceView[] }>("/api/services").then(r => r.services),
+  serviceAction: (action: "start" | "stop" | "restart", name: string) =>
+    postJson<{ result: unknown; services: ServiceView[] }>("/api/services/action", { action, name }),
 };
 
 /** Copy via the async clipboard API with a textarea fallback (non-secure contexts). */

@@ -180,6 +180,25 @@ export function listServices(): unknown {
   }));
 }
 
+/**
+ * Saved services for the console: definitions plus live process state, with
+ * no health probes (unlike serviceStatus, which is bounded per service and
+ * meant for on-demand checks). Keeps the panel a cheap 5 s poll.
+ */
+export function listServiceViews() {
+  return [...state.services.entries()].map(([name, service]) => ({
+    name,
+    group: service.group ?? "",
+    command: service.command,
+    cwd: service.cwd,
+    port: service.port ?? null,
+    health_url: service.healthUrl ?? null,
+    log_file: service.logFile ?? null,
+    running: isServiceRunning(service),
+    command_id: service.commandId ?? null,
+  }));
+}
+
 function isServiceRunning(service: ServiceDefinition): boolean {
   return Boolean(service.commandId && state.commands.get(service.commandId) && !state.commands.get(service.commandId)!.done);
 }
