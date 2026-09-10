@@ -22,6 +22,10 @@ let home;
 let child;
 let port;
 let routeToken;
+/** Set when the serve process exits, so a test that talks to a dead instance
+ * says so instead of reporting a bare ECONNREFUSED. */
+let serveExit = null;
+let serveOutput = "";
 
 async function waitForRuntime(timeoutMs = 20_000) {
   const started = Date.now();
@@ -50,11 +54,11 @@ before(async () => {
     path.join(ROOT, "bin", "open-bridge.js"),
     "serve", "--no-tunnel", "--port", "0", "--root", home, "--home", home,
   ], { stdio: ["ignore", "pipe", "pipe"] });
-  let bootLog = "";
-  child.stdout.on("data", d => { bootLog += d; });
-  child.stderr.on("data", d => { bootLog += d; });
-  child.on("exit", code => {
-    if (!port) throw new Error(`serve exited early (${code}):\n${bootLog}`);
+  child.stdout.on("data", d => { serveOutput += d; });
+  child.stderr.on("data", d => { serveOutput += d; });
+  child.on("exit", (code, signal) => {
+    serveExit = { code, signal };
+    if (!port) throw new Error(`serve exited early (${code}):\n${serveOutput}`);
   });
   const runtime = await waitForRuntime();
   port = runtime.port;
@@ -179,13 +183,40 @@ test("cli status/url reach the running instance and exit cleanly", async () => {
   assert.match(url.out.trim(), /\/mcp\//);
 });
 
+/**
+ * A request that fails to reach the instance reports why it is gone — the
+ * process state, the runtime file it published, and the tail of its own log.
+ * Without this a listener that dies mid-suite surfaces as a bare ECONNREFUSED,
+ * which says nothing about the cause (that happened on CI).
+ */
+function enrich(error) {
+  const details = {
+    cause: error?.cause?.code ?? error?.message,
+    port,
+    serve: serveExit,
+  };
+  let log = "";
+  try {
+    log = readFileSync(path.join(home, "logs", "bridge.log"), "utf8")
+      .split(/\r?\n/).filter(Boolean).slice(-8)
+      .map(l => l.replace(/\[20[^\]]*\] /, "")).join(" | ");
+  } catch { /* no log yet */ }
+  let runtime = "";
+  try { runtime = readFileSync(path.join(home, "runtime.json"), "utf8").replace(/\s+/g, " "); } catch {}
+  return new Error(`${JSON.stringify(details)} runtime.json=${runtime} log=${log}`);
+}
+
 /** POST a console action the way the console does. */
-function postAction(body, token = routeToken) {
-  return fetch(`${base()}/api/settings/action`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-open-bridge-console": token },
-    body: JSON.stringify(body),
-  });
+async function postAction(body, token = routeToken) {
+  try {
+    return await fetch(`${base()}/api/settings/action`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-open-bridge-console": token },
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    throw enrich(error);
+  }
 }
 
 /**
@@ -242,6 +273,7 @@ test("rotation answers before rebinding the listener", async () => {
   // then replied — but the reply travels over the socket the rebind closes, so
   // the console got ECONNRESET for a rotation that had succeeded, while holding
   // a token that no longer worked.
+  assert.equal(serveExit, null, `serve died before the rotation (${JSON.stringify(serveExit)}); last output: ${serveOutput.slice(-600)}`);
   const res = await postAction({ command: "rotateEndpoint" });
   assert.equal(res.status, 200);
   const body = await res.json();
@@ -257,10 +289,16 @@ test("rotation answers before rebinding the listener", async () => {
 });
 
 test("shutdown endpoint stops the process", async () => {
-  const res = await fetch(`${base()}/api/shutdown`, {
-    method: "POST",
-    headers: { "x-open-bridge-console": routeToken },
-  });
+  assert.equal(serveExit, null, `serve died before shutdown (${JSON.stringify(serveExit)}); last output: ${serveOutput.slice(-600)}`);
+  let res;
+  try {
+    res = await fetch(`${base()}/api/shutdown`, {
+      method: "POST",
+      headers: { "x-open-bridge-console": routeToken },
+    });
+  } catch (error) {
+    throw enrich(error);
+  }
   assert.equal(res.status, 200);
   const code = await new Promise(resolve => child.on("exit", resolve));
   assert.equal(code, 0);
