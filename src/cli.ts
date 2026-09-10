@@ -23,7 +23,7 @@ import { state } from "./bridge/state.js";
 import { currentWorkspaceRoot } from "./bridge/paths.js";
 import { loadServices } from "./bridge/services.js";
 import { loadUsageStats } from "./bridge/usage-store.js";
-import { start, stop, setExtraRouteHandler } from "./bridge/lifecycle.js";
+import { start, stop, setExtraRouteHandler, setLocalServerReadyHook } from "./bridge/lifecycle.js";
 import { apiRouteHandler, setShutdownHook } from "./server/api-router.js";
 import {
   deleteToken, listTokenViews, mintToken, revokeToken, rotateToken,
@@ -210,14 +210,31 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   console.log(`[open-bridge] project root: ${projectRoot}`);
   console.log(`[open-bridge] data dir:    ${nodeHost.storageDir()}`);
 
-  await start();
+  // Published the moment the listener binds (setLocalServerReadyHook), not when
+  // start() resolves: with a tunnel configured that can be seconds later, and
+  // while a tunnel is failing it never resolves at all — during which
+  // `open-bridge status` reported nothing running while the console was serving.
+  // The write is synchronous so a `status` that races the bind cannot miss it.
+  const runtimeFile = runtimePath(nodeHost.storageDir());
+  const startedAt = new Date().toISOString();
+  const publishRuntime = (): void => {
+    try {
+      fs.writeFileSync(runtimeFile, JSON.stringify({
+        pid: process.pid,
+        port: state.port,
+        root: projectRoot,
+        startedAt,
+      } satisfies RuntimeInfo, null, 2));
+    } catch {
+      // Best-effort: without the file, status falls back to the loopback probe.
+    }
+  };
+  setLocalServerReadyHook(publishRuntime);
 
-  await fsp.writeFile(runtimePath(nodeHost.storageDir()), JSON.stringify({
-    pid: process.pid,
-    port: state.port,
-    root: projectRoot,
-    startedAt: new Date().toISOString(),
-  } satisfies RuntimeInfo, null, 2));
+  await start();
+  // Safety net for the paths where the hook does not fire, e.g. start()
+  // short-circuiting because the Bridge was already running.
+  publishRuntime();
 
   const consoleUrl = `http://127.0.0.1:${state.port}/console/`;
   console.log("");

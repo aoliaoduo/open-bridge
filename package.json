@@ -44,7 +44,7 @@
     "dev": "tsx src/cli.ts",
     "lint": "eslint .",
     "test": "npm run test:core && npm run test:ui",
-    "test:core": "tsx --test test/*.test.ts && node --test test/api-integration.test.mjs test/api-teardown-integration.test.mjs",
+    "test:core": "tsx --test test/*.test.ts && node --test test/api-integration.test.mjs test/api-teardown-integration.test.mjs test/tunnel-integration.test.mjs",
     "test:ui": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.ui.json --noEmit",
     "verify": "npm run typecheck && npm run lint && npm run build && npm test"

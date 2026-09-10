@@ -1,0 +1,171 @@
+/**
+ * A tunnel that cannot come up must not lie about it — and must not hold the
+ * instance hostage while it tries.
+ *
+ * Two properties are asserted here, both of which failed against a real ngrok
+ * that refused the domain:
+ *
+ *  1. the loopback listener is published to the CLI the moment it binds, so
+ *     `open-bridge status` finds the instance even though start() has not
+ *     resolved yet;
+ *  2. `public_url` is never advertised — the https endpoint is published only
+ *     after the tunnel answers, and withdrawn when the tunnel process dies.
+ *
+ * ngrok is stood in for by Node itself: the fixture file is named `http` with no
+ * extension, because the spawn is
+ * `ngrokExecutable http <port> --url … --log stdout`, so with
+ * `ngrokExecutable = process.execPath` Node loads that file as the script (the
+ * serve process runs with cwd set to the fixture directory). It sleeps past the
+ * listener's bind and then reports the exact text ngrok prints for a domain the
+ * account may not serve.
+ */
+
+import assert from "node:assert/strict";
+import { test, before, after } from "node:test";
+import { spawn } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+
+const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+
+/** Sleeps past the listener's bind, then fails the way ngrok refuses a domain. */
+const FAKE_NGROK = `
+const fs = require("node:fs");
+const counter = process.env.OB_FAKE_NGROK_COUNTER;
+if (counter) { try { fs.appendFileSync(counter, Date.now() + "\\n"); } catch {} }
+setTimeout(() => {
+  console.error('t=2026-01-01T00:00:00+0000 lvl=eror msg="terminating with error" obj=app err="failed to start tunnel: Only paid plans may create endpoints with custom subdomains. ERR_NGROK_313"');
+  console.error("ERROR:  failed to start tunnel: Only paid plans may create endpoints with custom subdomains.");
+  console.error("ERROR:  ERR_NGROK_313");
+  process.exit(1);
+}, 3000);
+`;
+
+let home;
+let fixture;
+let counterFile;
+let child;
+let port;
+let serveLog = "";
+
+const base = () => `http://127.0.0.1:${port}`;
+const bridgeLog = () => {
+  try { return readFileSync(path.join(home, "logs", "bridge.log"), "utf8"); } catch { return ""; }
+};
+const spawnCount = () => {
+  try { return readFileSync(counterFile, "utf8").trim().split("\n").filter(Boolean).length; } catch { return 0; }
+};
+
+/**
+ * Waits for the listener, learning the port from runtime.json — the artefact
+ * under test. That file must appear the moment the listener binds, which is
+ * before start() resolves and prints the banner.
+ */
+async function waitForListener(timeoutMs = 20_000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const info = JSON.parse(readFileSync(path.join(home, "runtime.json"), "utf8"));
+      if (info.port > 0) {
+        port = info.port;
+        if ((await fetch(`${base()}/api/status`)).status === 200) return true;
+      }
+    } catch { /* not published yet, or the listener is still binding */ }
+    await delay(120);
+  }
+  return false;
+}
+
+before(async () => {
+  home = mkdtempSync(path.join(tmpdir(), "ob-tunnel-home-"));
+  fixture = mkdtempSync(path.join(tmpdir(), "ob-tunnel-fixture-"));
+  counterFile = path.join(fixture, "spawns.log");
+  writeFileSync(path.join(fixture, "http"), FAKE_NGROK);
+  // A domain the stand-in refuses, and a public-health budget short enough to
+  // keep the test quick.
+  writeFileSync(path.join(home, "config.json"), JSON.stringify({
+    ngrokDomain: "fixture-check.ngrok-free.dev",
+    ngrokExecutable: process.execPath,
+    publicHealthTimeoutMs: 15_000,
+  }, null, 2));
+
+  child = spawn(process.execPath, [
+    path.join(ROOT, "bin", "open-bridge.js"),
+    "serve", "--port", "0", "--root", fixture, "--home", home,
+  ], {
+    stdio: ["ignore", "pipe", "pipe"],
+    cwd: fixture, // so the stand-in `http` script resolves
+    env: { ...process.env, OB_FAKE_NGROK_COUNTER: counterFile },
+  });
+  child.stdout.on("data", d => { serveLog += d; });
+  child.stderr.on("data", d => { serveLog += d; });
+
+  const listening = await waitForListener();
+  assert.ok(listening, `the listener never answered; serve output:\n${serveLog}`);
+  assert.equal(serveLog.includes("Web 控制台"), false,
+    "runtime.json was published before start() resolved (the banner is printed afterwards)");
+});
+
+after(async () => {
+  if (child && !child.killed) child.kill("SIGTERM");
+  await delay(300);
+  rmSync(home, { recursive: true, force: true });
+  rmSync(fixture, { recursive: true, force: true });
+});
+
+test("the listener is published to the CLI while the tunnel is still failing", async () => {
+  // The tunnel takes seconds to give up (and never resolves when it cannot come
+  // up at all), so runtime.json must not wait for start(): it is written the
+  // moment the listener binds.
+  assert.ok(existsSync(path.join(home, "runtime.json")), "runtime.json is written before start() resolves");
+  const runtime = JSON.parse(readFileSync(path.join(home, "runtime.json"), "utf8"));
+  assert.equal(runtime.port, port);
+  assert.equal(runtime.pid > 0, true);
+
+  const status = await new Promise(resolve => {
+    const proc = spawn(process.execPath,
+      [path.join(ROOT, "bin", "open-bridge.js"), "status", "--home", home],
+      { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    proc.stdout.on("data", d => { out += d; });
+    proc.on("exit", code => resolve({ code, out }));
+  });
+  assert.equal(status.code, 0);
+  assert.match(status.out, /状态: running/);
+  assert.match(status.out, /未开启隧道/);
+});
+
+test("a refused tunnel is reported promptly, not after the health budget", async () => {
+  // The classification is the difference between "the operator is told in three
+  // seconds" and "the operator waits out a 20 s health check that was never
+  // going to pass" — and, before this, "retries forever".
+  const deadline = Date.now() + 8_000;
+  while (Date.now() < deadline && !bridgeLog().includes("隧道发布失败")) await delay(250);
+  const log = bridgeLog();
+  assert.match(log, /隧道发布失败/);
+  assert.match(log, /ERR_NGROK_313/, "ngrok's own reason reaches the operator");
+});
+
+test("no public URL is ever advertised while the tunnel is down", async () => {
+  const samples = [];
+  for (let i = 0; i < 12; i += 1) {
+    const body = await (await fetch(`${base()}/api/status`)).json();
+    samples.push(body.status.public_url ?? null);
+    await delay(400);
+  }
+  assert.deepEqual([...new Set(samples)], [null], `public_url leaked a dead endpoint: ${JSON.stringify(samples)}`);
+  assert.ok(spawnCount() >= 1, "the stand-in ngrok never ran, so nothing was proven");
+});
+
+test("the failed chain stops instead of respawning forever", async () => {
+  // One attempt, one reconnect (armed by the process exit before the failure was
+  // classified), then silence. A configuration error cannot be healed by trying
+  // again, so growth beyond that means the loop came back.
+  await delay(9_000);
+  const settled = spawnCount();
+  await delay(6_000);
+  assert.equal(spawnCount(), settled, `the tunnel kept respawning (${settled} → ${spawnCount()})`);
+  assert.ok(settled <= 2, `expected at most one retry, saw ${settled} spawns`);
+});

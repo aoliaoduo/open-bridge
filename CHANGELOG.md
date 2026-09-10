@@ -48,6 +48,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   handing to a client. `SettingsState.publicUrl` is renamed `mcpUrl` to match.
 
 ### Fixed
+- **A tunnel ngrok refuses no longer retries forever, and no longer advertises a
+  dead https endpoint while it does.** `ERR_NGROK_313` (a reserved subdomain the
+  account may not serve), a rejected authtoken and a refused proxy are
+  configuration errors: they fail identically on every attempt. They were treated
+  as transient blips, so the reconnect chain respawned ngrok every 2 s → 5 s →
+  15 s → 60 s, indefinitely, and each doomed attempt published an https URL — via
+  `status`, the console and the prompt — that answered nothing. New
+  `src/network/ngrok-failure.ts` recognises ngrok's own `ERR_NGROK_<code>` marker
+  in the failed attempt's output (the exit code cannot be used: ngrok exits 1 for
+  both kinds); such a failure is surfaced once, in ngrok's own words, and the
+  reconnect chain is cancelled. Transient exits — a killed agent, a dropped
+  session, a network that was not up yet — still reconnect as before.
+  `waitForTunnelReady` also gained a racer for the process's `close` event, so a
+  doomed attempt is reported in ~3 s instead of sitting out the 20 s
+  public-health budget; and `state.tunnelUrl` is now published only once the
+  tunnel actually answers, and cleared when the tunnel process dies.
+- `open-bridge status` reported 「未运行」 while the console was already serving.
+  `runtime.json` — how `status` / `url` / `stop` find the running instance — was
+  written only after `await start()` resolved, and with a tunnel configured that
+  can be seconds later (or never, if the tunnel cannot come up). The CLI now
+  publishes it from a `setLocalServerReadyHook` callback the moment the loopback
+  listener binds, with the post-`start()` write kept as a safety net.
 - Test suite: `path casing cannot split one file's lock on Windows` asserted a
   Windows-only invariant on every platform, so it failed on Linux. It now pins
   what each platform must do — fold case on Windows, keep paths distinct on POSIX.

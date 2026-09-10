@@ -16,6 +16,7 @@ import {
 import { bridgeAllowedHosts, isAllowedBridgeHost, validateNgrokDomain } from "../http/request-policy.js";
 import { authorizeRequest, authEnabled } from "../http/auth.js";
 import { isDeterministicNetworkFailure } from "../network/net-failure.js";
+import { isFatalNgrokError, ngrokFailureSummary } from "../network/ngrok-failure.js";
 import {
   MAX_SESSIONS, RECONNECT_DELAYS_MS, ROUTE_TOKEN_KEY,
   asStructuredContent, clientMcpUrl, record, state, text, redactedPublicUrl,
@@ -42,6 +43,20 @@ let extraRouteHandler: ExtraRouteHandler | undefined;
 
 export function setExtraRouteHandler(handler: ExtraRouteHandler | undefined): void {
   extraRouteHandler = handler;
+}
+
+let localServerReadyHook: (() => void) | undefined;
+
+/**
+ * Called the moment the local listener is bound — before the tunnel, before
+ * start() resolves. The CLI uses it to publish runtime.json, which is how
+ * `status` / `url` / `stop` find this instance: writing that file only after
+ * start() returned left the CLI blind for as long as the tunnel took (seconds),
+ * or forever when the tunnel could not come up at all, even though the console
+ * was already serving.
+ */
+export function setLocalServerReadyHook(hook: (() => void) | undefined): void {
+  localServerReadyHook = hook;
 }
 
 /** Serialize bridge lifecycle transitions so start/stop/rotate cannot overlap. */
@@ -200,13 +215,42 @@ async function waitForTunnelReady(healthUrl: string, child: ChildProcessWithoutN
   // unhandled rejection after the winner settles.
   void spawnError.catch(() => undefined);
   child.once("error", onSpawnError);
+
+  // ngrok can also start and then die within a second — a rejected --url, a bad
+  // authtoken, a refused proxy. Without this racer those attempts sat out the
+  // whole public-health budget (20 s by default) and then reported a generic
+  // timeout, which the scheduler classified as transient and retried forever:
+  // an endless spawn loop that republished a dead https URL on every pass.
+  const tail: string[] = [];
+  const collect = (chunk: Buffer): void => {
+    tail.push(chunk.toString());
+    if (tail.length > 40) tail.shift();
+  };
+  child.stdout.on("data", collect);
+  child.stderr.on("data", collect);
+  const exited = new Promise<never>((_, reject) => {
+    // 'close', not 'exit': 'exit' can fire before the process's output has been
+    // drained, and an empty buffer classifies ERR_NGROK_313 as a transient blip —
+    // which is precisely the endless-retry bug this racer exists to end.
+    child.once("close", (code, signal) => {
+      const output = tail.join("");
+      const how = `code ${code}${signal ? `, signal ${signal}` : ""}`;
+      reject(isFatalNgrokError(output)
+        ? new NgrokSpawnError(`ngrok 拒绝了这次隧道启动（${how}）：${ngrokFailureSummary(output)}`)
+        : new Error(`ngrok exited before the tunnel was ready (${how}).`));
+    });
+  });
+  void exited.catch(() => undefined);
+
   const health = waitForPublicHealth(healthUrl, controller.signal);
   void health.catch(() => undefined);
   try {
-    await Promise.race([health, spawnError]);
+    await Promise.race([health, spawnError, exited]);
   } finally {
     controller.abort();
     child.off("error", onSpawnError);
+    child.stdout.off("data", collect);
+    child.stderr.off("data", collect);
   }
 }
 
@@ -389,6 +433,13 @@ function stopSessionPruneLoop(): void {
  * todo state and managed processes survive a tunnel crash. A generation guard
  * invalidates timers left behind by a stop/restart that happened in between.
  */
+/** Cancels a pending reconnect: the last failure was not one retrying can heal. */
+function stopReconnectChain(): void {
+  if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+  state.reconnectTimer = undefined;
+  state.reconnectAttempt = 0;
+}
+
 function scheduleReconnect(domain: string, generation: number): void {
   if (state.stopping || generation !== state.tunnelGeneration) return;
   if (!state.server) return; // local side is gone; a reconnect has nothing to attach to
@@ -417,10 +468,14 @@ function scheduleReconnect(domain: string, generation: number): void {
     }).catch(e => {
       const message = e instanceof Error ? e.message : String(e);
       record("ngrok", "error", message);
-      // A missing domain or a failed spawn is deterministic — retrying cannot
-      // heal it. A spawn failure has already reverted to local-only, so do not
-      // arm an endless reconnect loop that can never succeed.
-      if (message.includes("ngrokDomain") || e instanceof NgrokSpawnError) return;
+      // A missing domain, an unusable binary or a configuration ngrok refuses
+      // is deterministic — retrying cannot heal it. Stay local-only, say why
+      // once, and stop arming reconnects that can never succeed.
+      if (message.includes("ngrokDomain") || e instanceof NgrokSpawnError) {
+        stopReconnectChain();
+        host().notify("error", `隧道无法建立，已停止自动重试：${message}`);
+        return;
+      }
       scheduleReconnect(domain, generation);
     });
   }, delay);
@@ -780,6 +835,11 @@ async function startHttpInternal(): Promise<void> {
   });
   state.port = (state.server.address() as { port: number }).port;
   state.boundPort = state.port;
+  try {
+    localServerReadyHook?.();
+  } catch {
+    // A host hook must never take the listener down with it.
+  }
   // Post-listen backstop: without these, a runtime failure (or unexpected
   // close) used to be swallowed after the one-shot listen error handler was
   // consumed, leaving the panel "running" on a dead port.
@@ -850,10 +910,17 @@ async function startTunnelInternal(generation: number): Promise<void> {
   }
   state.tunnelRole = "owner";
   const tunnelChild = spawnTunnel(domain, generation);
-  state.tunnelUrl = `https://${domain}/mcp/${state.routeToken}`;
+  // Published only once the tunnel answers. Setting it here advertised an https
+  // endpoint for every attempt — including the ones that were about to fail —
+  // so `status` and the console handed out a URL that answered nothing, which is
+  // the exact lie the tunnelUrl/public_url split was introduced to end. A peer
+  // tunnel sets it after its own health check for the same reason.
+  const publishedUrl = `https://${domain}/mcp/${state.routeToken}`;
   try {
     await waitForTunnelReady(`https://${domain}/healthz/${state.routeToken}`, tunnelChild);
     state.reconnectAttempt = 0;
+    state.tunnelUrl = publishedUrl;
+    host().ui.refresh();
   } catch (error) {
     if (error instanceof NgrokSpawnError) {
       // ngrok never bound the domain (missing executable, EACCES, ...). This is
@@ -867,8 +934,13 @@ async function startTunnelInternal(generation: number): Promise<void> {
       killTunnelTree(state.tunnel);
       state.tunnel = undefined;
       revertToLocalUrl();
+      // The process exit that produced this error also arms a reconnect (the exit
+      // handler cannot know why it died). Cancel it: a deterministic failure must
+      // not spawn ngrok again, and a pending timer would do exactly that.
+      stopReconnectChain();
       throw new NgrokSpawnError(
-        `${error.message} · 检查 openBridge.ngrokExecutable（未安装或路径不对请修正后重试；ERR_NGROK_9009 需关闭 openBridge.ngrokUseHttpProxy）。`,
+        `${error.message} · 检查 openBridge.ngrokExecutable（未安装或路径不对请修正后重试；ERR_NGROK_9009 需关闭 openBridge.ngrokUseHttpProxy）。`
+        + " 这类错误与配置有关，不会自动重试：修好后点 Start，或重新运行 open-bridge serve。",
       );
     }
     if ((await probePublicBridge(domain, state.routeToken)) !== "free") {
@@ -954,6 +1026,14 @@ function spawnTunnel(domain: string, generation: number): ChildProcessWithoutNul
   child.once("exit", () => {
     if (state.tunnel !== child) return;
     state.tunnel = undefined;
+    // The process carrying this URL is gone, so the endpoint is dead. Clearing
+    // it keeps `public_url` honest while the reconnect runs; a peer tunnel
+    // republishes after its own health check, and a successful reconnect
+    // republishes from startTunnelInternal.
+    if (state.tunnelRole !== "follower") {
+      state.tunnelRole = "none";
+      revertToLocalUrl();
+    }
     scheduleReconnect(domain, generation);
   });
   return child;
