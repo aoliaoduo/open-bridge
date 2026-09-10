@@ -34,7 +34,7 @@ import {
 } from "../bridge/settings-model.js";
 import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
 import { host } from "../host/host.js";
-import { start, stop, rotateRouteToken, startInternal, stopInternal, enqueueLifecycle, webAiPrompt } from "../bridge/lifecycle.js";
+import { start, rotateRouteToken, enqueueLifecycle, webAiPrompt } from "../bridge/lifecycle.js";
 
 export interface SecretPayload {
   kind: "minted" | "rotated";
@@ -54,6 +54,16 @@ export interface SettingsActionResult {
   secret?: SecretPayload;
   /** Text the console should copy to the clipboard itself. */
   copyText?: string;
+  /**
+   * Perform the stop only after this response has been flushed. Both fields
+   * below exist because stopping, or rebinding, closes the very socket the
+   * response travels over.
+   */
+  deferStop?: boolean;
+  /** Rebind the listener after this response has been flushed. */
+  deferRestart?: boolean;
+  /** The page's injected console token is stale; the console reloads. */
+  reloadRequired?: boolean;
 }
 
 type AuthStatusView = { tokens: SettingsTokenRow[] };
@@ -170,17 +180,30 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
     }
 
     case "stop": {
-      await stop();
-      return done();
+      // Describe the outcome instead of awaiting it: stopping closes the
+      // listener that carries this response, so the router performs it once the
+      // response is on the wire (see SettingsActionResult.deferStop). The state
+      // is therefore composed here rather than read back after the fact.
+      const before = await buildSettingsState();
+      return {
+        ok: true,
+        state: { ...before, running: false, statusText: "已停止", mcpUrl: "" },
+        info: "Bridge 已停止：本地服务关闭、端口释放，这个控制台也随之失效。重新启动请运行 open-bridge serve。",
+        deferStop: true,
+      };
     }
 
     case "rotateEndpoint": {
-      await enqueueLifecycle(async () => {
-        await rotateRouteToken();
-        await stopInternal(false);
-        await startInternal();
-      });
-      return done({ info: "MCP URL 已更新，旧链接立即失效。" });
+      // Flip the token first (an in-process assignment, no socket teardown) so
+      // this response can carry the new URL; the router rebinds the listener
+      // afterwards. The page's injected console token is now stale, hence
+      // reloadRequired — without the reload every later action would 403.
+      await enqueueLifecycle(async () => { await rotateRouteToken(); });
+      return {
+        ...(await done({ info: "MCP URL 已更新，旧链接立即失效。控制台正在重新加载。" })),
+        deferRestart: true,
+        reloadRequired: true,
+      };
     }
 
     case "setConfig": {

@@ -24,7 +24,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { state } from "../bridge/state.js";
 import { getBridgeStatus, getUsageStats } from "../bridge/meta-tools.js";
 import { buildSettingsState, handleSettingsAction } from "./settings-handler.js";
-import { start, stop, rotateRouteToken, startInternal, stopInternal, enqueueLifecycle, webAiPrompt } from "../bridge/lifecycle.js";
+import { start, stop, rotateRouteToken, restartListener, enqueueLifecycle, webAiPrompt } from "../bridge/lifecycle.js";
 import { nodeHost } from "../host/node-host.js";
 import { redactSensitiveText } from "../bridge/state.js";
 
@@ -185,14 +185,31 @@ export async function apiRouteHandler(
     if (req.method === "POST") {
       switch (route) {
         case "/bridge/start": { await start(); json(res, 200, { ok: true, status: getBridgeStatus() }); return true; }
-        case "/bridge/stop": { await stop(); json(res, 200, { ok: true, status: getBridgeStatus() }); return true; }
+        case "/bridge/stop": {
+          // Answer first, tear down second: this response travels over the very
+          // listener stop() closes, so awaiting it here handed the caller a
+          // connection reset for a stop that had in fact succeeded.
+          json(res, 200, { ok: true, status: getBridgeStatus() });
+          setImmediate(() => { void stop(); });
+          return true;
+        }
         case "/bridge/rotate": {
-          await enqueueLifecycle(async () => { await rotateRouteToken(); await stopInternal(false); await startInternal(); });
-          json(res, 200, { ok: true, status: getBridgeStatus() }); return true;
+          // Rotate in-process first so this response can carry the new endpoint,
+          // then rebind the listener once the response is flushed.
+          await enqueueLifecycle(async () => { await rotateRouteToken(); });
+          json(res, 200, { ok: true, status: getBridgeStatus(), reloadRequired: true });
+          setImmediate(() => { void restartListener(); });
+          return true;
         }
         case "/settings/action": {
           const result = await handleSettingsAction(await readBody(req));
-          json(res, result.ok ? 200 : 400, result); return true;
+          json(res, result.ok ? 200 : 400, result);
+          // Stop and rebind tear down the socket this response is on, so they
+          // run only after it has been flushed. Doing them first is what turned
+          // a successful stop/rotate into an ECONNRESET with no response body.
+          if (result.ok && result.deferStop) setImmediate(() => { void stop(); });
+          else if (result.ok && result.deferRestart) setImmediate(() => { void restartListener(); });
+          return true;
         }
         case "/shutdown": {
           json(res, 200, { ok: true, message: "Shutting down." });

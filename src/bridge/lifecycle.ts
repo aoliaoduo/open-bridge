@@ -620,6 +620,11 @@ export async function startInternal(): Promise<void> {
 /** Bind loopback, wire request handling (CORS, caps, sessions) and self-verify. */
 async function startHttpInternal(): Promise<void> {
   const configuredPort = host().config.get<number>("port", 0);
+  // An ephemeral bind must not move on a rebind: the console was loaded from
+  // this origin, `runtime.json` advertises this port to the CLI, and the tunnel
+  // forwards to it. Port 0 means "any free port", which is fine for the first
+  // bind and wrong for the second, so the port we already chose wins.
+  const listenPort = configuredPort === 0 && state.boundPort ? state.boundPort : configuredPort;
   state.server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     const securityHeaders = {
@@ -771,9 +776,10 @@ async function startHttpInternal(): Promise<void> {
   });
   await new Promise<void>((resolve, reject) => {
     state.server!.once("error", reject);
-    state.server!.listen(configuredPort, "127.0.0.1", () => resolve());
+    state.server!.listen(listenPort, "127.0.0.1", () => resolve());
   });
   state.port = (state.server.address() as { port: number }).port;
+  state.boundPort = state.port;
   // Post-listen backstop: without these, a runtime failure (or unexpected
   // close) used to be swallowed after the one-shot listen error handler was
   // consumed, leaving the panel "running" on a dead port.
@@ -1022,6 +1028,23 @@ export async function stop(notify = true): Promise<void> {
   return enqueueLifecycle(async () => {
     if (isStopped()) return;
     await stopInternal(notify);
+  });
+}
+
+/**
+ * Rebind the local listener so a newly rotated route token reaches every route,
+ * including whatever the tunnel is forwarding to.
+ *
+ * Deliberately separate from the rotation itself: rotating the token is a plain
+ * in-process assignment, while this closes the listening socket. Callers must
+ * flush their HTTP response in between, because that response is travelling
+ * over the socket this tears down — awaiting the whole thing before replying is
+ * what reached the console as ECONNRESET on a rotation that had succeeded.
+ */
+export function restartListener(): Promise<void> {
+  return enqueueLifecycle(async () => {
+    await stopInternal(false);
+    await startInternal();
   });
 }
 

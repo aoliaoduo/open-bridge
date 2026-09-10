@@ -101,6 +101,8 @@ export interface SettingsActionResult {
   error?: string;
   secret?: SecretPayload;
   copyText?: string;
+  /** The route token rotated: this document's injected token is stale. */
+  reloadRequired?: boolean;
 }
 
 async function getJson<T>(path: string): Promise<T> {

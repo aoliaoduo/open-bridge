@@ -152,6 +152,35 @@ describe("App shell", () => {
     expect(await screen.findByText("已就绪")).toBeTruthy();
   });
 
+  test("reloads the console after a rotation invalidates its injected token", async () => {
+    // The token is injected into the page server-side, so after a rotation the
+    // in-page copy is stale and every later action would 403. Reloading is the
+    // only way to pick up the fresh one, and without it the console was left
+    // silently broken until the operator thought to refresh by hand.
+    const reload = vi.fn();
+    const original = Object.getOwnPropertyDescriptor(window, "location");
+    Object.defineProperty(window, "location", { configurable: true, value: { reload } });
+    try {
+      mocks.settingsAction.mockResolvedValue({
+        ok: true,
+        state: settingsState(),
+        info: "MCP URL 已更新，旧链接立即失效。控制台正在重新加载。",
+        reloadRequired: true,
+      } satisfies SettingsActionResult);
+
+      render(<App />);
+      await screen.findByText("MCP 端点");
+
+      fireEvent.click(screen.getByRole("button", { name: "轮换端点" }));
+
+      expect(await screen.findByText(/控制台正在重新加载/)).toBeTruthy();
+      await new Promise(resolve => setTimeout(resolve, 1400));
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      if (original) Object.defineProperty(window, "location", original);
+    }
+  });
+
   test("shows the one-time secret mask and dismisses it", async () => {
     // The mint response carries the only copy of the secret, so the shell must
     // present it until the operator confirms they saved it.

@@ -179,6 +179,53 @@ test("cli status/url reach the running instance and exit cleanly", async () => {
   assert.match(url.out.trim(), /\/mcp\//);
 });
 
+/** POST a console action the way the console does. */
+function postAction(body, token = routeToken) {
+  return fetch(`${base()}/api/settings/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-open-bridge-console": token },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * After a rotation the listener is rebound; with an ephemeral port (--port 0
+ * here) that means a new port, so follow runtime.json until it answers again.
+ */
+async function waitForRebind(timeoutMs = 20_000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const info = JSON.parse(readFileSync(path.join(home, "runtime.json"), "utf8"));
+      if (info.port > 0) port = info.port;
+    } catch { /* mid-write */ }
+    try {
+      if ((await fetch(`${base()}/api/status`)).status === 200) return;
+    } catch { /* listener still down */ }
+    await delay(250);
+  }
+  throw new Error("the listener never came back after the rebind");
+}
+
+test("rotation answers before rebinding the listener", async () => {
+  // Regression: the rotation flipped the token, rebound the listener and only
+  // then replied — but the reply travels over the socket the rebind closes, so
+  // the console got ECONNRESET for a rotation that had succeeded, while holding
+  // a token that no longer worked.
+  const res = await postAction({ command: "rotateEndpoint" });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.reloadRequired, true, "the console is told its token went stale");
+  const rotated = body.state.mcpUrl.split("/mcp/")[1];
+  assert.ok(rotated && rotated !== routeToken, "the response carries the new endpoint");
+
+  await waitForRebind();
+  assert.equal((await postAction({ command: "ready" }, routeToken)).status, 403, "old token is dead");
+  routeToken = rotated;
+  assert.equal((await postAction({ command: "ready" })).status, 200, "new token works");
+});
+
 test("shutdown endpoint stops the process", async () => {
   const res = await fetch(`${base()}/api/shutdown`, {
     method: "POST",

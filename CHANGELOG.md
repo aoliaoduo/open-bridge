@@ -14,12 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ready-made opening message, `GET /api/prompt` serves it to local scripts, and
   the console's endpoint card gained a "复制接入提示词" button. `serve` now points
   at it in its startup banner.
-- Console test suite (vitest + jsdom + Testing Library, 20 tests) covering the API
+- Console test suite (vitest + jsdom + Testing Library, 21 tests) covering the API
   client, the endpoint card's tunnel-vs-loopback resolution, and the app shell's
   tabs, toasts and one-time secret mask.
 - `tsconfig.ui.json`, so the React console and its tests are type-checked. The
   core tsconfig only covers `src/**`, and Vite transpiles without checking types,
   so `ui/` had never been type-checked at all.
+- Integration coverage for teardown ordering: a rotation must answer with the new
+  endpoint before the listener rebinds, and the console's stop action must answer
+  before the process exits. `test/api-teardown-integration.test.mjs` owns the
+  latter because it consumes the process the main suite still needs.
 
 ### Changed
 - **Minimum Node.js is now 22** (was 20.3). Node 20 reached end-of-life in
@@ -55,6 +59,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   process, it drained before the deadline fired. The test now holds the loop
   open across the wait — the product keeps its `unref()` call, since a real
   server always has its listening socket holding the loop open.
+- **Rotating the endpoint, and stopping, no longer reach the caller as a
+  connection reset with no response body.** Both actions tore down (or rebound)
+  the listener and only then replied — but the reply travels over the very socket
+  they close. The console's "rotate endpoint" button therefore reported a failure
+  for a rotation that had succeeded, and left the page holding a token that no
+  longer worked: every action from then on answered 403 until the operator
+  thought to reload by hand. Responses are now flushed first and the teardown
+  runs on the next tick; a rotation also tells the console to reload, so it picks
+  up the freshly injected token instead of asking the operator to guess.
+- **A rotation no longer relocates the instance to a new port.** The default
+  config asks for port 0, so the rebind that follows a rotation came up on a
+  brand-new ephemeral port, abandoning everything already pointing at the old
+  one: the console page that issued the rotation, the port `runtime.json`
+  advertises to the CLI (`status` / `url` / `stop` all stopped finding the
+  instance), and whatever the tunnel forwards to. The port the listener last
+  bound is now remembered across rebinds.
 
 ## [1.0.0-alpha.1] — 2026-09-11
 

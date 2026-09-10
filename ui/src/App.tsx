@@ -50,6 +50,13 @@ export function App() {
       if (result.copyText) await copyText(result.copyText);
       if (result.error) showToast(result.error, true);
       else if (result.info) showToast(result.info);
+      if (result.reloadRequired) {
+        // The console token is injected into this document server-side, so a
+        // route-token rotation leaves the in-page copy stale: every action from
+        // here on would 403. Reload to pick up the freshly injected one, after
+        // the toast has told the operator why.
+        window.setTimeout(() => window.location.reload(), 1200);
+      }
       return result;
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), true);
