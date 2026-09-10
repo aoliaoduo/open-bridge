@@ -95,11 +95,24 @@ test("healthz answers on the route token path", async () => {
 });
 
 test("api status is loopback-readable without a token", async () => {
-  const res = await fetch(`${base()}/api/status`, { headers: { "x-open-bridge-console": routeToken } });
+  // No header on purpose: reads are loopback-gated only. This name used to lie —
+  // the request carried the console token, so a regression that made reads
+  // token-gated (breaking `open-bridge status`/`url`) went unnoticed.
+  const res = await fetch(`${base()}/api/status`);
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.status.state, "running");
   assert.ok(body.status.tool_count >= 40);
+});
+
+test("console page loads without a token (it is where the token is delivered)", async () => {
+  // Regression: /console/ demanded the console token, but the token is injected
+  // into this very page — a deadlock that made the web console unopenable.
+  const res = await fetch(`${base()}/console/`);
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  assert.ok(html.includes("open-bridge-console-token"), "token meta is injected into the console html");
+  assert.ok(!html.includes("window.__OPEN_BRIDGE_TOKEN__"), "token is not exposed as an inline script");
 });
 
 test("non-loopback Host is refused at the bridge layer", async () => {
@@ -141,6 +154,29 @@ test("console page is served with the token injected; ngrok Host is refused", as
   assert.ok(!html.includes("window.__OPEN_BRIDGE_TOKEN__"), "token is not exposed as inline script");
   const refusedStatus = await requestWithHost("/console/", "x.ngrok-free.dev");
   assert.equal(refusedStatus, 403);
+});
+
+test("cli status/url reach the running instance and exit cleanly", async () => {
+  const runCli = (args) => new Promise(resolve => {
+    const proc = spawn(process.execPath,
+      [path.join(ROOT, "bin", "open-bridge.js"), ...args, "--home", home],
+      { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "", err = "";
+    proc.stdout.on("data", d => { out += d; });
+    proc.stderr.on("data", d => { err += d; });
+    proc.on("exit", code => resolve({ code, out, err }));
+  });
+
+  // A non-zero exit here also catches the Windows libuv assertion that used to
+  // fire when process.exit() raced undici's closing keep-alive sockets.
+  const status = await runCli(["status"]);
+  assert.equal(status.code, 0, `status exited ${status.code}: ${status.err}`);
+  assert.match(status.out, /状态: running/);
+  assert.ok(!/Assertion failed/.test(status.err), `no libuv assertion: ${status.err}`);
+
+  const url = await runCli(["url"]);
+  assert.equal(url.code, 0, `url exited ${url.code}: ${url.err}`);
+  assert.match(url.out.trim(), /\/mcp\//);
 });
 
 test("shutdown endpoint stops the process", async () => {

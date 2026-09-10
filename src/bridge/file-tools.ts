@@ -138,19 +138,23 @@ function zeroMatchError(
 }
 
 let resolvedRipgrep: string | undefined;
-/** Prefer the host-bundled rg.exe (Windows); fall back to PATH's rg. */
+
+/**
+ * Prefer a host-bundled ripgrep on any platform, fall back to PATH's rg, and
+ * finally to the built-in scanner — the search tool probes whatever it gets
+ * with `rg --version` before committing to it, so a stale or foreign binary
+ * degrades instead of failing the search.
+ */
 function resolveRipgrepExecutable(): string {
   if (resolvedRipgrep !== undefined) return resolvedRipgrep;
   resolvedRipgrep = "rg";
-  if (process.platform === "win32") {
-    const bundled = host().bundledRipgrep();
-    if (bundled) {
-      try {
-        fsSync.accessSync(bundled);
-        resolvedRipgrep = bundled;
-      } catch {
-        // Not bundled in this install; use PATH.
-      }
+  const bundled = host().bundledRipgrep();
+  if (bundled) {
+    try {
+      fsSync.accessSync(bundled);
+      resolvedRipgrep = bundled;
+    } catch {
+      // Not bundled in this install; use PATH.
     }
   }
   return resolvedRipgrep;

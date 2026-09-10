@@ -14,6 +14,7 @@
 
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import { installNodeHost, resolveDefaultHome } from "./host/node-host.js";
@@ -111,6 +112,57 @@ async function consoleTokenFor(home: string, root: string): Promise<string> {
   return token;
 }
 
+/** Best-effort console token: reads are loopback-gated, so a miss is not fatal. */
+async function consoleTokenOrUndefined(home: string, root: string): Promise<string | undefined> {
+  try { return await consoleTokenFor(home, root); } catch { return undefined; }
+}
+
+interface HttpJsonResult { status: number; body: unknown }
+
+/**
+ * `state.publicUrl` mirrors the loopback URL whenever no tunnel is published,
+ * so only an https:// value is genuinely reachable from outside this machine.
+ * Labelling the loopback case "公网 MCP URL" told users a private address was
+ * public; treat anything else as absent.
+ */
+function tunnelUrl(value: unknown): string {
+  return typeof value === "string" && value.startsWith("https://") ? value : "";
+}
+
+/**
+ * One-shot JSON request over node:http, with the connection closed immediately.
+ *
+ * The CLI deliberately avoids global fetch() here: undici parks keep-alive
+ * sockets in a process-global dispatcher, and calling process.exit() while
+ * those handles are closing trips a libuv assertion on Windows
+ * ("Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)" in src\win\async.c).
+ * A dedicated agent-less socket leaves nothing behind to race the exit.
+ */
+function httpJson(
+  port: number,
+  pathname: string,
+  options: { method?: string; token?: string } = {},
+): Promise<HttpJsonResult> {
+  const { method = "GET", token } = options;
+  const headers: Record<string, string> = { connection: "close" };
+  if (token) headers["x-open-bridge-console"] = token;
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ host: "127.0.0.1", port, path: pathname, method, headers, agent: false }, res => {
+      const chunks: Buffer[] = [];
+      res.on("data", chunk => chunks.push(chunk as Buffer));
+      res.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        let body: unknown = text;
+        try { body = text ? JSON.parse(text) : undefined; } catch { /* keep raw text */ }
+        resolve({ status: res.statusCode ?? 0, body });
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+
 // --- serve ------------------------------------------------------------------
 
 async function cmdServe(parsed: ParsedArgs): Promise<void> {
@@ -179,7 +231,9 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   console.log("");
   console.log(`  Web 控制台:  ${consoleUrl}`);
   console.log(`  本地 MCP URL: http://127.0.0.1:${state.port}/mcp/${state.routeToken}`);
-  if (state.publicUrl) console.log(`  公网 MCP URL: ${state.publicUrl}`);
+  const published = tunnelUrl(state.publicUrl);
+  if (published) console.log(`  公网 MCP URL: ${published}`);
+  else console.log("  公网 MCP URL: （未开启隧道，仅本机可用）");
   console.log(`  日志:        ${nodeHost.bridgeLog.path()}`);
   console.log("");
   console.log("Ctrl+C 停止。");
@@ -209,11 +263,8 @@ async function cmdStop(parsed: ParsedArgs): Promise<void> {
   }
   try {
     const token = await consoleTokenFor(home, runtime.root);
-    const res = await fetch(`http://127.0.0.1:${runtime.port}/api/shutdown`, {
-      method: "POST",
-      headers: { "x-open-bridge-console": token },
-    });
-    if (!res.ok) throw new Error(`shutdown 返回 ${res.status}`);
+    const res = await httpJson(runtime.port, "/api/shutdown", { method: "POST", token });
+    if (res.status !== 200) throw new Error(`shutdown 返回 ${res.status}`);
     console.log("已发送停止指令。");
   } catch (error) {
     console.error(`停止失败 (${error instanceof Error ? error.message : String(error)})，尝试直接终止进程。`);
@@ -228,13 +279,15 @@ async function cmdStatus(parsed: ParsedArgs): Promise<void> {
     console.log("状态: 未运行");
     return;
   }
-  const res = await fetch(`http://127.0.0.1:${runtime.port}/api/status`);
-  if (!res.ok) fail(`status 请求失败: HTTP ${res.status}`);
-  const body = await res.json() as { status: Record<string, unknown> };
+  const res = await httpJson(runtime.port, "/api/status", { token: await consoleTokenOrUndefined(home, runtime.root) });
+  if (res.status !== 200) fail(`status 请求失败: HTTP ${res.status}`);
+  const body = res.body as { status: Record<string, unknown> };
   console.log(`状态: ${body.status.state} (pid ${runtime.pid})`);
   console.log(`项目根: ${runtime.root}`);
   if (body.status.local_url) console.log(`本地 MCP: ${body.status.local_url}`);
-  if (body.status.public_url) console.log(`公网 MCP: ${body.status.public_url}`);
+  const published = tunnelUrl(body.status.public_url);
+  if (published) console.log(`公网 MCP: ${published}`);
+  else console.log("公网 MCP: （未开启隧道，仅本机可用）");
   console.log(`会话: ${body.status.active_sessions}  命令: ${body.status.active_commands}  工具: ${body.status.tool_count}`);
 }
 
@@ -242,10 +295,10 @@ async function cmdUrl(parsed: ParsedArgs): Promise<void> {
   const home = resolveHome(parsed);
   const runtime = readRuntime(home);
   if (!runtime || !pidAlive(runtime.pid)) fail("没有正在运行的实例。");
-  const res = await fetch(`http://127.0.0.1:${runtime!.port}/api/status`);
-  if (!res.ok) fail(`status 请求失败: HTTP ${res.status}`);
-  const body = await res.json() as { status: { public_url?: string; local_url?: string } };
-  const url = body.status.public_url ?? body.status.local_url;
+  const res = await httpJson(runtime!.port, "/api/status", { token: await consoleTokenOrUndefined(home, runtime.root) });
+  if (res.status !== 200) fail(`status 请求失败: HTTP ${res.status}`);
+  const body = res.body as { status: { public_url?: string; local_url?: string } };
+  const url = tunnelUrl(body.status.public_url) || body.status.local_url;
   if (!url) fail("实例在运行但还没有 MCP URL。");
   console.log(url);
 }

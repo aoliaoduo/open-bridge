@@ -161,16 +161,22 @@ export async function apiRouteHandler(
   }
 
   if (isConsole) {
-    if (!hasConsoleToken(req)) {
-      json(res, 403, { error: "Missing or invalid console token." });
-      return true;
-    }
+    // Deliberately token-free. The console HTML is where the token is delivered
+    // (injected into <head> server-side), so demanding it here would deadlock:
+    // no browser could ever load the page that hands out the token. The
+    // loopback Host gate above is the boundary — and anything served here a
+    // same-machine process could already read straight from the data dir.
     await serveConsole(res, url);
     return true;
   }
 
   const route = url.pathname.replace(/^\/api/, "") || "/";
-  if (!hasConsoleToken(req)) {
+  // Reads are loopback-gated only; mutations must additionally prove possession
+  // of the console token. A cross-origin page can neither read these responses
+  // (no CORS headers are emitted) nor send this header without a preflight we
+  // never answer, so the mutation gate stays CSRF-proof on its own.
+  const mutating = req.method !== "GET" && req.method !== "HEAD";
+  if (mutating && !hasConsoleToken(req)) {
     json(res, 403, { error: "Missing or invalid console token." });
     return true;
   }

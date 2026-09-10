@@ -7,7 +7,8 @@ import * as path from "node:path";
 import { StreamableHTTPServerTransport, type EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { CORE_TOOLS, TOOL_DEFINITIONS } from "../mcp/tool-definitions.js";
+import { TOOL_DEFINITIONS } from "../mcp/tool-definitions.js";
+import { listToolDefinitions } from "./tool-catalog.js";
 import {
   bridgeTokenFromPath, findPeerForToken, healthCheckUrl, probePublicBridge,
   proxyToPeer, publishPeer, withdrawPeer,
@@ -209,15 +210,8 @@ async function waitForTunnelReady(healthUrl: string, child: ChildProcessWithoutN
   }
 }
 
-/** Editor-integration tools that only exist when the host ships a language server. */
-const EDITOR_ONLY_TOOLS = new Set(["get_diagnostics", "lsp"]);
-
-/** Effective catalog for tools/list: applies the openBridge.toolProfile filter ("full" lists every tool). */
-function listToolDefinitions(): Array<(typeof TOOL_DEFINITIONS)[number]> {
-  const profile = host().config.get<string>("toolProfile", "full");
-  const catalog = profile === "core" ? TOOL_DEFINITIONS.filter(tool => CORE_TOOLS.has(tool.name)) : [...TOOL_DEFINITIONS];
-  return host().capabilities.lsp ? catalog : catalog.filter(tool => !EDITOR_ONLY_TOOLS.has(tool.name));
-}
+// The advertised catalog (toolProfile + host-capability filters) lives in
+// tool-catalog.ts so tools/list and the status surface's tool_count agree.
 
 /**
  * Project instruction files (AGENTS.md / CLAUDE.md — DevSpace two-layer model,

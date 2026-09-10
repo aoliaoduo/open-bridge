@@ -2,7 +2,7 @@ import { host } from "../host/host.js";
 import * as fs from "node:fs/promises";
 import * as fsSync from "node:fs";
 import * as path from "node:path";
-import { CORE_TOOLS, TOOL_DEFINITIONS } from "../mcp/tool-definitions.js";
+import { listToolDefinitions } from "./tool-catalog.js";
 import { validateNgrokDomain } from "../http/request-policy.js";
 import { authStatus } from "../http/auth.js";
 import { lockSnapshot } from "./resource-locks.js";
@@ -31,9 +31,10 @@ export function getBridgeStatus(): Record<string, unknown> {
     active_sessions: state.sessions.size,
     active_commands: [...state.commands.values()].filter(command => !command.done).length,
     tool_profile: host().config.get<string>("toolProfile", "full"),
-    tool_count: host().config.get<string>("toolProfile", "full") === "core"
-      ? TOOL_DEFINITIONS.filter(tool => CORE_TOOLS.has(tool.name)).length
-      : TOOL_DEFINITIONS.length,
+    // Must report what tools/list actually advertises: the toolProfile filter
+    // AND the host-capability filter (a standalone instance has no language
+    // server, so editor-only tools are absent from the catalog).
+    tool_count: listToolDefinitions().length,
     auth_enabled: host().config.get<boolean>("auth.enabled", false) === true,
     locks: { held: locks.held.length, waiting: locks.waiting.length },
   };
@@ -219,7 +220,7 @@ export function workspaceBrief(): Record<string, unknown> {
 
   // Bridge-side state worth knowing at session start.
   brief.bridge = {
-    tool_count: TOOL_DEFINITIONS.length,
+    tool_count: listToolDefinitions().length,
     tool_profile: host().config.get<string>("toolProfile", "full"),
     active_commands: [...state.commands.values()].filter(c => !c.done).length,
     recent_activity: state.activity.slice(0, 5).map(a => `${a.tool} · ${a.message}`.slice(0, 120)),

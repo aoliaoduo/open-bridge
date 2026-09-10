@@ -259,10 +259,15 @@ export function installNodeHost(options: NodeHostOptions = {}): { host: NodeHost
 
   let projectRoot = path.resolve(options.projectRoot ?? process.cwd());
 
-  // dist/host/node-host.js -> <package root>/vendor/rg.exe (dev: src/host -> ../vendor)
+  // dist/host/node-host.js -> <package root>/vendor/rg[.exe] (dev: src/host -> ../vendor).
+  // The binary shipped in the npm tarball is Windows-only; on other platforms a
+  // packager may drop a native `rg` in the same folder. When neither exists the
+  // search tool falls back to PATH's rg, then to its built-in scanner.
+  const rgName = process.platform === "win32" ? "rg.exe" : "rg";
   const rgCandidate = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
-    "../../vendor/rg.exe",
+    "../../vendor",
+    rgName,
   );
   const rg = fs.existsSync(rgCandidate) ? rgCandidate : undefined;
 
