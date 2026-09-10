@@ -29,10 +29,18 @@ test("single-path write tools lock exactly that file", async () => {
   }
 });
 
-test("path casing cannot split one file's lock on Windows", async () => {
+test("path casing follows the platform's file-system semantics", async () => {
   const upper = await deriveLockPlan("write_file", { path: "SRC/A.TS" }, ctx());
   const lower = await deriveLockPlan("write_file", { path: "src/a.ts" }, ctx());
-  assert.deepEqual(upper?.keys, lower?.keys);
+  if (process.platform === "win32") {
+    // Windows file systems fold case: the two spellings name one file, so they
+    // must not be able to hold two independent locks on it.
+    assert.deepEqual(upper?.keys, lower?.keys);
+  } else {
+    // POSIX keeps them distinct; folding case here would wrongly serialize
+    // (and alias) two genuinely different files.
+    assert.notDeepEqual(upper?.keys, lower?.keys);
+  }
 });
 
 test("pair tools lock both source and destination", async () => {
