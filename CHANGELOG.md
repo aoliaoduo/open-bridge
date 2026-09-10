@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI pipeline (GitHub Actions): typecheck, lint, build, unit + API integration
   tests, and a CLI smoke test, across Ubuntu (Node 22 / 24) and Windows (Node 24).
 - README section on ripgrep resolution across platforms.
+- Onboarding, reachable from all three surfaces: `open-bridge prompt` prints the
+  ready-made opening message, `GET /api/prompt` serves it to local scripts, and
+  the console's endpoint card gained a "复制接入提示词" button. `serve` now points
+  at it in its startup banner.
+- Console test suite (vitest + jsdom + Testing Library, 20 tests) covering the API
+  client, the endpoint card's tunnel-vs-loopback resolution, and the app shell's
+  tabs, toasts and one-time secret mask.
+- `tsconfig.ui.json`, so the React console and its tests are type-checked. The
+  core tsconfig only covers `src/**`, and Vite transpiles without checking types,
+  so `ui/` had never been type-checked at all.
 
 ### Changed
 - **Minimum Node.js is now 22** (was 20.3). Node 20 reached end-of-life in
@@ -17,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   support floor for a tool that exposes a local workspace over HTTP. The old
   floor was inherited from the VS Code extension, where it tracked the
   editor's bundled runtime; a standalone CLI has no such constraint.
+- **`public_url` now means what it says.** The status payload used to put a
+  loopback URL in `public_url` whenever no tunnel was published, so every reader
+  had to guess which of the two things it was holding — which is how the CLI came
+  to print a private address under "public MCP URL", and how the health check
+  came to probe loopback as if it were a tunnel. Internally the field is now
+  `tunnelUrl`, set only while a tunnel is live; `public_url` is absent without
+  one, `local_url` is unchanged, and a new `mcp_url` carries the URL worth
+  handing to a client. `SettingsState.publicUrl` is renamed `mcpUrl` to match.
 
 ### Fixed
 - Test suite: `path casing cannot split one file's lock on Windows` asserted a
@@ -27,6 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through Node.
 - CI bumped to actions/checkout@v7 and actions/setup-node@v7 (v4 targets the
   Node 20 action runtime, which current runners have deprecated).
+- `webAiPrompt()` — the "connect this MCP" text — was exported but never called
+  anywhere in the standalone build. The VS Code extension offered it from its
+  settings page; the port left it unreachable.
 - Three `resource-locks` tests were cancelled on Node 22 with "Promise
   resolution is still pending but the event loop has already resolved". Every
   timer in `resource-locks` is deliberately `unref()`d so a pending lock can

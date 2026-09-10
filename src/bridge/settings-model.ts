@@ -68,7 +68,8 @@ export interface SettingsConfigView {
 export interface SettingsState {
   running: boolean;
   statusText: string;
-  publicUrl: string;
+  /** The MCP URL to show and copy — tunnel when published, otherwise loopback. */
+  mcpUrl: string;
   configuredDomain: string;
   authEnabled: boolean;
   defaultTtlSeconds: number;
@@ -81,7 +82,7 @@ export interface SettingsState {
 
 export type SettingsAction =
   | { command: "ready" }
-  | { command: "copyUrl" | "start" | "stop" | "rotateEndpoint" | "purgeTokens" | "revokeAll" | "copySecret" | "dismissSecret" }
+  | { command: "copyUrl" | "copyPrompt" | "start" | "stop" | "rotateEndpoint" | "purgeTokens" | "revokeAll" | "copySecret" | "dismissSecret" }
   | { command: "saveDomain"; domain: string }
   | { command: "setAuthEnabled"; enabled: boolean }
   | { command: "setDefaultTtl"; seconds: number }
@@ -147,7 +148,7 @@ export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
   const message = raw as Record<string, unknown>;
   const command = typeof message.command === "string" ? message.command : "";
   const allowed: ReadonlySet<string> = new Set([
-    "ready", "copyUrl", "start", "stop", "rotateEndpoint", "saveDomain",
+    "ready", "copyUrl", "copyPrompt", "start", "stop", "rotateEndpoint", "saveDomain",
     "setAuthEnabled", "setDefaultTtl", "createToken", "rotateToken",
     "revokeToken", "deleteToken", "purgeTokens", "revokeAll",
     "setConcurrency", "setConfig", "copyText", "copySecret", "dismissSecret",

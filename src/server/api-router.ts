@@ -24,7 +24,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { state } from "../bridge/state.js";
 import { getBridgeStatus, getUsageStats } from "../bridge/meta-tools.js";
 import { buildSettingsState, handleSettingsAction } from "./settings-handler.js";
-import { start, stop, rotateRouteToken, startInternal, stopInternal, enqueueLifecycle } from "../bridge/lifecycle.js";
+import { start, stop, rotateRouteToken, startInternal, stopInternal, enqueueLifecycle, webAiPrompt } from "../bridge/lifecycle.js";
 import { nodeHost } from "../host/node-host.js";
 import { redactSensitiveText } from "../bridge/state.js";
 
@@ -206,6 +206,7 @@ export async function apiRouteHandler(
       case "/activity": json(res, 200, { ok: true, activity: state.activity }); return true;
       case "/usage": json(res, 200, { ok: true, usage: getUsageStats() }); return true;
       case "/settings": json(res, 200, { ok: true, state: await buildSettingsState() }); return true;
+      case "/prompt": json(res, 200, { ok: true, prompt: webAiPrompt() }); return true;
       case "/logs/stream": {
         ensureLogStreamWired();
         res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", connection: "keep-alive" });

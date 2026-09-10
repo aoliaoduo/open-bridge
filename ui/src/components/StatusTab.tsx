@@ -25,7 +25,10 @@ export function StatusTab({ act, onRefresh }: Props) {
   }, []);
 
   const running = status?.state === "running";
-  const url = status?.public_url || status?.local_url;
+  // mcp_url already resolves tunnel-vs-loopback server-side; the UI no longer
+  // has to guess which of the two fields is populated.
+  const url = status?.mcp_url || status?.local_url;
+  const isPublic = Boolean(status?.public_url);
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -50,9 +53,19 @@ export function StatusTab({ act, onRefresh }: Props) {
           >
             复制 URL
           </button>
+          <button
+            className="small"
+            disabled={busy || !running}
+            onClick={() => void run(() => act({ command: "copyPrompt" }))}
+          >
+            复制接入提示词
+          </button>
         </div>
         <div className="section-note">
           把这个 URL 填进 MCP 客户端（ChatGPT 连接器、Claude、Cursor 等）。它本身就是凭证，请当作密钥保管。
+          {url && (isPublic
+            ? " 当前是公网隧道地址，拿到它的人都能访问。"
+            : " 当前仅本机可访问（未开启隧道）。")}
         </div>
       </div>
 

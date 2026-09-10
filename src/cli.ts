@@ -42,6 +42,7 @@ const HELP = `open-bridge ${VERSION} — standalone MCP bridge for local workspa
   open-bridge stop
   open-bridge status
   open-bridge url
+  open-bridge prompt
   open-bridge config [list] [get KEY] [set KEY VALUE] [path]
   open-bridge token create [--label L] [--ttl SEC] | list | revoke ID | delete ID | rotate ID
   open-bridge doctor
@@ -50,6 +51,7 @@ const HELP = `open-bridge ${VERSION} — standalone MCP bridge for local workspa
 说明:
   serve    前台启动 Bridge；控制台地址打印在终端（默认项目根 = 当前目录）
   stop     通过本机 shutdown 端点停止运行中的实例
+  prompt   打印给 AI 客户端的接入提示词（含 MCP URL，可直接粘贴）
   config   配置文件位于 ~/.open-bridge/config.json（OPEN_BRIDGE_HOME 可改）
   token    管理 Bearer 令牌；明文只在 create/rotate 时显示一次
 `;
@@ -118,16 +120,6 @@ async function consoleTokenOrUndefined(home: string, root: string): Promise<stri
 }
 
 interface HttpJsonResult { status: number; body: unknown }
-
-/**
- * `state.publicUrl` mirrors the loopback URL whenever no tunnel is published,
- * so only an https:// value is genuinely reachable from outside this machine.
- * Labelling the loopback case "公网 MCP URL" told users a private address was
- * public; treat anything else as absent.
- */
-function tunnelUrl(value: unknown): string {
-  return typeof value === "string" && value.startsWith("https://") ? value : "";
-}
 
 /**
  * One-shot JSON request over node:http, with the connection closed immediately.
@@ -231,10 +223,13 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   console.log("");
   console.log(`  Web 控制台:  ${consoleUrl}`);
   console.log(`  本地 MCP URL: http://127.0.0.1:${state.port}/mcp/${state.routeToken}`);
-  const published = tunnelUrl(state.publicUrl);
-  if (published) console.log(`  公网 MCP URL: ${published}`);
+  // state.tunnelUrl is set only while a tunnel is actually published, so its
+  // presence alone decides whether a public URL exists at all.
+  if (state.tunnelUrl) console.log(`  公网 MCP URL: ${state.tunnelUrl}`);
   else console.log("  公网 MCP URL: （未开启隧道，仅本机可用）");
   console.log(`  日志:        ${nodeHost.bridgeLog.path()}`);
+  console.log("");
+  console.log("  接入 AI 客户端：open-bridge prompt  →  复制提示词并粘贴给客户端");
   console.log("");
   console.log("Ctrl+C 停止。");
 
@@ -285,8 +280,7 @@ async function cmdStatus(parsed: ParsedArgs): Promise<void> {
   console.log(`状态: ${body.status.state} (pid ${runtime.pid})`);
   console.log(`项目根: ${runtime.root}`);
   if (body.status.local_url) console.log(`本地 MCP: ${body.status.local_url}`);
-  const published = tunnelUrl(body.status.public_url);
-  if (published) console.log(`公网 MCP: ${published}`);
+  if (body.status.public_url) console.log(`公网 MCP: ${body.status.public_url}`);
   else console.log("公网 MCP: （未开启隧道，仅本机可用）");
   console.log(`会话: ${body.status.active_sessions}  命令: ${body.status.active_commands}  工具: ${body.status.tool_count}`);
 }
@@ -297,10 +291,33 @@ async function cmdUrl(parsed: ParsedArgs): Promise<void> {
   if (!runtime || !pidAlive(runtime.pid)) fail("没有正在运行的实例。");
   const res = await httpJson(runtime!.port, "/api/status", { token: await consoleTokenOrUndefined(home, runtime.root) });
   if (res.status !== 200) fail(`status 请求失败: HTTP ${res.status}`);
-  const body = res.body as { status: { public_url?: string; local_url?: string } };
-  const url = tunnelUrl(body.status.public_url) || body.status.local_url;
+  const body = res.body as { status: { mcp_url?: string; local_url?: string } };
+  const url = body.status.mcp_url || body.status.local_url;
   if (!url) fail("实例在运行但还没有 MCP URL。");
   console.log(url);
+}
+
+/**
+ * Print the ready-made opening message for an AI client.
+ *
+ * The console has always been able to hand this out, but until now nothing
+ * outside the browser could: the standalone build exported webAiPrompt() and
+ * never called it, so the onboarding text the VS Code extension offered was
+ * unreachable. This is the terminal's way to it — paste the output straight
+ * into ChatGPT/Claude/Cursor and the client has the URL (and the bearer note
+ * when that gate is on).
+ */
+async function cmdPrompt(parsed: ParsedArgs): Promise<void> {
+  const home = resolveHome(parsed);
+  const runtime = readRuntime(home);
+  if (!runtime || !pidAlive(runtime.pid)) fail("没有正在运行的实例。先 open-bridge serve。");
+  const res = await httpJson(runtime.port, "/api/prompt", {
+    token: await consoleTokenOrUndefined(home, runtime.root),
+  });
+  if (res.status !== 200) fail(`prompt 请求失败: HTTP ${res.status}`);
+  const body = res.body as { prompt?: string; error?: string };
+  if (!body.prompt) fail(body.error ?? "实例在运行，但暂时没有可用的提示词。");
+  console.log(body.prompt);
 }
 
 // --- config -----------------------------------------------------------------
@@ -455,6 +472,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     case "stop": return cmdStop(parsed);
     case "status": return cmdStatus(parsed);
     case "url": return cmdUrl(parsed);
+    case "prompt": return cmdPrompt(parsed);
     case "config": return cmdConfig(parsed);
     case "token": return cmdToken(parsed);
     case "doctor": return cmdDoctor(parsed);

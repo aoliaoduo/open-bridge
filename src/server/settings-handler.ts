@@ -9,7 +9,7 @@
  * React console writes it to the clipboard itself.
  */
 
-import { state } from "../bridge/state.js";
+import { clientMcpUrl, state } from "../bridge/state.js";
 import { validateNgrokDomain } from "../http/request-policy.js";
 import {
   authEnabled,
@@ -34,7 +34,7 @@ import {
 } from "../bridge/settings-model.js";
 import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
 import { host } from "../host/host.js";
-import { start, stop, rotateRouteToken, startInternal, stopInternal, enqueueLifecycle } from "../bridge/lifecycle.js";
+import { start, stop, rotateRouteToken, startInternal, stopInternal, enqueueLifecycle, webAiPrompt } from "../bridge/lifecycle.js";
 
 export interface SecretPayload {
   kind: "minted" | "rotated";
@@ -70,7 +70,7 @@ export async function buildSettingsState(): Promise<SettingsState> {
   return {
     running,
     statusText: running ? (state.sessions.size ? `已连接 · ${state.sessions.size} 个会话` : "已就绪") : "离线",
-    publicUrl: state.publicUrl,
+    mcpUrl: clientMcpUrl(),
     configuredDomain: cfg.get("ngrokDomain", ""),
     authEnabled: authEnabled(),
     defaultTtlSeconds: tokenTtlSeconds(),
@@ -141,9 +141,16 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       return done();
 
     case "copyUrl": {
-      const url = state.publicUrl;
+      const url = clientMcpUrl();
       if (!url) throw new Error("Bridge 未运行，还没有可复制的 URL。");
       return done({ info: "MCP URL 已复制到剪贴板。", copyText: url });
+    }
+
+    case "copyPrompt": {
+      // Onboarding: hand the client a ready-made opening message carrying the
+      // URL (and, when the bearer gate is on, how to authenticate), instead of
+      // leaving the user to write one from scratch.
+      return done({ info: "接入提示词已复制，粘贴给 AI 客户端即可。", copyText: webAiPrompt() });
     }
 
     case "copyText":
@@ -265,7 +272,7 @@ function fallbackState(): SettingsState {
   return {
     running: Boolean(state.server),
     statusText: "错误",
-    publicUrl: state.publicUrl,
+    mcpUrl: clientMcpUrl(),
     configuredDomain: "",
     authEnabled: false,
     defaultTtlSeconds: 0,

@@ -123,7 +123,17 @@ export const state = {
   commands: new Map<string, CommandState>(),
   sessions: new Map<string, SessionState>(),
   latestSession: undefined as SessionState | undefined,
-  publicUrl: "",
+  /**
+   * The published tunnel URL — an https:// address, set only while a tunnel is
+   * actually live, and cleared the moment it is not.
+   *
+   * This used to be `publicUrl`, which also held a loopback fallback whenever no
+   * tunnel existed. One field carrying two meanings forced every reader to guess
+   * which it had: the CLI printed a private address under "public MCP URL", and
+   * the health check probed loopback as if it were a tunnel. Storing only the
+   * tunnel lets `clientMcpUrl()` derive the URL worth handing out.
+   */
+  tunnelUrl: "",
   activeWorkspaceRoot: "",
   reconnectTimer: undefined as ReturnType<typeof setTimeout> | undefined,
   stopping: false,
@@ -150,6 +160,22 @@ export const state = {
 /** The active VS Code workspace is the stable anchor for every relative path. */
 export const workspaceContext = new WorkspaceContext();
 
+/** Loopback MCP URL — valid exactly while the server is listening. */
+export function localMcpUrl(): string {
+  return state.server && state.port
+    ? `http://127.0.0.1:${state.port}/mcp/${state.routeToken}`
+    : "";
+}
+
+/**
+ * The URL to hand an MCP client: the published tunnel when there is one,
+ * otherwise loopback. Callers that need to know *which* they got should read
+ * `state.tunnelUrl` directly rather than inspecting this string.
+ */
+export function clientMcpUrl(): string {
+  return state.tunnelUrl || localMcpUrl();
+}
+
 export function redactedPublicUrl(url: string): string {
   try {
     const parsed = new URL(url);
@@ -161,7 +187,11 @@ export function redactedPublicUrl(url: string): string {
 
 export function redactSensitiveText(value: string): string {
   let result = value;
-  if (state.publicUrl) result = result.split(state.publicUrl).join(redactedPublicUrl(state.publicUrl));
+  // Tunnel first: the loopback URL is one of its own substrings only by
+  // coincidence, but redacting the longer form first keeps both readable.
+  for (const url of [state.tunnelUrl, localMcpUrl()]) {
+    if (url) result = result.split(url).join(redactedPublicUrl(url));
+  }
   if (state.routeToken) result = result.split(state.routeToken).join("<redacted>");
   result = result.replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)\S+/gi, "$1<redacted>");
   result = result.replace(/([?&](?:token|key|api[_-]?key|secret|password)=)[^&\s]+/gi, "$1<redacted>");

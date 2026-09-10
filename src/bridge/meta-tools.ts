@@ -7,7 +7,7 @@ import { validateNgrokDomain } from "../http/request-policy.js";
 import { authStatus } from "../http/auth.js";
 import { lockSnapshot } from "./resource-locks.js";
 import { CONFIG_DEFAULTS } from "./config-defaults.js";
-import { auditLogPath, record, state, type LogLevel } from "./state.js";
+import { auditLogPath, clientMcpUrl, localMcpUrl, record, state, type LogLevel } from "./state.js";
 import type { JsonArgs } from "./json-args.js";
 import { notifyLogging } from "./state.js";
 import type { SessionState } from "./state.js";
@@ -24,8 +24,11 @@ export function getBridgeStatus(): Record<string, unknown> {
   const locks = lockSnapshot();
   return {
     state: state.server ? "running" : "stopped",
-    local_url: state.server ? `http://127.0.0.1:${state.port}/mcp/${state.routeToken}` : undefined,
-    public_url: state.publicUrl || undefined,
+    local_url: localMcpUrl() || undefined,
+    /** Only ever a real published tunnel; absent while the Bridge is local-only. */
+    public_url: state.tunnelUrl || undefined,
+    /** The URL to hand a client: the tunnel when published, otherwise loopback. */
+    mcp_url: clientMcpUrl() || undefined,
     shell: shell.file,
     allowed_directories: allowedRoots(),
     active_sessions: state.sessions.size,

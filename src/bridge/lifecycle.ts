@@ -18,7 +18,7 @@ import { authorizeRequest, authEnabled } from "../http/auth.js";
 import { isDeterministicNetworkFailure } from "../network/net-failure.js";
 import {
   MAX_SESSIONS, RECONNECT_DELAYS_MS, ROUTE_TOKEN_KEY,
-  asStructuredContent, record, state, text, redactedPublicUrl,
+  asStructuredContent, clientMcpUrl, record, state, text, redactedPublicUrl,
   type SessionState,
 } from "./state.js";
 import { root, workspaceStateSuffix } from "./paths.js";
@@ -395,10 +395,10 @@ function scheduleReconnect(domain: string, generation: number): void {
   if (state.tunnelRole === "blocked") return; // another window owns the domain; watcher handles it
   if (!host().config.get<boolean>("autoReconnect", true)) {
     record("ngrok", "progress", "Tunnel exited; autoReconnect is off — the Bridge stays local-only.");
-    // With no reconnect the published https URL is dead; surface the live
-    // loopback URL instead so copy/status never point at a vanished tunnel.
+    // With no reconnect the published https URL is dead; clear it so copy and
+    // status fall back to the live loopback URL instead of a vanished tunnel.
     state.tunnelRole = "none";
-    state.publicUrl = `http://127.0.0.1:${state.port}/mcp/${state.routeToken}`;
+    state.tunnelUrl = "";
     host().ui.refresh();
     return;
   }
@@ -507,8 +507,8 @@ async function watchPublicDomain(domain: string): Promise<void> {
     // reconnecting at the fast end of the backoff curve, not at the 60 s cap
     // left over from the failed attempts that led here.
     state.reconnectAttempt = 0;
-    state.publicUrl = `https://${domain}/mcp/${state.routeToken}`;
-    record("bridge", "completed", `Published through a peer tunnel: ${redactedPublicUrl(state.publicUrl)}`);
+    state.tunnelUrl = `https://${domain}/mcp/${state.routeToken}`;
+    record("bridge", "completed", `Published through a peer tunnel: ${redactedPublicUrl(state.tunnelUrl)}`);
     host().ui.refresh();
     return;
   }
@@ -593,8 +593,8 @@ export async function startInternal(): Promise<void> {
   }
   // A tunnel failure must NOT take the healthy local server down with it —
   // that is exactly what the reconnect path already does (keep the server and
-  // live MCP sessions, drop only the tunnel). startTunnelInternal reverts
-  // publicUrl to loopback on every failure path, the panel shows the loopback
+  // live MCP sessions, drop only the tunnel). startTunnelInternal clears
+  // tunnelUrl on every failure path, the panel falls back to the loopback
   // URL, and the Start-retry branch above re-arms the tunnel once the cause is
   // fixed (bad ngrok path, network down at boot, domain still held by a stale
   // ngrok, ...). Only a failure of the local server itself is fatal.
@@ -605,7 +605,7 @@ export async function startInternal(): Promise<void> {
     tunnelError = error instanceof Error ? error.message : String(error);
     record("bridge", "error", `Tunnel failed; local Bridge stays up: ${tunnelError}`);
   }
-  record("bridge", "completed", `Started: ${redactedPublicUrl(state.publicUrl)}`);
+  record("bridge", "completed", `Started: ${redactedPublicUrl(clientMcpUrl())}`);
   host().ui.refresh();
   if (tunnelError) {
     host().notify("warn", 
@@ -810,7 +810,7 @@ async function startHttpInternal(): Promise<void> {
  * advertising a dead public endpoint.
  */
 function revertToLocalUrl(): void {
-  state.publicUrl = `http://127.0.0.1:${state.port}/mcp/${state.routeToken}`;
+  state.tunnelUrl = "";
   host().ui.refresh();
 }
 
@@ -821,7 +821,7 @@ function revertToLocalUrl(): void {
 async function startTunnelInternal(generation: number): Promise<void> {
   if (generation !== state.tunnelGeneration || !state.server) return;
   const provider = host().config.get<string>("tunnelProvider", "ngrok");
-  state.publicUrl = `http://127.0.0.1:${state.port}/mcp/${state.routeToken}`;
+  state.tunnelUrl = "";
   if (provider !== "ngrok") {
     state.tunnelRole = "none";
     return;
@@ -844,7 +844,7 @@ async function startTunnelInternal(generation: number): Promise<void> {
   }
   state.tunnelRole = "owner";
   const tunnelChild = spawnTunnel(domain, generation);
-  state.publicUrl = `https://${domain}/mcp/${state.routeToken}`;
+  state.tunnelUrl = `https://${domain}/mcp/${state.routeToken}`;
   try {
     await waitForTunnelReady(`https://${domain}/healthz/${state.routeToken}`, tunnelChild);
     state.reconnectAttempt = 0;
@@ -942,7 +942,7 @@ function spawnTunnel(domain: string, generation: number): ChildProcessWithoutNul
     // old fallback call to scheduleReconnect bypassed that guard and produced
     // an endless spawn-retry loop.
     state.tunnelRole = "none";
-    state.publicUrl = `http://127.0.0.1:${state.port}/mcp/${state.routeToken}`;
+    state.tunnelUrl = "";
     host().ui.refresh();
   });
   child.once("exit", () => {
@@ -992,7 +992,7 @@ export async function stopInternal(notify = true): Promise<void> {
   state.sessions.clear();
   state.latestSession = undefined;
   await stopLocalServer();
-  state.publicUrl = "";
+  state.tunnelUrl = "";
   state.port = 0;
   state.stopping = false;
   try {
@@ -1058,7 +1058,8 @@ export async function rotateRouteToken(): Promise<void> {
 }
 
 export function webAiPrompt(): string {
-  if (!state.publicUrl) throw new Error("Start Bridge before copying the web AI prompt.");
+  const url = clientMcpUrl();
+  if (!url) throw new Error("Start Bridge before copying the web AI prompt.");
   // The prompt carries the credential, so it must mention the second one when
   // the bearer gate is on; otherwise the client gets a 401 with no explanation.
   const authNote = authEnabled()
@@ -1066,7 +1067,7 @@ export function webAiPrompt(): string {
       + "`Authorization: Bearer <token>`（令牌在 Open Bridge Web 控制台签发，"
       + "只在签发时显示一次）。若你的客户端只能填 URL、不能设置请求头，可改用 `?token=<token>` 形式。"
     : "";
-  return `【${state.publicUrl}】${authNote}\n\n快速连接这个 MCP（URL），明确使用规则，熟悉可用工具，做好处理接下来一系列工作的准备。`;
+  return `【${url}】${authNote}\n\n快速连接这个 MCP（URL），明确使用规则，熟悉可用工具，做好处理接下来一系列工作的准备。`;
 }
 
 export async function runHealthCheck(): Promise<void> {
@@ -1077,8 +1078,8 @@ export async function runHealthCheck(): Promise<void> {
   const local = await fetch(`http://127.0.0.1:${state.port}/healthz/${state.routeToken}`)
     .then(async response => ({ ok: response.ok, status: response.status, body: await response.text() }))
     .catch(error => ({ ok: false, status: 0, body: error instanceof Error ? error.message : String(error) }));
-  const publicCheck = state.publicUrl
-    ? await fetch(state.publicUrl.replace(`/mcp/${state.routeToken}`, `/healthz/${state.routeToken}`), {
+  const publicCheck = state.tunnelUrl
+    ? await fetch(state.tunnelUrl.replace(`/mcp/${state.routeToken}`, `/healthz/${state.routeToken}`), {
         headers: { "ngrok-skip-browser-warning": "true" },
       })
         .then(async response => ({ ok: response.ok, status: response.status, body: await response.text() }))

@@ -3,16 +3,20 @@
  *
  * GET endpoints are loopback-only server-side and need no credential. Every
  * POST additionally sends the console token header — the server injects it
- * into this page (window.__OPEN_BRIDGE_TOKEN__) when serving /console/, so it
- * never travels in URLs or localStorage.
+ * into this page as a <meta> tag when serving /console/, so it never travels
+ * in URLs or localStorage.
  */
 
 export const consoleToken = (): string => document.querySelector<HTMLMetaElement>('meta[name="open-bridge-console-token"]')?.content ?? "";
 
 export interface BridgeStatus {
   state: string;
+  /** Loopback MCP URL; absent when the Bridge is stopped. */
   local_url?: string;
+  /** The published tunnel URL — absent while the Bridge is local-only. */
   public_url?: string;
+  /** The URL to hand a client: the tunnel when published, otherwise loopback. */
+  mcp_url?: string;
   shell: string;
   allowed_directories: string[];
   active_sessions: number;
@@ -58,7 +62,7 @@ export interface SettingsTokenRow {
 export interface SettingsState {
   running: boolean;
   statusText: string;
-  publicUrl: string;
+  mcpUrl: string;
   configuredDomain: string;
   authEnabled: boolean;
   defaultTtlSeconds: number;
