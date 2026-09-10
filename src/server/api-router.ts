@@ -57,6 +57,38 @@ function hasConsoleToken(req: IncomingMessage): boolean {
   return typeof presented === "string" && presented.length > 0 && presented === state.routeToken;
 }
 
+/**
+ * Run `task` once this response has actually left the process.
+ *
+ * `setImmediate` is NOT enough here: `res.end()` only hands the bytes to the
+ * socket, and the kernel may not have flushed them yet. Tearing the listener
+ * down on the next tick therefore truncates the body — under load the client
+ * reads most of it and then gets UND_ERR_SOCKET ("other side closed") for a
+ * response the server considered delivered, which is how this shipped once and
+ * failed CI on the busier runner. `finish` fires when the last byte is handed
+ * to the OS, which is the earliest safe moment.
+ */
+function afterResponse(res: ServerResponse, task: () => void): void {
+  let ran = false;
+  const run = (): void => {
+    if (ran) return;
+    ran = true;
+    task();
+  };
+  if (res.writableFinished) {
+    run();
+    return;
+  }
+  res.once("finish", run);
+  // A client that hangs up mid-response must not strand the teardown: the
+  // operator asked for a stop or a rotation, and it has to happen either way.
+  res.once("close", run);
+  // Backstop for the remaining case — a client that holds the connection open
+  // but stops reading. Responses here are a few KB on loopback, so 2 s is
+  // generous; `run` is idempotent, so a late fire is a no-op.
+  setTimeout(run, 2_000).unref?.();
+}
+
 async function readBody(req: IncomingMessage, maxBytes = 64 * 1024): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -190,7 +222,7 @@ export async function apiRouteHandler(
           // listener stop() closes, so awaiting it here handed the caller a
           // connection reset for a stop that had in fact succeeded.
           json(res, 200, { ok: true, status: getBridgeStatus() });
-          setImmediate(() => { void stop(); });
+          afterResponse(res, () => { void stop(); });
           return true;
         }
         case "/bridge/rotate": {
@@ -198,17 +230,19 @@ export async function apiRouteHandler(
           // then rebind the listener once the response is flushed.
           await enqueueLifecycle(async () => { await rotateRouteToken(); });
           json(res, 200, { ok: true, status: getBridgeStatus(), reloadRequired: true });
-          setImmediate(() => { void restartListener(); });
+          afterResponse(res, () => { void restartListener(); });
           return true;
         }
         case "/settings/action": {
           const result = await handleSettingsAction(await readBody(req));
           json(res, result.ok ? 200 : 400, result);
           // Stop and rebind tear down the socket this response is on, so they
-          // run only after it has been flushed. Doing them first is what turned
-          // a successful stop/rotate into an ECONNRESET with no response body.
-          if (result.ok && result.deferStop) setImmediate(() => { void stop(); });
-          else if (result.ok && result.deferRestart) setImmediate(() => { void restartListener(); });
+          // wait for it to be fully flushed. Doing them first is what turned a
+          // successful stop/rotate into an ECONNRESET with no response body —
+          // and doing them merely on the next tick still truncated the tail of
+          // a large body, which reached the client as a socket error.
+          if (result.ok && result.deferStop) afterResponse(res, () => { void stop(); });
+          else if (result.ok && result.deferRestart) afterResponse(res, () => { void restartListener(); });
           return true;
         }
         case "/shutdown": {

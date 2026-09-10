@@ -75,6 +75,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   thought to reload by hand. Responses are now flushed first and the teardown
   runs on the next tick; a rotation also tells the console to reload, so it picks
   up the freshly injected token instead of asking the operator to guess.
+- **The teardown ordering only holds if the response has actually left.** The
+  first attempt deferred the stop/rebind by a tick, but `res.end()` merely hands
+  the bytes to the socket; under load the client could read most of the body and
+  then get a socket error as the listener went away. The teardown now waits for
+  the response's `finish` event — the last byte handed to the OS — with a
+  disconnect and a 2 s backstop so a stop can never be stranded.
 - **A rotation no longer relocates the instance to a new port.** The default
   config asks for port 0, so the rebind that follows a rotation came up on a
   brand-new ephemeral port, abandoning everything already pointing at the old
