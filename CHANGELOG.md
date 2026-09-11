@@ -13,6 +13,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   控件跟随主题。补 favicon（内联 SVG，data URI，符合现行 CSP）与顶栏 logo，窄屏 padding 收敛。
 
 ### Fixed
+- **一个畸形请求不再能整死 Bridge 进程。** 绝对形式的请求行指向越界端口时 `new URL()`
+  抛 `ERR_INVALID_URL`，`/console/%zz` 这类非法转义让 `decodeURIComponent` 抛
+  `URIError`——两者都从 async 监听器里逃到进程顶层并把进程带走，MCP 会话、后台服务、
+  终端会话一起没了。现在处理器内全部兜住（400），外面还有一层 `unhandledRejection`
+  记录到 `bridge.log`；`/console` 的路径也改用 `path.relative` 判定，`dist/ui-extra`
+  不再被当成 `dist/ui` 内部，`..%2f` 无法上跳。
+- **令牌的新增/吊销立刻生效，跨进程也是。** 授权层原先把令牌表读进模块级缓存，于是
+  CLI 新建的令牌在跑着的实例上是 401，CLI 吊销的令牌要等重启才失效。现在每次都从
+  `secrets.json` 读，写入时在 `<file>.lock` 内合并再原子落盘。
+- **文件写入原子化，读取不再把错误当成空文件。** `persist.ts` / `file-tools.ts` 写文件
+  一律 temp + rename（跨盘 `EXDEV` 退化为 copy + unlink）；`readFileOrAbsent` 只吞
+  `ENOENT`（以前任何读失败都返回空串，会把「没权限」读成「空文件」并被后续写覆盖）；
+  `append` 支持 `expected_sha256` 乐观校验。
+- **`apply_patch` 修掉四个会静默改错/拒绝真实 diff 的形状**：`\ No newline at end of
+  file` 标记、`+++ /dev/null` 的删除段、无内容的 `*** Add File`（应建 0 字节文件）、
+  以及以 `--`/`++` 开头的补丁内容行不再被误认成下一个文件头；另外补了二进制/NUL 守卫、
+  `(?=@@)` 边界、目标目录预检和失败回滚。
+- **串流读取的窗口边界。** 范围读取在剩余尾巴很小时继续读到 EOF，好让 schema 承诺的
+  整文件 `sha256` 仍然给出（深范围读大文件仍提前停止，不为此扫全文件）；`stream_search`
+  修掉跨 chunk 的 CR 残留；shell 会话 marker 与 ready-pattern 扫描各自带上重叠窗口，
+  不再因跨块截断而漏判或报错退出码；glob 的花括号现在按嵌套深度拆分，
+  `{src,lib}/{a,{b,c}}.ts` 能匹配到 b、c。
+- **锁的两处语义。** `start_all_services` / `stop_all_services` 展开成具体服务键——
+  字面量 `svc:*` 与 `svc:<名字>` 从来不会冲突，全量操作可以和单个 start/restart 交错；
+  `holdTimeoutMs: 0` / `waitTimeoutMs: 0` 现在真的等于「不限」（之前会把 0 当成极小值
+  或反之），控制台上那两句「0 = 不限」由新的回归测试兜住。
+- **控制台。** 设置页改为失焦/回车才提交（此前每敲一个字符都写一次 `config.json`，
+  半截的端口号、低于下限的超时值一路弹错误提示）；令牌有效期白名单改为直接从服务端契约
+  导入（UI 自己那份多出「90 天」，服务端一直 400）；会话页的 30 分钟改成实际的 60 分钟。
+- **CLI。** HTTP 请求加 5 秒超时（桥接没起来时不再挂死）、`--port` 类型校验、
+  `taskkill /T /F` 连子进程一起收、`unhandledRejection` 记日志。
 - **A second instance no longer drops the first one's route token.** `secrets.json`
   (and, by the same construction, `config.json` and `state.json`) was read once in
   the constructor and written back whole, so two instances sharing the data dir
