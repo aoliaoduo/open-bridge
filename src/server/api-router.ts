@@ -171,7 +171,17 @@ const MIME: Record<string, string> = {
 };
 
 async function serveConsole(res: ServerResponse, url: URL): Promise<void> {
-  const requested = decodeURIComponent(url.pathname).replace(/^\/console\/?/, "");
+  // decodeURIComponent throws on malformed escapes ("%zz"): the handler runs
+  // OUTSIDE the router's catch, so a stray local request (or a public website
+  // driving the operator's browser at the loopback console) killed the process.
+  let requested: string;
+  try {
+    requested = decodeURIComponent(url.pathname).replace(/^\/console\/?/, "");
+  } catch {
+    json(res, 400, { error: "Bad request path." });
+    return;
+  }
+  try {
   // A request that looks like a file (assets/*.js, *.css, ...) must never be
   // answered with the HTML shell: the browser asked for a script and would get
   // markup with a text/html content type, which fails quietly. Only page paths
@@ -179,9 +189,11 @@ async function serveConsole(res: ServerResponse, url: URL): Promise<void> {
   const fileLike = !requested.endsWith("/") && path.extname(requested) !== "";
   let rel = requested;
   if (!rel || rel.endsWith("/")) rel = `${rel}console.html`;
-  // Never let ../ escape the console directory.
+  // Never let ../ escape the console directory. path.relative (not startsWith —
+  // a sibling "dist/ui-extra" would prefix-match "dist/ui") decides containment.
   const full = path.normalize(path.join(UI_DIR, rel));
-  if (!full.startsWith(UI_DIR)) {
+  const within = path.relative(UI_DIR, full);
+  if (within.startsWith("..") || path.isAbsolute(within)) {
     json(res, 403, { error: "Forbidden." });
     return;
   }
@@ -213,6 +225,11 @@ async function serveConsole(res: ServerResponse, url: URL): Promise<void> {
     json(res, 503, {
       error: "Console UI is not built. Run `npm run build` (or `open-bridge doctor` for details).",
     });
+  }
+  } catch (error) {
+    // The stat/read race (file vanishing between existsSync and readFile) must
+    // not escape: serveConsole runs outside the router's own try/catch.
+    json(res, 500, { error: error instanceof Error ? error.message : String(error) });
   }
 }
 

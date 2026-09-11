@@ -204,9 +204,9 @@ interface HttpJsonResult { status: number; body: unknown }
 function httpJson(
   port: number,
   pathname: string,
-  options: { method?: string; token?: string } = {},
+  options: { method?: string; token?: string; timeoutMs?: number } = {},
 ): Promise<HttpJsonResult> {
-  const { method = "GET", token } = options;
+  const { method = "GET", token, timeoutMs = 5_000 } = options;
   const headers: Record<string, string> = { connection: "close" };
   if (token) headers["x-open-bridge-console"] = token;
   return new Promise((resolve, reject) => {
@@ -220,6 +220,10 @@ function httpJson(
         resolve({ status: res.statusCode ?? 0, body });
       });
     });
+    // A recorded port that accepts but never answers (the listener died while
+    // the process lives on, another program grabbed the port) would hang
+    // stop/status/instances forever — bound every request.
+    req.setTimeout(timeoutMs, () => req.destroy(new Error(`no response within ${timeoutMs} ms`)));
     req.on("error", reject);
     req.end();
   });
@@ -237,7 +241,12 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
 
   // `let`: a configured (non-explicit) port that is already taken is replaced
   // by an ephemeral one below, which the config facade picked up a few lines on.
-  let port = portFlag === undefined ? undefined : Number(portFlag);
+  let port = typeof portFlag === "string" ? Number(portFlag) : undefined;
+  if (portFlag !== undefined && typeof portFlag !== "string") {
+    // `serve --port --no-tunnel` parsed the flag as boolean true; Number(true)
+    // is 1, which silently tried to bind port 1.
+    fail(`--port 需要一个整数值，收到: ${String(portFlag)}`);
+  }
   if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) {
     fail(`--port 必须是 0-65535 的整数，收到: ${String(portFlag)}`);
   }
@@ -296,6 +305,15 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   setShutdownHook(() => shutdown("shutdown request"));
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  // A stray rejected promise used to kill the whole process (Node's default):
+  // every session, the tunnel and the console died with it, and the log showed
+  // nothing. The per-request path answers 400 on its own now; this is the last
+  // line of defence for rejections from timers, peers and third-party internals.
+  process.on("unhandledRejection", reason => {
+    const text = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+    try { nodeHost.bridgeLog.write(`[ERROR] unhandled rejection: ${text}`); } catch { /* no host yet */ }
+    console.error(`[open-bridge] unhandled rejection: ${text}`);
+  });
 
   console.log(`[open-bridge] v${VERSION}  starting...`);
   console.log(`[open-bridge] project root: ${projectRoot}`);
@@ -405,7 +423,26 @@ async function cmdStop(parsed: ParsedArgs): Promise<void> {
     }
   }
   console.error(`停止失败 (${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)})，尝试直接终止进程。`);
-  try { process.kill(runtime.pid); console.log("进程已终止。"); } catch { fail("进程终止失败。"); }
+  try {
+    if (process.platform === "win32") {
+      // TerminateProcess via process.kill() leaves the ngrok child alive and
+      // holding the reserved domain — the exact mess lifecycle's own error
+      // text tells people to clean up with taskkill. Kill the whole tree.
+      const { execFileSync } = await import("node:child_process");
+      execFileSync("taskkill.exe", ["/pid", String(runtime.pid), "/T", "/F"], { stdio: "ignore", timeout: 3_000, windowsHide: true });
+    } else {
+      process.kill(runtime.pid);
+    }
+    console.log("进程已终止。");
+  } catch { fail("进程终止失败。"); }
+}
+
+/** The runtime record's port may have been taken by an unrelated program; a non-JSON answer must not crash the CLI. */
+function statusBodyOf(res: HttpJsonResult): Record<string, unknown> {
+  const body = res.body as { status?: unknown } | undefined;
+  const status = body?.status;
+  if (!status || typeof status !== "object") fail("实例端口返回了意外内容（该端口可能已被其他程序占用）。用 open-bridge instances 核对。");
+  return status as Record<string, unknown>;
 }
 
 async function cmdStatus(parsed: ParsedArgs): Promise<void> {
@@ -419,16 +456,16 @@ async function cmdStatus(parsed: ParsedArgs): Promise<void> {
   }
   const res = await httpJson(runtime.port, "/api/status", { token: await consoleTokenOrUndefined(home, runtime.root) });
   if (res.status !== 200) fail(`status 请求失败: HTTP ${res.status}`);
-  const body = res.body as { status: Record<string, unknown> };
-  console.log(`状态: ${body.status.state} (pid ${runtime.pid})`);
+  const status = statusBodyOf(res);
+  console.log(`状态: ${String(status.state)} (pid ${runtime.pid})`);
   console.log(`项目根: ${runtime.root}`);
-  if (body.status.local_url) console.log(`本地 MCP: ${body.status.local_url}`);
-  if (body.status.public_url) console.log(`公网 MCP: ${body.status.public_url}`);
+  if (status.local_url) console.log(`本地 MCP: ${String(status.local_url)}`);
+  if (status.public_url) console.log(`公网 MCP: ${String(status.public_url)}`);
   else console.log("公网 MCP: （未开启隧道，仅本机可用）");
-  if (body.status.exposure === "public-open") {
+  if (status.exposure === "public-open") {
     console.log("⚠️  公网可达且未开启鉴权：拿到该 URL 的人都能读写本机文件、执行命令。可用「令牌」页开启 Bearer 鉴权。");
   }
-  console.log(`会话: ${body.status.active_sessions}  命令: ${body.status.active_commands}  工具: ${body.status.tool_count}`);
+  console.log(`会话: ${String(status.active_sessions)}  命令: ${String(status.active_commands)}  工具: ${String(status.tool_count)}`);
 }
 
 async function cmdUrl(parsed: ParsedArgs): Promise<void> {
@@ -438,8 +475,8 @@ async function cmdUrl(parsed: ParsedArgs): Promise<void> {
   if (!runtime || !pidAlive(runtime.pid)) fail("没有正在运行的实例。");
   const res = await httpJson(runtime!.port, "/api/status", { token: await consoleTokenOrUndefined(home, runtime.root) });
   if (res.status !== 200) fail(`status 请求失败: HTTP ${res.status}`);
-  const body = res.body as { status: { mcp_url?: string; local_url?: string } };
-  const url = body.status.mcp_url || body.status.local_url;
+  const status = statusBodyOf(res);
+  const url = String(status.mcp_url ?? "") || String(status.local_url ?? "");
   if (!url) fail("实例在运行但还没有 MCP URL。");
   console.log(url);
 }
@@ -491,8 +528,10 @@ async function cmdInstances(parsed: ParsedArgs): Promise<void> {
     try {
       const res = await httpJson(info.port, "/api/status", { token: await consoleTokenOrUndefined(home, info.root) });
       if (res.status === 200) {
-        const s = (res.body as { status: Record<string, unknown> }).status;
-        extra = ` · ${String(s.tunnel_role ?? "none")} · ${String(s.exposure ?? "?")} · 会话 ${String(s.active_sessions ?? "?")} · 工具 ${String(s.tool_count ?? "?")}`;
+        const s = (res.body as { status?: Record<string, unknown> }).status;
+        if (s && typeof s === "object") {
+          extra = ` · ${String(s.tunnel_role ?? "none")} · ${String(s.exposure ?? "?")} · 会话 ${String(s.active_sessions ?? "?")} · 工具 ${String(s.tool_count ?? "?")}`;
+        }
       }
     } catch {
       extra = " · (状态不可读)";
@@ -543,9 +582,15 @@ async function cmdLogs(parsed: ParsedArgs): Promise<void> {
       if (stat.size < size) size = 0; // the file was cleared or rotated
       if (stat.size === size) return;
       const stream = fs.createReadStream(file, { start: size, end: stat.size - 1 });
-      let chunk = "";
-      stream.on("data", data => { chunk += String(data); });
-      stream.on("end", () => { size = stat.size; process.stdout.write(chunk); });
+      // Decode ONCE for the whole slice: per-chunk String(data) split multibyte
+      // UTF-8 characters at the read boundary and printed replacement glyphs
+      // for every CJK log line that straddled a chunk edge.
+      const parts: Buffer[] = [];
+      stream.on("data", data => { parts.push(data as Buffer); });
+      stream.on("end", () => {
+        size = stat.size;
+        process.stdout.write(Buffer.concat(parts).toString("utf8"));
+      });
     } catch { /* file gone; keep waiting for it to come back */ }
   }, 1000);
   await new Promise<void>(resolve => { process.on("SIGINT", () => { clearInterval(timer); resolve(); }); });

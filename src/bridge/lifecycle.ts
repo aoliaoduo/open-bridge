@@ -787,6 +787,13 @@ async function startHttpInternal(): Promise<void> {
   // bind and wrong for the second, so the port we already chose wins.
   const listenPort = configuredPort === 0 && state.boundPort ? state.boundPort : configuredPort;
   state.server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    // Outermost safety net for the WHOLE handler body: an async handler that
+    // rejects surfaces as an unhandled rejection, and Node's default for that
+    // kills the process — one malformed request line was enough (WHATWG URL
+    // throws on targets Node's own HTTP parser accepted: absolute-form with an
+    // out-of-range port). The body keeps its original indentation so this diff
+    // stays surgical; its inner try/catches are unchanged and still fire first.
+    try {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     const securityHeaders = {
       "cache-control": "no-store",
@@ -927,6 +934,15 @@ async function startHttpInternal(): Promise<void> {
       const message = e instanceof Error ? e.message : String(e);
       if (!res.headersSent) res.writeHead(500, { ...securityHeaders, "content-type": "application/json" });
       res.end(JSON.stringify({ error: message }));
+    }
+    } catch (error) {
+      // See the try above: turns "process dies on a stray request" into a 400.
+      const message = error instanceof Error ? error.message : String(error);
+      record("bridge", "error", `Request handler failed: ${message}`);
+      try {
+        if (!res.headersSent) res.writeHead(400, { "content-type": "application/json" });
+        if (!res.writableEnded) res.end(JSON.stringify({ error: message }));
+      } catch { /* the socket is already gone */ }
     }
   });
   // Do not race the client's keep-alive timer. Node destroys an idle connection
@@ -1341,6 +1357,9 @@ export async function runHealthCheck(): Promise<HealthReport> {
   const publicCheck = state.tunnelUrl
     ? await probe(state.tunnelUrl.replace(`/mcp/${state.routeToken}`, `/healthz/${state.routeToken}`), {
         headers: { "ngrok-skip-browser-warning": "true" },
+        // Bounded: a tunnel edge that accepts but never answers must not hang
+        // the health check (and with it the console's 体检 action) forever.
+        signal: AbortSignal.timeout(8_000),
       })
     : undefined;
   details.push(publicCheck
