@@ -89,7 +89,14 @@ export interface LockSnapshot { held: LockRow[]; waiting: LockWaiter[] }
 export interface ToolView { name: string; description: string; core: boolean }
 export interface ToolCatalog { profile: string; count: number; tools: ToolView[] }
 
-export interface HealthCheck { name: string; ok: boolean; detail: string }
+export interface HealthCheck {
+  name: string;
+  /** ok = fine, warn = 提醒 (a risk, not a defect), fail = 异常. */
+  level?: "ok" | "warn" | "fail";
+  /** Kept for callers that only need a boolean; false for warn and fail. */
+  ok: boolean;
+  detail: string;
+}
 export interface HealthReport { checks: HealthCheck[]; exposure: string }
 
 async function getJson<T>(path: string): Promise<T> {

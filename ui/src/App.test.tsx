@@ -175,14 +175,14 @@ function toolCatalog(): ToolCatalog {
 
 function healthReport(): HealthReport {
   return {
-    exposure: "local",
+    exposure: "public-open",
     checks: [
-      { name: "instance", ok: true, detail: "state=running" },
-      { name: "workspace", ok: true, detail: "C:\\work" },
-      { name: "tools", ok: true, detail: "54 个（full）" },
-      { name: "tunnel", ok: true, detail: "未开启（仅本机可用）" },
-      { name: "public", ok: true, detail: "HTTP 200（312 ms）" },
-      { name: "exposure", ok: true, detail: "local" },
+      { name: "instance", level: "ok", ok: true, detail: "state=running" },
+      { name: "workspace", level: "ok", ok: true, detail: "C:\\work" },
+      { name: "tools", level: "ok", ok: true, detail: "54 个（full）" },
+      { name: "tunnel", level: "ok", ok: true, detail: "未开启（仅本机可用）" },
+      { name: "public", level: "ok", ok: true, detail: "HTTP 200（312 ms）" },
+      { name: "exposure", level: "warn", ok: false, detail: "public-open" },
     ],
   };
 }
@@ -280,7 +280,10 @@ describe("App shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "一键体检" }));
 
     expect(await screen.findByText("体检结果")).toBeTruthy();
-    expect(await screen.findByText("全部通过。")).toBeTruthy();
+    // public-open is 提醒, not 异常: the summary must say so instead of crying
+    // wolf about a state the operator may have chosen.
+    expect(await screen.findByText("无异常，1 项提醒。")).toBeTruthy();
+    expect(screen.getByText("提醒")).toBeTruthy();
     expect(mocks.health).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("公网连通")).toBeTruthy();
   });

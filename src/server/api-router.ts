@@ -349,14 +349,21 @@ export async function apiRouteHandler(
         // actual request through the tunnel, which is the only way to know a
         // client could connect. Bounded by a timeout so the page cannot hang.
         const status = getBridgeStatus() as Record<string, unknown>;
-        const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
-        const check = (name: string, ok: boolean, detail: string): void => { checks.push({ name, ok, detail }); };
-        check("instance", status.state === "running", `state=${String(status.state ?? "?")}`);
-        check("workspace", true, String(status.workspace_root ?? ""));
-        check("tools", Number(status.tool_count ?? 0) > 0,
+        type Level = "ok" | "warn" | "fail";
+        const checks: Array<{ name: string; level: Level; ok: boolean; detail: string }> = [];
+        // `ok` stays for callers that only want a boolean; `level` lets the page
+        // say 提醒 for a risk that is not a defect. public-open is a state the
+        // operator may be choosing on purpose, and reporting it as 异常 made
+        // every healthy instance look broken.
+        const check = (name: string, level: Level, detail: string): void => {
+          checks.push({ name, level, ok: level !== "fail", detail });
+        };
+        check("instance", status.state === "running" ? "ok" : "fail", `state=${String(status.state ?? "?")}`);
+        check("workspace", "ok", String(status.workspace_root ?? ""));
+        check("tools", Number(status.tool_count ?? 0) > 0 ? "ok" : "fail",
           `${String(status.tool_count ?? 0)} 个（${String(status.tool_profile ?? "?")}）`);
         const publicUrl = typeof status.public_url === "string" ? status.public_url : "";
-        check("tunnel", true, publicUrl
+        check("tunnel", "ok", publicUrl
           ? `${String(status.tunnel_role ?? "?")} — ${publicUrl}`
           : "未开启（仅本机可用）");
         if (publicUrl && state.routeToken) {
@@ -367,13 +374,13 @@ export async function apiRouteHandler(
               headers: { "ngrok-skip-browser-warning": "true" },
               signal: AbortSignal.timeout(6_000),
             });
-            check("public", probe.ok, `HTTP ${probe.status}（${Date.now() - startedAt} ms）`);
+            check("public", probe.ok ? "ok" : "fail", `HTTP ${probe.status}（${Date.now() - startedAt} ms）`);
           } catch (error) {
-            check("public", false, `探测失败：${error instanceof Error ? error.message : String(error)}`);
+            check("public", "fail", `探测失败：${error instanceof Error ? error.message : String(error)}`);
           }
         }
         const exposure = String(status.exposure ?? "local");
-        check("exposure", exposure !== "public-open", exposure === "public-open"
+        check("exposure", exposure === "public-open" ? "warn" : "ok", exposure === "public-open"
           ? "公网可达且未开启鉴权：拿到 URL 的人都能读写文件、执行命令"
           : exposure);
         json(res, 200, { ok: true, health: { checks, exposure } });

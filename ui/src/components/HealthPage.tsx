@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type HealthReport } from "../api";
+import { api, type HealthCheck, type HealthReport } from "../api";
 
 const LABELS: Record<string, string> = {
   instance: "实例",
@@ -10,7 +10,7 @@ const LABELS: Record<string, string> = {
   exposure: "暴露面",
 };
 
-const EXPOSURE_TEXT: Record<string, { text: string; tone: "ok" | "dead" | "warn" }> = {
+const EXPOSURE_TEXT: Record<string, { text: string; tone: "ok" | "warn" }> = {
   local: { text: "仅本机：/api 与 /console 只认回环地址，即使隧道开着也不会把它们暴露出去。", tone: "ok" },
   "public-open": {
     text: "公网可达且未开启鉴权：拿到这个 URL 的人都能读写文件、执行命令。要收紧可以轮换端点，或在「令牌」页开启 Bearer 鉴权。",
@@ -18,6 +18,11 @@ const EXPOSURE_TEXT: Record<string, { text: string; tone: "ok" | "dead" | "warn"
   },
   "public-authed": { text: "公网可达，但每个请求都要带 Bearer 令牌。", tone: "ok" },
 };
+
+/** Older servers sent only `ok`; treat a missing level as ok/fail. */
+function levelOf(check: HealthCheck): "ok" | "warn" | "fail" {
+  return check.level ?? (check.ok ? "ok" : "fail");
+}
 
 /**
  * 体检 — one click,逐项结果.
@@ -46,7 +51,12 @@ export function HealthPage() {
   useEffect(() => { void run(); }, [run]);
 
   const exposure = EXPOSURE_TEXT[report?.exposure ?? ""];
-  const failed = (report?.checks ?? []).filter(check => !check.ok).length;
+  const failed = (report?.checks ?? []).filter(check => levelOf(check) === "fail").length;
+  const warned = (report?.checks ?? []).filter(check => levelOf(check) === "warn").length;
+  // 异常 is a defect; 提醒 is a risk the operator may be choosing on purpose
+  // (public-open with no Bearer gate). Both were 异常 before, which made every
+  // healthy instance look broken.
+  const summary = failed > 0 ? `${failed} 项异常。` : warned > 0 ? `无异常，${warned} 项提醒。` : "全部通过。";
 
   return (
     <>
@@ -56,11 +66,7 @@ export function HealthPage() {
           <button className="primary" disabled={busy} onClick={() => void run()}>
             {busy ? "体检中…" : "重新体检"}
           </button>
-          {report && (
-            <span className="section-note" style={{ margin: 0 }}>
-              {failed === 0 ? "全部通过。" : `${failed} 项异常。`}
-            </span>
-          )}
+          {report && <span className="section-note" style={{ margin: 0 }}>{summary}</span>}
         </div>
         <div className="section-note">
           「公网连通」这一项会用真实请求穿过隧道访问 <span className="mono">/healthz</span>（6 秒超时），
@@ -81,7 +87,11 @@ export function HealthPage() {
             <tbody>
               {report.checks.map(check => (
                 <tr key={check.name}>
-                  <td>{check.ok ? <span className="pill ok">通过</span> : <span className="pill dead">异常</span>}</td>
+                  <td>
+                    {levelOf(check) === "ok" && <span className="pill ok">通过</span>}
+                    {levelOf(check) === "warn" && <span className="pill warn">提醒</span>}
+                    {levelOf(check) === "fail" && <span className="pill dead">异常</span>}
+                  </td>
                   <td>{LABELS[check.name] ?? check.name}</td>
                   <td className="mono">{check.detail}</td>
                 </tr>
@@ -95,7 +105,7 @@ export function HealthPage() {
         <h2>暴露面</h2>
         {exposure ? (
           <div className="row">
-            <span className={`pill ${exposure.tone === "warn" ? "dead" : "ok"}`}>{report?.exposure}</span>
+            <span className={`pill ${exposure.tone === "warn" ? "warn" : "ok"}`}>{report?.exposure}</span>
             <span>{exposure.text}</span>
           </div>
         ) : (
