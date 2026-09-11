@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   以及从 `/api/oauth` 读到的已注册客户端与在用凭据数量（只有 `client_id` / 名称 / 回调地址 / 注册时间，
   不含任何摘要或密钥），并在卡片里写明开关两侧的后果。
 ### Fixed
+- **`npm run build:core` 不再顺手删掉控制台前端。** `build:core` 走的是同一支 `scripts/clean.mjs`，
+  而它整目录删 `dist/`——连同 vite 产物 `dist/ui`。**运行中的实例是按请求从 `dist/ui` 读控制台的**：
+  一跑 `build:core`，正开着的网页面板立刻变成 `{"error":"Console UI is not built. Run \`npm run build\`..."}`，
+  而那条提示不会告诉你是刚跑的那条命令干的（本轮就是这么把 18080 的面板弄哑的）。现在 `clean.mjs` 分两个
+  范围：`all`（默认，完整构建用，全删）与 `core`（`build:core` 用，保留 `dist/ui`）；`test/clean-scope.test.mjs`
+  三条用例钉住（core 保留 ui、all 全删、首次构建时 dist 不存在不算错）。
 - **打开 OAuth 不再把已经持有令牌的客户端挡在门外。** `oauth.enabled=true` 而未开个人令牌门禁时，
   `authorizeRequest` 直接按 OAuth 判定并返回：一个带着有效个人令牌（`Authorization: Bearer` 或
   `?token=`）的请求照样 401——与 README「不会让原来用路由令牌或 Bearer 令牌的客户端断线」的承诺相反。
