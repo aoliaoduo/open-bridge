@@ -99,6 +99,10 @@ export interface SettingsConfigView {
   ngrokUseHttpProxy: boolean;
   toolProfile: string;
   logMaxBytes: number;
+  /** OAuth 2.1 authorization server, off by default like the bearer gate. */
+  "oauth.enabled": boolean;
+  /** Extra redirect hosts a registered client may use; [] means the built-in list. */
+  "oauth.allowedRedirectHosts": string[];
 }
 
 /** Everything the settings page shows, pushed by the host as one `state` message. */
@@ -143,6 +147,11 @@ const CONFIG_SPEC = {
   unrestrictedFileAccess: { kind: "boolean" },
   autoReconnect: { kind: "boolean" },
   ngrokUseHttpProxy: { kind: "boolean" },
+  // OAuth is a plain on/off switch plus a redirect-host allowlist, so it fits the
+  // generic path. The host list is validated as hosts by meta-tools; here it only
+  // has to be an array of non-empty strings.
+  "oauth.enabled": { kind: "boolean" },
+  "oauth.allowedRedirectHosts": { kind: "stringArray", maxItems: 50, maxLen: 253 },
   tunnelProvider: { kind: "enum", values: ["none", "ngrok"] },
   toolProfile: { kind: "enum", values: ["full", "core"] },
   ngrokExecutable: { kind: "string", max: 500 },

@@ -31,6 +31,7 @@ import { redactSensitiveText } from "../bridge/state.js";
 import { lockSnapshot } from "../bridge/resource-locks.js";
 import { listToolDefinitions } from "../bridge/tool-catalog.js";
 import { CORE_TOOLS } from "../mcp/tool-definitions.js";
+import { handleOAuthRequest, oauthConsoleView } from "../http/oauth.js";
 
 const CONSOLE_HEADER = "x-open-bridge-console";
 
@@ -243,6 +244,15 @@ export async function apiRouteHandler(
 ): Promise<boolean> {
   const isApi = url.pathname === "/api" || url.pathname.startsWith("/api/");
   const isConsole = url.pathname === "/console" || url.pathname.startsWith("/console/");
+
+  // The OAuth endpoints are consulted BEFORE the loopback gate, and that order is
+  // the whole point: a remote MCP client has to discover the authorization
+  // server and complete the flow over the tunnel, so these must be publicly
+  // reachable once OAuth is switched on. `/api` and `/console` stay
+  // loopback-only exactly as before — OAuth does not widen them. When OAuth is
+  // off this is a single config read returning false.
+  if (await handleOAuthRequest(req, res, url)) return true;
+
   if (!isApi && !isConsole) return false;
 
   if (!isLoopbackHost(req.headers.host, state.port)) {
@@ -423,6 +433,10 @@ export async function apiRouteHandler(
       case "/services": json(res, 200, { ok: true, services: listServiceViews() }); return true;
       case "/activity": json(res, 200, { ok: true, activity: state.activity }); return true;
       case "/usage": json(res, 200, { ok: true, usage: getUsageStats() }); return true;
+      // Which OAuth clients are registered and how many credentials are live.
+      // Loopback-gated like every other /api read; the client list carries no
+      // secrets (tokens are stored hashed and never leave the store).
+      case "/oauth": json(res, 200, { ok: true, oauth: await oauthConsoleView() }); return true;
       case "/settings": json(res, 200, { ok: true, state: await buildSettingsState() }); return true;
       case "/prompt": json(res, 200, { ok: true, prompt: webAiPrompt() }); return true;
       case "/logs/stream": {

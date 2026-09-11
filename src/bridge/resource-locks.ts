@@ -48,7 +48,22 @@ export const DEFAULT_WAIT_TIMEOUT_MS = 120_000;
 /** Contention older than this is worth an audit line. */
 const CONTENTION_NOTICE_MS = 3_000;
 
-export type LockRelease = () => void;
+/**
+ * The release handle for one acquisition.
+ *
+ * `handOff()` is called when the lock's lifetime stops being "this tool call"
+ * and becomes "the process this call spawned". The hold timeout is a backstop
+ * for a call that never returns; once a live process owns the resource, a clock
+ * must not be able to take it away — otherwise a dev server that outlives
+ * `holdTimeoutMs` silently loses its reservation and a second caller is granted
+ * the same port or output directory while the first one is still running. The
+ * lock then lives exactly as long as the process, which is what the
+ * `resource_keys` contract promises.
+ *
+ * Calling it twice, or after release, is a no-op. The holder stays visible in
+ * `lockSnapshot()` — only the timer is cancelled, never the lock.
+ */
+export type LockRelease = (() => void) & { handOff?: () => void };
 
 interface Holder {
   keys: string[];
@@ -57,6 +72,8 @@ interface Holder {
   acquiredAt: number;
   holdTimer: ReturnType<typeof setTimeout> | undefined;
   released: boolean;
+  /** True once the hold timeout was disarmed by a hand-off to a live process. */
+  handOff?: boolean;
 }
 
 interface Waiter {
@@ -135,6 +152,20 @@ function attachHoldTimer(holder: Holder, tuning: LockTuning): void {
   holder.holdTimer.unref?.();
 }
 
+/**
+ * Cancel the hold-timeout backstop without releasing the lock.
+ *
+ * The holder stays in `active` (so `lockSnapshot()` still reports the key as
+ * held) and stays in its slots (so nobody else can be granted it). Only the
+ * clock is disarmed: from here on the resource is owned by a live process, and
+ * only that process exiting — via the release handle it was given — can free it.
+ */
+function disarmHoldTimer(holder: Holder): void {
+  if (holder.holdTimer) clearTimeout(holder.holdTimer);
+  holder.holdTimer = undefined;
+  holder.handOff = true;
+}
+
 function releaseHolder(holder: Holder): void {
   if (holder.released) return;
   holder.released = true;
@@ -174,7 +205,13 @@ function grant(waiter: Waiter): void {
   }
   active.add(holder);
   attachHoldTimer(holder, tuning);
-  waiter.resolve(() => releaseHolder(holder));
+  const release: LockRelease = () => releaseHolder(holder);
+  // Callable only while the lock is still held: it disarms the hold-timeout
+  // backstop so a spawned process's lock cannot be reclaimed by the clock.
+  release.handOff = () => {
+    if (!holder.released) disarmHoldTimer(holder);
+  };
+  waiter.resolve(release);
 }
 
 function pump(): void {

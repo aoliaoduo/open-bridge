@@ -7,12 +7,13 @@ import { validateNgrokDomain } from "../http/request-policy.js";
 import { authStatus } from "../http/auth.js";
 import { lockSnapshot } from "./resource-locks.js";
 import { CONFIG_DEFAULTS } from "./config-defaults.js";
-import { auditLogPath, clientMcpUrl, localMcpUrl, record, state, type LogLevel } from "./state.js";
+import { auditLogPath, clientMcpUrl, localMcpUrl, record, state } from "./state.js";
 import type { JsonArgs } from "./json-args.js";
 import { notifyLogging } from "./state.js";
 import type { SessionState } from "./state.js";
 import { root, allowedRoots, currentWorkspaceRoot } from "./paths.js";
 import { persistProgress, loadTodoStore } from "./todo-store.js";
+import { normalizeCategory, normalizeLevel, normalizePhase } from "./progress-vocabulary.js";
 import { searchActivityLog } from "../mcp/activity-log.js";
 import { shellSpec } from "./processes.js";
 import { execFileSync } from "node:child_process";
@@ -112,6 +113,7 @@ export async function setConfigValue(args: Args): Promise<unknown> {
     "unrestrictedFileAccess", "allowedDirectories", "port", "publicHealthTimeoutMs", "autoReconnect",
     "ngrokUseHttpProxy", "toolProfile",
     "auth.enabled", "auth.tokenTtlSeconds",
+    "oauth.enabled", "oauth.allowedRedirectHosts",
     "concurrency.enabled", "concurrency.holdTimeoutMs", "concurrency.waitTimeoutMs",
   ]);
   if (!allowed.has(key)) throw new Error(`Unsupported Open Bridge setting: ${key}`);
@@ -132,8 +134,16 @@ export async function setConfigValue(args: Args): Promise<unknown> {
     if (!Array.isArray(value) || value.some(item => typeof item !== "string")) {
       throw new Error("shellArgs must be an array of strings.");
     }
-  } else if (["unrestrictedFileAccess", "autoReconnect", "ngrokUseHttpProxy", "concurrency.enabled"].includes(key)) {
+  } else if (["unrestrictedFileAccess", "autoReconnect", "ngrokUseHttpProxy", "concurrency.enabled", "oauth.enabled"].includes(key)) {
     if (typeof value !== "boolean") throw new Error(`${key} must be a boolean. (expected '${key}': boolean)`);
+  } else if (key === "oauth.allowedRedirectHosts") {
+    // Hosts only, never full URLs: the registration check parses the redirect
+    // URI and compares its host, so a path or scheme here would never match and
+    // would silently narrow the allowlist to nothing.
+    if (!Array.isArray(value) || value.some(item => typeof item !== "string" || !item.trim())) {
+      throw new Error("oauth.allowedRedirectHosts must be an array of non-empty host strings.");
+    }
+    value = (value as string[]).map(item => item.trim().toLowerCase());
   } else if (key === "auth.enabled") {
     if (typeof value !== "boolean") throw new Error("auth.enabled must be a boolean.");
     // Enabling with no usable token would make the endpoint refuse everything
@@ -280,7 +290,12 @@ export async function lsp(): Promise<unknown> {
 
 export function reportProgress(args: Args, session?: SessionState): Record<string, unknown> {
   const message = String(args.message ?? "");
-  const level = String(args.level ?? "info");
+  // The structured fields are a closed vocabulary; anything outside it is
+  // dropped rather than stored (see progress-vocabulary.ts). The free-text
+  // `message` is unaffected — it is the human-readable part.
+  const level = normalizeLevel(args.level);
+  const phase = normalizePhase(args.phase);
+  const category = normalizeCategory(args.category);
   // Attach to the explicit todo_id, or to the single in_progress todo when
   // omitted — "report progress on what you are doing" then needs no id lookup.
   const todos = (session?.todos ?? state.latestSession?.todos ?? []) as Array<Record<string, unknown>>;
@@ -288,13 +303,30 @@ export function reportProgress(args: Args, session?: SessionState): Record<strin
   const todoId = typeof args.todo_id === "string" && args.todo_id.trim()
     ? args.todo_id.trim()
     : inProgress.length === 1 ? String(inProgress[0]?.id ?? "") : undefined;
-  record("report_progress", "progress", todoId ? `${message} (todo: ${todoId})` : message);
+  const detail = [phase, category].filter(Boolean).join("/");
+  record("report_progress", "progress", todoId ? `${detail ? `${detail} — ` : ""}${message} (todo: ${todoId})` : (detail ? `${detail} — ${message}` : message));
   // Push to the calling client as a standard MCP logging notification (best-effort;
   // request/response-only clients simply ignore it).
-  const normalizedLevel = (["debug","info","notice","warning","error"].includes(level) ? level : "info") as LogLevel;
-  notifyLogging(session, normalizedLevel, message);
-  persistProgress({ message, phase: args.phase, percent: args.percent, level: normalizedLevel });
-  return { received: true, message: args.message, phase: args.phase, percent: args.percent, pushed: true, ...(todoId ? { todo_id: todoId } : {}) };
+  notifyLogging(session, level, message);
+  persistProgress({
+    message,
+    // Only ever a member of the closed vocabulary, or absent.
+    ...(phase ? { phase } : {}),
+    ...(category ? { category } : {}),
+    percent: args.percent,
+    level,
+  });
+  return {
+    received: true,
+    message: args.message,
+    // Echoed back so a caller can tell whether its value was accepted: an
+    // unrecognised phase comes back absent rather than silently coerced.
+    ...(phase ? { phase } : {}),
+    ...(category ? { category } : {}),
+    percent: args.percent,
+    pushed: true,
+    ...(todoId ? { todo_id: todoId } : {}),
+  };
 }
 
 export function getTodos(_args?: Args, session?: SessionState): Record<string, unknown> {

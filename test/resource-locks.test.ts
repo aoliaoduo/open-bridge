@@ -162,6 +162,62 @@ test("the hold timeout reclaims an overrun lock and reports it", async () => {
   next();
 });
 
+test("a handed-off lock outlives the hold timeout: a live process keeps it", () =>
+  whileLoopRuns(async () => {
+    // Regression: a spawn that declares resource_keys hands the lease to the
+    // process so the resource stays reserved "for the process's lifetime"
+    // (dispatcher.handOffToProcess). The hold-timeout backstop used to stay
+    // armed, so a dev server outliving holdTimeoutMs had its lock reclaimed and
+    // re-granted to the next caller while it was still running — the exact
+    // double-claim resource_keys exists to prevent.
+    const reclaims: Array<{ keys: string[]; label: string }> = [];
+    const release = await acquireLocks(
+      { keys: ["port:5173"], mode: "write", label: "dev server" },
+      { holdTimeoutMs: 40, waitTimeoutMs: 200, onReclaim: info => reclaims.push(info) },
+    );
+
+    // The caller returns from its handler, the process is alive: hand off.
+    release.handOff?.();
+
+    await new Promise(resolve => setTimeout(resolve, 110));
+
+    assert.equal(reclaims.length, 0, "the clock must not reclaim a live process's lock");
+    assert.deepEqual(
+      lockSnapshot().held.map(entry => entry.key),
+      ["port:5173"],
+      "the key is still reported as held",
+    );
+
+    // A second caller declaring the same port must be refused outright.
+    await assert.rejects(
+      acquireLocks({ keys: ["port:5173"], mode: "write", label: "second server" }, { holdTimeoutMs: 0, waitTimeoutMs: 80 }),
+      /Timed out after .* waiting for port:5173/,
+      "the reserved port cannot be claimed twice",
+    );
+
+    // Only the process exiting — which calls the handed-off release — frees it.
+    release();
+    assert.deepEqual(lockSnapshot(), { held: [], waiting: [] });
+
+    // handOff after release is a harmless no-op.
+    release.handOff?.();
+    const next = await acquireLocks({ keys: ["port:5173"], mode: "write", label: "third" }, FAST);
+    next();
+  }));
+
+test("a lock that is never handed off is still reclaimed by the hold timeout", async () => {
+  // The backstop must survive the fix: a plain synchronous call that never
+  // returns is still reclaimed, so one wedged tool call cannot wedge a key.
+  const reclaims: string[] = [];
+  await acquireLocks(
+    { keys: ["file:a"], mode: "write", label: "wedged" },
+    { holdTimeoutMs: 40, waitTimeoutMs: 500, onReclaim: info => reclaims.push(info.label) },
+  );
+  await new Promise(resolve => setTimeout(resolve, 90));
+  assert.deepEqual(reclaims, ["wedged"]);
+  assert.deepEqual(lockSnapshot().held, []);
+});
+
 test("contention is reported once when a waiter passes the threshold", async () => {
   const notices: string[] = [];
   const held = await acquireLocks({ keys: ["res:build"], mode: "write", label: "build-a" }, FAST);

@@ -4,6 +4,7 @@ import {
   AUTH_TOKEN_PREFIX,
   AuthFailureLimiter,
   bearerFrom,
+  buildDigestIndex,
   digestEquals,
   expiryFrom,
   generateSecret,
@@ -71,6 +72,58 @@ test("expired and revoked tokens are distinguishable but never accepted", () => 
   const revokedSecret = generateSecret();
   const revoked = record({ hash: hashSecret(revokedSecret), revokedAt: NOW - 5 });
   assert.deepEqual(verifySecret([revoked], revokedSecret, NOW), { ok: false, reason: "revoked" });
+});
+
+test("the digest index answers exactly what the linear scan would", () => {
+  // The index is a performance change, not a semantic one, so every verdict the
+  // un-indexed path produces must survive the switch unchanged.
+  const liveSecret = generateSecret();
+  const expiredSecret = generateSecret();
+  const revokedSecret = generateSecret();
+  const records = [
+    record({ hash: hashSecret(liveSecret) }),
+    record({ hash: hashSecret(expiredSecret), expiresAt: NOW - 1 }),
+    record({ hash: hashSecret(revokedSecret), revokedAt: NOW - 5 }),
+    record(),
+  ];
+  const index = buildDigestIndex(records);
+
+  const probes: unknown[] = [liveSecret, expiredSecret, revokedSecret, generateSecret(), "", undefined, "not-prefixed"];
+  for (const probe of probes) {
+    assert.deepEqual(
+      verifySecret(records, probe, NOW, index),
+      verifySecret(records, probe, NOW),
+      `indexed and linear verdicts must agree for ${String(probe).slice(0, 12)}`,
+    );
+  }
+
+  // A revoked record must not be masked by a live one sharing the same digest:
+  // grouping preserves the "every record is examined" rule.
+  const sharedDigest = hashSecret(liveSecret);
+  const withDuplicate = [
+    record({ hash: sharedDigest, revokedAt: NOW - 5 }),
+    record({ hash: sharedDigest }),
+  ];
+  const duplicateIndex = buildDigestIndex(withDuplicate);
+  assert.equal(duplicateIndex.get(sharedDigest)?.length, 2, "duplicate digests group");
+  const viaIndex = verifySecret(withDuplicate, liveSecret, NOW, duplicateIndex);
+  assert.deepEqual(viaIndex, verifySecret(withDuplicate, liveSecret, NOW));
+  assert.equal(viaIndex.ok, true, "a live duplicate still authenticates");
+
+  // Revoked-only grouping is reported as revoked, not unknown.
+  const revokedOnly = [record({ hash: sharedDigest, revokedAt: NOW - 5 })];
+  assert.deepEqual(
+    verifySecret(revokedOnly, liveSecret, NOW, buildDigestIndex(revokedOnly)),
+    { ok: false, reason: "revoked" },
+  );
+});
+
+test("buildDigestIndex is keyed by digest, never by a readable secret", () => {
+  const secret = generateSecret();
+  const index = buildDigestIndex([record({ hash: hashSecret(secret) })]);
+  assert.equal(index.has(hashSecret(secret)), true);
+  assert.equal(index.has(secret), false, "the plaintext secret is never a key");
+  assert.equal(index.has(""), false);
 });
 
 test("a permanent token has no expiry, a ttl of 0 also means permanent", () => {

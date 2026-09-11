@@ -14,12 +14,32 @@
 ChatGPT 网页对话 / Claude / Cursor / 任意 MCP 客户端
         │  （经你掌控的 ngrok 隧道，或只在局域网/本机）
         ▼
-  open-bridge serve  ── /mcp/<路由令牌>   Streamable HTTP MCP（54 个工具）
+  open-bridge serve  ── /mcp/<路由令牌>   Streamable HTTP MCP（54 个工具，两代协议同端点）
         │            ── /console/         Web 控制台（仅本机回环可访问）
         │            ── /api/*            控制台后端（回环 + 令牌头双门控）
         ▼
   你所在目录的那个工作区（文件、命令、进程、服务编排）
 ```
+
+### 一个端点，两代协议
+
+`/mcp/<路由令牌>` 同时服务 **2026-07-28** 的「按请求」协议和 **2025 世代**的会话式协议，
+**由请求自身决定走哪条**——没有开关要配，也没有模式要选：
+
+| | 2026-07-28（现代） | 2025 世代（旧版） |
+| --- | --- | --- |
+| 握手 | 无 | `initialize` 换一个 session id |
+| 每请求信封 | `params._meta` + `MCP-Protocol-Version` / `MCP-Method` / `MCP-Call-Name` 头 | 无 |
+| 能力发现 | `server/discover` 回 `supportedVersions` | `initialize` 回 `protocolVersion` |
+| 工具报错 | JSON-RPC error | JSON-RPC result 里的 `isError: true` |
+| 断线续传 | 无（本来就没有会话） | `eventStore` + SSE 保活 |
+
+两条路共用同一份工具清单、同一套用量计数与审计日志；差异只在上表这些地方。旧客户端
+（Cursor、Claude Desktop、自建脚本……）不需要任何改动，会话表、锁与日志照旧。
+
+工具另带 MCP 行为标注（`readOnlyHint` / `destructiveHint` / `idempotentHint` /
+`openWorldHint`）。**这纯粹是给客户端和模型的信息，不是限制**：Bridge 不因此拒绝调用、
+不裁剪工具，也不新增确认步骤。
 
 ---
 
@@ -107,11 +127,35 @@ open-bridge serve                     # 另一个实例，服务「项目B」，
 所以加页面不需要动服务器。
 
 ### 安全边界（默认好用，需要时更严）
-
 - `/api` 与 `/console` **只响应回环 Host**（`127.0.0.1` / `localhost`）——经 ngrok 公网域名访问一律 403，公网只暴露 `/mcp`
 - 所有写操作要求 `X-Open-Bridge-Console` 头匹配路由令牌（页面由服务端注入；跨站页面既读不到也发不出）
 - **Bearer 鉴权默认关闭**，因为「只填 URL」的客户端（如 ChatGPT 连接器）带不了自定义头，一开就全断。要开的话有两个入口：「令牌」页签发令牌后打开开关，或在「体检」页点**「开启第二道锁」**（签发 + 开启一步完成，已有令牌则复用，明文只在弹层显示一次）：无有效令牌时**失败关闭**（全拒），本机控制台随时能关掉，不会被自己锁死在门外
 - **公网可达 = 拿到 URL 的人就能读写你的文件、执行命令**。应用不会偷偷限制你的权限，但会到处把这件事说出来：`status`、控制台、`health`、启动时的终端提示。想收紧就用令牌页开 Bearer，或直接 `--no-tunnel` 只在本机用
+
+### OAuth 2.1（可选，默认关闭）
+
+有些 MCP 客户端只认标准授权流程，不认「URL 里带令牌」。打开 OAuth 后，这类客户端可以
+自己注册并按 OAuth 2.1 + PKCE 换取**属于它自己的**凭据：
+
+```bash
+open-bridge config set oauth.enabled true
+```
+
+或者用控制台设置页。打开后，客户端从 `/.well-known/oauth-protected-resource` 找到本机，
+在 `/oauth/register` 动态注册，被引导到 `/oauth/authorize` 的授权页——**在那一页输入你的
+路由令牌**（即控制台地址里的那串；也可以用 `OPEN_BRIDGE_OAUTH_OWNER` 换成别的口令）——
+之后拿到 access + refresh token。
+
+要点：
+
+- **默认关闭。** 你的路由令牌已经让「只填 URL」的客户端能带凭据接入，OAuth 是**升级**不是门槛：
+  它给的是**按客户端签发、可单独吊销**的凭据，取代那把共享的路由令牌。
+- **两条路并存。** 开 OAuth 不会让原来用路由令牌或 Bearer 令牌的客户端断线。
+- **只支持 S256。** `plain` 一律拒绝——它是公开客户端（没有 client secret），PKCE 是唯一的持有证明。
+- **`resource` 必填且必须是本机。** 否则这里签发的 token 可能被拿去打别的服务（RFC 8707）。
+- **refresh 一次性轮换。** 用过的 refresh token 立刻失效，重放换不到新凭据。
+- 授权页、注册与 token 端点**只**在公网暴露这些路径；`/api` 与 `/console` 依然只回环可访问。
+- 控制台可以看已注册的客户端与在用凭据数量（`/api/oauth`），**不含任何密钥或摘要**。
 
 ---
 
@@ -180,9 +224,11 @@ npm run verify       # typecheck + lint + build + 全部测试（单元 / 集成
 npm run dev -- serve --no-tunnel   # tsx 免编译直接跑
 ```
 
-测试分层：`test/*.test.ts` 是单元测试；`test/*-integration.test.mjs` 会**真的启动 `bin/open-bridge.js` 并走 HTTP**（外壳、鉴权闸门、MCP 协议、多实例），其中鉴权闸门与协议不变量两份套件是从扩展时代移植过来的——它们当初是用真实事故换来的断言。
+测试分层：`test/*.test.ts` 是单元测试；`test/*-integration.test.mjs` 会**真的启动 `bin/open-bridge.js` 并走 HTTP**（外壳、鉴权闸门、两代 MCP 协议、多实例），其中鉴权闸门与协议不变量两份套件是从扩展时代移植过来的——它们当初是用真实事故换来的断言。
 
 架构：`src/bridge|http|mcp|network|process|shell|workspace` 是零宿主依赖的核心；`src/host/` 是宿主抽象（Host 接口 + 文件版实现）；`src/server/` 是 API/控制台；`src/cli.ts` 是入口。任何宿主（Tauri 壳、甚至回归 VS Code 壳）只需实现一次 Host 接口。
+
+依赖：运行时只有 `@modelcontextprotocol/server` + `@modelcontextprotocol/node`（2.x，负责 2026-07-28 的按请求协议）与 `@modelcontextprotocol/sdk`（1.x，负责 2025 世代的会话式传输）。**没有任何 Web 框架**——`/mcp`、`/api`、`/console` 全部挂在 `node:http` 上。
 
 ---
 

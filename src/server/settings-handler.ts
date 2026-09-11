@@ -80,6 +80,8 @@ export async function buildSettingsState(): Promise<SettingsState> {
       autoReconnect: cfg.get("autoReconnect", CONFIG_DEFAULTS.autoReconnect as boolean),
       ngrokUseHttpProxy: cfg.get("ngrokUseHttpProxy", CONFIG_DEFAULTS.ngrokUseHttpProxy as boolean),
       toolProfile: cfg.get("toolProfile", CONFIG_DEFAULTS.toolProfile as string),
+      "oauth.enabled": cfg.get("oauth.enabled", CONFIG_DEFAULTS["oauth.enabled"] as boolean),
+      "oauth.allowedRedirectHosts": cfg.get("oauth.allowedRedirectHosts", CONFIG_DEFAULTS["oauth.allowedRedirectHosts"] as string[]),
     },
   };
 }
@@ -362,6 +364,8 @@ function fallbackState(): SettingsState {
       autoReconnect: true,
       ngrokUseHttpProxy: true,
       toolProfile: "full",
+      "oauth.enabled": CONFIG_DEFAULTS["oauth.enabled"] as boolean,
+      "oauth.allowedRedirectHosts": CONFIG_DEFAULTS["oauth.allowedRedirectHosts"] as string[],
     },
   };
 }

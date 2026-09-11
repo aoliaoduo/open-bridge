@@ -47,6 +47,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `typecheck` 范围。
 
 ### Added
+- **OAuth 2.1 授权服务器（可选，默认关闭）。** 有些 MCP 客户端只认标准授权流程，不认「URL 里
+  带令牌」。打开 `oauth.enabled` 后，客户端可以走完整的 2026 规范流程：从
+  `/.well-known/oauth-protected-resource` 发现，`/oauth/register` 动态注册（RFC 7591），
+  `/oauth/authorize` 授权（PKCE），`/oauth/token` 换 access + refresh，`/oauth/revoke` 吊销
+  （RFC 7009）。**为什么要它**：路由令牌能给「只填 URL」的客户端凭据，但给不了**按客户端签发、
+  可单独吊销**的凭据——这才是 OAuth 唯一不可替代的收益，也是它不取代路由令牌、只作为第二把钥匙
+  的原因（两条路并存，开 OAuth 不会让原客户端断线）。
+  安全取舍写死在这几处：**只支持 S256**（公开客户端没有 secret，PKCE 是唯一持有证明，`plain`
+  一律拒绝）；`resource` 必填且必须是本机（RFC 8707，否则这里签发的 token 能拿去打别的服务）；
+  授权码**仅内存** + 5 分钟 TTL（重启丢掉只是让客户端重新授权，比持久化一个重放窗口安全）；
+  refresh **一次性轮换**（消费与读取在同一步，重放找不到东西）；access 1 小时、refresh 30 天；
+  所有密钥**只存 sha256**，与个人令牌同一套比较方式；重定向 host 走白名单且**精确匹配解析后的
+  host**（`https://evil.com/?x=chatgpt.com` 不通过）；授权页的口令默认就是路由令牌，可用
+  `OPEN_BRIDGE_OAUTH_OWNER` 覆盖，且受与 Bearer 同一套失败锁定保护。
+  实现不引入 Express：发现文档与 bearer 校验用 v2 的 Web 标准 helper，四个授权路由按 `node:http`
+  手写。新测试 `test/oauth-protocol.test.ts`（11 项，纯规则）与
+  `test/oauth-integration.test.mjs`（14 项，真起进程走完整流程，含单次性、PKCE 失败、重定向
+  未注册、越权 scope、跨 resource、轮换重放、吊销后 401）。
 - **`logs/bridge.log` 会轮转了。** 长到上限（`logMaxBytes`，默认 10 MiB）就改名成
   `bridge.log.1`，只留上一代——和审计日志、服务日志同一套做法——磁盘不再只涨不落。
   设置页新增「日志」卡片可改上限，`open-bridge config set logMaxBytes <字节>` 也行，
@@ -55,6 +73,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **会话页补上「首次连接」与「调用数」两列。** `list_sessions` 与 `/api/sessions` 都带上
   `connected_at` 与 `calls`：前者回答"这个客户端是什么时候进来的"（此前只能看空闲时长），
   后者回答"它到底用了多少"（按会话累计，batch 内部子调用不重复计数）。
+- **同一个 `/mcp` 端点现在同时服务两代协议，客户端不用选模式。** 2026-07-28 起 MCP 改成
+  **按请求**：没有 `initialize` 握手、没有 session id，每个请求自带信封
+  （`params._meta["io.modelcontextprotocol/protocolVersion"]` + `MCP-Protocol-Version` /
+  `MCP-Method` / `MCP-Call-Name` 头）。这类请求现在走 `@modelcontextprotocol/server@2` 的
+  `createMcpHandler`，`server/discover` 如实回答 `supportedVersions: ["2026-07-28"]`；
+  原来的 2025 世代会话式客户端走原路径，一行未改——`eventStore` 断线续传、15 s SSE 保活、
+  会话表都照旧。分流由 v2 自己的 `classifyInboundRequest` 判定（请求体是主判据），所以边界
+  就是规范说的边界。工具清单、用量计数、审计行在两条路上是同一份代码。
+  新测试 `test/mcp-modern-protocol-integration.test.mjs`（9 项）真起进程走 HTTP 验证两代共存。
+- **工具带上了 MCP 行为标注（`readOnlyHint` / `destructiveHint` / `idempotentHint` /
+  `openWorldHint`）。** 这是**纯告知**：客户端据此决定怎么展示或提示，Bridge 自身不因此
+  拒绝任何调用、不裁剪工具、不新增确认。标注表在 `src/bridge/tool-annotations.ts`，
+  对全部 56 个定义齐备；两代协议与「工具」页从同一处取，不会各说各话。注意几个刻意的取舍：
+  能覆盖既有内容的工具（`write_file`、`run_command`、`delete_file`…）**不声明**
+  `destructiveHint: false`——规范里缺省就是"可能破坏"，声明 `false` 是 Bridge 兑现不了的承诺；
+  纯新增的（`create_directory`、`copy_file`）才明确声明 `false`；`batch` 继承其中最弱的保证。
+- **`report_progress` 的 `phase` / `category` 改成封闭词表。** `phase` 取
+  `queued|preparing|running|verifying|done`，`category` 取 `read|edit|command|test|build|other`，
+  **词表外的值被丢弃**（结果里就是没有这个字段），而不是被强行归到某个默认值——否则存下来的
+  值就不再反映调用方，封闭集合也就不再约束任何东西。自由文本照旧放 `message`。
+  这三个词表在运行时 `Object.freeze`，因为集合本身就是成员检查读取的依据，一次误 `push` 就能
+  悄悄把它撑开。`src/bridge/progress-vocabulary.ts`，测试 `test/progress-vocabulary.test.ts`。
+- **每次 MCP 交换留下一条有界的追踪行。** 活动日志此前只回答"哪个工具跑了、成不成"，
+  回答不了传输层的问题：这次交换是哪个协议世代服务的、耗时多少、客户端是不是没等回包就走了。
+  现在每个 `/mcp` 请求结束（含客户端中途断开——`close` 事件，`end` 抓不到这种）都会记一行
+  `era/method · HTTP 状态 · 耗时 · 格式 · session 哈希 · tool 哈希 · client-aborted`。
+  **不泄漏是硬约束**：方法名走白名单，白名单外一律记为 `other`；session id 与工具名只留
+  sha256 前 12 位（够关联两行日志，不够反推）；错误只留 16 位指纹 + 截断到 160 字符的单行摘要，
+  换行折叠成空格以免一条错误伪造出多行日志；**不碰**请求体、请求头、参数，也没有任何"原始内容"
+  逃生口。成功的 `ping` / `notifications/initialized` 不记（否则会把真正要看的那条埋掉），
+  但失败的、被中断的一律记。`src/bridge/request-trace.ts`，测试 `test/request-trace.test.ts`。
+- **停机过程在活动日志里可见。** 原来那 1.5 秒宽限是静默的：看不出是在等客户端排空、
+  还是卡住了、还是把谁掐断了。现在按阶段记录——开始关闭监听 → 正在排空 N 个会话（没有会话就不记，
+  空闲停机仍然只有一行）→ 全部排空 / 宽限期到、开始关闭未排空的连接 → 完成。
 
 ### Changed
 - **控制台的一次整体视觉与可用性 pass。** 内容宽度 920 → 1040px，九条页签得到悬停/圆角与
@@ -63,6 +115,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   控件跟随主题。补 favicon（内联 SVG，data URI，符合现行 CSP）与顶栏 logo，窄屏 padding 收敛。
 
 ### Fixed
+- **声明了 `resource_keys` 的进程不再在 5 分钟后丢掉资源锁。** `handOffToProcess` 把租约交给
+  派生进程后**没有关掉 hold 超时定时器**，而默认 `concurrency.holdTimeoutMs` 是 300000 ms：
+  一个 dev server 活过 5 分钟，锁就被 `onReclaim` 回收、`pump()` 立刻授予排队中的第二个调用
+  ——此时第一个进程还在跑，两个进程可以同时占住 `port:5173`。这正好违反 README 对
+  `resource_keys` 的承诺（"Two calls naming the same key never start at once"）。
+  现在 `LockRelease` 带一个 `handOff()`，移交时**只关定时器、不释放锁**：holder 仍在
+  `lockSnapshot()` 里、仍占着 slot，锁的寿命从此由**进程退出**决定。定时器退化为它本来的
+  职责——兜住"调用没返回也没释放"的卡死。回归测试在 `test/resource-locks.test.ts`
+  （短超时 + 不移交 → 仍被回收；短超时 + 移交 → 不被回收且第二个调用拿不到 key）。
+- **鉴权热路径不再是每请求一次全量 JSON 解析 + 线性扫描。** `readRecords()` 每个请求都
+  `JSON.parse` 整个令牌数组，`verifySecret()` 再对每条记录做 `digestEquals`（每条分配两个
+  Buffer）。现在令牌以 **digest 为键**建索引做 O(1) 查找，解析结果**按存储原文缓存**：
+  `SecretStore.get` 本来就在 mtime 变化时重新加载，所以原文一变（别的进程铸造/吊销）缓存即
+  失效——**跨进程正确性一格没让**，而稳态下每请求只剩一次 `stat`。用内容而非 TTL 作失效键是
+  刻意的：TTL 缓存会让 CLI 刚吊销的令牌在 TTL 内继续通过。`AuthFailureLimiter.evictIfFull`
+  同时去掉了为了删一个条目而排序整个 Map 的写法，改成一次线性扫描。
 - **一个畸形请求不再能整死 Bridge 进程。** 绝对形式的请求行指向越界端口时 `new URL()`
   抛 `ERR_INVALID_URL`，`/console/%zz` 这类非法转义让 `decodeURIComponent` 抛
   `URIError`——两者都从 async 监听器里逃到进程顶层并把进程带走，MCP 会话、后台服务、

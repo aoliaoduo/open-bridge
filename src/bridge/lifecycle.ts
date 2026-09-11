@@ -7,6 +7,8 @@ import * as path from "node:path";
 import { StreamableHTTPServerTransport, type EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { classifyInboundRequest, createMcpHandler, Server as SpecServer } from "@modelcontextprotocol/server";
+import { toNodeHandler } from "@modelcontextprotocol/node";
 import { TOOL_DEFINITIONS } from "../mcp/tool-definitions.js";
 import { listToolDefinitions } from "./tool-catalog.js";
 import {
@@ -23,6 +25,7 @@ import {
   type SessionState,
 } from "./state.js";
 import { buildWebAiPrompt } from "./onboarding.js";
+import { exchangeLine, isNoteworthy, traceId, tracedFormat, tracedMethod, type TracedEra } from "./request-trace.js";
 import { root, workspaceStateSuffix } from "./paths.js";
 import { invoke } from "./dispatcher.js";
 import { loadTodoStore } from "./todo-store.js";
@@ -333,6 +336,142 @@ function createMcp(session: SessionState): Server {
     }
   });
   return mcp;
+}
+
+/**
+ * The 2026-07-28-era handler: one shared instance serving every modern request.
+ *
+ * `legacy: "reject"` is deliberate. The Bridge already has a stateful 2025-era
+ * session path with `eventStore` resumability and SSE keep-alive, so legacy
+ * traffic keeps going there; letting v2 also serve it statelessly would mean two
+ * behaviours for the same client depending on which one won the race. The
+ * classifier below decides the era, and each era has exactly one owner.
+ *
+ * Built lazily because `createSpecMcp` reads the host config (tool profile) and
+ * the host is not available at module-evaluation time.
+ */
+let modernHandlerCache: { toNode: ReturnType<typeof toNodeHandler> } | undefined;
+
+function modernNodeHandlerOf(): ReturnType<typeof toNodeHandler> {
+  modernHandlerCache ??= {
+    toNode: toNodeHandler(
+      createMcpHandler(createSpecMcp, {
+        legacy: "reject",
+        onerror: error => record("bridge", "error", `Modern MCP handler error: ${error.message}`),
+      }),
+      { onerror: error => record("bridge", "error", `Modern MCP adapter error: ${error.message}`) },
+    ),
+  };
+  return modernHandlerCache.toNode;
+}
+
+/** First value of a Node header, which may arrive as an array. */
+function headerValue(raw: string | string[] | undefined): string | undefined {
+  if (Array.isArray(raw)) return raw[0];
+  return raw;
+}
+
+/**
+ * The tool surface, shared verbatim by both protocol paths.
+ *
+ * `tools/list` is identical in both eras. For `tools/call` the only difference
+ * is error reporting: the 2025-era transport serialized `{ isError: true }` into
+ * a successful JSON-RPC result, while the 2026-07-28 era expects the handler to
+ * throw and lets the protocol layer build the error result. Both are wired from
+ * this one function so the catalog, usage counters, audit lines and
+ * structuredContent rules can never drift between eras.
+ */
+type ToolCallOutcome = { ok: true; result: unknown } | { ok: false; message: string };
+
+async function runToolCall(
+  name: string,
+  args: Record<string, unknown>,
+  session: SessionState | undefined,
+): Promise<ToolCallOutcome> {
+  const startedAt = Date.now();
+  try {
+    if (session) session.lastUsed = Date.now();
+    const result = await invoke(name, args, session);
+    state.usage.successes += 1;
+    persistUsageStats();
+    // apply_patch results carry per-file changes: surface them in the
+    // activity message and as structured data for the panel's diff badge.
+    const changeList = (result as { changes?: Array<{ path?: unknown; additions?: unknown; deletions?: unknown }> } | null)?.changes;
+    const activityChanges = Array.isArray(changeList)
+      ? changeList
+          .filter(c => c && typeof c === "object")
+          .map(c => ({
+            path: String((c as { path?: unknown }).path ?? ""),
+            additions: Number((c as { additions?: unknown }).additions) || 0,
+            deletions: Number((c as { deletions?: unknown }).deletions) || 0,
+          }))
+          .filter(c => c.path)
+      : undefined;
+    let message = `Completed in ${Date.now() - startedAt} ms.`;
+    if (activityChanges?.length) {
+      const summary = activityChanges.map(c => `${c.path} +${c.additions}/−${c.deletions}`).join(", ");
+      message = `Completed in ${Date.now() - startedAt} ms · ${summary}`;
+    }
+    record(name, "completed", message, undefined, activityChanges ? { changes: activityChanges } : undefined);
+    // Tools declaring an outputSchema also return structuredContent so clients
+    // can consume typed data directly; the text block stays for compatibility.
+    const definition = (TOOL_DEFINITIONS as ReadonlyArray<{ name: string; outputSchema?: unknown }>)
+      .find(tool => tool.name === name);
+    const payload = definition?.outputSchema
+      ? { ...text(result), structuredContent: asStructuredContent(result) }
+      : text(result);
+    return { ok: true, result: payload };
+  } catch (e) {
+    state.usage.failures += 1;
+    persistUsageStats();
+    record(name, "error", `Failed in ${Date.now() - startedAt} ms.`);
+    return { ok: false, message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * Build a 2026-07-28-era server for ONE request.
+ *
+ * Modern MCP is request-oriented: there is no session and no session id, so the
+ * v2 handler calls this factory per request. Everything that used to hang off
+ * `SessionState` is process-global anyway (shells, the command table, saved
+ * services, resource locks, usage counters, the audit log), so the only thing
+ * the modern path loses is the per-session todo list — `report_progress` falls
+ * back to the instance's most recent session, and `set_todos` anchors per
+ * conversation instead (see tool-catalog). The tool definitions, the usage
+ * counters and the audit trail are the same code as the legacy path.
+ */
+function createSpecMcp(): InstanceType<typeof SpecServer> {
+  const server = new SpecServer(
+    { name: "open-bridge", version: host().version() },
+    {
+      capabilities: { tools: {}, logging: {} },
+      instructions:
+        "You are connected to a local project workspace through the standalone Open Bridge. Relative paths, default command cwd, and project services always use that workspace. Other directories can be accessed only with explicit absolute paths; never let them change the workspace anchor. When starting work on an unfamiliar project, call workspace_brief once for orientation instead of exploring blindly. Use file tools for project management, run_command/start_process for commands, and wait_process/interact_with_process/restart_process/set_process_policy for supervised long-running services. Use check_port/check_http for readiness and save_service/list_services/start_service/stop_service/restart_service/delete_service/start_all_services/stop_all_services/service_status for reusable project orchestration. Use set_todos for multi-step work and report_progress for transient updates. Use batch to combine multiple tool calls in a single roundtrip. After finishing a batch of related edits, call review_changes so the user can see the full cumulative change set."
+        + projectInstructionSuffix(),
+    },
+  );
+  // `TOOL_DEFINITIONS` is `as const`, so its schemas carry `readonly` tuples
+  // (e.g. `enum: readonly [1, 2, 3]`) that the spec's mutable JSON-Schema type
+  // rejects structurally. v2 validates the emitted schema with AJV at runtime,
+  // so the literal types do not affect the wire form: this is a type-level
+  // adaptation only, and the JSON a client receives is byte-identical to the
+  // legacy path's.
+  server.setRequestHandler("tools/list", async () => ({
+    tools: listToolDefinitions(),
+  }) as unknown as { tools: Array<{ name: string; inputSchema: { type: "object" } }> });
+  server.setRequestHandler("tools/call", async req => {
+    // `notifications/message` is the 2025-era logging channel; the modern path
+    // reaches the client rather than the instance's last session.
+    const outcome = await runToolCall(
+      req.params.name,
+      (req.params.arguments ?? {}) as Record<string, unknown>,
+      state.latestSession,
+    );
+    if (!outcome.ok) throw new Error(outcome.message);
+    return outcome.result as { content: Array<{ type: "text"; text: string }>; structuredContent?: unknown };
+  });
+  return server;
 }
 
 async function waitForPublicHealth(url: string, abort?: AbortSignal): Promise<void> {
@@ -665,6 +804,7 @@ async function stopLocalServer(): Promise<void> {
   const activeServer = state.server;
   state.server = undefined;
   if (!activeServer) return;
+  record("bridge", "progress", "Shutdown started: closing the MCP listener.");
   try {
     // Drop idle keep-alive connections immediately so stop()/reload does not
     // wait on Node's keepAliveTimeout; in-flight requests still drain.
@@ -672,6 +812,7 @@ async function stopLocalServer(): Promise<void> {
   } catch {
     // best-effort: very old runtimes without closeIdleConnections still close below
   }
+  const inflight = state.sessions.size;
   await new Promise<void>(resolve => {
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -686,13 +827,24 @@ async function stopLocalServer(): Promise<void> {
     // so it would keep stop() pending forever and wedge the lifecycle queue.
     // Force-destroy stragglers after a short grace period, then resolve.
     timer = setTimeout(() => {
+      // Named, not silent: an operator seeing this line knows a client was cut
+      // off rather than that shutdown was slow for no reason.
+      record("bridge", "warning", "Shutdown: grace period elapsed, closing connections that had not drained.");
       try { activeServer.closeAllConnections?.(); } catch { /* very old runtimes lack it */ }
       // In the worst case (close still not signalled) resolve shortly after.
-      timer = setTimeout(finish, 250);
+      timer = setTimeout(() => { record("bridge", "progress", "Shutdown completed: stragglers closed."); finish(); }, 250);
     }, 1_500);
     timer.unref?.();
+    // Announce the wait only when there is something to wait for, so an idle
+    // stop stays one line instead of three.
+    if (inflight > 0) {
+      record("bridge", "progress", `Shutdown: draining ${inflight} open session(s) before exit.`);
+    }
     try {
-      activeServer.close(() => finish());
+      activeServer.close(() => {
+        record("bridge", "progress", inflight > 0 ? "Shutdown: all sessions drained." : "Shutdown completed: listener closed.");
+        finish();
+      });
     } catch {
       finish();
     }
@@ -763,14 +915,17 @@ export async function startInternal(): Promise<void> {
  */
 function rejectUnauthorized(
   res: ServerResponse,
-  gate: { status: number; reason: string; retryAfterMs?: number },
+  gate: { status: number; reason: string; retryAfterMs?: number; challenge?: string },
   securityHeaders: Record<string, string>,
 ): void {
   record("bridge", "error", `Unauthenticated request rejected (${gate.reason}).`);
   const headers: Record<string, string> = {
     ...securityHeaders,
     "content-type": "application/json",
-    "www-authenticate": 'Bearer realm="open-bridge", error="invalid_token"',
+    // An OAuth client finds the authorization server through this header, so the
+    // gate supplies the spec-shaped challenge (with resource_metadata) when it
+    // rejected for OAuth reasons, and the plain bearer challenge otherwise.
+    "www-authenticate": gate.challenge ?? 'Bearer realm="open-bridge", error="invalid_token"',
   };
   if (gate.retryAfterMs) headers["retry-after"] = String(Math.ceil(gate.retryAfterMs / 1000));
   if (!res.headersSent) res.writeHead(gate.status, headers);
@@ -859,6 +1014,34 @@ async function startHttpInternal(): Promise<void> {
       rejectUnauthorized(res, gate, securityHeaders);
       return;
     }
+    // Trace this MCP exchange. `close` fires even when the client disconnects
+    // mid-response, which is the case worth recording and the one an
+    // `end`-based hook would miss. Everything written is allow-listed or hashed
+    // (see request-trace.ts) — the method string comes from a closed set, the
+    // session and tool are hashes, and the error is a fingerprint plus a bounded
+    // one-liner.
+    const exchangeStartedAt = Date.now();
+    const headerEra: TracedEra = headerValue(req.headers["mcp-protocol-version"]) ? "modern" : "legacy";
+    const methodHint = headerValue(req.headers["mcp-method"]);
+    // The modern era names its target in a header; the legacy era names it in
+    // `params.name`. Seed from the header and let the body fill the gap below.
+    let toolNameHint = headerValue(req.headers["mcp-name"]);
+    res.once("close", () => {
+      const outcome = {
+        method: tracedMethod(methodHint),
+        era: headerEra,
+        httpStatus: res.statusCode,
+        durationMs: Date.now() - exchangeStartedAt,
+        // writableFinished is false when the response never completed, which is
+        // what a walked-away client looks like from here.
+        aborted: !res.writableFinished,
+        format: tracedFormat(res.getHeader("content-type")),
+        sessionHash: traceId(req.headers["mcp-session-id"]),
+        toolHash: traceId(toolNameHint),
+      };
+      if (!isNoteworthy(outcome)) return;
+      record("mcp", outcome.aborted ? "warning" : "progress", exchangeLine(outcome));
+    });
     try {
       pruneSessions();
       const sessionId = typeof req.headers["mcp-session-id"] === "string" ? req.headers["mcp-session-id"] : undefined;
@@ -879,6 +1062,51 @@ async function startHttpInternal(): Promise<void> {
           return;
         }
       }
+      // Trace the legacy tool name too, so both eras report the same field.
+      // Read defensively from an unvalidated body: this is logging, and a
+      // malformed shape must not turn into a thrown error on the request path.
+      if (!toolNameHint) {
+        const body = parsedBody as { method?: unknown; params?: { name?: unknown } } | undefined;
+        if (body && typeof body === "object" && body.method === "tools/call" && typeof body.params?.name === "string") {
+          toolNameHint = body.params.name;
+        }
+      }
+      // Two protocol eras share this one endpoint, and the request itself
+      // decides which one serves it — a client never has to be told, and no
+      // configuration selects a "mode".
+      //
+      //  - 2026-07-28 (modern): a per-request envelope in `params._meta` plus
+      //    `MCP-Protocol-Version` / `MCP-Method` headers. Stateless: no session
+      //    id is minted or required. Served by the v2 handler.
+      //  - 2025-era (legacy): an `initialize` handshake and a stateful session.
+      //    Served by the session path below, unchanged.
+      //
+      // The classifier is the v2 SDK's own, so the boundary between eras is
+      // whatever the spec says it is rather than our guess at it. Anything that
+      // is neither (a malformed modern envelope) is handed to the v2 handler so
+      // the client receives the spec's own error, with its `data.envelope`.
+      let era: "modern" | "legacy" = "legacy";
+      const classification = classifyInboundRequest({
+        httpMethod: req.method ?? "GET",
+        protocolVersionHeader: headerValue(req.headers["mcp-protocol-version"]),
+        mcpMethodHeader: headerValue(req.headers["mcp-method"]),
+        mcpNameHeader: headerValue(req.headers["mcp-name"]),
+        body: parsedBody,
+      });
+      if (classification.kind !== "legacy") era = "modern";
+
+      if (era === "modern") {
+        try {
+          await modernNodeHandlerOf()(req, res, parsedBody);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          record("bridge", "error", `Modern MCP handler failed: ${message}`);
+          if (!res.headersSent) res.writeHead(500, { ...securityHeaders, "content-type": "application/json" });
+          if (!res.writableEnded) res.end(JSON.stringify({ error: message }));
+        }
+        return;
+      }
+
       if (!session) {
         if (!makeRoomForSession()) {
           if (!res.headersSent) res.writeHead(503, { ...securityHeaders, "content-type": "application/json" });

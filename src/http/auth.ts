@@ -22,9 +22,11 @@
 
 import { host } from "../host/host.js";
 import { record } from "../bridge/state.js";
+import { oauthChallenge, oauthEnabled, verifyOAuthBearer } from "./oauth.js";
 import {
   AuthFailureLimiter,
   bearerFrom,
+  buildDigestIndex,
   expiryFrom,
   generateSecret,
   generateTokenId,
@@ -34,6 +36,7 @@ import {
   remoteKeyOf,
   verifySecret,
   type AuthTokenRecord,
+  type DigestIndex,
 } from "./auth-core.js";
 const AUTH_STORE_KEY = "openBridge.authTokens";
 /** Success-path bookkeeping is written at most this often to avoid a secrets write per request. */
@@ -73,6 +76,46 @@ async function readRecords(): Promise<AuthTokenRecord[]> {
   const secrets = host().secrets;
   if (!secrets) return [];
   return parseRecords(await secrets.get(AUTH_STORE_KEY));
+}
+
+/**
+ * Parsed records plus the digest index, memoized on the store's raw string.
+ *
+ * Why this keeps cross-process correctness while removing the per-request cost:
+ * `SecretStore.get` already reloads from disk whenever the file's mtime moves,
+ * so the string it returns is a faithful snapshot of the current store. The
+ * cache is therefore keyed on that exact string — a foreign mint or revoke
+ * produces different content, so the next request re-parses and rebuilds. A TTL
+ * cache would have been faster still and wrong: a CLI-revoked token would keep
+ * authenticating for the length of the TTL.
+ *
+ * Reads stay answerable from disk on every request (the `get` call still
+ * happens); what is skipped is re-parsing and re-indexing unchanged bytes, which
+ * used to happen once per request. That mattered little with a handful of PATs
+ * and matters much more once OAuth access tokens share this gate.
+ */
+let parsedCache: { raw: string; records: AuthTokenRecord[]; index: DigestIndex } | undefined;
+
+async function readRecordsIndexed(): Promise<{ records: AuthTokenRecord[]; index: DigestIndex }> {
+  const secrets = host().secrets;
+  if (!secrets) return { records: [], index: new Map() };
+  const raw = await secrets.get(AUTH_STORE_KEY);
+  if (parsedCache && parsedCache.raw === raw) {
+    return { records: parsedCache.records, index: parsedCache.index };
+  }
+  const records = parseRecords(raw);
+  const index = buildDigestIndex(records);
+  parsedCache = { raw: raw ?? "", records, index };
+  return { records, index };
+}
+
+/**
+ * Drop the parse cache. Writes go through `mutateRecords`, which re-reads from
+ * disk, so this exists for tests and for any caller that needs to prove a fresh
+ * parse rather than depend on string identity.
+ */
+export function invalidateAuthCache(): void {
+  parsedCache = undefined;
 }
 
 /**
@@ -259,7 +302,7 @@ export async function rotateToken(idOrPrefix: string): Promise<MintedToken> {
 
 export type AuthGateResult =
   | { ok: true }
-  | { ok: false; status: number; reason: string; retryAfterMs?: number };
+  | { ok: false; status: number; reason: string; retryAfterMs?: number; challenge?: string };
 
 /**
  * Gate one request. Returns { ok: true } when auth is disabled (the default).
@@ -274,10 +317,23 @@ export async function authorizeRequest(
   req: { headers: Record<string, unknown>; socket?: { remoteAddress?: string } },
   url: URL,
 ): Promise<AuthGateResult> {
+  // OAuth is an independent gate: a valid OAuth access token is admitted whether
+  // or not the personal-token gate is on. Both credential kinds are accepted, so
+  // enabling OAuth never disconnects a client that was already using a URL with
+  // the route token or a personal token — the capability-first rule for this
+  // project.
+  if (oauthEnabled()) {
+    const oauth = await authorizeWithOAuth(req, url);
+    if (oauth.ok) return oauth;
+    // Fall through to the personal-token path only when that gate is actually
+    // enabled; otherwise this is the rejection.
+    if (!authEnabled()) return oauth;
+  }
+
   if (!authEnabled()) return { ok: true };
 
   const now = Date.now();
-  const records = await readRecords();
+  const { records, index } = await readRecordsIndexed();
   if (!records.some(item => item.revokedAt === undefined && !isExpired(item, now))) {
     warnNoActiveToken();
     // Deliberately not counted as a failure: this is a configuration state, not
@@ -296,7 +352,7 @@ export async function authorizeRequest(
   }
 
   const presented = bearerFrom(req.headers["authorization"], url);
-  const verdict = verifySecret(records, presented.value, now);
+  const verdict = verifySecret(records, presented.value, now, index);
   if (!verdict.ok) {
     limiter.recordFailure(key, now);
     return { ok: false, status: 401, reason: verdict.reason };
@@ -308,6 +364,28 @@ export async function authorizeRequest(
 }
 
 let lastNoTokenWarningAt = 0;
+
+/**
+ * The OAuth half of the `/mcp` gate.
+ *
+ * A 401 here must carry the discovery challenge, or a client that speaks OAuth
+ * has no way to find the authorization server — the spec makes that header, not
+ * the status code, the entry point to the whole flow.
+ */
+async function authorizeWithOAuth(
+  req: { headers: Record<string, unknown>; socket?: { remoteAddress?: string } },
+  url: URL,
+): Promise<AuthGateResult> {
+  const presented = bearerFrom(req.headers["authorization"], url);
+  if (presented.via === "none") {
+    return { ok: false, status: 401, reason: "oauth_token_required", challenge: oauthChallenge() };
+  }
+  const verdict = await verifyOAuthBearer(presented.value);
+  if (!verdict.ok) {
+    return { ok: false, status: 401, reason: "invalid_token", challenge: oauthChallenge("invalid_token") };
+  }
+  return { ok: true };
+}
 
 /** Throttled so a blocked endpoint does not spam the audit log. */
 function warnNoActiveToken(): void {

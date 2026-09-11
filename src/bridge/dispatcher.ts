@@ -2,7 +2,7 @@ import { record, state, redactSensitiveText, type SessionState } from "./state.j
 import { host } from "../host/host.js";
 import { persistUsageStats } from "./usage-store.js";
 import { deriveLockPlan, type LockPlanContext } from "./lock-plan.js";
-import { acquireLocks, DEFAULT_HOLD_TIMEOUT_MS, DEFAULT_WAIT_TIMEOUT_MS } from "./resource-locks.js";
+import { acquireLocks, DEFAULT_HOLD_TIMEOUT_MS, DEFAULT_WAIT_TIMEOUT_MS, type LockRelease } from "./resource-locks.js";
 import { workspaceContext } from "./state.js";
 import { patchTargetPaths } from "../mcp/patch.js";
 
@@ -170,15 +170,22 @@ export async function invoke(
  * when the call did not leave a live process (nothing was spawned, or it exited
  * immediately), in which case the caller releases the lease itself.
  */
-function handOffToProcess(release: () => void, result: unknown): boolean {
+function handOffToProcess(release: LockRelease, result: unknown): boolean {
   if (!result || typeof result !== "object") return false;
   const id = (result as Record<string, unknown>).command_id;
   if (typeof id !== "string" || !id) return false;
   const command = state.commands.get(id);
   if (!command || command.done) return false;
   const prior = command.releaseResourceLocks;
+  // The resource is now owned by a live process, not by this call, so the
+  // hold-timeout backstop MUST be disarmed first. Leaving it armed meant a
+  // process that outlived holdTimeoutMs (a dev server, a watch build) had its
+  // lock force-reclaimed and handed to the next caller while it was still
+  // running — exactly the double-claim `resource_keys` exists to prevent.
+  // The lock now lives until the process exits.
+  release.handOff?.();
   // Idempotent wrapper: an auto-restart can carry the handle onto a replacement
-  // command and the hold-timeout backstop may fire first.
+  // command, so the exit path and any explicit stop must not double-release.
   let released = false;
   const combined = () => {
     if (released) return;
@@ -191,7 +198,7 @@ function handOffToProcess(release: () => void, result: unknown): boolean {
 }
 
 interface CallLease {
-  release: () => void;
+  release: LockRelease;
   handOff: boolean;
 }
 

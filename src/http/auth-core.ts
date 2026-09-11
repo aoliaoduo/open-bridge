@@ -86,21 +86,60 @@ export function isExpired(record: AuthTokenRecord, now: number): boolean {
 }
 
 /**
+ * Digest-keyed index over the stored records.
+ *
+ * The store holds a handful of tokens, so a linear scan is not slow in absolute
+ * terms — but it runs on EVERY request once the gate is on, and it allocates two
+ * Buffers per comparison. With OAuth access tokens sharing this gate the request
+ * rate goes up by an order of magnitude, so the lookup is made O(1) instead of
+ * paying a cost we already know is unnecessary.
+ *
+ * Keyed by digest because a digest is the only thing derived from a presented
+ * secret, so probing the index with our own computed digest reveals nothing
+ * about which tokens exist. A plaintext key must never be used here.
+ *
+ * A digest can legitimately be absent (almost every request from an attacker,
+ * and every malformed token): `get` returning undefined is the normal miss path,
+ * not an error.
+ */
+export type DigestIndex = ReadonlyMap<string, AuthTokenRecord[]>;
+
+/** Build the digest index. Duplicate digests group, preserving list order. */
+export function buildDigestIndex(records: readonly AuthTokenRecord[]): DigestIndex {
+  const index = new Map<string, AuthTokenRecord[]>();
+  for (const record of records) {
+    const existing = index.get(record.hash);
+    if (existing) existing.push(record);
+    else index.set(record.hash, [record]);
+  }
+  return index;
+}
+
+/**
  * Resolve a presented secret against the stored records.
  *
- * Every record is compared (no early exit on the first mismatch) so the work
- * does not depend on where, or whether, a match occurs. Revoked and expired
- * matches are reported distinctly so the operator can tell a stale token from a
- * wrong one, but neither grants access.
+ * Every record sharing the presented digest is examined (no early exit), so the
+ * work does not depend on where — or whether — a match occurs. Revoked and
+ * expired matches are reported distinctly so the operator can tell a stale token
+ * from a wrong one, but neither grants access.
  */
-export function verifySecret(records: readonly AuthTokenRecord[], secret: unknown, now: number): AuthVerdict {
+export function verifySecret(
+  records: readonly AuthTokenRecord[],
+  secret: unknown,
+  now: number,
+  index?: DigestIndex,
+): AuthVerdict {
   if (typeof secret !== "string" || secret.length === 0) return { ok: false, reason: "missing" };
   if (!secret.startsWith(AUTH_TOKEN_PREFIX)) return { ok: false, reason: "malformed" };
   const digest = hashSecret(secret);
+  // Without an index, group on the fly: same semantics, linear cost. Callers on
+  // a hot path pass the index; the shape is otherwise identical.
+  const candidates = index ? index.get(digest) : records.filter(record => record.hash === digest);
   let sawRevoked = false;
   let sawExpired = false;
   let matched: AuthTokenRecord | undefined;
-  for (const record of records) {
+  for (const record of candidates ?? []) {
+    // Constant-time confirmation of the digest before the record is trusted.
     if (!digestEquals(record.hash, digest)) continue;
     if (record.revokedAt !== undefined) sawRevoked = true;
     else if (isExpired(record, now)) sawExpired = true;
@@ -199,10 +238,18 @@ export class AuthFailureLimiter {
     if (this.entries.size < this.maxKeys) return;
     this.prune(now);
     if (this.entries.size < this.maxKeys) return;
-    // Still full: drop the oldest window. Cheap and bounded; the alternative is
-    // unbounded growth driven by a spoofable header.
-    const oldest = [...this.entries.entries()].sort((a, b) => a[1].windowStartedAt - b[1].windowStartedAt)[0];
-    if (oldest) this.entries.delete(oldest[0]);
+    // Still full: drop the oldest window. One linear pass rather than a sort —
+    // this only runs under the capped-key path, and sorting the whole map to
+    // remove a single entry was pure waste on a request-controlled code path.
+    let oldestKey: string | undefined;
+    let oldestStart = Number.POSITIVE_INFINITY;
+    for (const [key, entry] of this.entries) {
+      if (entry.windowStartedAt < oldestStart) {
+        oldestStart = entry.windowStartedAt;
+        oldestKey = key;
+      }
+    }
+    if (oldestKey !== undefined) this.entries.delete(oldestKey);
   }
 }
 

@@ -128,6 +128,8 @@ function settingsState(overrides: Partial<SettingsState> = {}): SettingsState {
       ngrokUseHttpProxy: true,
       toolProfile: "full",
       logMaxBytes: 10 * 1024 * 1024,
+      "oauth.enabled": false,
+      "oauth.allowedRedirectHosts": [],
     },
     ...overrides,
   };

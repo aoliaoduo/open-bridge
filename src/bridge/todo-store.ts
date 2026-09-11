@@ -1,13 +1,27 @@
 import { host } from "../host/host.js";
 import { state } from "./state.js";
+import {
+  isProgressCategory,
+  isProgressPhase,
+  normalizeLevel,
+  type ProgressCategory,
+  type ProgressLevel,
+  type ProgressPhase,
+} from "./progress-vocabulary.js";
 
 export const TODOS_STATE_PREFIX = "openBridge.todos.";
 
+/**
+ * One progress report. `phase` and `category` are typed as members of the
+ * closed vocabulary in `progress-vocabulary.ts` rather than `string`, so a
+ * caller cannot persist an arbitrary value even by accident.
+ */
 export interface TodoProgressEntry {
   message: string;
-  phase?: string;
+  phase?: ProgressPhase;
+  category?: ProgressCategory;
   percent?: number;
-  level: string;
+  level: ProgressLevel;
   at: string;
 }
 
@@ -62,14 +76,24 @@ export function persistTodos(todos: unknown[]): void {
   }));
 }
 
-export function persistProgress(entry: { message: string; phase?: string; percent?: number; level?: string }): void {
+export function persistProgress(entry: {
+  message: string;
+  phase?: ProgressPhase;
+  category?: ProgressCategory;
+  percent?: number;
+  level?: ProgressLevel;
+}): void {
   enqueueTodoWrite(current => ({
     todos: current.todos ?? [],
     lastProgress: {
       message: String(entry.message ?? ""),
-      phase: entry.phase ? String(entry.phase) : undefined,
+      // Re-check membership on the way in: the types are erased at runtime and
+      // this document is also read back from disk, so an out-of-vocabulary value
+      // must not be persisted even if a caller bypassed the type.
+      ...(isProgressPhase(entry.phase) ? { phase: entry.phase } : {}),
+      ...(isProgressCategory(entry.category) ? { category: entry.category } : {}),
       percent: typeof entry.percent === "number" ? entry.percent : undefined,
-      level: String(entry.level ?? "info"),
+      level: normalizeLevel(entry.level),
       at: new Date().toISOString(),
     },
     updatedAt: new Date().toISOString(),

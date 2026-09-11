@@ -25,6 +25,15 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = {
   logMaxBytes: 10 * 1024 * 1024,
   "auth.enabled": false,
   "auth.tokenTtlSeconds": 0,
+  /**
+   * OAuth 2.1 authorization server. OFF by default, like the bearer gate: the
+   * route token inside the MCP URL already authenticates a URL-only client, so
+   * this is an opt-in upgrade to per-client, individually revocable credentials
+   * — not a new default that could lock an existing client out.
+   */
+  "oauth.enabled": false,
+  /** Extra redirect hosts a dynamically registered client may use ([] = built-in list). */
+  "oauth.allowedRedirectHosts": [] as string[],
   "concurrency.enabled": true,
   "concurrency.holdTimeoutMs": 300_000,
   "concurrency.waitTimeoutMs": 120_000,
