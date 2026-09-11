@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **控制台的一次整体视觉与可用性 pass。** 内容宽度 920 → 1040px，九条页签得到悬停/圆角与
+  键盘焦点环，表格行有 hover、数字列用等宽数字（`tabular-nums`），输入框聚焦有 3px 光环，
+  按钮 disabled 不再有假 hover 且光标为 `not-allowed`，暗色模式通过 `color-scheme` 让原生
+  控件跟随主题。补 favicon（内联 SVG，data URI，符合现行 CSP）与顶栏 logo，窄屏 padding 收敛。
+
 ### Fixed
 - **A second instance no longer drops the first one's route token.** `secrets.json`
   (and, by the same construction, `config.json` and `state.json`) was read once in
@@ -26,6 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   socket can race the reply: the CLI now retries once, treats "the process is
   gone" as success, and only falls back to killing the process when it is still
   alive.
+- **控制台表格里的标识符列不再被挤成逐字竖排。** `.mono` 的 `word-break: break-all` 让自动布局
+  表格中该列的最小内容宽度塌缩到 1 个字符（工具目录的名称列整列竖排），CJK 表头与徽章也会任意
+  断行。现在表头不换行、表格内 `.mono` 单行 + 340px 上限 + 省略号（长内容另给 `title`），
+  需要换行的长文本用 `.mono.wrap`（体检「详情」列）。会话/锁/令牌/体检/工具五个表格同时受益。
+- **服务页的表格补上了 `token-table` 类**——它曾是全页唯一裸 `<table>`，无样式、与其他页不一致；
+  测试现在会断言这个类，防止再次漏掉。
+- **「扩展」徽章有了基础样式**（原先透明底、默认色，看起来像渲染错误）；徽章与 pill 一律不换行。
+- **Toast 的淡入淡出真正生效。** 原实现用 `key` 强制重挂载，元素天生带着 `.show` 挂上去，
+  过渡永远不会触发；改为常驻节点切换类，并按错误与否使用 `role="alert"` / `role="status"`。
+- **浏览器标签页标题跟随页面**：`/console/sessions` 的标签是「会话 · Open Bridge 控制台」，
+  同时开着几个实例的控制台时，标签页是唯一能区分它们的地方。
+- **轮换端点后的自动重载走命名接缝** `reloadConsole()`：测试改为直接断言这个接缝，不再去改
+  `window.location`（jsdom 与不同 vitest 池对它能否被重定义的答案不一致）。
 
 ### Added
 - **The console has real pages, one path each.** The panel was a single page

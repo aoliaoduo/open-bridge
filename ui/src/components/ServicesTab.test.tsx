@@ -33,8 +33,11 @@ afterEach(() => {
 describe("ServicesTab", () => {
   test("failed services get a start button, running ones a stop/restart", async () => {
     servicesMock.mockResolvedValue([web(false)]);
-    render(<ServicesTab />);
+    const { container } = render(<ServicesTab />);
     expect(await screen.findByText("web")).toBeTruthy();
+    // This table shipped without the shared class once, so it rendered unstyled
+    // next to five correctly styled ones.
+    expect(container.querySelector("table")?.className).toBe("token-table");
     expect(screen.getByText("已停止")).toBeTruthy();
     expect(screen.getByText("启动")).toBeTruthy();
   });

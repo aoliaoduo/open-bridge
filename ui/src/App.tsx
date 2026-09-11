@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, copyText, type SecretPayload, type SettingsActionResult, type SettingsState } from "./api";
+import { api, copyText, reloadConsole, type SecretPayload, type SettingsActionResult, type SettingsState } from "./api";
 import { ROUTES, currentRoute, navigate, routePath, type RouteId } from "./routes";
 import { StatusTab } from "./components/StatusTab";
 import { SettingsTab } from "./components/SettingsTab";
@@ -11,7 +11,7 @@ import { SessionsPage } from "./components/SessionsPage";
 import { ToolsPage } from "./components/ToolsPage";
 import { HealthPage } from "./components/HealthPage";
 
-export interface ToastMsg { text: string; isError: boolean; key: number }
+interface ToastMsg { text: string; isError: boolean }
 
 export function App() {
   // The URL is the source of truth for which page is open (see routes.ts): each
@@ -27,7 +27,7 @@ export function App() {
 
   const showToast = useCallback((text: string, isError = false) => {
     clearTimeout(toastTimer.current);
-    setToast({ text, isError, key: Date.now() });
+    setToast({ text, isError });
     toastTimer.current = setTimeout(() => setToast(null), 2600);
   }, []);
 
@@ -49,6 +49,13 @@ export function App() {
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
+  // With several consoles open (one per instance/port) the browser tab is the
+  // only thing that says which page this one is.
+  useEffect(() => {
+    const label = ROUTES.find(item => item.id === route)?.label ?? "控制台";
+    document.title = `${label} · Open Bridge 控制台`;
+  }, [route]);
+
   const open = useCallback((id: RouteId) => {
     navigate(id);
     setRoute(id);
@@ -68,7 +75,7 @@ export function App() {
         // route-token rotation leaves the in-page copy stale: every action from
         // here on would 403. Reload to pick up the freshly injected one, after
         // the toast has told the operator why.
-        window.setTimeout(() => window.location.reload(), 1200);
+        window.setTimeout(reloadConsole, 1200);
       }
       return result;
     } catch (error) {
@@ -80,6 +87,11 @@ export function App() {
   return (
     <div className="shell">
       <div className="topbar">
+        <svg className="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M2 17h20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <path d="M4 17v-3a8 8 0 0 1 16 0v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <path d="M8 17v-2.5M12 17v-4.5M16 17v-2.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
         <h1>Open Bridge 控制台</h1>
         <span className={`badge ${settings?.running ? "on" : "off"}`}>
           {settings ? settings.statusText : "连接中…"}
@@ -138,7 +150,12 @@ export function App() {
         {route === "settings" && <SettingsTab settings={settings} act={act} />}
       </div>
 
-      <div className={`toast ${toast ? "show" : ""} ${toast?.isError ? "error" : ""}`} key={toast?.key}>
+      {/* Persistent node on purpose: toggling .show on the same element is
+          what lets the fade in/out transitions actually run. */}
+      <div
+        className={`toast ${toast ? "show" : ""} ${toast?.isError ? "error" : ""}`}
+        role={toast?.isError ? "alert" : "status"}
+      >
         {toast?.text}
       </div>
 

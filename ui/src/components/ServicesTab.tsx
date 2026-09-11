@@ -53,7 +53,7 @@ export function ServicesTab() {
           保存后就能在这里启停，不必再让代理代劳。
         </div>
       ) : (
-        <table>
+        <table className="token-table">
           <thead>
             <tr>
               <th>名称</th>

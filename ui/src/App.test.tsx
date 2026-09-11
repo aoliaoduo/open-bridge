@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   tools: vi.fn(),
   health: vi.fn(),
   copyText: vi.fn(async () => undefined),
+  reloadConsole: vi.fn(),
 }));
 
 vi.mock("./api", () => ({
@@ -48,6 +49,7 @@ vi.mock("./api", () => ({
     health: mocks.health,
   },
   copyText: mocks.copyText,
+  reloadConsole: mocks.reloadConsole,
   consoleToken: () => "test-token",
 }));
 
@@ -294,6 +296,17 @@ describe("App shell", () => {
     expect(await screen.findByText("/console/status")).toBeTruthy();
   });
 
+  test("names the browser tab after the open page", async () => {
+    render(<App />);
+    await screen.findByText("MCP 端点");
+    expect(document.title).toBe("状态 · Open Bridge 控制台");
+
+    fireEvent.click(tabLink("体检"));
+
+    await screen.findByText("体检结果");
+    expect(document.title).toBe("体检 · Open Bridge 控制台");
+  });
+
   test("surfaces a settings failure as a toast", async () => {
     mocks.settings.mockRejectedValue(new Error("GET /api/settings → HTTP 403"));
 
@@ -312,31 +325,24 @@ describe("App shell", () => {
     // in-page copy is stale and every later action would 403. Reloading is the
     // only way to pick up the fresh one, and without it the console was left
     // silently broken until the operator thought to refresh by hand.
-    const reload = vi.fn();
-    const original = Object.getOwnPropertyDescriptor(window, "location");
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: { reload, pathname: "/console/status", href: "http://localhost/console/status" },
-    });
-    try {
-      mocks.settingsAction.mockResolvedValue({
-        ok: true,
-        state: settingsState(),
-        info: "MCP URL 已更新，旧链接立即失效。控制台正在重新加载。",
-        reloadRequired: true,
-      } satisfies SettingsActionResult);
+    // Patching window.location is not reliable across jsdom versions and vitest
+    // pools, so the component funnels the reload through reloadConsole and the
+    // mock stands in for it here.
+    mocks.settingsAction.mockResolvedValue({
+      ok: true,
+      state: settingsState(),
+      info: "MCP URL 已更新，旧链接立即失效。控制台正在重新加载。",
+      reloadRequired: true,
+    } satisfies SettingsActionResult);
 
-      render(<App />);
-      await screen.findByText("MCP 端点");
+    render(<App />);
+    await screen.findByText("MCP 端点");
 
-      fireEvent.click(screen.getByRole("button", { name: "轮换端点" }));
+    fireEvent.click(screen.getByRole("button", { name: "轮换端点" }));
 
-      expect(await screen.findByText(/控制台正在重新加载/)).toBeTruthy();
-      await new Promise(resolve => setTimeout(resolve, 1400));
-      expect(reload).toHaveBeenCalledTimes(1);
-    } finally {
-      if (original) Object.defineProperty(window, "location", original);
-    }
+    expect(await screen.findByText(/控制台正在重新加载/)).toBeTruthy();
+    await new Promise(resolve => setTimeout(resolve, 1400));
+    expect(mocks.reloadConsole).toHaveBeenCalledTimes(1);
   });
 
   test("shows the one-time secret mask and dismisses it", async () => {

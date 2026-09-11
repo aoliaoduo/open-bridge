@@ -152,3 +152,12 @@ export async function copyText(text: string): Promise<void> {
     el.remove();
   }
 }
+
+/**
+ * Full-page reload. A named seam on purpose: tests stub this instead of patching
+ * `window.location`, which is fragile — jsdom and the vitest pools disagree about
+ * whether it can be redefined.
+ */
+export function reloadConsole(): void {
+  window.location.reload();
+}

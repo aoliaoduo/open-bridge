@@ -127,7 +127,7 @@ export function SessionsPage() {
               {lockRows.map(row => (
                 <tr key={`${row.kind}-${row.key}`}>
                   <td>{row.kind === "持有" ? <span className="pill ok">持有</span> : <span className="pill dead">等待</span>}</td>
-                  <td className="mono">{row.key || "—"}</td>
+                  <td className="mono" title={row.key || undefined}>{row.key || "—"}</td>
                   <td>{row.mode || "—"}</td>
                   <td>{row.label || "—"}</td>
                   <td>{idleLabel(row.ms)}</td>

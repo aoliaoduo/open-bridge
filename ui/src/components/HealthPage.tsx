@@ -93,7 +93,7 @@ export function HealthPage() {
                     {levelOf(check) === "fail" && <span className="pill dead">异常</span>}
                   </td>
                   <td>{LABELS[check.name] ?? check.name}</td>
-                  <td className="mono">{check.detail}</td>
+                  <td className="mono wrap">{check.detail}</td>
                 </tr>
               ))}
             </tbody>
