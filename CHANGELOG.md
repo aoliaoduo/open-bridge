@@ -5,6 +5,47 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Fixed
+- **`wait_process` / `interact_with_process` / `send_to_shell` 的时间参数不再被 NaN 打穿。**
+  `Math.max(Number(args.timeout_ms ?? …), 0)` 遇到 LLM 传来的 `"30s"`、`null` 会得到 NaN：
+  `setTimeout(cb, NaN)` 约 0 ms 就触发，wait_process 不等就返回、send_to_shell 直接把命令标成
+  timed_out 并挂上 pendingMarker 卡住会话。这些入口（连同 `ready_timeout_ms`、`restart_process`
+  的 `delay_ms`）统一走新的 `clampMs()`，非法值回落到文档默认值——与 run_command 当年修过的是
+  同一类问题，这次把漏掉的三处补齐（`test/clamp-ms.test.ts`）。
+- **共享 JSON 存储的写失败不再静默成功。** `withFileLock` 抢锁 60 次仍拿不到时，旧实现返回
+  undefined 而 `write()` 照常 resolve——config/secrets/state 的更新可能根本没落盘，调用方却以为
+  成功（症状：签发了令牌却永远 401）。现在锁超时抛错，且每个调用者的 promise 单独可拒绝（串行
+  tail 依旧吞错防污染后续写入）。
+- **日志轮转失败不再清空当前文件。** audit.log / bridge.log / 服务日志的轮转 rename 在 Windows 上
+  因句柄占用失败时，旧回退是 `writeFile(file, "")`——把这次没能轮转的历史直接销毁。现在跳过本次
+  轮转照常追加，下一次再试；最多暂时超限，不再丢历史。
+- **未配置隧道域名不再是一次 ERROR。** 开箱 `open-bridge serve`（没填 ngrokDomain）以前每次启动
+  都在活动日志与 audit.log 里记 "Tunnel failed; local Bridge stays up: 未配置隧道域名…"——用户什么
+  都没做错，活动页首屏却永远是红的。现在按「状态」处理：一条 progress 说明 + 干净的本地模式；
+  保存域名后点 Start 仍会照常发起隧道。
+- **同一目录的并发 `serve` 不再产生双实例。** 原来的 runtime 记录检查是先读后写：两次 serve 在同一
+  秒内启动都看不到对方，各自绑上随机端口，后写的 runtime 文件把先者藏掉。现在绑定前先在数据目录
+  创建 `serve-<workspace>.lock`（`wx` 原子创建），持有方退出或 pid 已死时自动回收；`open-bridge stop` 在本目录没有实例可停时
+也会清掉这种死锁文件——只清 pid 已死的，正在启动的实例照样受保护。
+- **`/api/sessions/close` 的 id 前缀必须唯一。** 旧实现取第一个 `startsWith` 命中，短前缀撞上多个
+  会话时会关掉插入顺序里的第一个——不一定是想关的那个。现在匹配到多个返回 400 并提示加长前缀。
+- **`open-bridge logs --follow` 不再在竞态下崩溃。** 初始 `statSync` 与前面的读取之间文件被轮转/
+  清空会让 CLI 直接抛错；现在从 0 开始跟踪，文件回来后继续。
+- **控制台：设置页不再静默破坏或伪造配置。**
+  「文件访问」的目录白名单改用 `<textarea>`——HTML 会把 `<input type=text>` 值里的换行剥掉，
+  编辑一次就把多个目录合并成一个非法路径直接保存；数值字段（端口/健康检查/并发上限/日志上限）
+  失焦校验失败时弹提示并回弹为已保存值，不再无声地显示一个配置里根本没有的数字；UI 边界改为
+  与服务端 `CONFIG_SPEC` 一致（logMaxBytes 上限 1 GiB、并发上限 3 600 000 ms）。
+- **控制台：破坏性动作补上防重。** 「创建令牌」飞行中禁用——双击曾铸造两个令牌且一次性明文被
+  第二个覆盖，留下一个永远无法认证的幽灵令牌；`ConfirmButton` 支持 `disabled`，体检页「开启第二道锁」
+  arming 时真正禁用；会话页「断开」进行中同样禁用。
+- **控制台：轮询不再让旧响应覆盖新状态。** 状态/统计/服务/会话四个页面的轮询加了过期丢弃：
+  服务页点「停止」后，一个先前发出、尚未返回的轮询曾把"已停止"又翻回"运行中"到下一轮才自愈。
+  文件锁表的 React key 补上序号（两个 waiter 等同一资源时 key 曾重复）。
+- **控制台小项。** 保存域名失败不再清空输入；日志 SSE 断开/重连有页面提示（此前断线段静默缺失）；
+  `getJson` 对非 JSON 响应给出带 HTTP 状态的报错而非裸 SyntaxError；`vite.config.ts` 纳入
+  `typecheck` 范围。
+
 ### Added
 - **`logs/bridge.log` 会轮转了。** 长到上限（`logMaxBytes`，默认 10 MiB）就改名成
   `bridge.log.1`，只留上一代——和审计日志、服务日志同一套做法——磁盘不再只涨不落。
