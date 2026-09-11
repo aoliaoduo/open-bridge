@@ -80,6 +80,13 @@ export function StatusTab({ act, onRefresh }: Props) {
                 : "")
             : " 当前仅本机可访问（未开启隧道）。")}
         </div>
+        {status?.exposure === "public-open" && (
+          <div className="section-note" style={{ color: "#b45309" }}>
+            ⚠️ 公网可达且未开启鉴权：任何拿到这个 URL 的人都能读写本机文件、执行命令、启停服务。
+            要收紧可在「令牌」页签发令牌开启 Bearer 鉴权（客户端需带 Authorization 头），
+            或点「轮换端点」立即作废已经流出去的旧链接。
+          </div>
+        )}
       </div>
 
       <div className="card">

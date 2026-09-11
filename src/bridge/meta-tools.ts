@@ -46,6 +46,15 @@ export function getBridgeStatus(): Record<string, unknown> {
     // server, so editor-only tools are absent from the catalog).
     tool_count: listToolDefinitions().length,
     auth_enabled: host().config.get<boolean>("auth.enabled", false) === true,
+    /**
+     * What guards this instance right now. "public-open" means anyone holding
+     * the URL can read and write files, run commands and drive services on this
+     * machine — no restriction is applied here, but the console and the CLI say
+     * it out loud rather than leaving the operator to infer it from a URL.
+     */
+    exposure: state.tunnelUrl
+      ? (host().config.get<boolean>("auth.enabled", false) === true ? "public-authed" : "public-open")
+      : "local",
     locks: { held: locks.held.length, waiting: locks.waiting.length },
   };
 }

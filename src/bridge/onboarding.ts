@@ -33,8 +33,12 @@ export function buildWebAiPrompt(inputs: WebAiPromptInputs): string {
     ? ""
     : "⚠️ 当前未开启隧道：下面的地址只有本机能访问，外部 AI 客户端（网页版等）连不上。"
       + "要发给外部客户端，请先在控制台「设置」页填写 ngrokDomain 并开启隧道，然后重新复制本提示词。\n\n";
-  // Plain string for the fixed tail: a template literal that spans lines can
+  // Plain strings for the fixed tail: a template literal that spans lines can
   // silently swallow its own continuation, and tsc has nothing to complain about.
   const instruction = "快速连接这个 MCP（URL），明确使用规则，熟悉可用工具，做好处理接下来一系列工作的准备。";
-  return `${localNote}【${inputs.url}】${authNote}\n\n${instruction}`;
+  // Public tunnels (ngrok's free edge in particular) drop mid-session and come
+  // back. A client that treats the first SSL EOF as a hard failure reports a
+  // working tool as broken, so the prompt says what to do about it.
+  const transportNote = "若遇到传输层报错（SSL EOF、连接被重置或超时），等 5 秒后重试一次；这不是工具失败。";
+  return `${localNote}【${inputs.url}】${authNote}\n\n${instruction}\n${transportNote}`;
 }

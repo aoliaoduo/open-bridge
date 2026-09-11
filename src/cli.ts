@@ -244,6 +244,10 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   // presence alone decides whether a public URL exists at all.
   if (state.tunnelUrl) console.log(`  公网 MCP URL: ${state.tunnelUrl}`);
   else console.log("  公网 MCP URL: （未开启隧道，仅本机可用）");
+  if (state.tunnelUrl && nodeHost.config.get<boolean>("auth.enabled", false) !== true) {
+    console.log("  ⚠️  公网可达且未开启鉴权：拿到该 URL 的人都能读写本机文件、执行命令。");
+    console.log("      要收紧：控制台「令牌」页签发令牌并开启 Bearer 鉴权，或用「轮换端点」作废旧链接。");
+  }
   console.log(`  日志:        ${nodeHost.bridgeLog.path()}`);
   console.log("");
   console.log("  接入 AI 客户端：open-bridge prompt  →  复制提示词并粘贴给客户端");
@@ -299,6 +303,9 @@ async function cmdStatus(parsed: ParsedArgs): Promise<void> {
   if (body.status.local_url) console.log(`本地 MCP: ${body.status.local_url}`);
   if (body.status.public_url) console.log(`公网 MCP: ${body.status.public_url}`);
   else console.log("公网 MCP: （未开启隧道，仅本机可用）");
+  if (body.status.exposure === "public-open") {
+    console.log("⚠️  公网可达且未开启鉴权：拿到该 URL 的人都能读写本机文件、执行命令。可用「令牌」页开启 Bearer 鉴权。");
+  }
   console.log(`会话: ${body.status.active_sessions}  命令: ${body.status.active_commands}  工具: ${body.status.tool_count}`);
 }
 

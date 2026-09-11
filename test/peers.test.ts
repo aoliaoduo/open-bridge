@@ -156,10 +156,17 @@ test("the public probe tells mine, other and free apart", async () => {
     assert.equal(await probePublicBridge("shared.example", TOKEN_A), "other");
     answer(404, "<html>url not found</html>");
     assert.equal(await probePublicBridge("shared.example", TOKEN_A), "free");
+    // Only ngrok's own "no endpoint here" answer means the domain is free. A
+    // 5xx or a connection failure is inconclusive: during a tunnel holder's
+    // reconnect they are exactly what a probe sees, and reading them as "free"
+    // made this instance spawn a rival ngrok at the holder's domain
+    // (ERR_NGROK_334) and then sit local-only for good.
     answer(502, "bad gateway");
-    assert.equal(await probePublicBridge("shared.example", TOKEN_A), "free");
+    assert.equal(await probePublicBridge("shared.example", TOKEN_A), "unknown");
+    answer(307, "redirect");
+    assert.equal(await probePublicBridge("shared.example", TOKEN_A), "unknown");
     globalThis.fetch = (async () => { throw new Error("connect ECONNREFUSED"); }) as typeof fetch;
-    assert.equal(await probePublicBridge("shared.example", TOKEN_A), "free");
+    assert.equal(await probePublicBridge("shared.example", TOKEN_A), "unknown");
     const urls: string[] = [];
     globalThis.fetch = (async (input: string | URL | Request) => { urls.push(String(input)); return new Response("", { status: 404 }) as Response; }) as typeof fetch;
     await probePublicBridge("shared.example", TOKEN_B);

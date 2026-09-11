@@ -31,6 +31,18 @@ export function isFatalNgrokError(output: string): boolean {
 }
 
 /**
+ * ngrok's "that endpoint is already online" — someone else holds the domain.
+ *
+ * This is not a configuration mistake, so it must not be reported as one: it
+ * means another instance (another window, the VS Code extension, a stale ngrok)
+ * came online at our domain. The right answer is to stay local, keep watching
+ * and adopt that tunnel once it routes us — not to give up with "won't retry".
+ */
+export function isEndpointTakenError(output: string): boolean {
+  return /ERR_NGROK_334/.test(output);
+}
+
+/**
  * A short reason for the operator, in ngrok's own words, so the fix — which only
  * they can make — is visible without opening the log.
  */

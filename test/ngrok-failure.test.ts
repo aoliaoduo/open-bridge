@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isFatalNgrokError, ngrokFailureSummary } from "../src/network/ngrok-failure.js";
+import { isEndpointTakenError, isFatalNgrokError, ngrokFailureSummary } from "../src/network/ngrok-failure.js";
 
 /**
  * Captured verbatim from a real run: a reserved subdomain the free account may
@@ -50,4 +50,16 @@ test("the summary is bounded and never empty", () => {
   assert.ok(ngrokFailureSummary(long).length <= 241);
   assert.equal(ngrokFailureSummary(""), "ngrok exited before the tunnel was ready");
   assert.equal(ngrokFailureSummary("plain noise with no code"), "ngrok exited before the tunnel was ready");
+});
+
+test("an endpoint another instance already holds is its own case, not a config error", () => {
+  // ERR_NGROK_334 means someone else came online at this domain. The caller
+  // reacts by staying local and adopting that tunnel; reporting it as a
+  // deterministic "fix your configuration" failure is what parked this instance
+  // local-only while a working tunnel sat next to it.
+  const taken = 'lvl=eror msg="failed to start tunnel: The endpoint \'https://x.ngrok-free.dev\' is already online." ERR_NGROK_334';
+  assert.equal(isEndpointTakenError(taken), true);
+  assert.equal(isFatalNgrokError(taken), true);
+  assert.equal(isEndpointTakenError("ERR_NGROK_313: domain not assigned"), false);
+  assert.equal(isEndpointTakenError("tunnel exited without a structured code"), false);
 });

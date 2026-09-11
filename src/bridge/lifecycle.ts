@@ -16,7 +16,7 @@ import {
 import { bridgeAllowedHosts, isAllowedBridgeHost, validateNgrokDomain } from "../http/request-policy.js";
 import { authorizeRequest, authEnabled } from "../http/auth.js";
 import { isDeterministicNetworkFailure } from "../network/net-failure.js";
-import { isFatalNgrokError, ngrokFailureSummary } from "../network/ngrok-failure.js";
+import { isEndpointTakenError, isFatalNgrokError, ngrokFailureSummary } from "../network/ngrok-failure.js";
 import {
   MAX_SESSIONS, RECONNECT_DELAYS_MS, ROUTE_TOKEN_KEY,
   asStructuredContent, clientMcpUrl, record, state, text, redactedPublicUrl,
@@ -622,10 +622,19 @@ async function watchPublicDomain(domain: string): Promise<void> {
     host().ui.refresh();
     return;
   }
-  if ((await probePublicBridge(domain, state.routeToken)) !== "free") return;
+  // Only ngrok's own "no endpoint here" answer is evidence that nobody holds the
+  // domain. A timeout or a 5xx while the holder reconnects is NOT evidence, and
+  // a round that is merely inconclusive resets the counter — the claim below
+  // spawns a tunnel, so it must not be triggered by someone else's bad minute.
+  if ((await probePublicBridge(domain, state.routeToken)) !== "free") {
+    state.missingPublicRounds = 0;
+    return;
+  }
   state.missingPublicRounds += 1;
   if (state.missingPublicRounds < 2) return;
   state.missingPublicRounds = 0;
+  // The reconnect chain is the other claimant; two claimants race each other.
+  if (state.reconnectTimer || state.tunnel) return;
   stopPublicWatch();
   record("ngrok", "progress", "Public domain is free again; this window will claim it.");
   await enqueueLifecycle(async () => {
@@ -1013,6 +1022,24 @@ async function startTunnelInternal(generation: number): Promise<void> {
     host().ui.refresh();
   } catch (error) {
     if (error instanceof NgrokSpawnError) {
+      if (isEndpointTakenError(error.message)) {
+        // The endpoint came online in the gap between the pre-check and the
+        // spawn — the holder was mid-reconnect, or it just claimed the domain.
+        // Nothing here is a configuration mistake: stay local, keep watching and
+        // adopt that tunnel as soon as it routes us. (This used to throw a
+        // "won't retry" error and park the instance local-only for good, while
+        // the working tunnel sat right next to it.)
+        state.tunnelRole = "blocked";
+        killTunnelTree(state.tunnel);
+        state.tunnel = undefined;
+        revertToLocalUrl();
+        stopReconnectChain();
+        startPublicWatch(domain);
+        record("ngrok", "progress", "The domain went online under another instance mid-start; staying local and watching for a route.");
+        await publishSelf();
+        await adoptSharedTunnel(domain);
+        return;
+      }
       // ngrok never bound the domain (missing executable, EACCES, ...). This is
       // deterministic: surface the real cause right away instead of after the
       // public-health budget, and stay local-only. The error type is preserved

@@ -34,6 +34,8 @@ export interface BridgeStatus {
   public_url?: string;
   /** owner = this instance runs ngrok; follower = another instance's tunnel forwards to us. */
   tunnel_role?: string;
+  /** local = loopback only; public-open = anyone with the URL; public-authed = bearer gate on. */
+  exposure?: string;
   /** The URL to hand a client: the tunnel when published, otherwise loopback. */
   mcp_url?: string;
   shell: string;

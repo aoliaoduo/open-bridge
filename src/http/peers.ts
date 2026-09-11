@@ -195,13 +195,32 @@ export async function healthCheckUrl(url: string, timeoutMs: number): Promise<bo
  * path it does not own, which tells us another window holds the tunnel without needing its token;
  * ngrok's own page or a connection failure means the domain is free to claim.
  */
-export async function probePublicBridge(domain: string, token: string, timeoutMs = 2_000): Promise<"mine" | "other" | "free"> {
+export type PublicBridgeVerdict = "mine" | "other" | "free" | "unknown";
+
+/**
+ * What is behind a public domain right now.
+ *
+ *   mine    — our token answered: the tunnel is routing us (or the domain is ours).
+ *   other   — an Open Bridge router answered 404 for a token it does not know,
+ *             so the domain is online and serving someone else.
+ *   free    — ngrok itself answered "no endpoint here": nobody holds the domain.
+ *   unknown — a timeout, a TLS/connection failure, a redirect or a 5xx: the edge
+ *             could not tell us. The caller must NOT read this as "free".
+ *
+ * "unknown" exists because claiming on a guess starts a fight. During the tunnel
+ * holder's reconnect the domain answers timeouts/5xx, and treating that as
+ * "free" made this instance spawn its own ngrok at the holder's domain, lose to
+ * ERR_NGROK_334, and park itself local-only for good.
+ */
+export async function probePublicBridge(domain: string, token: string, timeoutMs = 2_000): Promise<PublicBridgeVerdict> {
   try {
     const response = await fetch(`https://${domain}/healthz/${token}`, { headers: { "ngrok-skip-browser-warning": "true" }, signal: AbortSignal.timeout(timeoutMs) });
     if (response.ok) return "mine";
-    if (response.status !== 404) return "free";
+    if (response.status !== 404) return "unknown";
+    // Our own router answers 404 {"error":"Not found"}; ngrok's "endpoint
+    // offline" page says something else entirely.
     return (await response.text()).includes("Not found") ? "other" : "free";
-  } catch { return "free"; }
+  } catch { return "unknown"; }
 }
 
 /**
