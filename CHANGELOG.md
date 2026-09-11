@@ -5,7 +5,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- **控制台设置页终于有了 OAuth 的开关。** `oauth.enabled` 之前只能 `open-bridge config set`（或直接打
+  `/api/settings/action`）——设置页里根本没有这一项，README 却说「或者用控制台设置页」。现在新增
+  「OAuth 2.1（可选）」卡片：开关、重定向主机白名单（`oauth.allowedRedirectHosts`，空 = 内置名单）、
+  以及从 `/api/oauth` 读到的已注册客户端与在用凭据数量（只有 `client_id` / 名称 / 回调地址 / 注册时间，
+  不含任何摘要或密钥），并在卡片里写明开关两侧的后果。
 ### Fixed
+- **打开 OAuth 不再把已经持有令牌的客户端挡在门外。** `oauth.enabled=true` 而未开个人令牌门禁时，
+  `authorizeRequest` 直接按 OAuth 判定并返回：一个带着有效个人令牌（`Authorization: Bearer` 或
+  `?token=`）的请求照样 401——与 README「不会让原来用路由令牌或 Bearer 令牌的客户端断线」的承诺相反。
+  现在只要请求**出示了**凭据，就继续走个人令牌校验（门禁开不开都校验），只有「什么都没带、只凭 URL」
+  的请求才被 OAuth 拦下。个人令牌校验失败时也带上同一个 `WWW-Authenticate`，好让过期客户端改用 OAuth。
+  顺带把那段声称「不会断线」却与实现相反的注释改成实情：路径里的路由令牌是路由键不是凭据，
+  OAuth 关上的正是「只凭 URL」这扇门。`test/oauth-integration.test.mjs` 新增两条用例钉住行为。
 - **`wait_process` / `interact_with_process` / `send_to_shell` 的时间参数不再被 NaN 打穿。**
   `Math.max(Number(args.timeout_ms ?? …), 0)` 遇到 LLM 传来的 `"30s"`、`null` 会得到 NaN：
   `setTimeout(cb, NaN)` 约 0 ms 就触发，wait_process 不等就返回、send_to_shell 直接把命令标成

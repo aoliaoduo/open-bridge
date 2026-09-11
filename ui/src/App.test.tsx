@@ -6,6 +6,7 @@ import type {
   HealthReport,
   LockSnapshot,
   SessionView,
+  OAuthConsoleView,
   SettingsActionResult,
   SettingsState,
   ToolCatalog,
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   closeSession: vi.fn(),
   tools: vi.fn(),
   health: vi.fn(),
+  oauth: vi.fn(),
   copyText: vi.fn(async () => undefined),
   reloadConsole: vi.fn(),
 }));
@@ -47,6 +49,7 @@ vi.mock("./api", () => ({
     closeSession: mocks.closeSession,
     tools: mocks.tools,
     health: mocks.health,
+    oauth: mocks.oauth,
   },
   copyText: mocks.copyText,
   reloadConsole: mocks.reloadConsole,
@@ -76,6 +79,7 @@ beforeEach(() => {
   mocks.closeSession.mockResolvedValue({ closed: "session-1", sessions: [] });
   mocks.tools.mockResolvedValue(toolCatalog());
   mocks.health.mockResolvedValue(healthReport());
+  mocks.oauth.mockResolvedValue(oauthConsoleView());
 });
 
 afterEach(() => {
@@ -166,6 +170,21 @@ function lockSnapshot(): LockSnapshot {
   return {
     held: [{ key: "C:\\work", mode: "write", label: "write_file", held_ms: 1_500 }],
     waiting: [{ keys: ["C:\\work"], mode: "write", label: "edit_file", waited_ms: 900 }],
+  };
+}
+
+function oauthConsoleView(): OAuthConsoleView {
+  return {
+    enabled: true,
+    issuer: "http://127.0.0.1:18080",
+    clients: [{
+      client_id: "ob-0123456789abcdef",
+      client_name: "ChatGPT 连接器",
+      redirect_uris: ["https://chatgpt.com/connector_platform_oauth_redirect"],
+      client_id_issued_at: Date.parse("2026-09-11T00:00:00Z"),
+    }],
+    counts: { clients: 1, activeAccessTokens: 2, activeRefreshTokens: 1 },
+    ownerSource: "route_token",
   };
 }
 
@@ -458,4 +477,26 @@ test("a number outside the server's bounds is refused with a toast, not saved", 
   );
   expect(await screen.findByText(/公网健康检查 需要整数 3000–120000/)).toBeTruthy();
   expect((health as HTMLInputElement).value).toBe("20000");
+});
+
+test("settings can turn OAuth on, and the card shows who holds a credential", async () => {
+  window.history.pushState({}, "", "/console/settings");
+  mocks.settings.mockResolvedValue(settingsState({
+    config: { ...settingsState().config, "oauth.enabled": true, "oauth.allowedRedirectHosts": ["chatgpt.com"] },
+  }));
+
+  render(<App />);
+
+  // The client list is live data (/api/oauth): without it the operator could
+  // switch OAuth on from the console and still see nothing at all.
+  expect(await screen.findByText("ChatGPT 连接器")).toBeTruthy();
+  expect(screen.getByText(/已注册客户端 1 个/)).toBeTruthy();
+
+  // And the switch writes the same config key the CLI does. Before this card
+  // there was no way to turn OAuth on from the console at all — README said
+  // otherwise.
+  const toggle = screen.getByLabelText("启用 OAuth 2.1 授权服务器") as HTMLInputElement;
+  expect(toggle.checked).toBe(true);
+  fireEvent.click(toggle);
+  expect(mocks.settingsAction).toHaveBeenCalledWith({ command: "setConfig", key: "oauth.enabled", value: false });
 });

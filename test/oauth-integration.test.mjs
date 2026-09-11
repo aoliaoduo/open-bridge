@@ -391,6 +391,95 @@ test("a revoked access token stops authenticating", async () => {
   assert.equal(unknown.status, 200);
 });
 
+/**
+ * OAuth is additive for anything that presents a credential: the audit that
+ * added this test found the opposite — with the personal gate still off (the
+ * default), the OAuth rejection was returned before the presented token was
+ * examined, so a client holding a perfectly good token died the moment an
+ * operator switched OAuth on. That is precisely the "never disconnects a
+ * client" promise README makes.
+ */
+test("a personal token still authenticates /mcp while OAuth is on", async () => {
+  const secret = await mintPersonalToken("url-only");
+
+  const viaHeader = await listToolsWith(secret);
+  assert.equal(viaHeader.status, 200, viaHeader.body.slice(0, 300));
+
+  // The query form is the only credential door a client that can be handed
+  // nothing but a URL has — and the one the README points such clients at. It
+  // carries a whole session, so the handshake goes through it too.
+  const opened = await rawRequest("POST", `/mcp/${routeToken}?token=${secret}`, JSON.stringify(rpc("initialize", {
+    protocolVersion: "2025-06-18",
+    capabilities: {},
+    clientInfo: { name: "url-only-client", version: "1" },
+  })), {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+  });
+  assert.equal(opened.status, 200, opened.body.slice(0, 300));
+  const sessionId = opened.headers["mcp-session-id"];
+  assert.ok(sessionId, "the query-credential session handshook");
+  const listed = await rawRequest("POST", `/mcp/${routeToken}?token=${secret}`, JSON.stringify(rpc("tools/list", {})), {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+    "mcp-session-id": sessionId,
+  });
+  assert.equal(listed.status, 200, listed.body.slice(0, 300));
+  assert.match(listed.body, /"tools"/);
+});
+
+test("with the personal gate on, both credential kinds are accepted", async () => {
+  const secret = await mintPersonalToken("coexist");
+  // registerClient takes a LIST of redirect URIs; passing the bare string
+  // registered nothing, and the consent POST then had no client to authorize.
+  const clientId = (await registerClient([REDIRECT], "coexist")).body.client_id;
+  const consent = await authorize(clientId);
+  const code = new URL(consent.location).searchParams.get("code");
+  const exchanged = await token({
+    grant_type: "authorization_code",
+    code,
+    client_id: clientId,
+    redirect_uri: REDIRECT,
+    code_verifier: VERIFIER,
+    resource: `http://127.0.0.1:${port}/mcp/${routeToken}`,
+  });
+  assert.equal(exchanged.status, 200, JSON.stringify(exchanged.body));
+
+  const gate = async enabled => {
+    const res = await rawRequest("POST", "/api/settings/action", JSON.stringify({
+      command: "setAuthEnabled", enabled,
+    }), { "content-type": "application/json", "x-open-bridge-console": routeToken });
+    assert.equal(res.status, 200, `setAuthEnabled(${enabled}) failed: ${res.body}`);
+  };
+
+  await gate(true);
+  try {
+    assert.equal((await listToolsWith(secret)).status, 200, "the personal token still works");
+    assert.equal((await listToolsWith(exchanged.body.access_token)).status, 200, "the OAuth token still works");
+    const anonymous = await rawRequest("POST", `/mcp/${routeToken}`, JSON.stringify(rpc("tools/list", {})), {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    });
+    assert.equal(anonymous.status, 401);
+    // Both gates on: the challenge must still point at the authorization
+    // server, otherwise an OAuth client has no way in.
+    assert.match(anonymous.headers["www-authenticate"] ?? "", /resource_metadata=/);
+  } finally {
+    await gate(false);
+  }
+});
+
+/** Mint a personal token through the same console action the page uses. */
+async function mintPersonalToken(label) {
+  const res = await rawRequest("POST", "/api/settings/action", JSON.stringify({
+    command: "createToken", label, ttlSeconds: 0,
+  }), { "content-type": "application/json", "x-open-bridge-console": routeToken });
+  assert.equal(res.status, 200, `minting a token failed: ${res.body}`);
+  const secret = JSON.parse(res.body)?.secret?.secret;
+  assert.ok(secret, `no one-time secret in ${res.body.slice(0, 200)}`);
+  return secret;
+}
+
 test("the console can read the OAuth client list without seeing any secret", async () => {
   const res = await rawRequest("GET", "/api/oauth", null, {});
   assert.equal(res.status, 200);

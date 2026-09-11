@@ -311,26 +311,42 @@ export type AuthGateResult =
  * would defeat the point of revoking the last token ("I think it leaked") — the
  * request would be admitted before its (revoked) credential was even checked.
  * Lockout is never unrecoverable anyway: the operator owns the machine and can
- * turn `openBridge.auth.enabled` off locally in VS Code settings.
+ * turn `auth.enabled` off from the local settings page — that surface is
+ * loopback-only, so it never needs the credential the operator lost.
  */
 export async function authorizeRequest(
   req: { headers: Record<string, unknown>; socket?: { remoteAddress?: string } },
   url: URL,
 ): Promise<AuthGateResult> {
   // OAuth is an independent gate: a valid OAuth access token is admitted whether
-  // or not the personal-token gate is on. Both credential kinds are accepted, so
-  // enabling OAuth never disconnects a client that was already using a URL with
-  // the route token or a personal token — the capability-first rule for this
-  // project.
+  // or not the personal-token gate is on.
+  //
+  // Turning OAuth on must not disconnect a client that already holds a
+  // credential: a presented token is verified below with the personal gate on
+  // OR off. What OAuth does close is the URL-only door — the route token in
+  // `/mcp/<token>` is a routing key, not a credential (lifecycle.ts matches the
+  // path before this gate runs, and bearerFrom never reads the path), so a
+  // request that presents nothing gets the discovery challenge. That header, not
+  // the status code, is how an OAuth client learns to authorize. A client that
+  // can only be handed a URL keeps working by carrying its token in the query
+  // string (`?token=`), which `bearerFrom` already reads.
+  const presented = bearerFrom(req.headers["authorization"], url);
+  let oauthRejection: AuthGateResult | undefined;
   if (oauthEnabled()) {
     const oauth = await authorizeWithOAuth(req, url);
     if (oauth.ok) return oauth;
-    // Fall through to the personal-token path only when that gate is actually
-    // enabled; otherwise this is the rejection.
-    if (!authEnabled()) return oauth;
+    oauthRejection = oauth;
   }
+  // Handed to every rejection below: a client whose own token is stale is
+  // exactly the one that should be told how to get a new one.
+  const oauthChallengeHeader = oauthRejection && !oauthRejection.ok ? oauthRejection.challenge : undefined;
 
-  if (!authEnabled()) return { ok: true };
+  // Personal gate off: the URL-only client is admitted as before — unless OAuth
+  // is on and the request presented nothing, in which case OAuth's rejection
+  // (with its discovery challenge) is the answer.
+  if (!authEnabled() && (oauthRejection === undefined || presented.via === "none")) {
+    return oauthRejection ?? { ok: true };
+  }
 
   const now = Date.now();
   const { records, index } = await readRecordsIndexed();
@@ -339,7 +355,7 @@ export async function authorizeRequest(
     // Deliberately not counted as a failure: this is a configuration state, not
     // an attack, and the operator's own client must not get locked out while
     // they fix it.
-    return { ok: false, status: 401, reason: "no_active_token" };
+    return { ok: false, status: 401, reason: "no_active_token", challenge: oauthChallengeHeader };
   }
 
   // Rate-limit on the forwarded client identity, NOT the socket address: the
@@ -351,11 +367,10 @@ export async function authorizeRequest(
     return { ok: false, status: 429, reason: "locked_out", retryAfterMs: lockedFor };
   }
 
-  const presented = bearerFrom(req.headers["authorization"], url);
   const verdict = verifySecret(records, presented.value, now, index);
   if (!verdict.ok) {
     limiter.recordFailure(key, now);
-    return { ok: false, status: 401, reason: verdict.reason };
+    return { ok: false, status: 401, reason: verdict.reason, challenge: oauthChallengeHeader };
   }
 
   limiter.recordSuccess(key);

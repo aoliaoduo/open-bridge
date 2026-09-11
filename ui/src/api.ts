@@ -103,6 +103,21 @@ export interface HealthCheck {
 }
 export interface HealthReport { checks: HealthCheck[]; exposure: string }
 
+/** Registered clients + live credential counts; mirrors oauthConsoleView(). */
+export interface OAuthClientView {
+  client_id: string;
+  client_name?: string;
+  redirect_uris: string[];
+  client_id_issued_at: number;
+}
+export interface OAuthConsoleView {
+  enabled: boolean;
+  issuer: string;
+  clients: OAuthClientView[];
+  counts: { clients: number; activeAccessTokens: number; activeRefreshTokens: number };
+  ownerSource: "env" | "route_token";
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(path);
   // Mirror postJson: a non-JSON body (an empty reply from a mid-restart
@@ -144,6 +159,7 @@ export const api = {
     postJson<{ closed: string; sessions: SessionView[] }>("/api/sessions/close", { id }),
   tools: () => getJson<ToolCatalog>("/api/tools"),
   health: () => getJson<{ health: HealthReport }>("/api/health").then(r => r.health),
+  oauth: () => getJson<{ oauth: OAuthConsoleView }>("/api/oauth").then(r => r.oauth),
   serviceAction: (action: "start" | "stop" | "restart", name: string) =>
     postJson<{ result: unknown; services: ServiceView[] }>("/api/services/action", { action, name }),
 };
