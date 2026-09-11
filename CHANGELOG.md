@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **One Bridge per directory, and the CLI knows which is which.** `open-bridge
+  serve` has always used the current directory as its workspace root, but the
+  app could not actually keep that promise for two directories at once: runtime
+  records went into a single shared `runtime.json`, so a second `serve` in
+  another directory overwrote the first record and then refused to start at all
+  ("已有实例在运行"). Records are now keyed by the same per-workspace suffix the
+  route tokens use (`runtime-<suffix>.json`), the legacy file is still read for
+  its own root only, and `serve` refuses only when *this* directory already has
+  an instance. `stop` / `status` / `url` / `prompt` / `health` resolve this
+  directory's instance, fall back to the single live one with a printed note,
+  and never guess between several.
+- **`open-bridge instances`** — every live instance sharing the data dir: pid,
+  port, workspace, tunnel role, exposure, session and tool counts, with the
+  current directory marked.
+- **`open-bridge logs [--tail N] [--follow] [--clear]`** — the log file was
+  reachable from the extension's terminal, copy and clear commands but not from
+  the standalone CLI.
+- **`open-bridge health`** — listener, workspace, state, tool count, tunnel role,
+  exposure, plus a real round trip through the public URL when one is published,
+  which is the only check that proves a client could connect.
+- **`workspace_root` on `get_bridge_status`** and a 工作区 row in the console
+  status card: with one instance per directory, "which workspace am I talking
+  to" is a real question.
+- **A port that is taken is no longer a dead end.** An explicitly requested
+  `--port` still wins and now fails with the exact alternative command; a port
+  that came from configuration falls back to an ephemeral one with a notice.
+- **`test/multi-instance-integration.test.mjs`** — boots two real instances in
+  two directories against one data dir and asserts the whole story: each reports
+  its own workspace root, route tokens differ, `status` answers for the
+  directory it is typed in, `instances` lists both and marks the current
+  directory, `stop` in A leaves B serving, and a duplicate `serve` in the same
+  directory is refused by name.
+- `paths.workspaceSuffixFor(root)` — the per-workspace key is now derived in one
+  place instead of being re-implemented wherever it was needed.
+
 - The console gained the four surfaces the VS Code panel had and the standalone
   app was missing, each wired to the implementation that already existed:
   - **服务 tab** — the saved services (`save_service` definitions) listed with

@@ -8,8 +8,17 @@ export const root = (): string => workspaceContext.root();
 
 export const currentWorkspaceRoot = (): string => path.resolve(host().projectRoot());
 
-export const workspaceStateSuffix = (): string =>
-  sha256(state.activeWorkspaceRoot || "<no-workspace>").slice(0, 24);
+/**
+ * The per-workspace state key for ANY root.
+ *
+ * Route tokens, runtime records and other per-workspace state are all addressed
+ * by this suffix, so it must be derived the same way everywhere — the CLI needs
+ * it for a directory that has no running Bridge to ask, hence the pure form.
+ */
+export const workspaceSuffixFor = (root: string): string =>
+  sha256(root || "<no-workspace>").slice(0, 24);
+
+export const workspaceStateSuffix = (): string => workspaceSuffixFor(state.activeWorkspaceRoot);
 
 export const unrestricted = (): boolean => workspaceContext.unrestricted();
 export const allowedRoots = (): string[] => workspaceContext.allowedRoots();

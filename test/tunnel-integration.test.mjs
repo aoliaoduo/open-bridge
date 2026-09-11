@@ -21,12 +21,13 @@
  */
 
 import assert from "node:assert/strict";
-import { test, before, after } from "node:test";
-import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {test, before, after} from "node:test";
+import {spawn} from "node:child_process";
+import {mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync} from "node:fs";
+import {tmpdir} from "node:os";
 import path from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
+import {readRuntimeFor, runtimeFileFor} from "./lib/bridge-runtime.mjs";
+import {setTimeout as delay} from "node:timers/promises";
 
 const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 
@@ -67,7 +68,7 @@ async function waitForListener(timeoutMs = 20_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     try {
-      const info = JSON.parse(readFileSync(path.join(home, "runtime.json"), "utf8"));
+      const info = readRuntimeFor(home, fixture);
       if (info.port > 0) {
         port = info.port;
         if ((await fetch(`${base()}/api/status`)).status === 200) return true;
@@ -119,8 +120,8 @@ test("the listener is published to the CLI while the tunnel is still failing", a
   // The tunnel takes seconds to give up (and never resolves when it cannot come
   // up at all), so runtime.json must not wait for start(): it is written the
   // moment the listener binds.
-  assert.ok(existsSync(path.join(home, "runtime.json")), "runtime.json is written before start() resolves");
-  const runtime = JSON.parse(readFileSync(path.join(home, "runtime.json"), "utf8"));
+  assert.ok(existsSync(runtimeFileFor(home, fixture)), "the record is written before start() resolves");
+  const runtime = readRuntimeFor(home, fixture);
   assert.equal(runtime.port, port);
   assert.equal(runtime.pid > 0, true);
 

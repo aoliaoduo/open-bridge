@@ -11,7 +11,7 @@ import { auditLogPath, clientMcpUrl, localMcpUrl, record, state, type LogLevel }
 import type { JsonArgs } from "./json-args.js";
 import { notifyLogging } from "./state.js";
 import type { SessionState } from "./state.js";
-import { root, allowedRoots } from "./paths.js";
+import { root, allowedRoots, currentWorkspaceRoot } from "./paths.js";
 import { persistProgress, loadTodoStore } from "./todo-store.js";
 import { searchActivityLog } from "../mcp/activity-log.js";
 import { shellSpec } from "./processes.js";
@@ -24,6 +24,13 @@ export function getBridgeStatus(): Record<string, unknown> {
   const locks = lockSnapshot();
   return {
     state: state.server ? "running" : "stopped",
+    /**
+     * Which directory this instance serves. Instances are one-per-directory and
+     * share a data dir, so "which workspace am I talking to" is a real question
+     * for anyone juggling two of them — the console shows it, the CLI shows it,
+     * and a client can ask.
+     */
+    workspace_root: currentWorkspaceRoot(),
     local_url: localMcpUrl() || undefined,
     /** Only ever a real published tunnel; absent while the Bridge is local-only. */
     public_url: state.tunnelUrl || undefined,

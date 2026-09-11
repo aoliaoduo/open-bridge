@@ -12,14 +12,14 @@
  */
 
 import assert from "node:assert/strict";
-import { test, before, after } from "node:test";
-import { spawn } from "node:child_process";
+import {test, before, after} from "node:test";
+import {spawn} from "node:child_process";
 import http from "node:http";
-import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {mkdtempSync, rmSync} from "node:fs";
+import {tmpdir} from "node:os";
 import path from "node:path";
-import { createHash } from "node:crypto";
-import { setTimeout as delay } from "node:timers/promises";
+import {routeTokenFor, waitForRuntime} from "./lib/bridge-runtime.mjs";
+import {setTimeout as delay} from "node:timers/promises";
 
 const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 
@@ -30,27 +30,6 @@ let routeToken;
 let serveExit = null;
 let serveOutput = "";
 
-async function waitForRuntime(timeoutMs = 20_000) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const file = path.join(home, "runtime.json");
-    if (existsSync(file)) {
-      try {
-        const info = JSON.parse(readFileSync(file, "utf8"));
-        if (info.port > 0) return info;
-      } catch { /* partial write */ }
-    }
-    await delay(250);
-  }
-  throw new Error("runtime.json never appeared — serve failed to start");
-}
-
-function routeTokenFromSecrets(root) {
-  const suffix = createHash("sha256").update(root).digest("hex").slice(0, 24);
-  const secrets = JSON.parse(readFileSync(path.join(home, "secrets.json"), "utf8"));
-  return secrets[`openBridge.routeToken.${suffix}`];
-}
-
 before(async () => {
   home = mkdtempSync(path.join(tmpdir(), "ob-protocol-"));
   child = spawn(process.execPath, [
@@ -60,10 +39,10 @@ before(async () => {
   child.stdout.on("data", d => { serveOutput += d; });
   child.stderr.on("data", d => { serveOutput += d; });
   child.on("exit", (code, signal) => { serveExit = { code, signal }; });
-  const runtime = await waitForRuntime();
+  const runtime = await waitForRuntime(home, home);
   port = runtime.port;
   for (let i = 0; i < 40 && !routeToken; i += 1) {
-    try { routeToken = routeTokenFromSecrets(home); } catch { await delay(250); }
+    try { routeToken = routeTokenFor(home, home); } catch { await delay(250); }
   }
   assert.ok(routeToken, "route token was persisted");
 });

@@ -13,13 +13,14 @@
  */
 
 import assert from "node:assert/strict";
-import { test, before, after } from "node:test";
-import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {test, before, after} from "node:test";
+import {spawn} from "node:child_process";
+import {mkdtempSync, readFileSync, rmSync} from "node:fs";
+import {tmpdir} from "node:os";
 import path from "node:path";
-import { createHash } from "node:crypto";
-import { setTimeout as delay } from "node:timers/promises";
+import {waitForRuntime} from "./lib/bridge-runtime.mjs";
+import {createHash} from "node:crypto";
+import {setTimeout as delay} from "node:timers/promises";
 
 const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 
@@ -28,28 +29,13 @@ let child;
 let port;
 let routeToken;
 
-async function waitForRuntime(timeoutMs = 20_000) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const file = path.join(home, "runtime.json");
-    if (existsSync(file)) {
-      try {
-        const info = JSON.parse(readFileSync(file, "utf8"));
-        if (info.port > 0) return info;
-      } catch { /* partial write */ }
-    }
-    await delay(250);
-  }
-  throw new Error("runtime.json never appeared — serve failed to start");
-}
-
 before(async () => {
   home = mkdtempSync(path.join(tmpdir(), "ob-teardown-test-"));
   child = spawn(process.execPath, [
     path.join(ROOT, "bin", "open-bridge.js"),
     "serve", "--no-tunnel", "--port", "0", "--root", home, "--home", home,
   ], { stdio: ["ignore", "pipe", "pipe"] });
-  const runtime = await waitForRuntime();
+  const runtime = await waitForRuntime(home, home);
   port = runtime.port;
   const suffix = createHash("sha256").update(home).digest("hex").slice(0, 24);
   for (let i = 0; i < 40 && !routeToken; i += 1) {

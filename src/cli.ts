@@ -2,25 +2,30 @@
  * open-bridge CLI — the standalone host entry.
  *
  * Commands:
- *   serve   start the Bridge (HTTP + MCP + console), stays in the foreground
- *   stop    stop a running instance (via its local shutdown endpoint)
- *   status  show the running instance's state
- *   url     print the active MCP URL
- *   config  list / get / set / path configuration
- *   token   create / list / revoke / delete / rotate auth tokens
- *   doctor  environment diagnostics
+ *   serve     start the Bridge (HTTP + MCP + console), stays in the foreground
+ *   stop      stop a running instance (via its local shutdown endpoint)
+ *   status    show the running instance's state
+ *   url       print the active MCP URL
+ *   instances every live instance sharing this data dir (one per directory)
+ *   logs      read / follow / clear the instance log
+ *   health    live check: listener, tunnel, exposure, tool count
+ *   prompt    the ready-made "connect your AI to me" message
+ *   config    list / get / set / path configuration
+ *   token     create / list / revoke / delete / rotate auth tokens
+ *   doctor    environment diagnostics
  *   version / help
  */
 
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import { request as httpRequest } from "node:http";
+import * as net from "node:net";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import { installNodeHost, resolveDefaultHome } from "./host/node-host.js";
 import { CONFIG_DEFAULTS } from "./bridge/config-defaults.js";
 import { state } from "./bridge/state.js";
-import { currentWorkspaceRoot } from "./bridge/paths.js";
+import { currentWorkspaceRoot, workspaceSuffixFor } from "./bridge/paths.js";
 import { loadServices } from "./bridge/services.js";
 import { loadUsageStats } from "./bridge/usage-store.js";
 import { start, stop, setExtraRouteHandler, setLocalServerReadyHook } from "./bridge/lifecycle.js";
@@ -28,7 +33,6 @@ import { apiRouteHandler, setShutdownHook } from "./server/api-router.js";
 import {
   deleteToken, listTokenViews, mintToken, revokeToken, rotateToken,
 } from "./http/auth.js";
-import { sha256 } from "./workspace/file-version.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
@@ -39,21 +43,28 @@ const HELP = `open-bridge ${VERSION} — standalone MCP bridge for local workspa
 
 用法:
   open-bridge serve [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]
-  open-bridge stop
-  open-bridge status
-  open-bridge url
-  open-bridge prompt
+  open-bridge stop | status | url | instances | health | prompt
+  open-bridge logs [--tail N] [--follow] [--clear]
   open-bridge config [list] [get KEY] [set KEY VALUE] [path]
   open-bridge token create [--label L] [--ttl SEC] | list | revoke ID | delete ID | rotate ID
   open-bridge doctor
   open-bridge version
 
 说明:
-  serve    前台启动 Bridge；控制台地址打印在终端（默认项目根 = 当前目录）
-  stop     通过本机 shutdown 端点停止运行中的实例
-  prompt   打印给 AI 客户端的接入提示词（含 MCP URL，可直接粘贴）
-  config   配置文件位于 ~/.open-bridge/config.json（OPEN_BRIDGE_HOME 可改）
-  token    管理 Bearer 令牌；明文只在 create/rotate 时显示一次
+  serve     前台启动 Bridge；控制台地址打印在终端
+  stop      停止「当前目录」那个实例（没有则按唯一运行中的实例）
+  status    同上，打印状态、项目根、MCP URL 与暴露情况
+  instances 列出共用同一数据目录的所有实例（一个目录一个实例）
+  logs      读取/跟踪/清空日志文件（~/.open-bridge/logs/bridge.log）
+  health    对运行中的实例做一次体检：监听、隧道、暴露、工具数
+  prompt    打印给 AI 客户端的接入提示词（含 MCP URL，可直接粘贴）
+  config    配置文件位于 ~/.open-bridge/config.json（OPEN_BRIDGE_HOME 可改）
+  token     管理 Bearer 令牌；明文只在 create/rotate 时显示一次
+
+工作区 = 当前目录:
+  在 A 目录运行 open-bridge serve，A 就是这次运行的工作区（相对路径的基准）；
+  在 B 目录再跑一次，就是第二个实例，两个实例互不干扰、可同时在线。
+  用 --root DIR 可以覆盖，用 open-bridge instances 看谁在跑。
 `;
 
 type ParsedArgs = { command: string; rest: string[]; flags: Map<string, string | true> };
@@ -87,18 +98,79 @@ function fail(message: string): never {
 
 // --- runtime registry -------------------------------------------------------
 
-function runtimePath(home: string): string {
+function runtimePath(home: string, root: string): string {
+  return path.join(home, `runtime-${workspaceSuffixFor(root)}.json`);
+}
+
+/** The pre-multi-instance record: one file for whichever instance wrote last. */
+function legacyRuntimePath(home: string): string {
   return path.join(home, "runtime.json");
 }
 
 interface RuntimeInfo { pid: number; port: number; root: string; startedAt: string }
 
-function readRuntime(home: string): RuntimeInfo | undefined {
+function readOneRuntime(file: string): RuntimeInfo | undefined {
   try {
-    const raw = JSON.parse(fs.readFileSync(runtimePath(home), "utf8")) as RuntimeInfo;
+    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as RuntimeInfo;
     if (typeof raw.pid === "number" && typeof raw.port === "number") return raw;
   } catch { /* absent or corrupt */ }
   return undefined;
+}
+
+/**
+ * The runtime record for ONE workspace root.
+ *
+ * The record used to be a single shared `runtime.json`, so starting a Bridge in
+ * a second directory overwrote the first record — and then refused to start at
+ * all ("已有实例在运行"), even though two directories are two independent
+ * workspaces. It is now keyed by the same per-root suffix the route token uses,
+ * so each directory has its own instance and its own record. The old file is
+ * still read, and honoured only when it names this root, so an instance started
+ * by an older build keeps being found.
+ */
+function readRuntime(home: string, root: string): RuntimeInfo | undefined {
+  const own = readOneRuntime(runtimePath(home, root));
+  if (own) return own;
+  const legacy = readOneRuntime(legacyRuntimePath(home));
+  if (legacy && legacy.root && path.resolve(legacy.root) === path.resolve(root)) return legacy;
+  return undefined;
+}
+
+/** Every live instance sharing this data dir, newest first. */
+function readAllRuntimes(home: string): RuntimeInfo[] {
+  const files: string[] = [];
+  try {
+    for (const entry of fs.readdirSync(home)) {
+      if (/^runtime(-[0-9a-f]{24})?\.json$/.test(entry)) files.push(path.join(home, entry));
+    }
+  } catch { /* no data dir yet */ }
+  const seen = new Set<string>();
+  const live: RuntimeInfo[] = [];
+  for (const file of files) {
+    const info = readOneRuntime(file);
+    if (!info || !info.root || !pidAlive(info.pid)) continue;
+    const key = path.resolve(info.root);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    live.push(info);
+  }
+  return live.sort((a, b) => String(b.startedAt ?? "").localeCompare(String(a.startedAt ?? "")));
+}
+
+/**
+ * The instance a bare command acts on: this directory's own Bridge when one is
+ * running, otherwise the only live instance on this machine (so `status` typed
+ * in the wrong folder still answers instead of pretending nothing runs) — and
+ * never an arbitrary pick among several, which would act on another workspace.
+ */
+function resolveInstance(home: string, root: string): { runtime?: RuntimeInfo; note?: string; live: RuntimeInfo[] } {
+  const own = readRuntime(home, root);
+  if (own && pidAlive(own.pid)) return { runtime: own, live: readAllRuntimes(home) };
+  const live = readAllRuntimes(home);
+  if (live.length === 1) {
+    return { runtime: live[0], note: `当前目录不是它的项目根（${live[0].root}），按唯一运行中的实例执行。`, live };
+  }
+  return { live };
 }
 
 function pidAlive(pid: number): boolean {
@@ -107,9 +179,8 @@ function pidAlive(pid: number): boolean {
 
 /** Console token for talking to a running instance from a second process. */
 async function consoleTokenFor(home: string, root: string): Promise<string> {
-  const suffix = sha256(root || "<no-workspace>").slice(0, 24);
   const secrets = JSON.parse(await fsp.readFile(path.join(home, "secrets.json"), "utf8")) as Record<string, string>;
-  const token = secrets[`openBridge.routeToken.${suffix}`];
+  const token = secrets[`openBridge.routeToken.${workspaceSuffixFor(root)}`];
   if (!token) throw new Error("找不到该实例的路由令牌（secrets.json 无记录）。");
   return token;
 }
@@ -164,7 +235,9 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   const noTunnel = parsed.flags.has("no-tunnel");
   const openConsole = parsed.flags.has("open");
 
-  const port = portFlag === undefined ? undefined : Number(portFlag);
+  // `let`: a configured (non-explicit) port that is already taken is replaced
+  // by an ephemeral one below, which the config facade picked up a few lines on.
+  let port = portFlag === undefined ? undefined : Number(portFlag);
   if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) {
     fail(`--port 必须是 0-65535 的整数，收到: ${String(portFlag)}`);
   }
@@ -182,9 +255,22 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
     return innerGet(key, fallback);
   };
 
-  const existing = readRuntime(nodeHost.storageDir());
+  const existing = readRuntime(nodeHost.storageDir(), projectRoot);
   if (existing && pidAlive(existing.pid)) {
-    fail(`已有实例在运行 (pid ${existing.pid}, 端口 ${existing.port})。先 open-bridge stop。`);
+    fail(`该目录已有实例在运行 (pid ${existing.pid}, 端口 ${existing.port})。先 open-bridge stop，或换一个目录/端口再用。`);
+  }
+
+  // Instances share one config file, so the configured port may belong to the
+  // instance that is already up in another directory. An explicit --port still
+  // wins: someone who asked for 18080 may have a bookmark or firewall rule on
+  // it, so we say what is wrong instead of quietly serving somewhere else.
+  const desiredPort = nodeHost.config.get<number>("port", 0);
+  if (desiredPort > 0 && !(await portAvailable(desiredPort))) {
+    if (port !== undefined) {
+      fail(`端口 ${desiredPort} 已被占用（可能是另一个实例）。改用其他端口：open-bridge serve --port ${desiredPort + 1}；open-bridge instances 可查看谁在跑。`);
+    }
+    console.log(`[open-bridge] 配置端口 ${desiredPort} 已被占用，本次改用系统分配的端口。`);
+    port = 0;
   }
 
   // Boot the core the same way the extension's activate() did.
@@ -199,7 +285,12 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
     shuttingDown = true;
     console.log(`\n[open-bridge] ${signal} received, stopping...`);
     try { await stop(); } catch { /* best-effort */ }
-    await fsp.rm(runtimePath(nodeHost.storageDir()), { force: true }).catch(() => undefined);
+    await fsp.rm(runtimePath(nodeHost.storageDir(), projectRoot), { force: true }).catch(() => undefined);
+    // An instance started by an older build writes the legacy file too.
+    const legacy = readOneRuntime(legacyRuntimePath(nodeHost.storageDir()));
+    if (legacy && legacy.pid === process.pid) {
+      await fsp.rm(legacyRuntimePath(nodeHost.storageDir()), { force: true }).catch(() => undefined);
+    }
     process.exit(0);
   };
   setShutdownHook(() => shutdown("shutdown request"));
@@ -215,7 +306,7 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   // while a tunnel is failing it never resolves at all — during which
   // `open-bridge status` reported nothing running while the console was serving.
   // The write is synchronous so a `status` that races the bind cannot miss it.
-  const runtimeFile = runtimePath(nodeHost.storageDir());
+  const runtimeFile = runtimePath(nodeHost.storageDir(), projectRoot);
   const startedAt = new Date().toISOString();
   const publishRuntime = (): void => {
     try {
@@ -269,12 +360,29 @@ function resolveHome(parsed: ParsedArgs): string {
   return home ? path.resolve(home) : resolveDefaultHome();
 }
 
+/** Can we bind this port on loopback right now? */
+async function portAvailable(port: number): Promise<boolean> {
+  return await new Promise<boolean>(resolve => {
+    const probe = net.createServer();
+    probe.once("error", () => resolve(false));
+    probe.once("listening", () => probe.close(() => resolve(true)));
+    probe.listen(port, "127.0.0.1");
+  });
+}
+
+/** The workspace root a bare command means: the directory it was typed in. */
+function cwdRoot(): string {
+  return path.resolve(process.cwd());
+}
+
 async function cmdStop(parsed: ParsedArgs): Promise<void> {
   const home = resolveHome(parsed);
-  const runtime = readRuntime(home);
+  const root = cwdRoot();
+  const { runtime, note } = resolveInstance(home, root);
+  if (note) console.log(`注: ${note}`);
   if (!runtime || !pidAlive(runtime.pid)) {
     console.log("没有正在运行的实例。");
-    await fsp.rm(runtimePath(home), { force: true }).catch(() => undefined);
+    await fsp.rm(runtimePath(home, root), { force: true }).catch(() => undefined);
     return;
   }
   try {
@@ -290,9 +398,11 @@ async function cmdStop(parsed: ParsedArgs): Promise<void> {
 
 async function cmdStatus(parsed: ParsedArgs): Promise<void> {
   const home = resolveHome(parsed);
-  const runtime = readRuntime(home);
+  const { runtime, note, live } = resolveInstance(home, cwdRoot());
+  if (note) console.log(`注: ${note}`);
   if (!runtime || !pidAlive(runtime.pid)) {
     console.log("状态: 未运行");
+    if (live.length > 1) console.log(`（本机还有 ${live.length} 个其他目录的实例，用 open-bridge instances 查看）`);
     return;
   }
   const res = await httpJson(runtime.port, "/api/status", { token: await consoleTokenOrUndefined(home, runtime.root) });
@@ -311,7 +421,8 @@ async function cmdStatus(parsed: ParsedArgs): Promise<void> {
 
 async function cmdUrl(parsed: ParsedArgs): Promise<void> {
   const home = resolveHome(parsed);
-  const runtime = readRuntime(home);
+  const { runtime, note } = resolveInstance(home, cwdRoot());
+  if (note) console.log(`注: ${note}`);
   if (!runtime || !pidAlive(runtime.pid)) fail("没有正在运行的实例。");
   const res = await httpJson(runtime!.port, "/api/status", { token: await consoleTokenOrUndefined(home, runtime.root) });
   if (res.status !== 200) fail(`status 请求失败: HTTP ${res.status}`);
@@ -333,7 +444,8 @@ async function cmdUrl(parsed: ParsedArgs): Promise<void> {
  */
 async function cmdPrompt(parsed: ParsedArgs): Promise<void> {
   const home = resolveHome(parsed);
-  const runtime = readRuntime(home);
+  const { runtime, note } = resolveInstance(home, cwdRoot());
+  if (note) console.log(`注: ${note}`);
   if (!runtime || !pidAlive(runtime.pid)) fail("没有正在运行的实例。先 open-bridge serve。");
   const res = await httpJson(runtime.port, "/api/prompt", {
     token: await consoleTokenOrUndefined(home, runtime.root),
@@ -342,6 +454,134 @@ async function cmdPrompt(parsed: ParsedArgs): Promise<void> {
   const body = res.body as { prompt?: string; error?: string };
   if (!body.prompt) fail(body.error ?? "实例在运行，但暂时没有可用的提示词。");
   console.log(body.prompt);
+}
+
+// --- instances / logs / health ----------------------------------------------
+
+/**
+ * Every live instance sharing this data dir.
+ *
+ * The standalone app supports one Bridge per directory, and they share one data
+ * dir (config, tokens, peer registry) — so the only honest answer to "what is
+ * running?" is a list, not a single record.
+ */
+async function cmdInstances(parsed: ParsedArgs): Promise<void> {
+  const home = resolveHome(parsed);
+  const live = readAllRuntimes(home);
+  if (live.length === 0) {
+    console.log("没有正在运行的实例。");
+    return;
+  }
+  const here = cwdRoot();
+  console.log(`${live.length} 个实例正在运行（数据目录 ${home}）：`);
+  for (const info of live) {
+    let extra = "";
+    try {
+      const res = await httpJson(info.port, "/api/status", { token: await consoleTokenOrUndefined(home, info.root) });
+      if (res.status === 200) {
+        const s = (res.body as { status: Record<string, unknown> }).status;
+        extra = ` · ${String(s.tunnel_role ?? "none")} · ${String(s.exposure ?? "?")} · 会话 ${String(s.active_sessions ?? "?")} · 工具 ${String(s.tool_count ?? "?")}`;
+      }
+    } catch {
+      extra = " · (状态不可读)";
+    }
+    const isHere = path.resolve(info.root) === here;
+    console.log(`  pid ${info.pid}  端口 ${info.port}  ${info.root}${extra}${isHere ? "  ← 当前目录" : ""}`);
+  }
+}
+
+/**
+ * The instance log.
+ *
+ * The VS Code extension could show its log in a terminal, copy it, and clear
+ * it; the standalone app had a log file nobody could reach from the terminal.
+ */
+async function cmdLogs(parsed: ParsedArgs): Promise<void> {
+  const home = resolveHome(parsed);
+  const file = path.join(home, "logs", "bridge.log");
+  if (parsed.flags.has("clear")) {
+    try {
+      fs.writeFileSync(file, "");
+      console.log(`已清空日志: ${file}`);
+    } catch (error) {
+      fail(`清空失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return;
+  }
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    console.log(`还没有日志: ${file}`);
+    return;
+  }
+  const lines = text.split(/\r?\n/).filter(line => line.length > 0);
+  const tailFlag = parsed.flags.get("tail");
+  const wanted = typeof tailFlag === "string" ? Number(tailFlag) : 200;
+  const count = parsed.flags.has("follow") ? 60 : (Number.isFinite(wanted) ? Math.max(1, Math.min(5000, wanted)) : 200);
+  const shown = lines.slice(-count);
+  console.log(`# ${file}（共 ${lines.length} 行，显示最后 ${shown.length} 行）`);
+  if (shown.length > 0) console.log(shown.join("\n"));
+  if (!parsed.flags.has("follow")) return;
+  console.log("-- 跟踪中，Ctrl+C 退出 --");
+  let size = fs.statSync(file).size;
+  const timer = setInterval(() => {
+    try {
+      const stat = fs.statSync(file);
+      if (stat.size < size) size = 0; // the file was cleared or rotated
+      if (stat.size === size) return;
+      const stream = fs.createReadStream(file, { start: size, end: stat.size - 1 });
+      let chunk = "";
+      stream.on("data", data => { chunk += String(data); });
+      stream.on("end", () => { size = stat.size; process.stdout.write(chunk); });
+    } catch { /* file gone; keep waiting for it to come back */ }
+  }, 1000);
+  await new Promise<void>(resolve => { process.on("SIGINT", () => { clearInterval(timer); resolve(); }); });
+}
+
+/**
+ * One-shot health report for a running instance: listener, tunnel, exposure,
+ * tool count, and — when a tunnel is published — a real round trip through the
+ * public URL, which is the only check that proves a client could connect.
+ */
+async function cmdHealth(parsed: ParsedArgs): Promise<void> {
+  const home = resolveHome(parsed);
+  const { runtime, note } = resolveInstance(home, cwdRoot());
+  if (note) console.log(`注: ${note}`);
+  if (!runtime || !pidAlive(runtime.pid)) fail("没有正在运行的实例。先 open-bridge serve。");
+  const token = await consoleTokenOrUndefined(home, runtime.root);
+  const res = await httpJson(runtime.port, "/api/status", { token });
+  if (res.status !== 200) fail(`status 请求失败: HTTP ${res.status}`);
+  const status = (res.body as { status: Record<string, unknown> }).status;
+  const lines: string[] = [];
+  const check = (name: string, ok: boolean, detail: string): void => {
+    lines.push(`  [${ok ? "OK" : "!!"}] ${name}: ${detail}`);
+  };
+  check("instance", true, `pid ${runtime.pid}, 端口 ${runtime.port}`);
+  check("workspace", true, String(status.workspace_root ?? runtime.root));
+  check("state", status.state === "running", String(status.state));
+  check("tools", Number(status.tool_count ?? 0) > 0, `${String(status.tool_count ?? 0)} 个工具（${String(status.tool_profile ?? "?")}）`);
+  const publicUrl = typeof status.public_url === "string" ? status.public_url : "";
+  check("tunnel", true, publicUrl ? `${String(status.tunnel_role ?? "?")} — ${publicUrl}` : "未开启（仅本机可用）");
+  if (publicUrl && token) {
+    const origin = new URL(publicUrl).origin;
+    const started = Date.now();
+    try {
+      const probe = await fetch(`${origin}/healthz/${token}`, {
+        headers: { "ngrok-skip-browser-warning": "true" },
+        signal: AbortSignal.timeout(8000),
+      });
+      check("public reachability", probe.ok, `HTTP ${probe.status} in ${Date.now() - started} ms（公网真的能连上）`);
+    } catch (error) {
+      check("public reachability", false, `探测失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const exposure = String(status.exposure ?? "local");
+  check("exposure", exposure !== "public-open", exposure === "public-open"
+    ? "公网可达且未开启鉴权：拿到 URL 的人都能读写文件、执行命令（令牌页可开启 Bearer）"
+    : exposure);
+  console.log(`open-bridge health (v${VERSION})`);
+  console.log(lines.join("\n"));
 }
 
 // --- config -----------------------------------------------------------------
@@ -480,8 +720,10 @@ async function cmdDoctor(parsed: ParsedArgs): Promise<void> {
   const domain = nodeHost.config.get("ngrokDomain", "");
   check("ngrok domain", true, domain || "未配置（serve 时隧道需要，可先 --no-tunnel 本地用）");
   check("config file", true, nodeHost.configPath());
-  const runtime = readRuntime(home);
-  check("instance", true, runtime && pidAlive(runtime.pid) ? `运行中 (pid ${runtime.pid}, 端口 ${runtime.port})` : "未运行");
+  const live = readAllRuntimes(home);
+  check("instance", true, live.length === 0
+    ? "未运行"
+    : `${live.length} 个实例：${live.map(info => `pid ${info.pid} @ ${info.root}`).join("；")}`);
 
   console.log(`open-bridge doctor (v${VERSION})`);
   console.log(lines.join("\n"));
@@ -496,6 +738,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     case "stop": return cmdStop(parsed);
     case "status": return cmdStatus(parsed);
     case "url": return cmdUrl(parsed);
+    case "instances": case "list": return cmdInstances(parsed);
+    case "logs": return cmdLogs(parsed);
+    case "health": return cmdHealth(parsed);
     case "prompt": return cmdPrompt(parsed);
     case "config": return cmdConfig(parsed);
     case "token": return cmdToken(parsed);

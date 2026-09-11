@@ -4,164 +4,193 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](package.json)
 
-在本机安全暴露工作区能力的独立 MCP 桥接：**一个 Node 进程，一个端口，同时提供 MCP 端点和 Web 控制台**。
+把本机的文件、命令、进程和服务，变成一个标准的 MCP 端点，交给 ChatGPT 网页版 / Claude / Cursor 这类 AI 客户端直接调用。
 
-源自 VS Code 扩展 Open Bridge（0.5.17 终版）的独立化演进——核心服务器、工具集、并发锁与鉴权模型原样继承，宿主从 VS Code 换成本机 CLI + 浏览器控制台。
+**一个 Node 进程，一个端口，同时提供 MCP 端点和网页控制台。**
+
+源自 VS Code 扩展 Open Bridge（0.5.17 终版）的独立化演进：核心服务器、工具集、并发锁与鉴权模型原样继承，宿主从 VS Code 换成本机 CLI + 浏览器控制台。
 
 ```
 ChatGPT 网页对话 / Claude / Cursor / 任意 MCP 客户端
-        │  （经你掌控的 ngrok 隧道或局域网）
+        │  （经你掌控的 ngrok 隧道，或只在局域网/本机）
         ▼
   open-bridge serve  ── /mcp/<路由令牌>   Streamable HTTP MCP（54 个工具）
         │            ── /console/         Web 控制台（仅本机回环可访问）
         │            ── /api/*            控制台后端（回环 + 令牌头双门控）
         ▼
-  你的项目工作区（文件、命令、进程、服务编排）
+  你所在目录的那个工作区（文件、命令、进程、服务编排）
 ```
 
-## 运行
+---
 
-要求 Node.js ≥ 22（Node 20 已于 2026-03 结束维护，不再作为支持基线）。
-
-### 从源码运行（现在就能用）
+## 30 秒上手
 
 ```bash
-git clone https://github.com/aoliaoduo/open-bridge-app.git
-cd open-bridge-app
-npm ci
-npm run build
-
-npm start
+npm install -g .        # 在仓库目录里执行一次；之后任意目录都能用 open-bridge
+cd 你的项目目录
+open-bridge serve --open          # 或 --no-tunnel 只在本机用
 ```
 
-**控制台地址：<http://127.0.0.1:18080/console/>** —— `npm start` 固定用 18080 端口并自动打开浏览器（等价于 `node bin/open-bridge.js serve --port 18080 --open`）。
+终端会打印三个地址，浏览器会自动打开控制台：
 
-`npm start` 会尝试公网发布：域名被本机另一个实例（例如 VS Code 扩展）占用且它愿意转发时，就**借用那条隧道**（`tunnel_role` = `follower`）；域名空着时自己起 ngrok（`owner`）。两种情况控制台拿到的都是真实的公网 MCP URL，细节见下方「公网隧道」。只想纯本机运行就用 `npm run start:local`（即 `--no-tunnel`）。
+```
+  Web 控制台:   http://127.0.0.1:18080/console/
+  本地 MCP URL: http://127.0.0.1:18080/mcp/<路由令牌>
+  公网 MCP URL: https://<你的域名>/mcp/<路由令牌>      ← 配了 ngrok 才有
 
-要桥接的不是本仓库时，在**你的项目目录**里运行并指定工作区根：
+  接入 AI 客户端：open-bridge prompt  →  复制提示词，粘贴给客户端即可
+```
+
+把 **MCP URL** 填进客户端（或在客户端支持时直接把 `open-bridge prompt` 的输出粘过去），就通了。Ctrl+C 停止。
+
+---
+
+## 工作区 = 你所在的目录
+
+这是独立版最省心的一点：**`open-bridge serve` 的工作区就是它被启动时的那个目录**，不用配置文件、不用下拉菜单。
 
 ```bash
-cd your-project
-node <open-bridge-app>/bin/open-bridge.js serve --root . --port 18080 --open --no-tunnel
+cd C:\work\项目A
+open-bridge serve --port 18080        # 这个实例服务「项目A」
+
+cd C:\work\项目B
+open-bridge serve                     # 另一个实例，服务「项目B」，互不干扰
 ```
 
-`serve` 是**前台运行**，Ctrl+C 停止。想在后台跑就另开一个终端：`node bin/open-bridge.js stop`。
+- 两个实例可以**同时在线**，各有各的端口、路由令牌和运行记录；相对路径（`read_file("src/index.ts")`）永远以自己那个目录为基准。
+- 一条命令看谁在跑：`open-bridge instances` —— 列出每个实例的 pid、端口、工作区，以及当前目录是哪一个。
+- `stop` / `status` / `url` / `prompt` / `health` **默认作用于当前目录的那个实例**；当前目录没有实例、而整机只有唯一一个在跑时，会用它并在输出里注明；有多个而当前目录没有时，会提示你用 `instances` 挑清楚，绝不乱猜。
+- 想覆盖默认行为用 `--root DIR`；换数据目录用 `--home DIR`。
 
-### 全局安装
+> **端口**：不传 `--port` 时默认 `0`（每次启动随机分配一个空闲端口，地址会变）。想固定地址就显式指定 `--port 18080`。显式指定的端口被占用时会直接报错并给出替代命令；**配置里**的端口被占用时，会自动改用空闲端口并打印提示。同一个目录重复启动会被拒绝，并明确告诉你是哪个 pid 占着。
 
-npm 上还没有发布（`npm install -g open-bridge` 暂时会 404）。想现在就装成全局命令，在仓库目录里：
-
-```bash
-npm install -g .        # 装的是当前源码，之后任意目录可用 open-bridge
-cd your-project
-open-bridge serve --port 18080 --open --no-tunnel
-```
-
-发布后会变成常规写法：
-
-```bash
-npm install -g open-bridge
-open-bridge serve --no-tunnel        # 纯本地
-open-bridge serve                    # 走 ngrok 隧道（需先配置域名）
-```
-
-### 启动后你会看到
-
-```
-  Web 控制台:  http://127.0.0.1:18080/console/        ← 浏览器打开这个
-  本地 MCP URL: http://127.0.0.1:18080/mcp/<路由令牌>   ← 填进 MCP 客户端
-  公网 MCP URL: （未开启隧道，仅本机可用）
-
-  接入 AI 客户端：open-bridge prompt  →  复制提示词并粘贴给客户端
-```
-
-**端口**：不传 `--port` 时默认 0（每次启动随机分配一个空闲端口），地址会变。要固定地址就显式指定，推荐 `--port 18080`。
-
-### 公网隧道
-
-只有要让 ChatGPT 网页版这类外部客户端连进来，才需要 ngrok：
-
-```bash
-open-bridge config set ngrokDomain <你预留的域名>.ngrok-free.dev
-open-bridge serve --port 18080 --open      # 注意：不带 --no-tunnel
-```
-
-- 免费 ngrok 账号只分配一个子域，**同一域名同时只能被一个实例占用**。旧的 VS Code 扩展实例正在用时**不必先停它**：本机实例注册表（`bridge-peers.json`）本来就是跨实例共享的 —— 持有隧道的实例按令牌摘要查表并转发到对应实例。应用会把自己的那一行登记进**已存在**的注册表（自己的，加上编辑器 `globalStorage/open-bridge.open-bridge/` 下的；不会在别人的目录里凭空建文件），于是公网请求经那条隧道转发到应用，`tunnel_role` 显示 `follower`，控制台同时提示该地址依赖那个实例；持有方退出后，应用会在下一轮探测里自己接管域名（变成 `owner`）。需要额外路径时用 `sharedPeerRegistry` 指定。
-- **不开隧道就不会被公网看到**：`--no-tunnel`（或没配域名）时应用只登记自己的注册表，不会出现在持有隧道实例的注册表里，`public_url` 为空、控制台显示「仅本机可访问」。
-- 必须填你账号分配到的那个域名；随便编一个会得到 `ERR_NGROK_313`（并且当前实现会一直重试同一域名）。
-
-**MCP URL 本身就是凭证**（路由令牌即鉴权），把它填进 MCP 客户端即可。可选开启 Bearer 鉴权做第二道闸（控制台「令牌」页签发，明文只显示一次）。
+---
 
 ## 命令一览
 
 | 命令 | 作用 |
 | --- | --- |
-| `open-bridge serve [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]` | 前台启动 Bridge |
-| `open-bridge stop` | 停止运行中的实例 |
-| `open-bridge status` | 查看实例状态 |
+| `open-bridge serve [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]` | 前台启动 Bridge（工作区 = 当前目录） |
+| `open-bridge instances` | 列出共用同一数据目录的所有实例（别名 `list`） |
+| `open-bridge status` | 状态、工作区、MCP URL、暴露情况 |
+| `open-bridge health` | 体检：监听、工作区、隧道角色、暴露等级、工具数，并真连一次公网 |
 | `open-bridge url` | 打印当前 MCP URL |
 | `open-bridge prompt` | 打印「快速连接这个 MCP」接入提示词，直接粘给 AI 客户端 |
+| `open-bridge logs [--tail N] [--follow] [--clear]` | 读 / 跟踪 / 清空日志 |
+| `open-bridge stop` | 停止当前目录的实例 |
 | `open-bridge config list / get KEY / set KEY VALUE / path` | 读写配置 |
 | `open-bridge token create / list / revoke / delete / rotate` | 管理 Bearer 令牌 |
-| `open-bridge doctor` | 环境诊断 |
+| `open-bridge doctor` | 环境诊断（含所有运行中实例） |
+| `open-bridge version / help` | 版本与帮助 |
+
+---
 
 ## Web 控制台
 
 浏览器打开 `http://127.0.0.1:18080/console/`（端口随 `--port`）：
 
-- **状态**：MCP URL 复制、启动/停止/轮换端点、实时会话与锁
+- **状态**：工作区、MCP URL 复制、启动/停止/轮换端点、实时会话与锁；公网可达且未开鉴权时会显示显式告警
 - **设置**：隧道域名、端口、Shell、文件访问白名单、工具集、并发锁——与 MCP `get_config` / `set_config_value` 共用一套校验
-- **令牌**：创建/轮换/吊销/删除/清理，两步确认防误触，新令牌明文只在签发时显示一次
+- **令牌**：创建/轮换/吊销/删除/清理，两步确认防误触，明文只在签发时显示一次
 - **日志**：实时日志流（SSE），完整审计在数据目录 `audit.log`
 - **统计**：调用计数、按工具分布、最近活动
+- **服务**：保存/启动/停止/重启本机服务定义
 
-安全边界（与扩展时代同一姿态，适配 HTTP 后更严）：
+### 安全边界（默认好用，需要时更严）
 
-- `/api` 与 `/console` **只响应回环 Host**（`127.0.0.1`/`localhost`）——经 ngrok 公网域名访问一律 403，公网只暴露 `/mcp`
-- 所有写操作要求 `X-Open-Bridge-Console` 头匹配路由令牌（页面由服务端注入；跨站页面既读不到也发不出，CSRF 无解）
-- Bearer 鉴权默认关闭；开启后失败关闭（无有效令牌时全拒），操作员本机可随时在控制台关掉
+- `/api` 与 `/console` **只响应回环 Host**（`127.0.0.1` / `localhost`）——经 ngrok 公网域名访问一律 403，公网只暴露 `/mcp`
+- 所有写操作要求 `X-Open-Bridge-Console` 头匹配路由令牌（页面由服务端注入；跨站页面既读不到也发不出）
+- **Bearer 鉴权默认关闭**，因为「只填 URL」的客户端（如 ChatGPT 连接器）带不了自定义头，一开就全断。要开的话在控制台「令牌」页签发令牌后打开开关：无有效令牌时**失败关闭**（全拒），本机控制台随时能关掉，不会被自己锁死在门外
+- **公网可达 = 拿到 URL 的人就能读写你的文件、执行命令**。应用不会偷偷限制你的权限，但会到处把这件事说出来：`status`、控制台、`health`、启动时的终端提示。想收紧就用令牌页开 Bearer，或直接 `--no-tunnel` 只在本机用
+
+---
+
+## 公网隧道（ngrok）
+
+只想本机/局域网用 → 加 `--no-tunnel`，完事，不需要 ngrok。
+
+要让 ChatGPT 网页版这类外部客户端连进来：
+
+```bash
+open-bridge config set ngrokDomain <你预留的域名>.ngrok-free.dev
+open-bridge serve --open          # 注意：不带 --no-tunnel
+```
+
+- 免费 ngrok 账号只分配一个子域，**同一域名同时只能被一个实例占用**。旧的 VS Code 扩展实例正占着也不必先停它：本机实例注册表（`bridge-peers.json`）是跨实例共享的——持有隧道的实例按令牌摘要查表并转发到对应实例。应用会把自己的那一行登记进**已存在**的注册表（不会在别人目录里凭空建文件），于是公网请求经那条隧道转发到应用，`tunnel_role` 显示 `follower`，控制台会注明这条地址依赖那个实例；持有方退出后，应用在下一轮探测里自己接管域名（变成 `owner`）。需要额外路径时用 `sharedPeerRegistry`。
+- 抢域名这件事很谨慎：**只有 ngrok 明确回答"这个域名没人在用"时才认领**，超时/5xx 一律按"不知道"处理并继续观察。万一撞上 `ERR_NGROK_334`（域名已被别人占用），实例会老老实实只在本机服务，并持续观察那条隧道，一旦发现自己能被正常转发就自动切回 `follower`——不会把自己卡死，也不会起第二个 ngrok 去打架。
+- 配置里没填域名、或域名写错 → 只会得到 `ERR_NGROK_313` 之类的明确报错，本地服务不受影响。
+
+---
 
 ## 数据目录
 
 默认 `~/.open-bridge`（`OPEN_BRIDGE_HOME` 或 `--home` 可改）：
 
 ```
-config.json     配置（config-defaults.ts 为 schema 单一事实源）
-state.json      持久状态（服务定义 / 待办 / 用量计数）
-secrets.json    路由令牌 + 哈希令牌记录（chmod 600，明文永不落盘）
-audit.log       追加式审计日志（1 MiB 轮转）
-logs/           Bridge 与服务日志
-runtime.json    运行实例注册（pid / 端口，供 stop/status 使用）
+config.json              配置（config-defaults.ts 是 schema 单一事实源）
+state.json               持久状态（服务定义 / 待办 / 用量计数）
+secrets.json             路由令牌 + 哈希令牌记录（明文永不落盘）
+audit.log                追加式审计日志（1 MiB 轮转）
+logs/bridge.log          Bridge 与服务日志（open-bridge logs 读它）
+runtime-<后缀>.json      每个工作区一份运行记录（pid / 端口 / 根目录）
+bridge-peers.json        本机实例注册表（多实例共享隧道用）
 ```
 
-## ngrok 隧道
+多个实例共享同一个数据目录：**配置、令牌、注册表是全局的**，**运行记录、路由令牌是按工作区分开的**（后缀 = 工作区路径的哈希前 24 位）。
 
-1. 在 [ngrok 控制台](https://dashboard.ngrok.com/domains)预留一个免费域名
-2. `open-bridge config set ngrokDomain example.ngrok-free.dev`（或控制台「设置」页）
-3. `open-bridge serve` —— 隧道意外退出会自动重连（本地服务器与 MCP 会话保持存活，只重连隧道）
+> 从旧版本升级：旧的单一 `runtime.json` 仍会被读取——只有当它记录的根目录正是你要找的那个时才采用，避免把 A 目录的实例误当成 B 的。
 
-本机多实例共享隧道域名时自动形成 owner/follower 协调（peers 注册表），与扩展行为一致。
+---
 
-## 从 VS Code 扩展迁移
+## 常见问题
 
-扩展 0.5.17 已封存为终版。独立版差异：
+**端口被占用？**
+`open-bridge instances` 看是不是已经有一个实例在跑；换端口 `--port 18081`，或先 `open-bridge stop`。
 
-- 配置从 VS Code settings 迁到 `~/.open-bridge/config.json`（键名完全一致）
-- 「工作区」概念变为 `serve` 时的 `--root`（默认当前目录）
-- 编辑器专属工具（`lsp`、`get_diagnostics`）不在独立版提供——它们依赖语言服务器，`tools/list` 会自动过滤（直接调用会得到明确的降级提示，而不是"未知工具"）
-- 工具定义共 56 个，与扩展逐字节一致；独立版对外暴露其中 54 个（文件/发现/补丁/进程/服务编排/网络探测/批处理/待办/统计）
-- 内置 ripgrep 解析按平台自适应：Windows 用 `vendor/rg.exe`，其他平台找 `vendor/rg`，都没有就回退 PATH 上的 `rg`，最后回退内置扫描器——**功能不受影响**，只是大仓库搜索会慢一些
+**公网地址打不开？**
+`open-bridge health` 会真连一次公网并报 HTTP 状态与耗时。`tunnel_role: follower` 表示这条地址借用自另一个实例——那个实例退出后地址会变，应用会在能接管时接管。
+
+**MCP 客户端报传输层错误（SSL EOF / 连接被重置 / 超时）？**
+免费 ngrok 隧道偶尔会抖一下，等 5 秒重试一次即可；接入提示词里已经写了这句，客户端不需要额外配置。
+
+**担心公网裸奔？**
+`status` / `health` / 控制台都会明确告诉你当前暴露等级（`local` / `public-open` / `public-authed`）。要收紧就在控制台令牌页签发令牌并打开 Bearer 开关；不想暴露就直接 `--no-tunnel`。
+
+**要不要装 VS Code 扩展？**
+不需要。扩展 0.5.17 已封存为终版，独立版是主力。
+
+---
 
 ## 开发
 
 ```bash
 npm install
 npm run build        # tsc（core + CLI）+ vite（React 控制台）
-npm test             # 单元测试 + API 集成测试
+npm run verify       # typecheck + lint + build + 全部测试（单元 / 集成 / UI）
 npm run dev -- serve --no-tunnel   # tsx 免编译直接跑
 ```
 
+测试分层：`test/*.test.ts` 是单元测试；`test/*-integration.test.mjs` 会**真的启动 `bin/open-bridge.js` 并走 HTTP**（外壳、鉴权闸门、MCP 协议、多实例），其中鉴权闸门与协议不变量两份套件是从扩展时代移植过来的——它们当初是用真实事故换来的断言。
+
 架构：`src/bridge|http|mcp|network|process|shell|workspace` 是零宿主依赖的核心；`src/host/` 是宿主抽象（Host 接口 + 文件版实现）；`src/server/` 是 API/控制台；`src/cli.ts` 是入口。任何宿主（Tauri 壳、甚至回归 VS Code 壳）只需实现一次 Host 接口。
+
+---
+
+## 与 VS Code 扩展的关系
+
+独立版**在能力上继承扩展**（配置键名一一对应，工具定义逐字节一致：扩展 56 个定义，独立版对外暴露 54 个），并去掉只在编辑器里有意义的壳（webview HTML、命令面板、`autoStart` 等），把宿主换成 CLI + 浏览器控制台。
+
+已经**强于扩展**的地方：
+
+- 多实例：一个目录一个实例、共享一条隧道；扩展受限于"一个窗口一个 Bridge"
+- 稳定性：重连链可取消（不再无限重试）、拆除时序有防 ECONNRESET 处理、域名认领绝不靠猜
+- 可运维：`instances` / `logs` / `health` / `doctor`，以及 HTTP API 与 6 页签控制台
+
+刻意**不做**的三件事：
+
+- **运行时切换工作区**（扩展的 `switchWorkspace`）：改成"第二个目录 = 第二个实例"，比在跑着的实例里换根更干净
+- **把进程输出镜像进真实终端**（扩展的 `visible=true`）：独立进程弹系统窗口太打扰；输出一律走 `read_process_output` 按需读
+- **编辑器专属工具**（`lsp`、`get_diagnostics`）：依赖语言服务器，独立版没有就不假装有，`tools/list` 会自动过滤，直接调用会得到明确的降级说明
 
 ## License
 
