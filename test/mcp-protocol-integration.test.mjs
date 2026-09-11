@@ -264,3 +264,40 @@ test("the session table reports the handshake time and a cumulative call count",
   assert.equal(row.calls, 3, "the tool counts its own call too");
   assert.match(row.connected_at, /^\d{4}-\d\d-\d\dT/);
 });
+
+test("closing a session needs an unambiguous id; an ambiguous prefix closes nothing", async () => {
+  // Session ids are random, so the collision is produced rather than assumed:
+  // handshake until two ids share a first character, then ask the API to close
+  // by that one character. The old route took the first startsWith hit in
+  // insertion order — which may not be the session the operator meant.
+  const ids = [];
+  let pair = null;
+  for (let attempt = 0; attempt < 40 && !pair; attempt += 1) {
+    const { sessionId } = await openSession();
+    if (!sessionId) continue;
+    pair = ids.find(id => id[0] === sessionId[0]) ?? null;
+    ids.push(sessionId);
+    if (pair) pair = [pair, sessionId];
+  }
+  assert.ok(pair, `no two of ${ids.length} sessions shared a first character`);
+
+  const close = async id => {
+    const res = await rawRequest("POST", "/api/sessions/close", JSON.stringify({ id }),
+      { "content-type": "application/json", "x-open-bridge-console": routeToken });
+    return { status: res.status, body: res.body };
+  };
+
+  const ambiguous = await close(pair[0][0]);
+  assert.equal(ambiguous.status, 400, ambiguous.body);
+  assert.match(ambiguous.body, /前缀不唯一|prefix/);
+
+  const listed = JSON.parse((await rawRequest("GET", "/api/sessions", null, {})).body).sessions.map(row => row.id);
+  assert.ok(listed.includes(pair[0]) && listed.includes(pair[1]), "neither session was touched");
+
+  const exact = await close(pair[0]);
+  assert.equal(exact.status, 200, exact.body);
+  assert.equal(JSON.parse(exact.body).closed, pair[0], "the exact id closes exactly the session asked for");
+  const after = JSON.parse((await rawRequest("GET", "/api/sessions", null, {})).body).sessions.map(row => row.id);
+  assert.equal(after.includes(pair[0]), false, "the intended session is gone");
+  assert.ok(after.includes(pair[1]), "the other one is still connected");
+});

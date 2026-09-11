@@ -301,14 +301,20 @@ export async function apiRouteHandler(
         case "/sessions/close": {
           // "Who is connected" is only useful with a way to act on it: an
           // operator who sees a session they do not recognise must be able to
-          // close it from the same page. Accepts an id or an unambiguous prefix,
-          // because the console shows a shortened id.
+          // close it from the same page. Accepts an id or a prefix, but ONLY an
+          // unambiguous one: the console shows a shortened id, and a short
+          // prefix that matched several sessions used to close whichever came
+          // first in insertion order — not necessarily the intended one.
           const body = await readBody(req) as { id?: unknown } | undefined;
           const wanted = String(body?.id ?? "");
           if (!wanted) { json(res, 400, { ok: false, error: "id is required." }); return true; }
-          const match = [...state.sessions.entries()].find(([id]) => id === wanted || id.startsWith(wanted));
-          if (!match) { json(res, 404, { ok: false, error: "会话不存在（可能已经自己断开）。" }); return true; }
-          const [closedId, session] = match;
+          const matches = [...state.sessions.entries()].filter(([id]) => id === wanted || id.startsWith(wanted));
+          if (matches.length === 0) { json(res, 404, { ok: false, error: "会话不存在（可能已经自己断开）。" }); return true; }
+          if (matches.length > 1) {
+            json(res, 400, { ok: false, error: `id 前缀不唯一（匹配到 ${matches.length} 个会话），请使用更长的前缀。` });
+            return true;
+          }
+          const [closedId, session] = matches[0]!;
           state.sessions.delete(closedId);
           void session.transport.close();
           json(res, 200, { ok: true, closed: closedId, sessions: sessionViews() });

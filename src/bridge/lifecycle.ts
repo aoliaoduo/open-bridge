@@ -1020,10 +1020,17 @@ async function startTunnelInternal(generation: number): Promise<void> {
   }
   const configuredDomain = host().config.get<string>("ngrokDomain", "");
   if (!configuredDomain?.trim()) {
-    throw new Error(
-      "未配置隧道域名：请在控制台「设置」页填写 ngrokDomain，或运行 "
-      + "open-bridge config set ngrokDomain <你的域名>。",
-    );
+    // A plain `serve` with no domain configured never asked for a tunnel, so
+    // this is a state, not a failure: stay local-only and say so once. The old
+    // throw landed in startInternal's catch as "Tunnel failed; local Bridge
+    // stays up" — an ERROR line in the activity log and the audit trail on
+    // EVERY out-of-box start, burying real failures under a message the
+    // operator had done nothing to earn. The Start-retry branch in
+    // startInternal (tunnelRole "none", no reconnect armed) still picks the
+    // tunnel up the moment a domain is saved.
+    state.tunnelRole = "none";
+    record("bridge", "progress", "未配置隧道域名：仅本机可用。要开公网隧道，在控制台「设置」页填写 ngrokDomain，或运行 open-bridge config set ngrokDomain <你的域名>。");
+    return;
   }
   const domain = validateNgrokDomain(configuredDomain);
   if ((await probePublicBridge(domain, state.routeToken)) !== "free") {
