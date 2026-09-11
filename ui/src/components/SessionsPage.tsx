@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type LockSnapshot, type SessionView } from "../api";
 import { ConfirmButton } from "./ConfirmButton";
 
@@ -38,14 +38,20 @@ export function SessionsPage() {
   const [sessions, setSessions] = useState<SessionView[] | null>(null);
   const [locks, setLocks] = useState<LockSnapshot>({ held: [], waiting: [] });
   const [note, setNote] = useState("");
+  const [closingId, setClosingId] = useState("");
+  // Stale-response guard: a slow poll that lands after a newer one (or after
+  // an action) used to overwrite fresh state with expired data.
+  const pollSeq = useRef(0);
 
   const refresh = useCallback(async () => {
+    const mine = ++pollSeq.current;
     try {
       const snapshot = await api.sessions();
+      if (pollSeq.current !== mine) return;
       setSessions(snapshot.sessions);
       setLocks(snapshot.locks);
     } catch (error) {
-      setNote(error instanceof Error ? error.message : String(error));
+      if (pollSeq.current === mine) setNote(error instanceof Error ? error.message : String(error));
     }
   }, []);
 
@@ -56,6 +62,8 @@ export function SessionsPage() {
   }, [refresh]);
 
   const close = async (id: string) => {
+    if (closingId) return;
+    setClosingId(id);
     setNote(`正在断开 ${id.slice(0, 8)}…`);
     try {
       await api.closeSession(id);
@@ -63,6 +71,8 @@ export function SessionsPage() {
       await refresh();
     } catch (error) {
       setNote(error instanceof Error ? error.message : String(error));
+    } finally {
+      setClosingId("");
     }
   };
 
@@ -110,7 +120,7 @@ export function SessionsPage() {
                   <td>{session.active_requests > 0 ? `${session.active_requests} 个请求` : "—"}</td>
                   <td>{session.todos > 0 ? `${session.todos} 项` : "—"}</td>
                   <td>
-                    <ConfirmButton label="断开" onConfirm={() => void close(session.id)} />
+                    <ConfirmButton label="断开" disabled={closingId === session.id} onConfirm={() => void close(session.id)} />
                   </td>
                 </tr>
               ))}
@@ -140,8 +150,11 @@ export function SessionsPage() {
               </tr>
             </thead>
             <tbody>
-              {lockRows.map(row => (
-                <tr key={`${row.kind}-${row.key}`}>
+              {/* Key includes the index: two waiters can legally queue on the
+                  same resource (that is the whole point of the table), and a
+                  kind+key key collided between them. */}
+              {lockRows.map((row, index) => (
+                <tr key={`${row.kind}-${row.key}-${index}`}>
                   <td>{row.kind === "持有" ? <span className="pill ok">持有</span> : <span className="pill dead">等待</span>}</td>
                   <td className="mono" title={row.key || undefined}>{row.key || "—"}</td>
                   <td>{row.mode || "—"}</td>

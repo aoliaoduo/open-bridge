@@ -19,6 +19,16 @@ export function LogsTab() {
         setLines(prev => [...prev.slice(-800), line]);
       } catch { /* malformed frame */ }
     };
+    // Surface disconnects: while the Bridge restarts, EventSource retries
+    // silently and the page just looked frozen — the operator had no way to
+    // know the quiet stretch was missing lines rather than a quiet log.
+    source.onopen = () => {
+      setNote((prev: string) => (prev.startsWith("连接已断开") ? "" : prev));
+    };
+    source.onerror = () => {
+      if (pausedRef.current) return;
+      setNote("连接已断开，自动重连中……断线期间的日志行会缺失，完整审计在数据目录 audit.log。");
+    };
     return () => source.close();
   }, []);
 

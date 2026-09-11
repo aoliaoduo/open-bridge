@@ -20,12 +20,19 @@ export function TokensTab({ settings, act }: Props) {
   const [showForm, setShowForm] = useState(false);
   const [label, setLabel] = useState("");
   const [ttl, setTtl] = useState(settings.defaultTtlSeconds);
+  const [creating, setCreating] = useState(false);
 
   const create = async () => {
-    const result = await act({ command: "createToken", label, ttlSeconds: ttl });
-    if (result?.ok) {
-      setShowForm(false);
-      setLabel("");
+    if (creating) return;
+    setCreating(true);
+    try {
+      const result = await act({ command: "createToken", label, ttlSeconds: ttl });
+      if (result?.ok) {
+        setShowForm(false);
+        setLabel("");
+      }
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -80,7 +87,12 @@ export function TokensTab({ settings, act }: Props) {
                 <option key={choice.seconds} value={choice.seconds}>{choice.label}</option>
               ))}
             </select>
-            <button className="primary small" onClick={() => void create()}>创建</button>
+            {/* Disabled while in flight: a double click minted two tokens and
+                the one-time plaintext of the first was overwritten — an
+                unauthenticated-forever token nobody could ever use. */}
+            <button className="primary small" disabled={creating} onClick={() => void create()}>
+              {creating ? "创建中…" : "创建"}
+            </button>
           </div>
         )}
 

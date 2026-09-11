@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, copyText, type BridgeStatus, type SettingsActionResult, type SettingsState } from "../api";
 
 interface Props {
@@ -11,18 +11,21 @@ export function StatusTab({ act, onRefresh }: Props) {
   const [status, setStatus] = useState<BridgeStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [health, setHealth] = useState<{ ok: boolean; info: string; lines: string[] } | null>(null);
+  // Expired-response guard: a poll that started before an action and finished
+  // after it used to overwrite the fresher state with stale data.
+  const pollSeq = useRef(0);
 
   useEffect(() => {
-    let cancelled = false;
     const poll = async () => {
+      const mine = ++pollSeq.current;
       try {
         const next = await api.status();
-        if (!cancelled) setStatus(next);
+        if (pollSeq.current === mine) setStatus(next);
       } catch { /* server may be mid-restart */ }
     };
     void poll();
     const timer = setInterval(() => void poll(), 2000);
-    return () => { cancelled = true; clearInterval(timer); };
+    return () => clearInterval(timer);
   }, []);
 
   const running = status?.state === "running";
@@ -36,6 +39,10 @@ export function StatusTab({ act, onRefresh }: Props) {
     try {
       await fn();
       await onRefresh();
+      // Bump past any poll already in flight so its stale answer cannot land
+      // after this fresh one.
+      const mine = pollSeq.current + 1;
+      pollSeq.current = mine;
       setStatus(await api.status());
     } catch { /* the settings action already toasted */ }
     setBusy(false);

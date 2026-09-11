@@ -402,3 +402,52 @@ describe("App shell", () => {
     expect(screen.queryByText("ob_secret_value")).toBeNull();
   });
 });
+
+test("the directory whitelist is a textarea: every line survives editing", async () => {
+  // HTML value sanitization strips newlines from <input type="text">, so the
+  // list silently collapsed into one bogus path the moment an operator edited
+  // and blurred it. Two directories must come back as two.
+  window.history.pushState({}, "", "/console/settings");
+  mocks.settings.mockResolvedValue(settingsState({
+    config: {
+      ...settingsState().config,
+      unrestrictedFileAccess: false,
+      allowedDirectories: ["C:\\work\\one", "C:\\work\\two"],
+    },
+  }));
+
+  const { container } = render(<App />);
+  await screen.findByText("每行一个绝对目录；失焦时保存");
+  const area = container.querySelector("textarea") as HTMLTextAreaElement;
+  expect(area).toBeTruthy();
+  expect(area.value).toBe("C:\\work\\one\nC:\\work\\two");
+
+  fireEvent.change(area, { target: { value: "C:\\work\\one\nC:\\work\\three" } });
+  fireEvent.blur(area);
+
+  expect(mocks.settingsAction).toHaveBeenCalledWith({
+    command: "setConfig",
+    key: "allowedDirectories",
+    value: ["C:\\work\\one", "C:\\work\\three"],
+  });
+});
+
+test("a number outside the server's bounds is refused with a toast, not saved", async () => {
+  // The field used to keep whatever was typed while the config held something
+  // else — the operator only found out on the next reload.
+  window.history.pushState({}, "", "/console/settings");
+  const { container } = render(<App />);
+  await screen.findByText("单文件上限");
+  const inputs = [...container.querySelectorAll("input[type=number]")] as HTMLInputElement[];
+  const health = inputs.find(input => input.value === "20000");
+  expect(health).toBeTruthy();
+
+  fireEvent.change(health!, { target: { value: "42" } });
+  fireEvent.blur(health!);
+
+  expect(mocks.settingsAction).not.toHaveBeenCalledWith(
+    expect.objectContaining({ command: "setConfig", key: "publicHealthTimeoutMs" }),
+  );
+  expect(await screen.findByText(/公网健康检查 需要整数 3000–120000/)).toBeTruthy();
+  expect((health as HTMLInputElement).value).toBe("20000");
+});

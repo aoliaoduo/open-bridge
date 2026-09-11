@@ -105,8 +105,13 @@ export interface HealthReport { checks: HealthCheck[]; exposure: string }
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(path);
-  if (!res.ok) throw new Error(`GET ${path} → HTTP ${res.status}`);
-  return res.json() as Promise<T>;
+  // Mirror postJson: a non-JSON body (an empty reply from a mid-restart
+  // server, a proxy page) must not surface as a raw SyntaxError with the HTTP
+  // status lost.
+  const data = (await res.json().catch(() => undefined)) as (T & { error?: string }) | undefined;
+  if (!res.ok) throw new Error(data?.error ?? `GET ${path} → HTTP ${res.status}`);
+  if (data === undefined) throw new Error(`GET ${path} → 响应不是有效 JSON (HTTP ${res.status})`);
+  return data;
 }
 
 async function postJson<T>(path: string, body?: unknown): Promise<T> {

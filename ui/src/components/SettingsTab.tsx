@@ -1,40 +1,87 @@
 import { useEffect, useState } from "react";
-import type { SettingsState } from "../api";
+import type { SettingsActionResult, SettingsState } from "../api";
 
 interface Props {
   settings: SettingsState | null;
   act: (action: Record<string, unknown>) => Promise<unknown>;
+  /** Invalid-input feedback: shows a toast instead of failing silently. */
+  notify?: (text: string, isError?: boolean) => void;
 }
+
+/** Bounds mirror the server's CONFIG_SPEC (src/bridge/settings-model.ts) so a
+ *  value the UI accepts never comes back as an inscrutable 400. */
+const NUMBER_BOUNDS = {
+  port: { min: 0, max: 65_535, label: "本地端口" },
+  publicHealthTimeoutMs: { min: 3_000, max: 120_000, label: "公网健康检查" },
+  holdTimeoutMs: { min: 0, max: 3_600_000, label: "占用上限" },
+  waitTimeoutMs: { min: 0, max: 3_600_000, label: "等待上限" },
+  logMaxBytes: { min: 0, max: 1_073_741_824, label: "单文件上限" },
+} as const;
 
 /**
  * One draft field: edits stay local until blur (or Enter). The previous
  * version called setConfig on EVERY keystroke — each one a config.json write,
  * and intermediate values (a half-typed port, a health timeout below its
  * minimum) fired error toasts on every key.
+ *
+ * Number fields validate on commit against the server's bounds: an invalid
+ * value is REVERTED to the saved one with a toast, never silently kept — the
+ * old behaviour left the input showing a value the config did not hold, and
+ * the operator only found out on the next reload.
  */
 function DraftField({
   value,
   onCommit,
+  onInvalid,
   type = "text",
   min,
   max,
   step,
   placeholder,
+  multiline = false,
 }: {
   value: string;
   onCommit: (raw: string) => void;
+  onInvalid?: () => void;
   type?: "text" | "number";
   min?: number;
   max?: number;
   step?: number;
   placeholder?: string;
+  /** Render a <textarea>: HTML inputs strip newlines from their value, which
+   *  silently merged the allowedDirectories list into one bogus path. */
+  multiline?: boolean;
 }) {
   const [draft, setDraft] = useState(value);
   // Follow authoritative changes while the operator is not editing.
   useEffect(() => { setDraft(value); }, [value]);
   const commit = (): void => {
-    if (draft !== value) onCommit(draft);
+    if (draft === value) return;
+    if (type === "number") {
+      const n = Number(draft.trim());
+      const bad = draft.trim() === ""
+        || !Number.isInteger(n)
+        || (min !== undefined && n < min)
+        || (max !== undefined && n > max);
+      if (bad) {
+        onInvalid?.();
+        setDraft(value);
+        return;
+      }
+    }
+    onCommit(draft);
   };
+  if (multiline) {
+    return (
+      <textarea
+        rows={4}
+        value={draft}
+        placeholder={placeholder}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+      />
+    );
+  }
   return (
     <input
       type={type}
@@ -50,7 +97,7 @@ function DraftField({
   );
 }
 
-export function SettingsTab({ settings, act }: Props) {
+export function SettingsTab({ settings, act, notify }: Props) {
   const [domain, setDomain] = useState<string | null>(null);
 
   if (!settings) return <div className="card">加载中…</div>;
@@ -58,6 +105,21 @@ export function SettingsTab({ settings, act }: Props) {
   const domainValue = domain ?? settings.configuredDomain;
 
   const setConfig = (key: string, value: unknown) => { void act({ command: "setConfig", key, value }); };
+
+  /**
+   * Commit a number the DraftField has already validated against NUMBER_BOUNDS
+   * (it reverts and reports the rejection itself, via `invalidFor`). Re-checking
+   * here would be a second copy of the same rule that can only ever agree.
+   */
+  const commitNumber = (key: keyof typeof NUMBER_BOUNDS, raw: string): void => {
+    setConfig(key, Number(raw.trim()));
+  };
+
+  /** Rejection feedback for a DraftField; the revert is DraftField's own job. */
+  const invalidFor = (key: keyof typeof NUMBER_BOUNDS) => (): void => {
+    const { label, min, max } = NUMBER_BOUNDS[key];
+    notify?.(`${label} 需要整数 ${min}–${max}，已还原为保存的值。`, true);
+  };
 
   return (
     <>
@@ -81,7 +143,14 @@ export function SettingsTab({ settings, act }: Props) {
           <button
             className="small"
             disabled={domain === null}
-            onClick={() => { void act({ command: "saveDomain", domain: domainValue }).then(() => setDomain(null)); }}
+            onClick={() => {
+              // Reset the draft only on success: a rejected domain (bad
+              // format) used to wipe the operator's typing along with the
+              // toast, making them retype it from scratch.
+              void act({ command: "saveDomain", domain: domainValue }).then(result => {
+                if ((result as SettingsActionResult | null)?.ok) setDomain(null);
+              });
+            }}
           >
             保存域名
           </button>
@@ -111,13 +180,11 @@ export function SettingsTab({ settings, act }: Props) {
           <span className="label">本地端口</span>
           <DraftField
             type="number"
-            min={0}
-            max={65535}
+            min={NUMBER_BOUNDS.port.min}
+            max={NUMBER_BOUNDS.port.max}
             value={String(cfg.port)}
-            onCommit={raw => {
-              const n = Number(raw.trim());
-              if (raw.trim() !== "" && Number.isInteger(n) && n >= 0 && n <= 65535) setConfig("port", n);
-            }}
+            onCommit={raw => commitNumber("port", raw)}
+            onInvalid={invalidFor("port")}
           />
           <span className="section-note" style={{ margin: 0 }}>0 = 自动选择空闲端口（重启 Bridge 生效）；失焦时保存</span>
         </div>
@@ -125,14 +192,12 @@ export function SettingsTab({ settings, act }: Props) {
           <span className="label">公网健康检查</span>
           <DraftField
             type="number"
-            min={3000}
-            max={120000}
+            min={NUMBER_BOUNDS.publicHealthTimeoutMs.min}
+            max={NUMBER_BOUNDS.publicHealthTimeoutMs.max}
             step={1000}
             value={String(cfg.publicHealthTimeoutMs)}
-            onCommit={raw => {
-              const n = Number(raw.trim());
-              if (Number.isInteger(n) && n >= 3000 && n <= 120000) setConfig("publicHealthTimeoutMs", n);
-            }}
+            onCommit={raw => commitNumber("publicHealthTimeoutMs", raw)}
+            onInvalid={invalidFor("publicHealthTimeoutMs")}
           />
           <span className="section-note" style={{ margin: 0 }}>毫秒（3000-120000）；失焦时保存</span>
         </div>
@@ -147,12 +212,17 @@ export function SettingsTab({ settings, act }: Props) {
           </label>
         </div>
         {!cfg.unrestrictedFileAccess && (
-          <div className="row">
+          <div className="row" style={{ flexDirection: "column", alignItems: "stretch" }}>
+            {/* A textarea, not an input: HTML value sanitization strips \n from
+                text inputs, so the list silently merged into one bogus path
+                the moment the operator edited and blurred the field. */}
             <DraftField
+              multiline
               value={cfg.allowedDirectories.join("\n")}
               placeholder={"每行一个绝对目录，如\nC:\\projects\\shared"}
-              onCommit={raw => setConfig("allowedDirectories", raw.split("\n").map(s => s.trim()).filter(Boolean))}
+              onCommit={raw => setConfig("allowedDirectories", raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean))}
             />
+            <span className="section-note">每行一个绝对目录；失焦时保存</span>
           </div>
         )}
       </div>
@@ -207,14 +277,16 @@ export function SettingsTab({ settings, act }: Props) {
               <span className="label">占用上限</span>
               <DraftField
                 type="number"
-                min={0}
+                min={NUMBER_BOUNDS.holdTimeoutMs.min}
+                max={NUMBER_BOUNDS.holdTimeoutMs.max}
                 value={String(settings.concurrency.holdTimeoutMs)}
-                onCommit={raw => {
-                  const n = Number(raw.trim());
-                  if (Number.isInteger(n) && n >= 0) {
-                    void act({ command: "setConcurrency", enabled: true, holdTimeoutMs: n, waitTimeoutMs: settings.concurrency.waitTimeoutMs });
-                  }
-                }}
+                onCommit={raw => void act({
+                  command: "setConcurrency",
+                  enabled: true,
+                  holdTimeoutMs: Number(raw.trim()),
+                  waitTimeoutMs: settings.concurrency.waitTimeoutMs,
+                })}
+                onInvalid={invalidFor("holdTimeoutMs")}
               />
               <span className="section-note" style={{ margin: 0 }}>毫秒，0 = 不限；失焦时保存</span>
             </div>
@@ -222,14 +294,16 @@ export function SettingsTab({ settings, act }: Props) {
               <span className="label">等待上限</span>
               <DraftField
                 type="number"
-                min={0}
+                min={NUMBER_BOUNDS.waitTimeoutMs.min}
+                max={NUMBER_BOUNDS.waitTimeoutMs.max}
                 value={String(settings.concurrency.waitTimeoutMs)}
-                onCommit={raw => {
-                  const n = Number(raw.trim());
-                  if (Number.isInteger(n) && n >= 0) {
-                    void act({ command: "setConcurrency", enabled: true, holdTimeoutMs: settings.concurrency.holdTimeoutMs, waitTimeoutMs: n });
-                  }
-                }}
+                onCommit={raw => void act({
+                  command: "setConcurrency",
+                  enabled: true,
+                  holdTimeoutMs: settings.concurrency.holdTimeoutMs,
+                  waitTimeoutMs: Number(raw.trim()),
+                })}
+                onInvalid={invalidFor("waitTimeoutMs")}
               />
               <span className="section-note" style={{ margin: 0 }}>毫秒，0 = 无限等待；失焦时保存</span>
             </div>
@@ -248,12 +322,11 @@ export function SettingsTab({ settings, act }: Props) {
           <span className="label">单文件上限</span>
           <DraftField
             type="number"
-            min={0}
+            min={NUMBER_BOUNDS.logMaxBytes.min}
+            max={NUMBER_BOUNDS.logMaxBytes.max}
             value={String(cfg.logMaxBytes)}
-            onCommit={raw => {
-              const n = Number(raw.trim());
-              if (Number.isInteger(n) && n >= 0) setConfig("logMaxBytes", n);
-            }}
+            onCommit={raw => commitNumber("logMaxBytes", raw)}
+            onInvalid={invalidFor("logMaxBytes")}
           />
           <span className="section-note" style={{ margin: 0 }}>字节（默认 10485760 = 10 MiB，0 = 不轮转）；失焦时保存</span>
         </div>

@@ -147,7 +147,7 @@ export function App() {
         {route === "tokens" && (
           <SettingsStateGuard settings={settings}><TokensTab settings={settings!} act={act} /></SettingsStateGuard>
         )}
-        {route === "settings" && <SettingsTab settings={settings} act={act} />}
+        {route === "settings" && <SettingsTab settings={settings} act={act} notify={showToast} />}
       </div>
 
       {/* Persistent node on purpose: toggling .show on the same element is

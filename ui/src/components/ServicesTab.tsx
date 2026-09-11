@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type ServiceView } from "../api";
 
 /**
@@ -13,12 +13,18 @@ export function ServicesTab() {
   const [services, setServices] = useState<ServiceView[] | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState("");
+  // Expired-response guard. Without it a poll that left BEFORE an action and
+  // landed AFTER it resurrected the old running badge over the action's fresh
+  // answer (a stopped service looked running until the next tick).
+  const pollSeq = useRef(0);
 
   const refresh = useCallback(async () => {
+    const mine = ++pollSeq.current;
     try {
-      setServices(await api.services());
+      const list = await api.services();
+      if (pollSeq.current === mine) setServices(list);
     } catch (error) {
-      setNote(error instanceof Error ? error.message : String(error));
+      if (pollSeq.current === mine) setNote(error instanceof Error ? error.message : String(error));
     }
   }, []);
 
@@ -32,6 +38,9 @@ export function ServicesTab() {
     setBusy(name);
     try {
       const result = await api.serviceAction(action, name);
+      // Invalidate any poll still in flight before applying the action's own
+      // (fresher) answer.
+      pollSeq.current += 1;
       setServices(result.services);
       setNote(`${name}：${action === "start" ? "已启动" : action === "stop" ? "已停止" : "已重启"}`);
     } catch (error) {

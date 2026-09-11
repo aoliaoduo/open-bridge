@@ -15,16 +15,18 @@ export function StatsTab() {
   const [note, setNote] = useState("");
 
   useEffect(() => {
-    let cancelled = false;
+    // Expired-response guard: drop a slow poll that landed after a newer one.
+    let seq = 0;
     const poll = async () => {
+      const mine = ++seq;
       try {
         const [u, a] = await Promise.all([api.usage(), api.activity()]);
-        if (!cancelled) { setUsage(u); setActivity(a); }
+        if (seq === mine) { setUsage(u); setActivity(a); }
       } catch { /* transient */ }
     };
     void poll();
     const timer = setInterval(() => void poll(), 3000);
-    return () => { cancelled = true; clearInterval(timer); };
+    return () => clearInterval(timer);
   }, []);
 
   const clearStats = async () => {

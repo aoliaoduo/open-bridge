@@ -129,6 +129,7 @@ export function HealthPage(
               <div className="row">
                 <ConfirmButton
                   className="primary"
+                  disabled={arming}
                   label={arming ? "开启中…" : "开启第二道锁"}
                   onConfirm={() => void arm()}
                 />
