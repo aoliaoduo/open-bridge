@@ -71,29 +71,79 @@ function coerce<T>(raw: unknown, fallback: T): T {
   }
 }
 
-class FileConfig {
-  private readonly file: string;
-  private data: Record<string, unknown>;
+/**
+ * A JSON object store shared by every Bridge instance on this machine.
+ *
+ * One data dir is common to all instances, so a snapshot taken in the
+ * constructor is not enough: another instance's keys must become visible without
+ * a restart, and a write must never publish a map that predates theirs — that is
+ * exactly how a second instance used to drop the first one's route token.
+ *
+ * Reads reload when the file changed under us; writes re-read, merge, then write
+ * to a temp file and rename, so a reader (the CLI reads these files directly)
+ * never observes a half-written file.
+ */
+class SharedJsonStore {
+  protected data: Record<string, unknown> = {};
   private writeTail: Promise<void> = Promise.resolve();
+  private loadedMtimeMs = 0;
 
+  constructor(protected readonly file: string) {
+    this.data = readJsonSync(file);
+    this.loadedMtimeMs = this.mtimeMs();
+  }
+
+  private mtimeMs(): number {
+    try { return fs.statSync(this.file).mtimeMs; } catch { return 0; }
+  }
+
+  /** Pick up another instance's writes; the disk wins per key. */
+  protected reload(): void {
+    const seen = this.mtimeMs();
+    if (seen === 0 || seen <= this.loadedMtimeMs) return;
+    const fresh = readJsonSync(this.file);
+    if (fresh && typeof fresh === "object") this.data = { ...this.data, ...fresh };
+    this.loadedMtimeMs = seen;
+  }
+
+  protected async write(key: string, value: unknown): Promise<void> {
+    this.reload();
+    this.data[key] = value;
+    this.writeTail = this.writeTail
+      .then(async () => {
+        // Merge once more at write time: the gap between the reload above and
+        // this write is where a concurrent instance's key would otherwise be lost.
+        const onDisk = readJsonSync(this.file);
+        const merged = {
+          ...(onDisk && typeof onDisk === "object" ? onDisk : {}),
+          ...this.data,
+          [key]: value,
+        };
+        const temp = `${this.file}.${process.pid}.tmp`;
+        await fsp.writeFile(temp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
+        await fsp.rename(temp, this.file);
+        this.data = merged;
+        this.loadedMtimeMs = this.mtimeMs();
+      })
+      .catch(() => undefined);
+    await this.writeTail;
+  }
+}
+
+class FileConfig extends SharedJsonStore {
   constructor(home: string) {
-    this.file = path.join(home, "config.json");
-    this.data = readJsonSync(this.file);
+    super(path.join(home, "config.json"));
   }
 
   get<T>(key: string, fallback: T): T {
+    this.reload();
     const declared = (CONFIG_DEFAULTS as Record<string, unknown>)[key];
     const base = declared === undefined ? fallback : coerce(declared, fallback);
     return coerce(this.data[key], base);
   }
 
   async update(key: string, value: unknown): Promise<void> {
-    this.data[key] = value;
-    const snapshot = { ...this.data };
-    this.writeTail = this.writeTail
-      .then(() => fsp.writeFile(this.file, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8"))
-      .catch(() => undefined);
-    await this.writeTail;
+    await this.write(key, value);
   }
 
   /** All effective values (config page rendering). */
@@ -110,39 +160,25 @@ class FileConfig {
   }
 }
 
-class FileStateStore {
-  private readonly file: string;
-  private data: Record<string, unknown>;
-  private writeTail: Promise<void> = Promise.resolve();
-
+class FileStateStore extends SharedJsonStore {
   constructor(home: string) {
-    this.file = path.join(home, "state.json");
-    this.data = readJsonSync(this.file);
+    super(path.join(home, "state.json"));
   }
 
   get<T>(key: string, fallback: T): T {
+    this.reload();
     const raw = this.data[key];
     return raw === undefined || raw === null ? fallback : (raw as T);
   }
 
   async update(key: string, value: unknown): Promise<void> {
-    this.data[key] = value;
-    const snapshot = { ...this.data };
-    this.writeTail = this.writeTail
-      .then(() => fsp.writeFile(this.file, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8"))
-      .catch(() => undefined);
-    await this.writeTail;
+    await this.write(key, value);
   }
 }
 
-class FileSecretStore {
-  private readonly file: string;
-  private data: Record<string, string>;
-  private writeTail: Promise<void> = Promise.resolve();
-
+class FileSecretStore extends SharedJsonStore {
   constructor(home: string) {
-    this.file = path.join(home, "secrets.json");
-    this.data = readJsonSync(this.file) as Record<string, string>;
+    super(path.join(home, "secrets.json"));
     this.restrictPermissions();
   }
 
@@ -152,19 +188,14 @@ class FileSecretStore {
   }
 
   async get(key: string): Promise<string | undefined> {
-    return this.data[key];
+    this.reload();
+    const value = this.data[key];
+    return typeof value === "string" ? value : undefined;
   }
 
   async store(key: string, value: string): Promise<void> {
-    this.data[key] = value;
-    const snapshot = { ...this.data };
-    this.writeTail = this.writeTail
-      .then(async () => {
-        await fsp.writeFile(this.file, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
-        this.restrictPermissions();
-      })
-      .catch(() => undefined);
-    await this.writeTail;
+    await this.write(key, value);
+    this.restrictPermissions();
   }
 }
 

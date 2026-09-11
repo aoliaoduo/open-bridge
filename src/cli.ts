@@ -385,15 +385,27 @@ async function cmdStop(parsed: ParsedArgs): Promise<void> {
     await fsp.rm(runtimePath(home, root), { force: true }).catch(() => undefined);
     return;
   }
-  try {
-    const token = await consoleTokenFor(home, runtime.root);
-    const res = await httpJson(runtime.port, "/api/shutdown", { method: "POST", token });
-    if (res.status !== 200) throw new Error(`shutdown 返回 ${res.status}`);
-    console.log("已发送停止指令。");
-  } catch (error) {
-    console.error(`停止失败 (${error instanceof Error ? error.message : String(error)})，尝试直接终止进程。`);
-    try { process.kill(runtime.pid); console.log("进程已终止。"); } catch { fail("进程终止失败。"); }
+  let shutdownError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const token = await consoleTokenFor(home, runtime.root);
+      const res = await httpJson(runtime.port, "/api/shutdown", { method: "POST", token });
+      if (res.status !== 200) throw new Error(`shutdown 返回 ${res.status}`);
+      console.log("已发送停止指令。");
+      return;
+    } catch (error) {
+      shutdownError = error;
+      await new Promise(resolve => setTimeout(resolve, 400));
+      // The endpoint answers and then closes the listener, so a reset socket can
+      // race the reply. If the process is gone, the stop worked.
+      if (!pidAlive(runtime.pid)) {
+        console.log("已停止（响应在途时连接被关闭，但实例确实退出了）。");
+        return;
+      }
+    }
   }
+  console.error(`停止失败 (${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)})，尝试直接终止进程。`);
+  try { process.kill(runtime.pid); console.log("进程已终止。"); } catch { fail("进程终止失败。"); }
 }
 
 async function cmdStatus(parsed: ParsedArgs): Promise<void> {

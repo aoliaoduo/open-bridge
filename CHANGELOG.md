@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A second instance no longer drops the first one's route token.** `secrets.json`
+  (and, by the same construction, `config.json` and `state.json`) was read once in
+  the constructor and written back whole, so two instances sharing the data dir
+  each published a snapshot taken before the other's key existed — the last writer
+  won and one Bridge's token vanished. All three now share one store
+  implementation that re-reads when the file changes and merges immediately
+  before writing, atomically (temp file + rename) so a direct reader such as the
+  CLI never sees a half-written file. Found by the new multi-instance suite on
+  Linux CI, where the timing differs from Windows.
+- **`open-bridge stop` no longer reports failure when the instance really did
+  stop.** The shutdown endpoint answers and then closes the listener, so a reset
+  socket can race the reply: the CLI now retries once, treats "the process is
+  gone" as success, and only falls back to killing the process when it is still
+  alive.
+
 ### Added
 - **One Bridge per directory, and the CLI knows which is which.** `open-bridge
   serve` has always used the current directory as its workspace root, but the
