@@ -85,8 +85,12 @@ test("a stop typed from inside the instance is refused, and the instance lives o
 });
 
 test("--force still stops it: the way out is real, not decorative", async () => {
+  // The CLI's own stdout is not the evidence: the instance it just asked to stop
+  // takes its own process tree down with it, and on ubuntu/node 22 that child was
+  // killed before it could flush (exit code null, empty output). The outcome is
+  // what this test is about.
   const text = await callToolText("run_command", { command: stopCommand("--force"), timeout_ms: 30_000 });
-  assert.match(text, /已发送停止指令|已停止/, "the forced stop went through");
+  assert.doesNotMatch(text, /拒绝停止/, "the guard must not fire on --force");
   const runtimeRecords = () => readdirSync(home).filter(name => name.startsWith("runtime-"));
   for (let i = 0; i < 40 && await mcpAnswers(); i += 1) await delay(250);
   assert.equal(await mcpAnswers(), false, "the forced stop took the instance down");
