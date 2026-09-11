@@ -129,6 +129,27 @@ test("settings action with the console token works", async () => {
   assert.equal(body.state.usableCount, 1);
 });
 
+test("console assets resolve from every page path, and a missing asset 404s", async () => {
+  // Two defects the page paths exposed. The bundle used to be referenced
+  // relatively ("./assets/..."), which resolves to /console/sessions/assets/...
+  // from /console/sessions/ — the SPA fallback then answered that with HTML and
+  // the page came up blank. And the fallback answered *any* missing path under
+  // /console/, so a lost asset failed as a MIME error instead of a plain 404.
+  const page = await fetch(`${base()}/console/sessions/`);
+  assert.equal(page.status, 200);
+  const html = await page.text();
+  const asset = /(?:src|href)="(\/console\/assets\/[^"]+)"/.exec(html)?.[1];
+  assert.ok(asset, `console html references an absolute asset: ${html.slice(0, 200)}`);
+
+  const bundle = await fetch(`${base()}${asset}`);
+  assert.equal(bundle.status, 200);
+  assert.match(bundle.headers.get("content-type") ?? "", /javascript/);
+
+  const missing = await fetch(`${base()}/console/assets/does-not-exist.js`);
+  assert.equal(missing.status, 404);
+  assert.match(missing.headers.get("content-type") ?? "", /application\/json/);
+});
+
 test("the panel endpoints answer for the console pages", async () => {
   // 会话 / 工具 / 体检 read these three routes. The shapes asserted here are the
   // ones ui/src/api.ts parses, so a rename on the server shows up as a failure

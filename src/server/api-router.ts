@@ -171,7 +171,13 @@ const MIME: Record<string, string> = {
 };
 
 async function serveConsole(res: ServerResponse, url: URL): Promise<void> {
-  let rel = decodeURIComponent(url.pathname).replace(/^\/console\/?/, "");
+  const requested = decodeURIComponent(url.pathname).replace(/^\/console\/?/, "");
+  // A request that looks like a file (assets/*.js, *.css, ...) must never be
+  // answered with the HTML shell: the browser asked for a script and would get
+  // markup with a text/html content type, which fails quietly. Only page paths
+  // get the fallback.
+  const fileLike = !requested.endsWith("/") && path.extname(requested) !== "";
+  let rel = requested;
   if (!rel || rel.endsWith("/")) rel = `${rel}console.html`;
   // Never let ../ escape the console directory.
   const full = path.normalize(path.join(UI_DIR, rel));
@@ -179,7 +185,12 @@ async function serveConsole(res: ServerResponse, url: URL): Promise<void> {
     json(res, 403, { error: "Forbidden." });
     return;
   }
-  const file = existsSync(full) && statSync(full).isFile() ? full : path.join(UI_DIR, "console.html");
+  const found = existsSync(full) && statSync(full).isFile();
+  if (!found && fileLike) {
+    json(res, 404, { error: "Not found." });
+    return;
+  }
+  const file = found ? full : path.join(UI_DIR, "console.html");
   try {
     let body = await fs.readFile(file);
     const type = MIME[path.extname(file).toLowerCase()] ?? "application/octet-stream";

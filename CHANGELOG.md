@@ -36,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "open in new tab" keep working), the address bar follows, and back/forward move
   between pages. No server change was needed: `/console/*` already answers with
   the SPA shell.
+  The bundle is referenced absolutely (`/console/assets/...`) and a missing asset
+  under `/console/` is a 404 rather than the HTML shell — both were real defects
+  the page paths exposed: the relative form resolved against the page path, so
+  `/console/sessions/` asked for `/console/sessions/assets/...` and rendered a
+  blank page, while the shell-for-everything fallback turned a lost asset into a
+  MIME error instead of a clear failure.
 - **会话: who is connected, and a way to act on it.** `active_sessions` was a
   number with nothing behind it. `GET /api/sessions` returns the table — client
   name from the MCP handshake (`clientInfo`), idle time, in-flight requests, todo
