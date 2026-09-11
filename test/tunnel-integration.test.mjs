@@ -79,6 +79,25 @@ async function waitForListener(timeoutMs = 20_000) {
   return false;
 }
 
+/**
+ * Polls until a condition holds, up to a generous deadline.
+ *
+ * The three tunnel tests below used to encode wall-clock budgets (8 s for a log
+ * line, "the stand-in must have run by the time we sample"). Node's test runner
+ * runs these files in PARALLEL, so on a loaded machine the spawn lands after the
+ * budget — and a suite that is green alone went red inside `npm run verify`
+ * with "the stand-in ngrok never ran, so nothing was proven". The properties
+ * those tests assert are unchanged: they just stop assuming an idle CPU.
+ */
+async function until(check, timeoutMs = 20_000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (check()) return true;
+    await delay(200);
+  }
+  return check();
+}
+
 before(async () => {
   home = mkdtempSync(path.join(tmpdir(), "ob-tunnel-home-"));
   fixture = mkdtempSync(path.join(tmpdir(), "ob-tunnel-fixture-"));
@@ -142,14 +161,16 @@ test("a refused tunnel is reported promptly, not after the health budget", async
   // The classification is the difference between "the operator is told in three
   // seconds" and "the operator waits out a 20 s health check that was never
   // going to pass" — and, before this, "retries forever".
-  const deadline = Date.now() + 8_000;
-  while (Date.now() < deadline && !bridgeLog().includes("隧道发布失败")) await delay(250);
+  await until(() => bridgeLog().includes("隧道发布失败"));
   const log = bridgeLog();
   assert.match(log, /隧道发布失败/);
   assert.match(log, /ERR_NGROK_313/, "ngrok's own reason reaches the operator");
 });
 
 test("no public URL is ever advertised while the tunnel is down", async () => {
+  // Wait for the stand-in to actually be running before sampling: "nothing was
+  // advertised" is only evidence once something existed to advertise.
+  assert.ok(await until(() => spawnCount() >= 1), "the stand-in ngrok never ran, so nothing was proven");
   const samples = [];
   for (let i = 0; i < 12; i += 1) {
     const body = await (await fetch(`${base()}/api/status`)).json();
@@ -157,13 +178,15 @@ test("no public URL is ever advertised while the tunnel is down", async () => {
     await delay(400);
   }
   assert.deepEqual([...new Set(samples)], [null], `public_url leaked a dead endpoint: ${JSON.stringify(samples)}`);
-  assert.ok(spawnCount() >= 1, "the stand-in ngrok never ran, so nothing was proven");
 });
 
 test("the failed chain stops instead of respawning forever", async () => {
   // One attempt, one reconnect (armed by the process exit before the failure was
   // classified), then silence. A configuration error cannot be healed by trying
-  // again, so growth beyond that means the loop came back.
+  // again, so growth beyond that means the loop came back. The countdown starts
+  // when the first spawn is visible, so a loaded machine cannot look like a
+  // second respawn.
+  assert.ok(await until(() => spawnCount() >= 1), "the stand-in ngrok never ran, so nothing was proven");
   await delay(9_000);
   const settled = spawnCount();
   await delay(6_000);

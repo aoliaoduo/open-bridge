@@ -29,6 +29,7 @@ import { currentWorkspaceRoot, workspaceSuffixFor } from "./bridge/paths.js";
 import { loadServices } from "./bridge/services.js";
 import { loadUsageStats } from "./bridge/usage-store.js";
 import { start, stop, setExtraRouteHandler, setLocalServerReadyHook } from "./bridge/lifecycle.js";
+import { armShutdownDeadline } from "./bridge/shutdown-deadline.js";
 import { apiRouteHandler, setShutdownHook } from "./server/api-router.js";
 import {
   deleteToken, listTokenViews, mintToken, revokeToken, rotateToken,
@@ -278,7 +279,10 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
 
   const existing = readRuntime(nodeHost.storageDir(), projectRoot);
   if (existing && pidAlive(existing.pid)) {
-    fail(`该目录已有实例在运行 (pid ${existing.pid}, 端口 ${existing.port})。先 open-bridge stop，或换一个目录/端口再用。`);
+    // A double-clicked launcher lands here while an instance is already up,
+    // so hand out the console address instead of only refusing.
+    fail(`该目录已有实例在运行 (pid ${existing.pid}, 端口 ${existing.port})。它的控制台: http://127.0.0.1:${existing.port}/console/`
+      + " ；先 open-bridge stop，或换一个目录/端口再用。");
   }
 
   // Claim the startup slot before touching the network (see serveLockPath).
@@ -331,6 +335,12 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`\n[open-bridge] ${signal} received, stopping...`);
+    // Armed before the first await: whatever the graceful path ends up waiting
+    // on, the operator said stop and this ends with a dead process.
+    const cancelDeadline = armShutdownDeadline(() => {
+      console.error("[open-bridge] shutdown did not finish in time; exiting now.");
+      process.exit(0);
+    });
     try { await stop(); } catch { /* best-effort */ }
     await fsp.rm(runtimePath(nodeHost.storageDir(), projectRoot), { force: true }).catch(() => undefined);
     await fsp.rm(serveLock, { force: true }).catch(() => undefined);
@@ -339,11 +349,19 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
     if (legacy && legacy.pid === process.pid) {
       await fsp.rm(legacyRuntimePath(nodeHost.storageDir()), { force: true }).catch(() => undefined);
     }
+    cancelDeadline();
     process.exit(0);
   };
   setShutdownHook(() => shutdown("shutdown request"));
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  // Closing the console window is how a launcher user stops everything: Node
+  // reports that as SIGHUP on Windows, and Ctrl+Break arrives as SIGBREAK.
+  // Neither was handled, so the process could stay alive with the window gone -
+  // and the next start was then refused, because the runtime file still named a
+  // live pid.
+  process.on("SIGHUP", () => void shutdown("SIGHUP"));
+  process.on("SIGBREAK", () => void shutdown("SIGBREAK"));
   // A stray rejected promise used to kill the whole process (Node's default):
   // every session, the tunnel and the console died with it, and the log showed
   // nothing. The per-request path answers 400 on its own now; this is the last

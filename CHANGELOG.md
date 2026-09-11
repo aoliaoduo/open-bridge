@@ -5,8 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-
-（下一次发版的改动写在这里。）
+### Fixed
+- **关窗/挂断不再留下「活着但没人管」的实例。** `serve` 只处理 SIGINT/SIGTERM：控制台窗口关闭（Node 在 Windows 上报成 SIGHUP）与 Ctrl+Break（SIGBREAK）都没人接，于是窗口没了、进程还在，端口、runtime 文件与启动锁都还被它占着——下一次启动因此被拒（「该目录已有实例在运行」）。现在两个信号都走同一条优雅停机，并且停机在任何一步卡住时都有 **10 秒硬期限**（`src/bridge/shutdown-deadline.ts`，在第一次 await 之前就武装好），到点强制退出。
+  实测（本轮探针）：控制台成员表证明长驻子进程与 serve 同属一个控制台——`sleep.exe`/`bash.exe` 出现在那个窗口的控制台进程列表里，修复前它们各自持有独立（隐形）控制台、关窗也不会退出。非交互会话里拿不到可关闭的真实控制台窗口，所以「点 X」这一步依赖 Windows 文档化的行为（关闭控制台窗口会终止其成员进程）＋ SIGHUP 处理作为双保险。新增 `test/shutdown-deadline.test.ts` 三条用例（到点触发、完成后取消、默认期限下限）。
 
 ## [1.0.0-alpha.2] — 2026-09-11
 ### Added
