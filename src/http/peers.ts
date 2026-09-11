@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 
 /**
  * One live Bridge instance on this machine. The shared file never carries a route token: only its
@@ -85,6 +85,102 @@ export async function findPeerForToken(filePath: string, token: string): Promise
   if (!token) return undefined;
   const hash = peerHash(token);
   return (await readPeers(filePath)).find(row => row.hash === hash && row.pid !== process.pid);
+}
+
+export type PeerWriteResult = { file: string; ok: boolean; error?: string };
+
+export interface PeerRegistryEnvironment {
+  /** Windows: %APPDATA% (…/AppData/Roaming). */
+  appData?: string;
+  /** Linux: $XDG_CONFIG_HOME, or ~/.config. */
+  configHome?: string;
+  /** macOS: ~/Library/Application Support. */
+  libraryHome?: string;
+}
+
+/** Editor installs an Open Bridge extension is published to. */
+const EDITOR_FLAVOURS = ["Code", "Code - Insiders", "VSCodium"];
+
+/**
+ * Every registry this instance should advertise itself in — its own first, then
+ * those that already exist for other Open Bridge builds on this machine.
+ *
+ * The registry is a cross-instance file by design: whichever instance holds the
+ * public tunnel looks incoming tokens up here and proxies to the owning row's
+ * loopback port (that is what makes one ngrok session serve several windows).
+ * But the products keep the file in different places — the standalone app under
+ * its `--home` (`~/.open-bridge`), the VS Code extension under the editor's
+ * `globalStorage` — so on a machine running both they could not see each other
+ * at all: the tunnel answered 404 for the other's token, and an instance whose
+ * domain was held elsewhere stayed "blocked" instead of borrowing the tunnel.
+ *
+ * Only files that already exist are adopted: nothing is created inside another
+ * product's storage directory on a guess. `exists` is injected so the rule is
+ * testable without touching a filesystem.
+ */
+export function peerRegistryCandidates(
+  ownFile: string,
+  env: PeerRegistryEnvironment,
+  exists: (file: string) => boolean,
+): string[] {
+  const roots = [
+    ...(env.appData ? [env.appData] : []),
+    ...(env.libraryHome ? [env.libraryHome] : []),
+    ...(env.configHome ? [env.configHome] : []),
+  ];
+  const shared = roots.flatMap(root =>
+    EDITOR_FLAVOURS.map(flavour =>
+      join(root, flavour, "User", "globalStorage", "open-bridge.open-bridge", "bridge-peers.json"),
+    ),
+  );
+  return [ownFile, ...shared.filter(exists)];
+}
+
+/**
+ * Advertise this instance in every registry, reporting per-file outcomes: one
+ * unreachable registry (a path that vanished, a lock, a permission) must not
+ * hide the fact, nor stop the others from working.
+ */
+export async function publishPeerTo(files: string[], input: PeerInput): Promise<PeerWriteResult[]> {
+  const results: PeerWriteResult[] = [];
+  for (const file of files) {
+    try {
+      await publishPeer(file, input);
+      results.push({ file, ok: true });
+    } catch (error) {
+      results.push({ file, ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return results;
+}
+
+/** The mirror of publishPeerTo: drop this instance's rows everywhere. */
+export async function withdrawPeerFrom(files: string[], token: string): Promise<PeerWriteResult[]> {
+  const results: PeerWriteResult[] = [];
+  for (const file of files) {
+    try {
+      await withdrawPeer(file, token);
+      results.push({ file, ok: true });
+    } catch (error) {
+      results.push({ file, ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return results;
+}
+
+/**
+ * Look a token up across every registry. Rows belonging to this very process are
+ * ignored: a request for our own token is ours to serve, never something to
+ * forward to ourselves.
+ */
+export async function findPeerIn(files: string[], token: string): Promise<PeerRecord | undefined> {
+  if (!token) return undefined;
+  const hash = peerHash(token);
+  for (const file of files) {
+    const row = (await readPeers(file)).find(candidate => candidate.hash === hash && candidate.pid !== process.pid);
+    if (row) return row;
+  }
+  return undefined;
 }
 
 export async function healthCheckUrl(url: string, timeoutMs: number): Promise<boolean> {

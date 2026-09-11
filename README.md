@@ -34,9 +34,9 @@ npm run build
 npm start
 ```
 
-**控制台地址：<http://127.0.0.1:18080/console/>** —— `npm start` 固定用 18080 端口并自动打开浏览器（等价于 `node bin/open-bridge.js serve --port 18080 --open --no-tunnel`）。
+**控制台地址：<http://127.0.0.1:18080/console/>** —— `npm start` 固定用 18080 端口并自动打开浏览器（等价于 `node bin/open-bridge.js serve --port 18080 --open`）。
 
-`--no-tunnel` 是纯本机运行。要让外部客户端连进来，见下方「公网隧道」。
+`npm start` 会尝试公网发布：域名被本机另一个实例（例如 VS Code 扩展）占用且它愿意转发时，就**借用那条隧道**（`tunnel_role` = `follower`）；域名空着时自己起 ngrok（`owner`）。两种情况控制台拿到的都是真实的公网 MCP URL，细节见下方「公网隧道」。只想纯本机运行就用 `npm run start:local`（即 `--no-tunnel`）。
 
 要桥接的不是本仓库时，在**你的项目目录**里运行并指定工作区根：
 
@@ -86,7 +86,8 @@ open-bridge config set ngrokDomain <你预留的域名>.ngrok-free.dev
 open-bridge serve --port 18080 --open      # 注意：不带 --no-tunnel
 ```
 
-- 免费 ngrok 账号只分配一个子域，**同一域名同时只能被一个实例占用**。VS Code 扩展实例在跑时先停掉它的隧道，否则新实例会因域名被占而停在本地（此时 `public_url` 不出现，控制台显示「仅本机可访问」）。
+- 免费 ngrok 账号只分配一个子域，**同一域名同时只能被一个实例占用**。旧的 VS Code 扩展实例正在用时**不必先停它**：本机实例注册表（`bridge-peers.json`）本来就是跨实例共享的 —— 持有隧道的实例按令牌摘要查表并转发到对应实例。应用会把自己的那一行登记进**已存在**的注册表（自己的，加上编辑器 `globalStorage/open-bridge.open-bridge/` 下的；不会在别人的目录里凭空建文件），于是公网请求经那条隧道转发到应用，`tunnel_role` 显示 `follower`，控制台同时提示该地址依赖那个实例；持有方退出后，应用会在下一轮探测里自己接管域名（变成 `owner`）。需要额外路径时用 `sharedPeerRegistry` 指定。
+- **不开隧道就不会被公网看到**：`--no-tunnel`（或没配域名）时应用只登记自己的注册表，不会出现在持有隧道实例的注册表里，`public_url` 为空、控制台显示「仅本机可访问」。
 - 必须填你账号分配到的那个域名；随便编一个会得到 `ERR_NGROK_313`（并且当前实现会一直重试同一域名）。
 
 **MCP URL 本身就是凭证**（路由令牌即鉴权），把它填进 MCP 客户端即可。可选开启 Bearer 鉴权做第二道闸（控制台「令牌」页签发，明文只显示一次）。

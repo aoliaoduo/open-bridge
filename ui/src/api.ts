@@ -32,6 +32,8 @@ export interface BridgeStatus {
   local_url?: string;
   /** The published tunnel URL — absent while the Bridge is local-only. */
   public_url?: string;
+  /** owner = this instance runs ngrok; follower = another instance's tunnel forwards to us. */
+  tunnel_role?: string;
   /** The URL to hand a client: the tunnel when published, otherwise loopback. */
   mcp_url?: string;
   shell: string;

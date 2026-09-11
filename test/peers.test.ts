@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { bridgeTokenFromPath, findPeerForToken, peerHash, probePublicBridge, proxyToPeer, publishPeer, readPeers, withdrawPeer, type PeerRecord } from "../src/http/peers.js";
+import { bridgeTokenFromPath, findPeerIn, findPeerForToken, peerHash, peerRegistryCandidates, probePublicBridge, proxyToPeer, publishPeer, publishPeerTo, readPeers, withdrawPeer, withdrawPeerFrom, type PeerRecord } from "../src/http/peers.js";
 
 const TOKEN_A = "a".repeat(32);
 const TOKEN_B = "b".repeat(32);
@@ -70,6 +70,66 @@ test("a rotation replaces the instance row instead of leaving a dead digest behi
     assert.equal((await readPeers(file)).length, 1, "re-publishing the same token stays idempotent");
     await publishPeer(file, { token: TOKEN_A, port: 41_002, pid: peer.pid, root: "C:/peer", at: Date.now() });
     assert.deepEqual((await readPeers(file)).map(row => row.port).sort(), [41_001, 41_002], "other instances are untouched");
+  } finally { peer.stop(); }
+});
+
+test("registries are discovered per platform, and only when they already exist", () => {
+  const own = path.join("C:", "home", ".open-bridge", "bridge-peers.json");
+  const appData = path.join("C:", "Users", "x", "AppData", "Roaming");
+  const codeRegistry = path.join(appData, "Code", "User", "globalStorage", "open-bridge.open-bridge", "bridge-peers.json");
+  const candidates = peerRegistryCandidates(own, { appData }, file => file === codeRegistry);
+  assert.deepEqual(candidates, [own, codeRegistry], "own registry first, then the one that exists");
+  assert.equal(
+    candidates.some(file => file.includes("Code - Insiders")),
+    false,
+    "a flavour that is not installed is not adopted — nothing is created on a guess",
+  );
+
+  const libraryHome = path.join("/Users", "x", "Library", "Application Support");
+  const mac = peerRegistryCandidates(path.join("/Users", "x", ".open-bridge", "bridge-peers.json"), { libraryHome }, () => true);
+  assert.ok(
+    mac.includes(path.join(libraryHome, "VSCodium", "User", "globalStorage", "open-bridge.open-bridge", "bridge-peers.json")),
+    "macOS roots are searched too",
+  );
+
+  const configHome = path.join("/home", "x", ".config");
+  const linux = peerRegistryCandidates(path.join("/home", "x", ".open-bridge", "bridge-peers.json"), { configHome }, () => true);
+  assert.equal(linux.length, 4, "own + the three editor flavours under the configured root");
+
+  assert.deepEqual(peerRegistryCandidates(own, {}, () => true), [own], "no roots configured: own registry only");
+});
+
+test("publishing fans out, lookups cross registries, one bad registry cannot stop the rest", async () => {
+  const first = await registryPath();
+  const second = await registryPath();
+  const peer = await liveChild();
+  try {
+    const results = await publishPeerTo([first, second], { token: TOKEN_A, port: 42_001, pid: process.pid, root: "C:/self", at: Date.now() });
+    assert.deepEqual(results.map(r => r.ok), [true, true]);
+    assert.deepEqual((await findPeerIn([second], TOKEN_A)), undefined, "our own row is never a peer to forward to");
+    assert.equal((await readPeers(second)).length, 1, "the second registry got the row too");
+
+    await publishPeerTo([second], { token: TOKEN_B, port: 42_002, pid: peer.pid, root: "C:/peer", at: Date.now() });
+    assert.equal((await findPeerIn([first, second], TOKEN_B))?.port, 42_002, "lookup crosses registries");
+
+    // A path whose parent is a regular FILE cannot be written: the failure is
+    // reported for that file only, and the healthy one still receives the row.
+    const blocked = await registryPath();
+    const unwritable = path.join(blocked, "not-a-directory.json");
+    await writeFile(blocked, "file", "utf8");
+    const mixed = await publishPeerTo([first, unwritable], { token: TOKEN_A, port: 42_003, pid: process.pid, root: "C:/self", at: Date.now() });
+    assert.deepEqual(mixed.map(r => r.ok), [true, false]);
+    assert.ok(mixed[1]!.error, "the failure carries a reason");
+    assert.equal((await readPeers(first)).find(row => row.port === 42_003)?.port, 42_003);
+
+    const withdrawn = await withdrawPeerFrom([first, second], TOKEN_A);
+    assert.deepEqual(withdrawn.map(r => r.ok), [true, true]);
+    assert.deepEqual((await readPeers(first)).map(row => row.hash), [], "our row left the first registry");
+    assert.deepEqual(
+      (await readPeers(second)).map(row => row.hash),
+      [peerHash(TOKEN_B)],
+      "withdrawing only removes our own row; the other instance's is untouched",
+    );
   } finally { peer.stop(); }
 });
 

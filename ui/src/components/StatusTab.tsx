@@ -75,6 +75,9 @@ export function StatusTab({ act, onRefresh }: Props) {
           把这个 URL 填进 MCP 客户端（ChatGPT 连接器、Claude、Cursor 等）。它本身就是凭证，请当作密钥保管。
           {url && (isPublic
             ? " 当前是公网隧道地址，拿到它的人都能访问。"
+              + (status?.tunnel_role === "follower"
+                ? "该地址由本机另一个实例的隧道转发，那个实例停止后此地址会失效。"
+                : "")
             : " 当前仅本机可访问（未开启隧道）。")}
         </div>
       </div>

@@ -27,6 +27,13 @@ export function getBridgeStatus(): Record<string, unknown> {
     local_url: localMcpUrl() || undefined,
     /** Only ever a real published tunnel; absent while the Bridge is local-only. */
     public_url: state.tunnelUrl || undefined,
+    /**
+     * How that public URL is served: "owner" (this instance runs ngrok),
+     * "follower" (another instance on this machine holds the domain and
+     * forwards to us — the URL dies with it), "blocked"/"none" (no tunnel).
+     * The console says so, because "公网地址可用" alone hides that dependency.
+     */
+    tunnel_role: state.tunnelRole,
     /** The URL to hand a client: the tunnel when published, otherwise loopback. */
     mcp_url: clientMcpUrl() || undefined,
     shell: shell.file,

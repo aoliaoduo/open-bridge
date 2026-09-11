@@ -100,6 +100,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`src/bridge/onboarding.ts`), the loopback variant leads with the caveat and the
   way to publish the instance, and the console toast repeats it instead of saying
   "粘贴给 AI 客户端即可".
+- **The app can borrow the tunnel that is already running next to it.** The
+  instance holding the public tunnel forwards requests for other instances'
+  tokens by looking them up in `bridge-peers.json` — but the standalone app keeps
+  that file under its own `--home` while the VS Code extension keeps it in the
+  editor's `globalStorage`, so on a machine running both the tunnel answered 404
+  for the app's token and the app sat in "domain belongs to another instance"
+  without ever becoming routable, despite its `blocked → adoptSharedTunnel() →
+  follower` path already existing. The app now advertises its row in every
+  registry that already exists (its own plus the editor flavours it finds; only
+  existing files are adopted, nothing is created inside another product's
+  storage), looks peers up across all of them, and publishes before probing for
+  adoption — so `open-bridge serve` with `ngrokDomain` set publishes a real
+  public URL whenever another instance holds the domain, and takes over as owner
+  when it does not. `sharedPeerRegistry` overrides the discovery with one
+  explicit path.
+- **The public URL now says where it comes from, and the default run can publish.**
+  `getBridgeStatus()` carries `tunnel_role` (`owner` / `follower` / `none` /
+  `blocked`), and the console appends "该地址由本机另一个实例的隧道转发，那个实例停止后
+  此地址会失效" when the URL is borrowed — a public URL that silently depends on
+  another process is the kind of thing an operator should not have to discover
+  from an outage. `npm start` no longer forces `--no-tunnel` (the app is the main
+  product now); local-only keeps its own name, `npm run start:local`.
 - **The shared peer registry keeps one row per instance.** It merged on the token
   digest, so every rotation added a row whose digest could never match a token
   again — one dead credential entry per rotation, in a file other windows read,

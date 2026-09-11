@@ -1,7 +1,7 @@
 {
   "name": "open-bridge",
   "version": "1.0.0-alpha.1",
-  "description": "Standalone Streamable HTTP MCP bridge for local workspaces. 在本机安全暴露工作区能力的独立 MCP 桥接（CLI + Web 控制台）。",
+  "description": "Standalone Streamable HTTP MCP bridge for local workspaces. \u5728\u672c\u673a\u5b89\u5168\u66b4\u9732\u5de5\u4f5c\u533a\u80fd\u529b\u7684\u72ec\u7acb MCP \u6865\u63a5\uff08CLI + Web \u63a7\u5236\u53f0\uff09\u3002",
   "keywords": [
     "mcp",
     "model-context-protocol",
@@ -38,7 +38,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "start": "node bin/open-bridge.js serve --port 18080 --open --no-tunnel",
+    "start": "node bin/open-bridge.js serve --port 18080 --open",
     "build": "node scripts/clean.mjs && tsc -p tsconfig.json && vite build",
     "build:core": "node scripts/clean.mjs && tsc -p tsconfig.json",
     "dev": "tsx src/cli.ts",
@@ -47,7 +47,8 @@
     "test:core": "tsx --test test/*.test.ts && node --test test/api-integration.test.mjs test/api-teardown-integration.test.mjs test/tunnel-integration.test.mjs",
     "test:ui": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.ui.json --noEmit",
-    "verify": "npm run typecheck && npm run lint && npm run build && npm test"
+    "verify": "npm run typecheck && npm run lint && npm run build && npm test",
+    "start:local": "node bin/open-bridge.js serve --port 18080 --open --no-tunnel"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0"

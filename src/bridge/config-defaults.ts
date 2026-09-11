@@ -10,6 +10,8 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = {
   tunnelProvider: "ngrok",
   ngrokDomain: "",
   ngrokExecutable: "ngrok",
+  /** Extra/override path to another instance's peer registry ("" = discover). */
+  sharedPeerRegistry: "",
   shellPath: "",
   shellArgs: [] as string[],
   unrestrictedFileAccess: true,
