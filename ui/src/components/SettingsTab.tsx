@@ -1,9 +1,53 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { SettingsState } from "../api";
 
 interface Props {
   settings: SettingsState | null;
   act: (action: Record<string, unknown>) => Promise<unknown>;
+}
+
+/**
+ * One draft field: edits stay local until blur (or Enter). The previous
+ * version called setConfig on EVERY keystroke — each one a config.json write,
+ * and intermediate values (a half-typed port, a health timeout below its
+ * minimum) fired error toasts on every key.
+ */
+function DraftField({
+  value,
+  onCommit,
+  type = "text",
+  min,
+  max,
+  step,
+  placeholder,
+}: {
+  value: string;
+  onCommit: (raw: string) => void;
+  type?: "text" | "number";
+  min?: number;
+  max?: number;
+  step?: number;
+  placeholder?: string;
+}) {
+  const [draft, setDraft] = useState(value);
+  // Follow authoritative changes while the operator is not editing.
+  useEffect(() => { setDraft(value); }, [value]);
+  const commit = (): void => {
+    if (draft !== value) onCommit(draft);
+  };
+  return (
+    <input
+      type={type}
+      min={min}
+      max={max}
+      step={step}
+      value={draft}
+      placeholder={placeholder}
+      onChange={e => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+    />
+  );
 }
 
 export function SettingsTab({ settings, act }: Props) {
@@ -44,10 +88,9 @@ export function SettingsTab({ settings, act }: Props) {
         </div>
         <div className="row">
           <span className="label">ngrok 可执行文件</span>
-          <input
-            type="text"
+          <DraftField
             value={cfg.ngrokExecutable}
-            onChange={e => setConfig("ngrokExecutable", e.target.value)}
+            onCommit={raw => setConfig("ngrokExecutable", raw)}
           />
         </div>
         <div className="row">
@@ -66,21 +109,32 @@ export function SettingsTab({ settings, act }: Props) {
         <h2>网络</h2>
         <div className="row">
           <span className="label">本地端口</span>
-          <input
-            type="number" min={0} max={65535}
-            value={cfg.port}
-            onChange={e => setConfig("port", Number(e.target.value))}
+          <DraftField
+            type="number"
+            min={0}
+            max={65535}
+            value={String(cfg.port)}
+            onCommit={raw => {
+              const n = Number(raw.trim());
+              if (raw.trim() !== "" && Number.isInteger(n) && n >= 0 && n <= 65535) setConfig("port", n);
+            }}
           />
-          <span className="section-note" style={{ margin: 0 }}>0 = 自动选择空闲端口（重启 Bridge 生效）</span>
+          <span className="section-note" style={{ margin: 0 }}>0 = 自动选择空闲端口（重启 Bridge 生效）；失焦时保存</span>
         </div>
         <div className="row">
           <span className="label">公网健康检查</span>
-          <input
-            type="number" min={3000} max={120000} step={1000}
-            value={cfg.publicHealthTimeoutMs}
-            onChange={e => setConfig("publicHealthTimeoutMs", Number(e.target.value))}
+          <DraftField
+            type="number"
+            min={3000}
+            max={120000}
+            step={1000}
+            value={String(cfg.publicHealthTimeoutMs)}
+            onCommit={raw => {
+              const n = Number(raw.trim());
+              if (Number.isInteger(n) && n >= 3000 && n <= 120000) setConfig("publicHealthTimeoutMs", n);
+            }}
           />
-          <span className="section-note" style={{ margin: 0 }}>毫秒（3000-120000）</span>
+          <span className="section-note" style={{ margin: 0 }}>毫秒（3000-120000）；失焦时保存</span>
         </div>
       </div>
 
@@ -94,10 +148,10 @@ export function SettingsTab({ settings, act }: Props) {
         </div>
         {!cfg.unrestrictedFileAccess && (
           <div className="row">
-            <textarea
-              placeholder={"每行一个绝对目录，如\nC:\\projects\\shared"}
+            <DraftField
               value={cfg.allowedDirectories.join("\n")}
-              onChange={e => setConfig("allowedDirectories", e.target.value.split("\n").map(s => s.trim()).filter(Boolean))}
+              placeholder={"每行一个绝对目录，如\nC:\\projects\\shared"}
+              onCommit={raw => setConfig("allowedDirectories", raw.split("\n").map(s => s.trim()).filter(Boolean))}
             />
           </div>
         )}
@@ -107,20 +161,18 @@ export function SettingsTab({ settings, act }: Props) {
         <h2>Shell 与工具</h2>
         <div className="row">
           <span className="label">Shell 路径</span>
-          <input
-            type="text"
+          <DraftField
             value={cfg.shellPath}
             placeholder="留空自动探测（Git Bash → pwsh → powershell）"
-            onChange={e => setConfig("shellPath", e.target.value)}
+            onCommit={raw => setConfig("shellPath", raw)}
           />
         </div>
         <div className="row">
           <span className="label">Shell 参数</span>
-          <input
-            type="text"
+          <DraftField
             value={cfg.shellArgs.join(" ")}
             placeholder="留空使用默认参数"
-            onChange={e => setConfig("shellArgs", e.target.value.trim() ? e.target.value.trim().split(/\s+/) : [])}
+            onCommit={raw => setConfig("shellArgs", raw.trim() ? raw.trim().split(/\s+/) : [])}
           />
         </div>
         <div className="row">
@@ -153,31 +205,33 @@ export function SettingsTab({ settings, act }: Props) {
           <>
             <div className="row">
               <span className="label">占用上限</span>
-              <input
-                type="number" min={0}
-                value={settings.concurrency.holdTimeoutMs}
-                onChange={e => void act({
-                  command: "setConcurrency",
-                  enabled: true,
-                  holdTimeoutMs: Number(e.target.value),
-                  waitTimeoutMs: settings.concurrency.waitTimeoutMs,
-                })}
+              <DraftField
+                type="number"
+                min={0}
+                value={String(settings.concurrency.holdTimeoutMs)}
+                onCommit={raw => {
+                  const n = Number(raw.trim());
+                  if (Number.isInteger(n) && n >= 0) {
+                    void act({ command: "setConcurrency", enabled: true, holdTimeoutMs: n, waitTimeoutMs: settings.concurrency.waitTimeoutMs });
+                  }
+                }}
               />
-              <span className="section-note" style={{ margin: 0 }}>毫秒，0 = 不限</span>
+              <span className="section-note" style={{ margin: 0 }}>毫秒，0 = 不限；失焦时保存</span>
             </div>
             <div className="row">
               <span className="label">等待上限</span>
-              <input
-                type="number" min={0}
-                value={settings.concurrency.waitTimeoutMs}
-                onChange={e => void act({
-                  command: "setConcurrency",
-                  enabled: true,
-                  holdTimeoutMs: settings.concurrency.holdTimeoutMs,
-                  waitTimeoutMs: Number(e.target.value),
-                })}
+              <DraftField
+                type="number"
+                min={0}
+                value={String(settings.concurrency.waitTimeoutMs)}
+                onCommit={raw => {
+                  const n = Number(raw.trim());
+                  if (Number.isInteger(n) && n >= 0) {
+                    void act({ command: "setConcurrency", enabled: true, holdTimeoutMs: settings.concurrency.holdTimeoutMs, waitTimeoutMs: n });
+                  }
+                }}
               />
-              <span className="section-note" style={{ margin: 0 }}>毫秒，0 = 无限等待</span>
+              <span className="section-note" style={{ margin: 0 }}>毫秒，0 = 无限等待；失焦时保存</span>
             </div>
           </>
         )}

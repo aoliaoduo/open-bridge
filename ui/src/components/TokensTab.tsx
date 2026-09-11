@@ -1,20 +1,16 @@
 import { useState } from "react";
 import type { SettingsActionResult, SettingsState, SettingsTokenRow } from "../api";
+// The TTL whitelist is the server's contract (settings-model.ts): restating it
+// here let the two drift — this list offered "90 天" (7776000 s), which the
+// server's whitelist rejects, so both selects answered 400 forever. Import,
+// never restate.
+import { TTL_CHOICES } from "../../../src/bridge/settings-model.js";
 import { ConfirmButton } from "./ConfirmButton";
 
 interface Props {
   settings: SettingsState;
   act: (action: Record<string, unknown>) => Promise<SettingsActionResult | null>;
 }
-
-const TTL_CHOICES: Array<{ seconds: number; label: string }> = [
-  { seconds: 0, label: "永久（不过期）" },
-  { seconds: 3600, label: "1 小时" },
-  { seconds: 86400, label: "1 天" },
-  { seconds: 604800, label: "7 天" },
-  { seconds: 2592000, label: "30 天" },
-  { seconds: 7776000, label: "90 天" },
-];
 
 function fmtDate(iso: string | null): string {
   return iso ? iso.slice(0, 16).replace("T", " ") : "—";

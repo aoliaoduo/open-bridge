@@ -64,7 +64,7 @@ export function SessionsPage() {
       <div className="card">
         <h2>已连接的客户端</h2>
         <div className="section-note">
-          一行是一个活着的 MCP 会话：客户端在 <span className="mono">initialize</span> 之后出现，空闲超过 30 分钟或被容量挤出时自动消失。
+          一行是一个活着的 MCP 会话：客户端在 <span className="mono">initialize</span> 之后出现，空闲超过 60 分钟或被容量挤出时自动消失。
           <span className="mono">断开</span> 只关掉这一个会话，不影响实例本身，也不影响别的客户端。
         </div>
         {sessions === null ? (
