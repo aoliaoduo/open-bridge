@@ -264,3 +264,53 @@ test("minting a replacement restores access", async () => {
   assert.match(status.text, new RegExp(fresh.id));
   assert.equal(serveExit, null, `serve died during the guards suite:\n${serveOutput.slice(-600)}`);
 });
+
+const CLI_BIN = path.join(ROOT, "bin", "open-bridge.js");
+
+/** One CLI invocation against the same data dir the running instance uses. */
+function cliToken(args) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(process.execPath, [CLI_BIN, "token", ...args, "--home", home], {
+      cwd: ROOT,
+      env: { ...process.env, OPEN_BRIDGE_HOME: home },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out = "";
+    proc.stdout.on("data", d => { out += d; });
+    proc.stderr.on("data", d => { out += d; });
+    proc.on("error", reject);
+    proc.on("close", code => resolve({ code, out }));
+  });
+}
+
+/**
+ * Cross-process credential visibility (ported from the throwaway
+ * `scripts/auth-cache-check.mjs` probe). The store used to be read into a
+ * module-level snapshot, so while the gate was on a token minted by the CLI was
+ * a 401 until the instance restarted, and a token revoked by the CLI kept
+ * working just as long. Every read now hits the file, and every write merges
+ * under the shared lock.
+ */
+test("a token minted or revoked by another process (the CLI) is honoured at once", async () => {
+  const anon = await openSession();
+  assert.equal(anon.res.status, 401, "the gate must be on for this test to mean anything");
+
+  const created = await cliToken(["create", "--label", "cross-process"]);
+  assert.equal(created.code, 0, created.out);
+  const secret = /ob_[A-Za-z0-9_-]{20,}/.exec(created.out)?.[0];
+  assert.ok(secret, `the CLI printed no secret:\n${created.out}`);
+
+  const foreign = await openSession(bearer(secret));
+  assert.equal(foreign.res.status, 200, "a CLI-minted token must work without restarting the instance");
+
+  const listed = await cliToken(["list"]);
+  const id = new RegExp("^\\s+([0-9a-f]{8})\\s+cross-process\\b", "m").exec(listed.out)?.[1];
+  assert.ok(id, `the CLI list did not show the new token:\n${listed.out}`);
+  const revoked = await cliToken(["revoke", id]);
+  assert.equal(revoked.code, 0, revoked.out);
+
+  const after = await openSession(bearer(secret));
+  assert.equal(after.res.status, 401, "a CLI-revoked token must stop working at once");
+
+  assert.equal(serveExit, null, `serve died during the cross-process test:\n${serveOutput.slice(-600)}`);
+});

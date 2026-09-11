@@ -7,8 +7,17 @@
  * route-token/peer handling, so an unauthenticated request never reaches the
  * MCP transport, the peer proxy, or the session table.
  *
- * Records live in VS Code `secrets` (encrypted at rest, never in settings or on
- * disk in the clear). The plaintext secret exists only in the mint response.
+ * Records live in the host secret store (`secrets.json`, chmod 600), hashed at
+ * rest. The plaintext secret exists only in the mint/rotate response.
+ *
+ * Cross-process consistency: instances and the CLI share one data dir, so a
+ * module-level cache would freeze another process's mint/revoke out of this
+ * one forever — a CLI-minted token answered 401 and a CLI-revoked token kept
+ * authenticating until restart. Reads therefore go to the store every time
+ * (the store already reloads on mtime change; parsing a small JSON array per
+ * request is cheap), and writes are serialized per process and MERGED with the
+ * rows on disk: rows with ids we have never seen are kept, so a token minted
+ * by another instance milliseconds before our write cannot be deleted by it.
  */
 
 import { host } from "../host/host.js";
@@ -31,7 +40,6 @@ const AUTH_STORE_KEY = "openBridge.authTokens";
 const LAST_USED_FLUSH_MS = 30_000;
 
 const limiter = new AuthFailureLimiter();
-let cache: AuthTokenRecord[] | undefined;
 let lastFlushAt = 0;
 
 export function authEnabled(): boolean {
@@ -45,30 +53,63 @@ export function tokenTtlSeconds(): number {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
-async function readRecords(): Promise<AuthTokenRecord[]> {
-  if (cache) return cache;
-  const secrets = host().secrets;
-  if (!secrets) return (cache = []);
-  const raw = await secrets.get(AUTH_STORE_KEY);
-  if (typeof raw !== "string" || !raw) return (cache = []);
+function parseRecords(raw: unknown): AuthTokenRecord[] {
+  if (typeof raw !== "string" || !raw) return [];
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return (cache = []);
-    cache = parsed.filter((item): item is AuthTokenRecord =>
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is AuthTokenRecord =>
       !!item && typeof item === "object"
       && typeof (item as AuthTokenRecord).id === "string"
       && typeof (item as AuthTokenRecord).hash === "string");
   } catch {
     // Corrupt store: treat as empty rather than locking the operator out.
-    cache = [];
+    return [];
   }
-  return cache;
 }
 
-async function writeRecords(records: AuthTokenRecord[]): Promise<void> {
-  cache = records;
-  await host().secrets.store(AUTH_STORE_KEY, JSON.stringify(records));
+/** Fresh read on every call: another process's changes must be visible at once. */
+async function readRecords(): Promise<AuthTokenRecord[]> {
+  const secrets = host().secrets;
+  if (!secrets) return [];
+  return parseRecords(await secrets.get(AUTH_STORE_KEY));
+}
+
+/**
+ * Serialize record mutations per process (concurrent tool calls must not
+ * interleave read-merge-write), then MERGE with a fresh disk read inside the
+ * write: rows the task never saw (another process minted them between our
+ * read and our write) survive. Rows the task SAW and dropped stay dropped —
+ * otherwise a purge would resurrect the very rows it just deleted.
+ */
+let recordsWriteTail: Promise<void> = Promise.resolve();
+
+function enqueueRecordWrite<T>(task: () => Promise<T>): Promise<T> {
+  const next = recordsWriteTail.then(task, task);
+  recordsWriteTail = next.then(() => undefined, () => undefined);
+  return next;
+}
+
+async function writeMergedRecords(basis: AuthTokenRecord[], next: AuthTokenRecord[]): Promise<void> {
+  const onDisk = await readRecords();
+  const basisIds = new Set(basis.map(item => item.id));
+  const nextIds = new Set(next.map(item => item.id));
+  const foreign = onDisk.filter(item => !basisIds.has(item.id) && !nextIds.has(item.id));
+  const merged = [...next, ...foreign];
+  await host().secrets.store(AUTH_STORE_KEY, JSON.stringify(merged));
   host().ui.update();
+}
+
+/** Run one read-transform-write cycle with a fresh disk read inside. */
+async function mutateRecords<T>(
+  mutate: (records: AuthTokenRecord[]) => { records: AuthTokenRecord[]; result: T },
+): Promise<T> {
+  return enqueueRecordWrite(async () => {
+    const basis = await readRecords();
+    const { records, result } = mutate(basis);
+    await writeMergedRecords(basis, records);
+    return result;
+  });
 }
 
 export interface MintedToken {
@@ -79,6 +120,17 @@ export interface MintedToken {
   created_at: string;
   expires_at: string | null;
   permanent: boolean;
+}
+
+function mintedView(record: AuthTokenRecord, secret: string): MintedToken {
+  return {
+    id: record.id,
+    label: record.label,
+    secret,
+    created_at: new Date(record.createdAt).toISOString(),
+    expires_at: record.expiresAt === null ? null : new Date(record.expiresAt).toISOString(),
+    permanent: record.expiresAt === null,
+  };
 }
 
 /** Mint a new token. `ttlSeconds` from the caller, else the configured default. */
@@ -95,21 +147,12 @@ export async function mintToken(options: { label?: string; ttlSeconds?: number |
     lastUsedAt: null,
     useCount: 0,
   };
-  const records = [...(await readRecords()), record];
-  await writeRecords(records);
-  return {
-    id: record.id,
-    label: record.label,
-    secret,
-    created_at: new Date(record.createdAt).toISOString(),
-    expires_at: record.expiresAt === null ? null : new Date(record.expiresAt).toISOString(),
-    permanent: record.expiresAt === null,
-  };
+  return mutateRecords(records => ({ records: [...records, record], result: mintedView(record, secret) }));
 }
 
 export async function listTokenViews(): Promise<ReturnType<typeof publicTokenView>[]> {
   const now = Date.now();
-  return (await readRecords()).map(record => publicTokenView(record, now));
+  return (await readRecords()).map(item => publicTokenView(item, now));
 }
 
 /**
@@ -119,22 +162,29 @@ export async function listTokenViews(): Promise<ReturnType<typeof publicTokenVie
 export async function revokeToken(idOrPrefix: string): Promise<{ revoked: string[] }> {
   const needle = idOrPrefix.trim().toLowerCase();
   if (!needle) throw new Error("Provide a token id. Use openBridge.auth.manageTokens to list them.");
-  const records = await readRecords();
-  const hits = records.filter(record => record.revokedAt === undefined && record.id.toLowerCase().startsWith(needle));
-  if (!hits.length) throw new Error(`No active token matches "${idOrPrefix}".`);
-  const now = Date.now();
-  const next = records.map(record => (hits.includes(record) ? { ...record, revokedAt: now } : record));
-  await writeRecords(next);
-  return { revoked: hits.map(record => record.id) };
+  return mutateRecords(records => {
+    const now = Date.now();
+    const hits = records.filter(item => item.revokedAt === undefined && item.id.toLowerCase().startsWith(needle));
+    if (!hits.length) throw new Error(`No active token matches "${idOrPrefix}".`);
+    const hitIds = new Set(hits.map(item => item.id));
+    return {
+      records: records.map(item => (hitIds.has(item.id) ? { ...item, revokedAt: now } : item)),
+      result: { revoked: hits.map(item => item.id) },
+    };
+  });
 }
 
 /** Revoke every active token. Escape hatch for "I think a token leaked". */
 export async function revokeAllTokens(): Promise<{ revoked: string[] }> {
-  const now = Date.now();
-  const records = await readRecords();
-  const hits = records.filter(record => record.revokedAt === undefined);
-  await writeRecords(records.map(record => (hits.includes(record) ? { ...record, revokedAt: now } : record)));
-  return { revoked: hits.map(record => record.id) };
+  return mutateRecords(records => {
+    const now = Date.now();
+    const hits = records.filter(item => item.revokedAt === undefined);
+    const hitIds = new Set(hits.map(item => item.id));
+    return {
+      records: records.map(item => (hitIds.has(item.id) ? { ...item, revokedAt: now } : item)),
+      result: { revoked: hits.map(item => item.id) },
+    };
+  });
 }
 
 /**
@@ -149,27 +199,34 @@ export async function revokeAllTokens(): Promise<{ revoked: string[] }> {
 export async function deleteToken(idOrPrefix: string): Promise<{ deleted: string[] }> {
   const needle = idOrPrefix.trim().toLowerCase();
   if (!needle) throw new Error("Provide a token id. Token ids are listed on the Open Bridge settings page.");
-  const records = await readRecords();
-  const hits = records.filter(record => record.id.toLowerCase().startsWith(needle));
-  if (!hits.length) throw new Error(`No token matches "${idOrPrefix}".`);
-  await writeRecords(records.filter(record => !hits.includes(record)));
-  return { deleted: hits.map(record => record.id) };
+  return mutateRecords(records => {
+    const hits = records.filter(item => item.id.toLowerCase().startsWith(needle));
+    if (!hits.length) throw new Error(`No token matches "${idOrPrefix}".`);
+    const hitIds = new Set(hits.map(item => item.id));
+    return {
+      records: records.filter(item => !hitIds.has(item.id)),
+      result: { deleted: hits.map(item => item.id) },
+    };
+  });
 }
 
 /** Delete every already-revoked or already-expired token in one step. */
 export async function purgeInactiveTokens(): Promise<{ deleted: string[] }> {
-  const now = Date.now();
-  const records = await readRecords();
-  const hits = records.filter(record => record.revokedAt !== undefined || isExpired(record, now));
-  if (!hits.length) return { deleted: [] };
-  await writeRecords(records.filter(record => !hits.includes(record)));
-  return { deleted: hits.map(record => record.id) };
+  return mutateRecords(records => {
+    const now = Date.now();
+    const hits = records.filter(item => item.revokedAt !== undefined || isExpired(item, now));
+    const hitIds = new Set(hits.map(item => item.id));
+    return {
+      records: records.filter(item => !hitIds.has(item.id)),
+      result: { deleted: hits.map(item => item.id) },
+    };
+  });
 }
 
 /** How many tokens could still authenticate a request right now. */
 export async function usableTokenCount(): Promise<number> {
   const now = Date.now();
-  return (await readRecords()).filter(record => record.revokedAt === undefined && !isExpired(record, now)).length;
+  return (await readRecords()).filter(item => item.revokedAt === undefined && !isExpired(item, now)).length;
 }
 
 /**
@@ -179,29 +236,25 @@ export async function usableTokenCount(): Promise<number> {
  */
 export async function rotateToken(idOrPrefix: string): Promise<MintedToken> {
   const needle = idOrPrefix.trim().toLowerCase();
-  const records = await readRecords();
-  const target = records.find(record => record.id.toLowerCase().startsWith(needle));
-  if (!target) throw new Error(`No token matches "${idOrPrefix}".`);
-  const now = Date.now();
-  const secret = generateSecret();
-  const updated: AuthTokenRecord = {
-    id: target.id,
-    label: target.label,
-    hash: hashSecret(secret),
-    createdAt: target.createdAt,
-    expiresAt: expiryFrom(tokenTtlSeconds(), now),
-    lastUsedAt: null,
-    useCount: 0,
-  };
-  await writeRecords(records.map(record => (record.id === target.id ? updated : record)));
-  return {
-    id: updated.id,
-    label: updated.label,
-    secret,
-    created_at: new Date(updated.createdAt).toISOString(),
-    expires_at: updated.expiresAt === null ? null : new Date(updated.expiresAt).toISOString(),
-    permanent: updated.expiresAt === null,
-  };
+  return mutateRecords(records => {
+    const target = records.find(item => item.id.toLowerCase().startsWith(needle));
+    if (!target) throw new Error(`No token matches "${idOrPrefix}".`);
+    const now = Date.now();
+    const secret = generateSecret();
+    const updated: AuthTokenRecord = {
+      id: target.id,
+      label: target.label,
+      hash: hashSecret(secret),
+      createdAt: target.createdAt,
+      expiresAt: expiryFrom(tokenTtlSeconds(), now),
+      lastUsedAt: null,
+      useCount: 0,
+    };
+    return {
+      records: records.map(item => (item.id === target.id ? updated : item)),
+      result: mintedView(updated, secret),
+    };
+  });
 }
 
 export type AuthGateResult =
@@ -225,7 +278,7 @@ export async function authorizeRequest(
 
   const now = Date.now();
   const records = await readRecords();
-  if (!records.some(record => record.revokedAt === undefined && !isExpired(record, now))) {
+  if (!records.some(item => item.revokedAt === undefined && !isExpired(item, now))) {
     warnNoActiveToken();
     // Deliberately not counted as a failure: this is a configuration state, not
     // an attack, and the operator's own client must not get locked out while
@@ -271,14 +324,18 @@ function warnNoActiveToken(): void {
 
 /** Bump lastUsed/useCount, persisting at most every LAST_USED_FLUSH_MS. */
 async function touchToken(id: string, now: number): Promise<void> {
-  const records = await readRecords();
-  const target = records.find(record => record.id === id);
-  if (!target) return;
-  target.lastUsedAt = now;
-  target.useCount += 1;
   if (now - lastFlushAt < LAST_USED_FLUSH_MS) return;
   lastFlushAt = now;
-  await host().secrets.store(AUTH_STORE_KEY, JSON.stringify(records));
+  // The flush writes through the merged, serialized path: a stale whole-array
+  // store used to delete tokens another instance had minted in the meantime.
+  await mutateRecords(records => {
+    const target = records.find(item => item.id === id);
+    if (target) {
+      target.lastUsedAt = now;
+      target.useCount += 1;
+    }
+    return { records, result: undefined as void };
+  }).catch(() => undefined);
 }
 
 /** Auth state for the panel / get_config / the auth status tool. */
