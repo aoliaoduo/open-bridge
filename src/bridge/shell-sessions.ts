@@ -20,6 +20,7 @@ import { workspacePath } from "./paths.js";
 import { shellSpec } from "./processes.js";
 import { ProcessOutputBuffer, type ProcessOutputRead } from "../process/output-buffer.js";
 import { MAX_CAPTURED_OUTPUT } from "./state.js";
+import { windowsHideForChild } from "./child-console.js";
 import { createMarker, scanMarkerExitCode, stripMarkerLines } from "../shell/session-marker.js";
 import { availableHint } from "./error-hints.js";
 import { maybeStripAnsi } from "../process/ansi.js";
@@ -90,9 +91,10 @@ function spawnSessionShell(name: string, cwd: string): { id: string; child: Chil
   }
   const id = "shell-" + randomBytes(6).toString("hex");
   // "-l" login shell (loads profile, like the one-shot "-lc"), "-s" read commands from stdin.
+  // Same console rule as services: an open shell must not survive the window.
   const child = spawn(spec.file, ["-l", "-s"], {
     cwd,
-    windowsHide: true,
+    windowsHide: windowsHideForChild(),
     env: { ...process.env, OPEN_BRIDGE_SHELL: name },
   });
   const output = new ProcessOutputBuffer(MAX_CAPTURED_OUTPUT);

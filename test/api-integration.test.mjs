@@ -88,6 +88,18 @@ test("api status is loopback-readable without a token", async () => {
   assert.ok(body.status.tool_count >= 40);
 });
 
+test("one version everywhere: package.json, /api/status and /api/settings agree", async () => {
+  // A hard-coded fallback in src/host/node-host.ts used to be a second copy of
+  // the version; it drifted on every bump for anything that built the host
+  // without passing one. package.json is now the only place it is written.
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.match(pkg.version, /^\d+\.\d+\.\d+/);
+  const status = await (await fetch(`${base()}/api/status`)).json();
+  assert.equal(status.status.version, pkg.version, "/api/status reports the package version");
+  const settings = await (await fetch(`${base()}/api/settings`)).json();
+  assert.equal(settings.state.version, pkg.version, "/api/settings reports the same one");
+});
+
 test("console page loads without a token (it is where the token is delivered)", async () => {
   // Regression: /console/ demanded the console token, but the token is injected
   // into this very page — a deadlock that made the web console unopenable.

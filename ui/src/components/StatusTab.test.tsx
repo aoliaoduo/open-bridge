@@ -22,6 +22,7 @@ afterEach(() => {
 function bridgeStatus(overrides: Partial<BridgeStatus> = {}): BridgeStatus {
   return {
     state: "running",
+    version: "9.9.9-test",
     local_url: "http://127.0.0.1:18080/mcp/local-token",
     shell: "C:/Program Files/Git/bin/bash.exe",
     allowed_directories: [],

@@ -110,6 +110,7 @@ function bridgeStatus(overrides: Partial<BridgeStatus> = {}): BridgeStatus {
 function settingsState(overrides: Partial<SettingsState> = {}): SettingsState {
   return {
     running: true,
+    version: "9.9.9-test",
     statusText: "已就绪",
     mcpUrl: "http://127.0.0.1:18080/mcp/tok",
     configuredDomain: "",
@@ -372,6 +373,9 @@ describe("App shell", () => {
   test("reports the running state in the header badge", async () => {
     render(<App />);
     expect(await screen.findByText("已就绪")).toBeTruthy();
+    // The header chip answers "which build is this page from?" — the string
+    // the server took from package.json.
+    expect(screen.getByText("v9.9.9-test")).toBeTruthy();
   });
 
   test("reloads the console after a rotation invalidates its injected token", async () => {

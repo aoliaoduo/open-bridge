@@ -53,6 +53,8 @@ export function getBridgeStatus(): Record<string, unknown> {
     // AND the host-capability filter (a standalone instance has no language
     // server, so editor-only tools are absent from the catalog).
     tool_count: listToolDefinitions().length,
+    /** The same string `open-bridge --version` prints: one version everywhere. */
+    version: host().version(),
     auth_enabled: host().config.get<boolean>("auth.enabled", false) === true,
     /**
      * What guards this instance right now. "public-open" means anyone holding
@@ -258,6 +260,7 @@ export function workspaceBrief(): Record<string, unknown> {
 
   // Bridge-side state worth knowing at session start.
   brief.bridge = {
+    version: host().version(),
     tool_count: listToolDefinitions().length,
     tool_profile: host().config.get<string>("toolProfile", "full"),
     active_commands: [...state.commands.values()].filter(c => !c.done).length,

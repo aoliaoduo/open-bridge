@@ -28,6 +28,8 @@ export const consoleToken = (): string => document.querySelector<HTMLMetaElement
 
 export interface BridgeStatus {
   state: string;
+  /** Build version (package.json), the same string the CLI prints. */
+  version?: string;
   /** Loopback MCP URL; absent when the Bridge is stopped. */
   local_url?: string;
   /** The published tunnel URL — absent while the Bridge is local-only. */

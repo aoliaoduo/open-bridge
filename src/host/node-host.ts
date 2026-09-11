@@ -24,6 +24,23 @@ import {
   type Host, type HostCapabilities, type UiChannel,
 } from "./host.js";
 
+/**
+ * The version of this build, read from package.json - the only place it is
+ * written. The old fallback was a second literal, so every bump left a stale
+ * copy behind for anything that built the host without passing a version
+ * (tests, embedders, a hand-made dist).
+ */
+function packageVersion(): string {
+  try {
+    // The same relative depth from src/ and from dist/, so it works either way.
+    const manifest = fs.readFileSync(new URL("../../package.json", import.meta.url), "utf8");
+    return (JSON.parse(manifest) as { version: string }).version;
+  } catch {
+    // An unreadable manifest must never turn into a startup failure.
+    return "0.0.0-unknown";
+  }
+}
+
 export interface NodeHostOptions {
   /** Root data directory; defaults to $OPEN_BRIDGE_HOME or ~/.open-bridge. */
   homeDir?: string;
@@ -377,7 +394,10 @@ export function installNodeHost(options: NodeHostOptions = {}): { host: NodeHost
     maxBytes: config.get("logMaxBytes", CONFIG_DEFAULTS.logMaxBytes as number),
   });
   const ui = new MultiSubscriberUi();
-  const version = options.version ?? "1.0.0-alpha.1";
+  // package.json is the only place a version is written. This fallback used to
+  // be a second literal, so every bump left a stale copy behind for whoever
+  // built the host without passing one (tests, embedders, a hand-made dist).
+  const version = options.version ?? packageVersion();
 
   let projectRoot = path.resolve(options.projectRoot ?? process.cwd());
 

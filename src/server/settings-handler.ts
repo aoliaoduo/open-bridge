@@ -54,6 +54,7 @@ export async function buildSettingsState(): Promise<SettingsState> {
   const running = Boolean(state.server);
   return {
     running,
+    version: host().version(),
     statusText: running ? (state.sessions.size ? `已连接 · ${state.sessions.size} 个会话` : "已就绪") : "离线",
     mcpUrl: clientMcpUrl(),
     configuredDomain: cfg.get("ngrokDomain", ""),
@@ -342,6 +343,7 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
 function fallbackState(): SettingsState {
   return {
     running: Boolean(state.server),
+    version: host().version(),
     statusText: "错误",
     mcpUrl: clientMcpUrl(),
     configuredDomain: "",

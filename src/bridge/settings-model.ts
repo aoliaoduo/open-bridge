@@ -108,6 +108,8 @@ export interface SettingsConfigView {
 /** Everything the settings page shows, pushed by the host as one `state` message. */
 export interface SettingsState {
   running: boolean;
+  /** Build version from package.json — the console header shows it. */
+  version: string;
   statusText: string;
   /** The MCP URL to show and copy — tunnel when published, otherwise loopback. */
   mcpUrl: string;

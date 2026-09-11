@@ -19,6 +19,7 @@ import { bridgeAllowedHosts, isAllowedBridgeHost, validateNgrokDomain } from "..
 import { authorizeRequest, authEnabled } from "../http/auth.js";
 import { isDeterministicNetworkFailure } from "../network/net-failure.js";
 import { isEndpointTakenError, isFatalNgrokError, ngrokFailureSummary } from "../network/ngrok-failure.js";
+import { windowsHideForChild } from "./child-console.js";
 import {
   MAX_SESSIONS, RECONNECT_DELAYS_MS, ROUTE_TOKEN_KEY,
   asStructuredContent, clientMcpUrl, record, state, text, redactedPublicUrl,
@@ -1381,7 +1382,9 @@ function spawnTunnel(domain: string, generation: number): ChildProcessWithoutNul
   const child: ChildProcessWithoutNullStreams = state.tunnel = spawn(
     exe,
     ["http", String(state.port), "--url", `https://${domain}`, "--log", "stdout"],
-    { windowsHide: true, env: ngrokProcessEnvironment() },
+    // Share our console when we have one, so closing the terminal window takes
+    // the agent with it (src/bridge/child-console.ts records the measurement).
+    { windowsHide: windowsHideForChild(), env: ngrokProcessEnvironment() },
   );
   child.stdout.on("data", d => {
     try {

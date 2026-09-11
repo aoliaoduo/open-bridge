@@ -8,6 +8,7 @@ import { resolveShell, type ShellSpec } from "../shell/shell-provider.js";
 import { maybeStripAnsi } from "../process/ansi.js";
 import { isBashLikeShell, visibleCapturePath, wrapWithTee, wrapWithTeeAppend } from "../process/tee-capture.js";
 import { showVisibleTerminal } from "./visible-terminal.js";
+import { windowsHideForChild } from "./child-console.js";
 import * as fsSync from "node:fs";
 import {
   MAX_CAPTURED_OUTPUT,
@@ -72,7 +73,9 @@ export function spawnManaged(
       : commandText;
   const child = spawn(spec.file, [...spec.args, spawnText], {
     cwd,
-    windowsHide: true,
+    // A service that outlives the terminal that started it is an orphan
+    // holding a port; share our console so closing the window takes it along.
+    windowsHide: windowsHideForChild(),
     env: { ...process.env, ...env, OPEN_BRIDGE_COMMAND_ID: id },
   });
   // A child that exits (or closes its stdin) mid-write makes stdin emit

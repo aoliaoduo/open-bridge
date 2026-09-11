@@ -5,6 +5,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+（下一次发版的改动写在这里。）
+
+## [1.0.0-alpha.2] — 2026-09-11
 ### Added
 - **控制台设置页终于有了 OAuth 的开关。** `oauth.enabled` 之前只能 `open-bridge config set`（或直接打
   `/api/settings/action`）——设置页里根本没有这一项，README 却说「或者用控制台设置页」。现在新增
@@ -497,6 +501,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instance), and whatever the tunnel forwards to. The port the listener last
   bound is now remembered across rebinds.
 
+### Added
+- **双击一次就能跑起来：`start-open-bridge.cmd`。** 仓库根目录的批处理，双击即可——首次运行时
+  自动 `npm install` + `npm run build`，然后在**本窗口**里跑 `open-bridge serve --open`：
+  服务端自己的日志和三个地址就在窗口里，浏览器自动打开控制台。**关掉窗口 = 停止服务**：
+  隧道、后台服务、常驻 shell 都与这个控制台同属一个控制台，Windows 关窗即终止其成员。
+  `Ctrl+C` 是干净停止（删掉启动锁与 runtime 文件）。节点缺失/步骤失败时会留住窗口显示原因。
+- 控制台顶栏与「状态」页显示构建版本；`/api/status`、`/api/settings` 与 MCP 的 `status`、
+  `workspace_brief` 都带上 `version`，与 `open-bridge --version` 是同一个字符串。
+### Fixed
+- **长驻子进程不再从终端里「逃逸」。** ngrok、后台服务、常驻 shell 此前一律以 `windowsHide: true`
+  拉起，等于各自拿一个**独立（隐形）控制台**：关掉终端窗口后它们活着，隧道继续占着域名，
+  下次启动只会得到 `ERR_NGROK_334` 并退回本地模式，屏幕上没有任何线索。实测（Win32
+  `AttachConsole` + `GetConsoleProcessList`）证明 `windowsHide: false` 的子进程会挂在**我们**
+  的控制台上、而隐藏的那个不会。现在只要我们自己有控制台（`stdout`/`stderr` 是 TTY）就共享它，
+  只有在确实没有控制台时（输出被重定向、或 GUI 父进程如旧的 VS Code 扩展宿主）才隐藏。
+- **版本号只剩一处来源。** `src/host/node-host.ts` 曾把 `"1.0.0-alpha.1"` 写成兜底字面量：
+  任何没传 version 的构建（测试、嵌入方、手工重建的 dist）都会带一个过期版本号。现在从
+  `package.json` 读，并由集成测试把 `/api/status`、`/api/settings` 与它钉在一起。
 ## [1.0.0-alpha.1] — 2026-09-11
 
 First standalone release: the VS Code extension (0.5.17, final) is now an

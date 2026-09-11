@@ -93,6 +93,11 @@ export function App() {
           <path d="M8 17v-2.5M12 17v-4.5M16 17v-2.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
         </svg>
         <h1>Open Bridge 控制台</h1>
+        {settings?.version ? (
+          <span className="mono" style={{ fontSize: 12, opacity: 0.6 }} title="构建版本（package.json）">
+            v{settings.version}
+          </span>
+        ) : null}
         <span className={`badge ${settings?.running ? "on" : "off"}`}>
           {settings ? settings.statusText : "连接中…"}
         </span>

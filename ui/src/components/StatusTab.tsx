@@ -132,6 +132,7 @@ export function StatusTab({ act, onRefresh }: Props) {
           <div className="row"><span className="label">活动命令</span><span>{status?.active_commands ?? "…"}</span></div>
           <div className="row"><span className="label">工具数</span><span>{status?.tool_count ?? "…"}（{status?.tool_profile ?? "…"}）</span></div>
           <div className="row"><span className="label">Shell</span><span className="mono">{status?.shell ?? "…"}</span></div>
+          <div className="row"><span className="label">版本</span><span className="mono">{status?.version ? `v${status.version}` : "…"}</span></div>
           <div className="row"><span className="label">鉴权</span><span>{status?.auth_enabled ? "已启用（Bearer）" : "关闭（仅凭 URL）"}</span></div>
           <div className="row"><span className="label">锁</span><span>持有 {status?.locks.held ?? 0} · 等待 {status?.locks.waiting ?? 0}</span></div>
         </div>
