@@ -5,6 +5,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- **`logs/bridge.log` 会轮转了。** 长到上限（`logMaxBytes`，默认 10 MiB）就改名成
+  `bridge.log.1`，只留上一代——和审计日志、服务日志同一套做法——磁盘不再只涨不落。
+  设置页新增「日志」卡片可改上限，`open-bridge config set logMaxBytes <字节>` 也行，
+  `0` = 不轮转（旧行为）。轮转失败（例如 Windows 上另一个实例正持有文件）退化为清空当前文件，
+  永远不把错误抛给写日志的调用。
+- **会话页补上「首次连接」与「调用数」两列。** `list_sessions` 与 `/api/sessions` 都带上
+  `connected_at` 与 `calls`：前者回答"这个客户端是什么时候进来的"（此前只能看空闲时长），
+  后者回答"它到底用了多少"（按会话累计，batch 内部子调用不重复计数）。
 
 ### Changed
 - **控制台的一次整体视觉与可用性 pass。** 内容宽度 920 → 1040px，九条页签得到悬停/圆角与
