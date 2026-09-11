@@ -102,6 +102,18 @@ function runtimePath(home: string, root: string): string {
   return path.join(home, `runtime-${workspaceSuffixFor(root)}.json`);
 }
 
+/**
+ * Startup lock for one workspace root, created with `wx` BEFORE the listener
+ * binds. The runtime-record check above is read-then-act: two `serve`s in the
+ * same directory within the same second both saw no record, both bound
+ * (different ephemeral ports), and the later runtime write hid the first
+ * instance for good. The lock file closes that window; it is removed on
+ * shutdown and treated as stale when its pid is gone.
+ */
+function serveLockPath(home: string, root: string): string {
+  return path.join(home, `serve-${workspaceSuffixFor(root)}.lock`);
+}
+
 /** The pre-multi-instance record: one file for whichever instance wrote last. */
 function legacyRuntimePath(home: string): string {
   return path.join(home, "runtime.json");
@@ -269,6 +281,32 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
     fail(`该目录已有实例在运行 (pid ${existing.pid}, 端口 ${existing.port})。先 open-bridge stop，或换一个目录/端口再用。`);
   }
 
+  // Claim the startup slot before touching the network (see serveLockPath).
+  const serveLock = serveLockPath(nodeHost.storageDir(), projectRoot);
+  const claimServeLock = (): void => {
+    try {
+      fs.writeFileSync(serveLock, JSON.stringify({ pid: process.pid, root: projectRoot }), { flag: "wx" });
+      return;
+    } catch {
+      // EEXIST: either a concurrent starter or a crashed one. An alive pid that
+      // is not ours wins; anything else (dead pid, corrupt file) is stale.
+      let lockPid = 0;
+      try {
+        lockPid = (JSON.parse(fs.readFileSync(serveLock, "utf8")) as { pid?: number }).pid ?? 0;
+      } catch { /* unreadable: treat as stale */ }
+      if (lockPid && lockPid !== process.pid && pidAlive(lockPid)) {
+        fail(`该目录有一个实例正在启动 (pid ${lockPid})。请稍候，或用 open-bridge instances 查看。`);
+      }
+    }
+    try { fs.rmSync(serveLock, { force: true }); } catch { /* best-effort reclaim */ }
+    try {
+      fs.writeFileSync(serveLock, JSON.stringify({ pid: process.pid, root: projectRoot }), { flag: "wx" });
+    } catch (error) {
+      fail(`无法创建启动锁 ${serveLock}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  claimServeLock();
+
   // Instances share one config file, so the configured port may belong to the
   // instance that is already up in another directory. An explicit --port still
   // wins: someone who asked for 18080 may have a bookmark or firewall rule on
@@ -295,6 +333,7 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
     console.log(`\n[open-bridge] ${signal} received, stopping...`);
     try { await stop(); } catch { /* best-effort */ }
     await fsp.rm(runtimePath(nodeHost.storageDir(), projectRoot), { force: true }).catch(() => undefined);
+    await fsp.rm(serveLock, { force: true }).catch(() => undefined);
     // An instance started by an older build writes the legacy file too.
     const legacy = readOneRuntime(legacyRuntimePath(nodeHost.storageDir()));
     if (legacy && legacy.pid === process.pid) {
@@ -401,6 +440,19 @@ async function cmdStop(parsed: ParsedArgs): Promise<void> {
   if (!runtime || !pidAlive(runtime.pid)) {
     console.log("没有正在运行的实例。");
     await fsp.rm(runtimePath(home, root), { force: true }).catch(() => undefined);
+    // Also clear a startup lock left behind by an instance that was killed
+    // abruptly (Windows has no SIGTERM, so its handler never ran): otherwise the
+    // next `serve` in this directory is refused because of a dead pid. A lock
+    // whose process is still alive belongs to a serve that is booting RIGHT NOW
+    // and is left alone.
+    const staleLock = serveLockPath(home, root);
+    let stalePid = 0;
+    try {
+      stalePid = (JSON.parse(fs.readFileSync(staleLock, "utf8")) as { pid?: number }).pid ?? 0;
+    } catch { /* absent or unreadable: nothing to protect */ }
+    if (!stalePid || !pidAlive(stalePid)) {
+      await fsp.rm(staleLock, { force: true }).catch(() => undefined);
+    }
     return;
   }
   let shutdownError: unknown;
@@ -575,7 +627,11 @@ async function cmdLogs(parsed: ParsedArgs): Promise<void> {
   if (shown.length > 0) console.log(shown.join("\n"));
   if (!parsed.flags.has("follow")) return;
   console.log("-- 跟踪中，Ctrl+C 退出 --");
-  let size = fs.statSync(file).size;
+  // The file can vanish between the read above and this stat (rotation, a
+  // concurrent `logs --clear`): start from 0 instead of crashing the CLI —
+  // the interval's own try/catch re-reads once it comes back.
+  let size = 0;
+  try { size = fs.statSync(file).size; } catch { /* starts over when it reappears */ }
   const timer = setInterval(() => {
     try {
       const stat = fs.statSync(file);

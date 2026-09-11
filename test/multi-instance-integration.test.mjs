@@ -16,7 +16,7 @@ import { test, before, after } from "node:test";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import http from "node:http";
-import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -187,4 +187,30 @@ test("a second serve in the same directory is refused with a clear message", asy
     .catch(error => ({ code: error.code, stderr: String(error.stderr ?? "") }));
   assert.notEqual(again.code, 0, "the duplicate must fail, not silently double-bind");
   assert.match(again.stderr + (again.stdout ?? ""), /该目录已有实例在运行/, `expected the per-directory refusal, got: ${again.stderr}`);
+});
+
+test("the startup lock dies with its instance, and a stale one is reclaimed", async () => {
+  const lockFor = root => path.join(home, `serve-${suffixFor(root)}.lock`);
+  // A was stopped by the previous test: its graceful shutdown takes the lock
+  // along with the runtime record.
+  assert.equal(existsSync(lockFor(dirA)), false, "no lock survives a graceful stop");
+
+  // A lock left by an abruptly killed instance (a dead pid, which is the normal
+  // case on Windows) must not refuse the next serve in that directory.
+  writeFileSync(lockFor(dirA), JSON.stringify({ pid: 999_999_999, root: dirA }));
+  rmSync(runtimeFileFor(dirA), { force: true });
+  boot("A2", dirA);
+  const a2 = instances.A2;
+
+  const runtime = await waitFor(() => {
+    try { return JSON.parse(readFileSync(runtimeFileFor(dirA), "utf8")); } catch { return false; }
+  }, "the reclaiming serve to publish its record");
+  assert.equal(runtime.pid, a2.child.pid, "the serve that reclaimed the lock is the one that bound");
+  assert.equal(JSON.parse(readFileSync(lockFor(dirA), "utf8")).pid, a2.child.pid,
+    "the stale claim was replaced by the live one");
+
+  const stopped = await run(process.execPath, [CLI, "stop", "--home", home], { cwd: dirA });
+  assert.match(stopped.stdout, /已发送停止指令/);
+  await waitFor(() => !existsSync(lockFor(dirA)), "the lock to disappear with its instance");
+  assert.equal(existsSync(runtimeFileFor(dirA)), false, "and the runtime record with it");
 });
