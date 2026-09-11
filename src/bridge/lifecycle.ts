@@ -22,6 +22,7 @@ import {
   asStructuredContent, clientMcpUrl, record, state, text, redactedPublicUrl,
   type SessionState,
 } from "./state.js";
+import { buildWebAiPrompt } from "./onboarding.js";
 import { root, workspaceStateSuffix } from "./paths.js";
 import { invoke } from "./dispatcher.js";
 import { loadTodoStore } from "./todo-store.js";
@@ -1184,17 +1185,17 @@ export async function republishAfterRotate(): Promise<void> {
   await publishSelf();
 }
 
+/**
+ * The onboarding prompt for the current instance, with its locality stated.
+ *
+ * `state.tunnelUrl` is the signal: it is set only while a tunnel is actually
+ * published (see the public_url semantics fixed earlier), so when it is empty
+ * the prompt must admit that the URL it carries is loopback-only.
+ */
 export function webAiPrompt(): string {
   const url = clientMcpUrl();
   if (!url) throw new Error("Start Bridge before copying the web AI prompt.");
-  // The prompt carries the credential, so it must mention the second one when
-  // the bearer gate is on; otherwise the client gets a 401 with no explanation.
-  const authNote = authEnabled()
-    ? "\n\n注意：本 Bridge 已启用 Bearer 鉴权。除上面的 URL 外，请求还需带上请求头 "
-      + "`Authorization: Bearer <token>`（令牌在 Open Bridge Web 控制台签发，"
-      + "只在签发时显示一次）。若你的客户端只能填 URL、不能设置请求头，可改用 `?token=<token>` 形式。"
-    : "";
-  return `【${url}】${authNote}\n\n快速连接这个 MCP（URL），明确使用规则，熟悉可用工具，做好处理接下来一系列工作的准备。`;
+  return buildWebAiPrompt({ url, isPublic: Boolean(state.tunnelUrl), authEnabled: authEnabled() });
 }
 
 export interface HealthReport {

@@ -301,6 +301,24 @@ test("rotation swaps the token without interrupting the listener", async () => {
   );
 });
 
+test("the onboarding prompt admits when its URL is local-only", async () => {
+  // Regression: the console card said "仅本机可访问" while the copied prompt
+  // handed over a 127.0.0.1 URL with no caveat — and the prompt is the one thing
+  // whose entire purpose is to be pasted into a client that is often NOT this
+  // machine. This suite runs with --no-tunnel, so the honest answer here is the
+  // loopback one. (The public variant is covered by test/onboarding.test.ts.)
+  const served = await (await fetch(`${base()}/api/prompt`)).json();
+  assert.match(served.prompt, /127\.0\.0\.1/);
+  assert.match(served.prompt, /未开启隧道/);
+  assert.match(served.prompt, /只有本机能访问/);
+
+  const res = await postAction({ command: "copyPrompt" });
+  assert.equal(res.status, 200);
+  const action = await res.json();
+  assert.match(action.copyText, /未开启隧道/, "the copied text carries the caveat");
+  assert.match(action.info, /只有本机能访问/, "the toast agrees with the text");
+});
+
 test("services are listed and driven through the console API", async () => {
   // The console had no service surface at all: a service the agent saved could
   // only be controlled by asking the agent again.

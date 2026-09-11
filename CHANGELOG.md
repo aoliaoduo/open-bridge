@@ -90,6 +90,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on ngrok Free's one-session-per-domain budget. Rotation is now a pure token
   swap plus a refresh of the public URL and the peer registry row, and
   `restartListener()` / `SettingsActionResult.deferRestart` are gone with it.
+- **The onboarding prompt no longer hands over a local-only address as if it were
+  reachable.** `clientMcpUrl()` resolves correctly (published tunnel URL first,
+  loopback only as a fallback), but the copied text said nothing about which one
+  it held: with no tunnel the console card read "当前仅本机可访问（未开启隧道）"
+  while "复制接入提示词" handed over `http://127.0.0.1:...` with no caveat — and
+  that prompt exists to be pasted into a client that is usually not this machine.
+  The text is now built by a pure, unit-tested function
+  (`src/bridge/onboarding.ts`), the loopback variant leads with the caveat and the
+  way to publish the instance, and the console toast repeats it instead of saying
+  "粘贴给 AI 客户端即可".
 - **The shared peer registry keeps one row per instance.** It merged on the token
   digest, so every rotation added a row whose digest could never match a token
   again — one dead credential entry per rotation, in a file other windows read,

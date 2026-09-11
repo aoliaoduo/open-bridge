@@ -142,14 +142,27 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
     case "copyUrl": {
       const url = clientMcpUrl();
       if (!url) throw new Error("Bridge 未运行，还没有可复制的 URL。");
-      return done({ info: "MCP URL 已复制到剪贴板。", copyText: url });
+      return done({
+        info: state.tunnelUrl
+          ? "MCP URL 已复制到剪贴板。"
+          : "MCP URL 已复制到剪贴板（当前仅本机可访问，未开启隧道）。",
+        copyText: url,
+      });
     }
 
     case "copyPrompt": {
       // Onboarding: hand the client a ready-made opening message carrying the
       // URL (and, when the bearer gate is on, how to authenticate), instead of
-      // leaving the user to write one from scratch.
-      return done({ info: "接入提示词已复制，粘贴给 AI 客户端即可。", copyText: webAiPrompt() });
+      // leaving the user to write one from scratch. The toast repeats the
+      // prompt's own caveat when the URL is loopback-only: the text and the
+      // toast must never disagree about whether the address is reachable.
+      return done({
+        info: state.tunnelUrl
+          ? "接入提示词已复制，粘贴给 AI 客户端即可。"
+          : "接入提示词已复制 —— 但当前未开启隧道，里面的地址只有本机能访问；"
+            + "外部客户端请先在「设置」页填写 ngrokDomain 并开启隧道，再重新复制。",
+        copyText: webAiPrompt(),
+      });
     }
 
     case "copyText":
