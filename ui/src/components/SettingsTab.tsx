@@ -236,6 +236,28 @@ export function SettingsTab({ settings, act }: Props) {
           </>
         )}
       </div>
+
+      <div className="card">
+        <h2>日志</h2>
+        <div className="section-note">
+          <span className="mono">bridge.log</span> 长到一个上限就轮转成{" "}
+          <span className="mono">bridge.log.1</span>（只留上一代，和审计日志、服务日志同一套做法），
+          旧的覆盖旧的，磁盘不再只涨不落。0 = 不轮转。重启 Bridge 生效。
+        </div>
+        <div className="row">
+          <span className="label">单文件上限</span>
+          <DraftField
+            type="number"
+            min={0}
+            value={String(cfg.logMaxBytes)}
+            onCommit={raw => {
+              const n = Number(raw.trim());
+              if (Number.isInteger(n) && n >= 0) setConfig("logMaxBytes", n);
+            }}
+          />
+          <span className="section-note" style={{ margin: 0 }}>字节（默认 10485760 = 10 MiB，0 = 不轮转）；失焦时保存</span>
+        </div>
+      </div>
     </>
   );
 }

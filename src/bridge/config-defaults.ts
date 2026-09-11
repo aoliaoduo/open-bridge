@@ -21,6 +21,8 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = {
   autoReconnect: true,
   ngrokUseHttpProxy: true,
   toolProfile: "full",
+  /** `logs/bridge.log` rotates to `.1` at this size (0 = never rotate). */
+  logMaxBytes: 10 * 1024 * 1024,
   "auth.enabled": false,
   "auth.tokenTtlSeconds": 0,
   "concurrency.enabled": true,

@@ -98,6 +98,7 @@ export interface SettingsConfigView {
   autoReconnect: boolean;
   ngrokUseHttpProxy: boolean;
   toolProfile: string;
+  logMaxBytes: number;
 }
 
 /** Everything the settings page shows, pushed by the host as one `state` message. */
@@ -150,6 +151,7 @@ const CONFIG_SPEC = {
   shellArgs: { kind: "stringArray", maxItems: 50, maxLen: 500 },
   port: { kind: "int", min: 0, max: 65535 },
   publicHealthTimeoutMs: { kind: "int", min: 3000, max: 120000 },
+  logMaxBytes: { kind: "int", min: 0, max: 1024 * 1024 * 1024 },
 } as const;
 
 export type SettingsConfigKey = keyof typeof CONFIG_SPEC;

@@ -141,7 +141,7 @@ config.json              配置（config-defaults.ts 是 schema 单一事实源�
 state.json               持久状态（服务定义 / 待办 / 用量计数）
 secrets.json             路由令牌 + 哈希令牌记录（明文永不落盘）
 audit.log                追加式审计日志（1 MiB 轮转）
-logs/bridge.log          Bridge 与服务日志（open-bridge logs 读它）
+logs/bridge.log          Bridge 与服务日志（open-bridge logs 读它；默认 10 MiB 轮转到 bridge.log.1，`logMaxBytes` 可调，0 = 不轮转）
 runtime-<后缀>.json      每个工作区一份运行记录（pid / 端口 / 根目录）
 bridge-peers.json        本机实例注册表（多实例共享隧道用）
 ```

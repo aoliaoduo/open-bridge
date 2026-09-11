@@ -272,14 +272,25 @@ class MultiSubscriberUi implements UiChannel {
   }
 }
 
+/** `logs/bridge.log` rotates to a single previous generation at this size. */
+export const FILE_LOG_MAX_BYTES = 10 * 1024 * 1024;
+
+export interface FileLogOptions {
+  /** Rotate once the live file has reached this many bytes (0 disables rotation). */
+  maxBytes?: number;
+}
+
 export class FileLog {
   private readonly file: string;
+  private readonly maxBytes: number;
   private tail: Promise<void> = Promise.resolve();
   private readonly listeners = new Set<(line: string) => void>();
 
-  constructor(logsDir: string) {
+  constructor(logsDir: string, options: FileLogOptions = {}) {
     ensureDir(logsDir);
     this.file = path.join(logsDir, "bridge.log");
+    const declared = options.maxBytes === undefined ? FILE_LOG_MAX_BYTES : options.maxBytes;
+    this.maxBytes = Number.isFinite(declared) && declared > 0 ? Math.floor(declared) : 0;
   }
 
   write(line: string): void {
@@ -288,8 +299,36 @@ export class FileLog {
       try { listener(stamped); } catch { /* listeners never break logging */ }
     }
     this.tail = this.tail
-      .then(() => fsp.appendFile(this.file, `${stamped}\n`, "utf8"))
+      .then(() => this.append(stamped))
       .catch(() => undefined);
+  }
+
+  /**
+   * Append one stamped line, rotating first when the file has reached the cap.
+   *
+   * One previous generation (`bridge.log.1`), the same shape audit.log and the
+   * service logs use: unbounded growth was the last thing the data directory
+   * had no answer for, and bridge.log carries every instance's service output.
+   * Rotation is best-effort by construction — a second instance may hold the
+   * file open on Windows, where the rename fails — so a failed rotate falls
+   * back to truncating the live file rather than throwing into the caller.
+   */
+  private async append(stamped: string): Promise<void> {
+    if (this.maxBytes > 0) {
+      try {
+        const stat = await fsp.stat(this.file);
+        if (stat.size >= this.maxBytes) {
+          await fsp.rename(this.file, `${this.file}.1`)
+            .catch(() => fsp.writeFile(this.file, "").catch(() => undefined));
+        }
+      } catch { /* missing on first run is expected */ }
+    }
+    await fsp.appendFile(this.file, `${stamped}\n`, "utf8");
+  }
+
+  /** Resolves once every queued line has been written (tests, graceful shutdown). */
+  async flush(): Promise<void> {
+    await this.tail;
   }
 
   onLine(listener: (line: string) => void): () => void {
@@ -325,7 +364,9 @@ export function installNodeHost(options: NodeHostOptions = {}): { host: NodeHost
   const config = new FileConfig(home);
   const state = new FileStateStore(home);
   const secrets = new FileSecretStore(home);
-  const log = new FileLog(logsDir);
+  const log = new FileLog(logsDir, {
+    maxBytes: config.get("logMaxBytes", CONFIG_DEFAULTS.logMaxBytes as number),
+  });
   const ui = new MultiSubscriberUi();
   const version = options.version ?? "1.0.0-alpha.1";
 
