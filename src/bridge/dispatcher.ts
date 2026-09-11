@@ -11,6 +11,9 @@ const LOCK_CONTEXT: LockPlanContext = {
   resolvePath: input => workspaceContext.resolve(input),
   patchTargets: args => patchTargetPaths(args.patch, args.patch_file, workspaceContext),
   workspaceRoot: () => workspaceContext.root(),
+  servicesInGroup: group => [...state.services.entries()]
+    .filter(([, service]) => !group || String(service.group ?? "").trim().toLowerCase() === group)
+    .map(([name]) => name.trim().toLowerCase()),
 };
 import {
   listDirectory, findFiles, searchFiles, readFiles, writeFile, editBlock,
@@ -228,5 +231,8 @@ async function acquireForCall(name: string, args: Args): Promise<CallLease> {
 
 function positiveOr(value: unknown, fallback: number): number {
   const numeric = Number(value);
-  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
+  // 0 is meaningful here (the settings page documents it): holdTimeoutMs 0 =
+  // never reclaim, waitTimeoutMs 0 = wait forever. Only non-finite or negative
+  // values fall back to the default.
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : fallback;
 }

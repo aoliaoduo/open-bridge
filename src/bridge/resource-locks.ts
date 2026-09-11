@@ -63,6 +63,8 @@ interface Waiter {
   keys: string[];
   mode: LockMode;
   label: string;
+  /** The tuning THIS waiter was created with; grant/pump must use it, not whatever a later caller brought. */
+  tuning: LockTuning;
   enqueuedAt: number;
   resolve: (release: LockRelease) => void;
   reject: (error: Error) => void;
@@ -151,11 +153,12 @@ function releaseHolder(holder: Holder): void {
   pump();
 }
 
-function grant(waiter: Waiter, tuning: LockTuning): void {
+function grant(waiter: Waiter): void {
   if (waiter.settled) return;
   waiter.settled = true;
   if (waiter.waitTimer) clearTimeout(waiter.waitTimer);
   if (waiter.contentionTimer) clearTimeout(waiter.contentionTimer);
+  const tuning = waiter.tuning;
   const holder: Holder = {
     keys: waiter.keys,
     mode: waiter.mode,
@@ -183,17 +186,24 @@ function pump(): void {
       continue;
     }
     waiting.splice(index, 1);
-    grant(waiter, currentTuning);
+    grant(waiter);
     index = 0;
   }
 }
 
 /**
- * Tuning is per-process state because `pump()` is synchronous and must be able
- * to grant queued waiters without an options argument. `acquireLocks` refreshes
- * it from the caller's (config-derived) values on every call.
+ * Merge caller tuning over the defaults. Explicit `undefined` fields are
+ * IGNORED (a spread would let `holdTimeoutMs: undefined` disable the timers
+ * entirely: locks never reclaimed, waiters waiting forever).
  */
-let currentTuning: LockTuning = { holdTimeoutMs: DEFAULT_HOLD_TIMEOUT_MS, waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS };
+function mergedTuning(tuning?: Partial<LockTuning>): LockTuning {
+  const merged: LockTuning = { holdTimeoutMs: DEFAULT_HOLD_TIMEOUT_MS, waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS };
+  if (tuning?.holdTimeoutMs !== undefined) merged.holdTimeoutMs = tuning.holdTimeoutMs;
+  if (tuning?.waitTimeoutMs !== undefined) merged.waitTimeoutMs = tuning.waitTimeoutMs;
+  if (tuning?.onReclaim) merged.onReclaim = tuning.onReclaim;
+  if (tuning?.onContention) merged.onContention = tuning.onContention;
+  return merged;
+}
 
 /**
  * Acquire every key in `request.keys`, or wait for a conflicting holder.
@@ -201,8 +211,7 @@ let currentTuning: LockTuning = { holdTimeoutMs: DEFAULT_HOLD_TIMEOUT_MS, waitTi
  */
 export function acquireLocks(request: LockRequest, tuning?: Partial<LockTuning>): Promise<LockRelease> {
   const keys = [...new Set(request.keys.filter(key => typeof key === "string" && key.length > 0))].sort();
-  const merged: LockTuning = { ...currentTuning, ...tuning };
-  currentTuning = merged;
+  const merged = mergedTuning(tuning);
   // Nothing to serialize on: succeed immediately without touching the queue.
   if (keys.length === 0) return Promise.resolve(() => undefined);
 
@@ -211,6 +220,7 @@ export function acquireLocks(request: LockRequest, tuning?: Partial<LockTuning>)
       keys,
       mode: request.mode,
       label: request.label,
+      tuning: merged,
       enqueuedAt: Date.now(),
       resolve,
       reject,
@@ -224,7 +234,7 @@ export function acquireLocks(request: LockRequest, tuning?: Partial<LockTuning>)
     // must not slip past a writer that is already waiting on the same key.
     const conflictsWithQueued = waiting.some(earlier => overlaps(earlier.keys, keys));
     if (!conflictsWithQueued && canGrant(waiter)) {
-      grant(waiter, merged);
+      grant(waiter);
       return;
     }
 
@@ -302,5 +312,4 @@ export function resetLocks(): void {
     if (waiter.contentionTimer) clearTimeout(waiter.contentionTimer);
   }
   slots.clear();
-  currentTuning = { holdTimeoutMs: DEFAULT_HOLD_TIMEOUT_MS, waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS };
 }

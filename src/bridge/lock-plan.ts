@@ -28,6 +28,14 @@ export interface LockPlanContext {
   patchTargets(args: Record<string, unknown>): Promise<string[]>;
   /** Workspace root, used as the coarse fallback key. */
   workspaceRoot(): string;
+  /**
+   * Lowercased names of saved services in `group` ("" = every group). Consumed
+   * to expand start_all/stop_all into concrete svc:<name> keys — the lock
+   * table matches by exact string, so a literal "svc:*" key never conflicted
+   * with "svc:<name>" and an all-services run could interleave with an
+   * individual service op.
+   */
+  servicesInGroup(group: string): string[];
 }
 
 export interface LockPlan {
@@ -147,8 +155,14 @@ export async function deriveLockPlan(
     const service = args.name;
     if (typeof service === "string" && service.trim()) keys.push(`svc:${service.trim().toLowerCase()}`);
   } else if (name === "start_all_services" || name === "stop_all_services") {
-    const group = typeof args.group === "string" && args.group.trim() ? args.group.trim().toLowerCase() : "*";
-    keys.push(`svc:${group}`);
+    const group = typeof args.group === "string" && args.group.trim() ? args.group.trim().toLowerCase() : "";
+    // Expand to the concrete services the batch WILL touch: exact-key matching
+    // makes a literal "svc:*" or "svc:<group>" disjoint from "svc:<name>", so
+    // stop_all could tear a service down while start/restart of that same
+    // service ran next to it. Services saved after this plan was derived are
+    // not covered — the batch iterates the same snapshot, so the exposure is
+    // theoretical.
+    keys.push(...ctx.servicesInGroup(group).map(serviceName => `svc:${serviceName}`));
   }
 
   if (DECLARED_RESOURCES.has(name)) keys.push(...declaredKeys(args.resource_keys));

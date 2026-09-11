@@ -175,3 +175,42 @@ test("contention is reported once when a waiter passes the threshold", async () 
   held();
   (await waiter)();
 });
+
+test("holdTimeoutMs 0 means unlimited: the holder is never reclaimed", () =>
+  whileLoopRuns(async () => {
+    const reclaims: string[] = [];
+    const holder = await acquireLocks(
+      { keys: ["file:zero-hold"], mode: "write", label: "holder" },
+      { holdTimeoutMs: 0, waitTimeoutMs: 1_000, onReclaim: info => reclaims.push(info.label) },
+    );
+    await new Promise(resolve => setTimeout(resolve, 120));
+    assert.deepEqual(reclaims, [], "0 must not arm a reclaim timer (the console renders it as 0 = unlimited)");
+    // Still held, not reclaimed: a second writer has to time out.
+    await assert.rejects(
+      acquireLocks(
+        { keys: ["file:zero-hold"], mode: "write", label: "other" },
+        { holdTimeoutMs: 0, waitTimeoutMs: 80 },
+      ),
+      /Timed out/,
+    );
+    holder();
+  }));
+
+test("waitTimeoutMs 0 means unlimited: a queued caller waits instead of being rejected", () =>
+  whileLoopRuns(async () => {
+    const release = await acquireLocks(
+      { keys: ["file:zero-wait"], mode: "write", label: "holder" },
+      FAST,
+    );
+    let granted = false;
+    const pending = acquireLocks(
+      { keys: ["file:zero-wait"], mode: "write", label: "waiter" },
+      { holdTimeoutMs: 0, waitTimeoutMs: 0 },
+    ).then(release2 => { granted = true; return release2; });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.equal(granted, false, "0 must not arm a wait deadline (the console renders it as 0 = unlimited)");
+    release();
+    const waiterRelease = await pending;
+    assert.equal(granted, true, "the waiter is granted as soon as the holder releases");
+    waiterRelease();
+  }));

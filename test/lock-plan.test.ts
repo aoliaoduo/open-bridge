@@ -11,6 +11,7 @@ function ctx(overrides: Partial<LockPlanContext> = {}): LockPlanContext {
     resolvePath: input => (path.isAbsolute(input) ? path.resolve(input) : path.join(ROOT, input)),
     workspaceRoot: () => ROOT,
     patchTargets: async () => [],
+    servicesInGroup: () => [],
     ...overrides,
   };
 }
@@ -88,12 +89,23 @@ test("process lifecycle tools serialize per command id", async () => {
   assert.equal(await deriveLockPlan("force_terminate", {}, ctx()), undefined, "no id, no lock");
 });
 
-test("service lifecycle tools serialize per service, and all_* on the group", async () => {
+test("service lifecycle tools serialize per service, and all_* on the group's concrete services", async () => {
   for (const tool of ["start_service", "stop_service", "restart_service", "delete_service"]) {
     assert.deepEqual((await deriveLockPlan(tool, { name: "API" }, ctx()))?.keys, ["svc:api"], tool);
   }
-  assert.deepEqual((await deriveLockPlan("start_all_services", {}, ctx()))?.keys, ["svc:*"]);
-  assert.deepEqual((await deriveLockPlan("stop_all_services", { group: "Web" }, ctx()))?.keys, ["svc:web"]);
+  // all_* expands to the concrete services it will touch (exact-key matching):
+  // a literal "svc:*" never conflicted with "svc:<name>", so a stop-all could
+  // interleave with an individual start/restart of the same service.
+  const all = await deriveLockPlan("start_all_services", {}, ctx({
+    servicesInGroup: () => ["api", "web"],
+  }));
+  assert.deepEqual(all?.keys, ["svc:api", "svc:web"]);
+  const web = await deriveLockPlan("stop_all_services", { group: "Web" }, ctx({
+    servicesInGroup: group => (group === "web" ? ["api", "web"] : []),
+  }));
+  assert.deepEqual(web?.keys, ["svc:api", "svc:web"]);
+  const empty = await deriveLockPlan("start_all_services", {}, ctx());
+  assert.equal(empty, undefined, "no saved services, nothing to serialize");
 });
 
 test("declared resource keys are locked and handed to the process", async () => {
