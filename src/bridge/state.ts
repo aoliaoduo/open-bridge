@@ -228,7 +228,11 @@ async function appendAuditEntry(entry: Omit<Activity, "at"> & { at: string }): P
     const stat = await fs.stat(logPath);
     if (stat.size >= MAX_AUDIT_LOG_BYTES) {
       // Rotate instead of truncating: keep one previous generation as audit.log.1.
-      await fs.rename(logPath, `${logPath}.1`).catch(() => fs.writeFile(logPath, ""));
+      // A failed rename (a concurrent instance's append holds the file open on
+      // Windows) now SKIPS rotation and appends anyway — the next entry retries
+      // it. The old truncate fallback destroyed the un-rotated history, which
+      // for an audit trail is worse than a temporarily oversized file.
+      await fs.rename(logPath, `${logPath}.1`).catch(() => undefined);
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;

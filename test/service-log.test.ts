@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { sanitizeServiceLogName, serviceLogFilePath, SERVICE_LOG_MAX_BYTES } from "../src/bridge/service-log.js";
+import { mkdir, mkdtemp, rm, stat, truncate, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import {
+  prepareServiceLog,
+  sanitizeServiceLogName,
+  serviceLogFilePath,
+  SERVICE_LOG_MAX_BYTES,
+} from "../src/bridge/service-log.js";
 
 test("sanitize keeps [a-zA-Z0-9_-] and maps everything else to _", () => {
   assert.equal(sanitizeServiceLogName("api server"), "api_server");
@@ -26,4 +34,22 @@ test("default path is <storage>/service-logs/<wsHash8>/<sanitized>.log", () => {
 
 test("SERVICE_LOG_MAX_BYTES is 5 MiB", () => {
   assert.equal(SERVICE_LOG_MAX_BYTES, 5 * 1024 * 1024);
+});
+
+test("a service log whose rotation fails keeps its bytes", async () => {
+  // Sparse file, instantly at the cap; .1 as a directory defeats the rename.
+  const dir = await mkdtemp(path.join(tmpdir(), "ob-svclog-"));
+  try {
+    const file = path.join(dir, "api.log");
+    await writeFile(file, "");
+    await truncate(file, SERVICE_LOG_MAX_BYTES);
+    await mkdir(`${file}.1`, { recursive: true });
+
+    await prepareServiceLog(file);
+
+    assert.equal((await stat(file)).size, SERVICE_LOG_MAX_BYTES, "the un-rotated history is still on disk");
+    assert.ok((await stat(`${file}.1`)).isDirectory(), "the rename really was impossible");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

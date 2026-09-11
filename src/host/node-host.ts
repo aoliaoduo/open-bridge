@@ -109,29 +109,31 @@ class SharedJsonStore {
   protected async write(key: string, value: unknown): Promise<void> {
     this.reload();
     this.data[key] = value;
-    this.writeTail = this.writeTail
-      .then(async () => {
-        await this.withFileLock(async () => {
-          // Re-read INSIDE the lock. Merging "just before writing" was not
-          // enough: two instances starting together could each read the file
-          // before the other's rename landed, and one key would be lost for
-          // good. The lock is what makes read-merge-write actually atomic
-          // across processes.
-          const onDisk = readJsonSync(this.file);
-          const merged = {
-            ...(onDisk && typeof onDisk === "object" ? onDisk : {}),
-            ...this.data,
-            [key]: value,
-          };
-          const temp = `${this.file}.${process.pid}.tmp`;
-          await fsp.writeFile(temp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
-          await fsp.rename(temp, this.file);
-          this.data = merged;
-          this.loadedMtimeMs = this.mtimeMs();
-        });
-      })
-      .catch(() => undefined);
-    await this.writeTail;
+    // Serialize on the tail but keep THIS caller's promise rejectable: the tail
+    // itself swallows errors (so one failed write cannot poison later ones),
+    // while the individual caller still learns its update did not land. The
+    // old shape awaited the already-caught tail, so a write that silently gave
+    // up reported success and the key quietly never reached the disk.
+    const next = this.writeTail.then(() => this.withFileLock(async () => {
+      // Re-read INSIDE the lock. Merging "just before writing" was not
+      // enough: two instances starting together could each read the file
+      // before the other's rename landed, and one key would be lost for
+      // good. The lock is what makes read-merge-write actually atomic
+      // across processes.
+      const onDisk = readJsonSync(this.file);
+      const merged = {
+        ...(onDisk && typeof onDisk === "object" ? onDisk : {}),
+        ...this.data,
+        [key]: value,
+      };
+      const temp = `${this.file}.${process.pid}.tmp`;
+      await fsp.writeFile(temp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
+      await fsp.rename(temp, this.file);
+      this.data = merged;
+      this.loadedMtimeMs = this.mtimeMs();
+    }));
+    this.writeTail = next.catch(() => undefined);
+    await next;
   }
 
   /**
@@ -142,7 +144,7 @@ class SharedJsonStore {
    * forever, hence the staleness check; contention is a few milliseconds of
    * jittered backoff because writers here are short-lived.
    */
-  private async withFileLock<T>(body: () => Promise<T>): Promise<T | undefined> {
+  private async withFileLock<T>(body: () => Promise<T>): Promise<T> {
     const lock = `${this.file}.lock`;
     for (let attempt = 0; attempt < 60; attempt += 1) {
       let handle: Awaited<ReturnType<typeof fsp.open>>;
@@ -167,7 +169,14 @@ class SharedJsonStore {
         await fsp.rm(lock, { force: true }).catch(() => undefined);
       }
     }
-    return undefined;
+    // Exhausting every attempt means the update did NOT land. Throwing (not
+    // returning undefined) is what keeps this honest: a silently dropped
+    // secrets/config write reported success and left the operator with a token
+    // or setting that only existed in memory. The lock's staleness escape
+    // makes a permanent wedge bounded, so this fires only under real contention.
+    throw new Error(
+      `${this.file} stayed locked by another process; the update was not saved. Retry once it frees up.`,
+    );
   }
 }
 
@@ -310,16 +319,16 @@ export class FileLog {
    * service logs use: unbounded growth was the last thing the data directory
    * had no answer for, and bridge.log carries every instance's service output.
    * Rotation is best-effort by construction — a second instance may hold the
-   * file open on Windows, where the rename fails — so a failed rotate falls
-   * back to truncating the live file rather than throwing into the caller.
+   * file open on Windows, where the rename fails — so a failed rotate is
+   * SKIPPED (the next append retries) rather than truncating the live file:
+   * truncation here destroyed the very history the rename would have kept.
    */
   private async append(stamped: string): Promise<void> {
     if (this.maxBytes > 0) {
       try {
         const stat = await fsp.stat(this.file);
         if (stat.size >= this.maxBytes) {
-          await fsp.rename(this.file, `${this.file}.1`)
-            .catch(() => fsp.writeFile(this.file, "").catch(() => undefined));
+          await fsp.rename(this.file, `${this.file}.1`).catch(() => undefined);
         }
       } catch { /* missing on first run is expected */ }
     }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { FILE_LOG_MAX_BYTES, FileLog } from "../src/host/node-host.js";
@@ -81,4 +81,25 @@ test("listeners keep receiving stamped lines across rotations", async () => {
 
 test("the documented default cap is a positive number", () => {
   assert.equal(FILE_LOG_MAX_BYTES, 10 * 1024 * 1024);
+});
+
+test("a rotation that fails is skipped, never a truncation", async () => {
+  // The previous fallback on a failed rename was writeFile(file, "") — which
+  // destroyed exactly the history the rotation was supposed to keep. A
+  // directory at the .1 path makes rename() fail everywhere, the same shape as
+  // another instance holding the file open on Windows.
+  const dir = await mkdtemp(path.join(tmpdir(), "ob-filelog-fail-"));
+  try {
+    await mkdir(`${path.join(dir, "bridge.log")}.1`, { recursive: true });
+    const log = new FileLog(dir, { maxBytes: 400 });
+    for (let index = 0; index < 40; index += 1) log.write(line(index));
+    await log.flush();
+
+    const lines = await linesOf(log.path());
+    assert.equal(lines.length, 40, "no line was lost to a failed rotation");
+    assert.ok(Buffer.byteLength(lines.join("\n"), "utf8") > 400, "the live file exceeded the cap instead");
+    assert.deepEqual(indicesOf(lines), [...Array(40).keys()], "order and content are intact, oldest first");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

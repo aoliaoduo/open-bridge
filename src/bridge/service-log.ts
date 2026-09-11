@@ -40,14 +40,15 @@ export function serviceLogFilePath(
 /**
  * Ensure the log's directory exists and rotate the live file to `.1` when it
  * reaches SERVICE_LOG_MAX_BYTES (one previous generation, mirroring the audit
- * log: on a failed rename, truncate the live file instead).
+ * log). A failed rename (the file held open on Windows) skips rotation so the
+ * next append retries it — truncating there destroyed the un-rotated history.
  */
 export async function prepareServiceLog(filePath: string): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   try {
     const stat = await fs.stat(filePath);
     if (stat.size >= SERVICE_LOG_MAX_BYTES) {
-      await fs.rename(filePath, `${filePath}.1`).catch(() => fs.writeFile(filePath, "").catch(() => undefined));
+      await fs.rename(filePath, `${filePath}.1`).catch(() => undefined);
     }
   } catch {
     // Missing log on first run is expected.
