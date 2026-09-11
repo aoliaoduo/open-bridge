@@ -14,6 +14,18 @@ function idleLabel(ms: number): string {
 }
 
 /**
+ * Clock time of a handshake. The row already says how long the session has been
+ * idle; 「首次连接」 answers the other half — since when — which is what tells an
+ * operator whether a client is theirs or something that appeared overnight.
+ */
+function connectedLabel(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "—";
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`;
+}
+
+/**
  * 会话 — who is connected, and who is holding the file locks.
  *
  * `active_sessions` was a number with nothing behind it: the operator could see
@@ -79,7 +91,9 @@ export function SessionsPage() {
               <tr>
                 <th>客户端</th>
                 <th>会话</th>
+                <th>首次连接</th>
                 <th>空闲</th>
+                <th>调用数</th>
                 <th>进行中</th>
                 <th>待办</th>
                 <th>操作</th>
@@ -90,7 +104,9 @@ export function SessionsPage() {
                 <tr key={session.id}>
                   <td>{session.client}</td>
                   <td className="mono" title={session.id}>{session.id.slice(0, 8)}…</td>
+                  <td title={session.connected_at}>{connectedLabel(session.connected_at)}</td>
                   <td>{idleLabel(session.idle_ms)}</td>
+                  <td>{session.calls > 0 ? session.calls : "—"}</td>
                   <td>{session.active_requests > 0 ? `${session.active_requests} 个请求` : "—"}</td>
                   <td>{session.todos > 0 ? `${session.todos} 项` : "—"}</td>
                   <td>

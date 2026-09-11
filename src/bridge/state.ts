@@ -80,6 +80,10 @@ export type SessionState = {
   /** The MCP server bound to this session; used to push logging/progress notifications. */
   mcp?: { notification: (notification: { method: string; params?: unknown }) => Promise<void> | void };
   lastUsed: number;
+  /** When this session handshook (`initialize`) — the console's 「首次连接」. */
+  connectedAt: number;
+  /** Requests served on this session since it connected — the console's 「调用数」. */
+  calls: number;
   /** clientInfo from the MCP handshake ("cursor/0.42"), for the console's session table. */
   client?: string;
   todos: unknown[];

@@ -144,6 +144,10 @@ export async function invoke(
     state.usage.calls += 1;
     if (handler) state.usage.byTool[name] = (state.usage.byTool[name] ?? 0) + 1;
     persistUsageStats();
+    // Per-session counter for the console's 会话 page: who is actually using
+    // this instance, not just how busy it is overall. Batch sub-calls pass
+    // countUsage:false, so a batch costs one call on its session too.
+    if (session) session.calls += 1;
   }
   if (!handler) throw new Error(`Unknown tool: "${name}".${suggestionHint(name, Object.keys(HANDLERS))}`);
 

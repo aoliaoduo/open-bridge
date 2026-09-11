@@ -127,6 +127,7 @@ function settingsState(overrides: Partial<SettingsState> = {}): SettingsState {
       autoReconnect: true,
       ngrokUseHttpProxy: true,
       toolProfile: "full",
+      logMaxBytes: 10 * 1024 * 1024,
     },
     ...overrides,
   };
@@ -149,6 +150,8 @@ function sessionView(overrides: Partial<SessionView> = {}): SessionView {
   return {
     id: "a1b2c3d4e5f60718",
     client: "cursor/0.42",
+    connected_at: new Date("2026-09-11T00:00:00Z").toISOString(),
+    calls: 47,
     last_used: new Date("2026-09-11T00:00:00Z").toISOString(),
     idle_ms: 12_000,
     active_requests: 0,
@@ -214,6 +217,9 @@ describe("App shell", () => {
     expect(await screen.findByText("隧道（ngrok）")).toBeTruthy();
     expect(screen.queryByText("MCP 端点")).toBeNull();
     expect(window.location.pathname).toBe("/console/settings");
+    // 日志 card: the rotation cap is editable and shows the value the server sent.
+    expect(await screen.findByText("单文件上限")).toBeTruthy();
+    expect(await screen.findByDisplayValue("10485760")).toBeTruthy();
   });
 
   test("deep-links straight to a page from the URL", async () => {
@@ -225,6 +231,10 @@ describe("App shell", () => {
 
     expect(await screen.findByText("已连接的客户端")).toBeTruthy();
     expect(await screen.findByText("cursor/0.42")).toBeTruthy();
+    // 「首次连接」/「调用数」: the two columns the table was missing.
+    expect(await screen.findByText("首次连接")).toBeTruthy();
+    expect(await screen.findByText("调用数")).toBeTruthy();
+    expect(await screen.findByText("47")).toBeTruthy();
   });
 
   test("falls back to 状态 for an unknown console path", async () => {

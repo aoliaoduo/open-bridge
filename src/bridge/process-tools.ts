@@ -350,7 +350,9 @@ export function getProcessSnapshot(args: Args): unknown {
 export function listSessions(): unknown {
   return [...state.sessions.entries()].map(([id, s]) => ({
     session_id: id,
+    connected_at: new Date(s.connectedAt ?? s.lastUsed).toISOString(),
     last_used: new Date(s.lastUsed).toISOString(),
+    calls: s.calls ?? 0,
     todo_count: s.todos.length,
   }));
 }

@@ -444,6 +444,8 @@ function sessionViews(): Array<Record<string, unknown>> {
     .map(([id, session]) => ({
       id,
       client: session.client ?? "未标识客户端",
+      connected_at: new Date(session.connectedAt ?? session.lastUsed).toISOString(),
+      calls: session.calls ?? 0,
       last_used: new Date(session.lastUsed).toISOString(),
       idle_ms: Math.max(0, now - session.lastUsed),
       active_requests: session.activeRequests,

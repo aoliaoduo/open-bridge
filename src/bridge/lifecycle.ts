@@ -915,7 +915,7 @@ async function startHttpInternal(): Promise<void> {
         };
         const persisted = loadTodoStore();
         const persistedTodos = Array.isArray(persisted.todos) ? persisted.todos.map(t => (t !== null && typeof t === "object" ? { ...t as object } : t)) : [];
-        const newSession: SessionState = { transport, lastUsed: Date.now(), client: pendingClientLabel, todos: persistedTodos, activeRequests: 0 };
+        const newSession: SessionState = { transport, lastUsed: Date.now(), connectedAt: Date.now(), calls: 0, client: pendingClientLabel, todos: persistedTodos, activeRequests: 0 };
         session = newSession;
         const mcpServer = createMcp(newSession);
         newSession.mcp = mcpServer as unknown as NonNullable<SessionState["mcp"]>;

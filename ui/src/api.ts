@@ -73,6 +73,10 @@ export interface SessionView {
   id: string;
   /** clientInfo from the handshake, or 未标识客户端 when the client sent none. */
   client: string;
+  /** When this session handshook — the row's 「首次连接」. */
+  connected_at: string;
+  /** Requests served on this session since it connected. */
+  calls: number;
   last_used: string;
   /** Milliseconds since this session's last request — the reason to show the table. */
   idle_ms: number;

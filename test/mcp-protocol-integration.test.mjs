@@ -231,3 +231,36 @@ test("a command that cannot run reports a real failure, never a phantom success"
   assert.match(alive.text, /still-here/, "the server keeps serving after a failed spawn");
   assert.equal(serveExit, null, `serve died during the protocol suite:\n${serveOutput.slice(-600)}`);
 });
+
+test("the session table reports the handshake time and a cumulative call count", async () => {
+  // The 会话 page's 「首次连接」 and 「调用数」 columns: both are per-session facts
+  // only the server knows, so the wire shape is pinned here rather than in a probe.
+  const { sessionId } = await openSession();
+  assert.ok(sessionId, "the handshake assigned a session id");
+
+  const rowFor = async () => {
+    const res = await rawRequest("GET", "/api/sessions", null, {});
+    assert.equal(res.status, 200);
+    const row = JSON.parse(res.body).sessions.find(candidate => candidate.id === sessionId);
+    assert.ok(row, "the session is listed");
+    return row;
+  };
+
+  const fresh = await rowFor();
+  assert.equal(fresh.calls, 0, "a session that has only handshaken has made no calls");
+  assert.match(fresh.connected_at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d/);
+  assert.ok(Date.parse(fresh.connected_at) <= Date.now(), "the handshake is in the past");
+  assert.ok(fresh.idle_ms >= 0);
+
+  await callTool(sessionId, "get_bridge_status", {});
+  await callTool(sessionId, "list_services", {});
+  const after = await rowFor();
+  assert.equal(after.calls, 2, "each served call is counted once, on its own session");
+  assert.equal(after.connected_at, fresh.connected_at, "the handshake time does not move");
+
+  const listed = JSON.parse((await callTool(sessionId, "list_sessions", {})).text);
+  const row = listed.find(entry => entry.session_id === sessionId);
+  assert.ok(row, "list_sessions knows this session");
+  assert.equal(row.calls, 3, "the tool counts its own call too");
+  assert.match(row.connected_at, /^\d{4}-\d\d-\d\dT/);
+});
