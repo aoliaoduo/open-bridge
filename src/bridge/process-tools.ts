@@ -58,6 +58,19 @@ function throwIfSpawnFailed(commandState: { spawnError?: string }): void {
   }
 }
 
+/**
+ * Clamp a caller-supplied millisecond duration, treating garbage as the
+ * fallback. A raw `Math.max(Number(x), 0)` passes NaN straight through, and
+ * `setTimeout(cb, NaN)` fires at ~0 ms — the bug that once instantly "timed
+ * out" running commands in run_command. MCP arguments are LLM-generated, so a
+ * "30s" string or a null lands here more often than anyone would like.
+ */
+export function clampMs(value: unknown, fallback: number): number {
+  if (value === undefined || value === null) return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
 function stringEnv(args: Args): Record<string, string> {
   return args.env && typeof args.env === "object" && !Array.isArray(args.env)
     ? (Object.fromEntries(Object.entries(args.env).filter(([, value]) => typeof value === "string")) as Record<string, string>)
@@ -85,7 +98,7 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
 
   if (name === "start_process" || args.background) {
     if (patternText) {
-      const readyTimeout = Math.max(Number(args.ready_timeout_ms ?? 10000), 0);
+      const readyTimeout = clampMs(args.ready_timeout_ms, 10_000);
       const until = Date.now() + readyTimeout;
       let ready = false;
       let inspectedOffset = commandState.output.state().bufferStartOffset;
@@ -233,7 +246,7 @@ export async function interactWithProcess(args: Args): Promise<Record<string, un
   } catch (error) {
     throw new Error(`Failed to write to process ${s.id}: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const waitMs = Math.max(Number(args.wait_ms ?? 250), 0);
+  const waitMs = clampMs(args.wait_ms, 250);
   if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs));
   const effectiveOffset = args.offset !== undefined ? Number(args.offset) : preOffsets[stream] ?? preOffsets.merged;
   return outputRead(s, effectiveOffset, args.max_bytes, args.stream, args.strip_ansi);
@@ -266,7 +279,7 @@ export async function restartProcess(args: Args): Promise<Record<string, unknown
   // crashed command with autoRestart waiting out restartDelayMs would
   // otherwise respawn a duplicate (orphan) instance while we spawn ours.
   await terminateProcess(s, "stopped");
-  const delay = Math.max(Number(args.delay_ms ?? 0), 0);
+  const delay = clampMs(args.delay_ms, 0);
   if (delay) await new Promise(resolve => setTimeout(resolve, delay));
   const replacement = spawnManaged(s.command, s.cwd, s.env, s.id, s.restartCount + 1, policy, { visible: s.visibleTerminal === true });
   state.commands.set(s.id, replacement);
@@ -279,7 +292,7 @@ export async function restartProcess(args: Args): Promise<Record<string, unknown
 export async function waitProcess(args: Args): Promise<Record<string, unknown>> {
   const s = state.commands.get(String(args.command_id));
   if (!s) throw new Error(`Unknown command id: "${String(args.command_id)}".${availableHint("Active command ids", state.commands.keys())}`);
-  const timeout = Math.max(Number(args.timeout_ms ?? 120000), 0);
+  const timeout = clampMs(args.timeout_ms, 120_000);
   if (!s.done) {
     await new Promise<void>(resolve => {
       // Listen for 'error' as well as 'close': on some runtimes a failed
