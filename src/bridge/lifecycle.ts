@@ -402,6 +402,23 @@ function pruneSessions(): void {
 }
 
 /** Ensure one slot is free before creating a session; false when all are busy. */
+/**
+ * clientInfo from the initialize request that is about to create a session.
+ *
+ * The session object is built inside `onsessioninitialized`, which never sees
+ * the parsed body, so the label travels through this variable. Single-threaded
+ * request handling makes that safe: it is written and consumed within one
+ * handleRequest() call.
+ */
+let pendingClientLabel: string | undefined;
+
+function clientLabelFrom(body: unknown): string | undefined {
+  const info = (body as { params?: { clientInfo?: { name?: unknown; version?: unknown } } } | undefined)
+    ?.params?.clientInfo;
+  if (!info || typeof info.name !== "string" || !info.name) return undefined;
+  return typeof info.version === "string" && info.version ? `${info.name}/${info.version}` : info.name;
+}
+
 function makeRoomForSession(): boolean {
   if (state.sessions.size < MAX_SESSIONS) return true;
   const evictable = [...state.sessions.entries()]
@@ -861,6 +878,11 @@ async function startHttpInternal(): Promise<void> {
           res.end(JSON.stringify({ error: "Bridge session capacity reached. Close an existing MCP session and retry." }));
           return;
         }
+        // Only an initialize mints a session, and only then is there a client
+        // name to show: the console prints "cursor/0.42 · 空闲 2 分钟" instead of
+        // a bare count. onsessioninitialized below never sees the parsed body,
+        // so the label is handed over here — same call, same tick.
+        pendingClientLabel = clientLabelFrom(parsedBody);
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomBytes(16).toString("hex"),
           enableDnsRebindingProtection: true,
@@ -886,7 +908,7 @@ async function startHttpInternal(): Promise<void> {
         };
         const persisted = loadTodoStore();
         const persistedTodos = Array.isArray(persisted.todos) ? persisted.todos.map(t => (t !== null && typeof t === "object" ? { ...t as object } : t)) : [];
-        const newSession: SessionState = { transport, lastUsed: Date.now(), todos: persistedTodos, activeRequests: 0 };
+        const newSession: SessionState = { transport, lastUsed: Date.now(), client: pendingClientLabel, todos: persistedTodos, activeRequests: 0 };
         session = newSession;
         const mcpServer = createMcp(newSession);
         newSession.mcp = mcpServer as unknown as NonNullable<SessionState["mcp"]>;

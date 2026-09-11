@@ -28,6 +28,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   alive.
 
 ### Added
+- **The console has real pages, one path each.** The panel was a single page
+  whose "tabs" were component state: the address bar never moved, nothing could
+  be linked, bookmarked, reloaded into place or opened in a second window. Every
+  page now lives at `/console/<name>` — 状态 / 会话 / 工具 / 体检 / 服务 / 日志 /
+  统计 / 令牌 / 设置 — the nav items are real `<a href>` links (ctrl-click and
+  "open in new tab" keep working), the address bar follows, and back/forward move
+  between pages. No server change was needed: `/console/*` already answers with
+  the SPA shell.
+- **会话: who is connected, and a way to act on it.** `active_sessions` was a
+  number with nothing behind it. `GET /api/sessions` returns the table — client
+  name from the MCP handshake (`clientInfo`), idle time, in-flight requests, todo
+  count — together with the file-lock snapshot, and `POST /api/sessions/close`
+  closes one session without touching the instance or the other clients.
+- **工具 and 体检 pages.** `GET /api/tools` returns exactly what `tools/list`
+  advertises (tool profile, then the host-capability filter, with core tools
+  flagged) so "54 tools" is inspectable instead of asserted. `GET /api/health`
+  runs the checks server-side and really sends a request through the tunnel for
+  the public leg — the only way to know a client could connect — with the
+  exposure verdict next to it.
 - **One Bridge per directory, and the CLI knows which is which.** `open-bridge
   serve` has always used the current directory as its workspace root, but the
   app could not actually keep that promise for two directories at once: runtime

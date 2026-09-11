@@ -28,6 +28,9 @@ import { controlService, listServiceViews } from "../bridge/service-tools.js";
 import { start, stop, webAiPrompt } from "../bridge/lifecycle.js";
 import { nodeHost } from "../host/node-host.js";
 import { redactSensitiveText } from "../bridge/state.js";
+import { lockSnapshot } from "../bridge/resource-locks.js";
+import { listToolDefinitions } from "../bridge/tool-catalog.js";
+import { CORE_TOOLS } from "../mcp/tool-definitions.js";
 
 const CONSOLE_HEADER = "x-open-bridge-console";
 
@@ -267,6 +270,22 @@ export async function apiRouteHandler(
           });
           return true;
         }
+        case "/sessions/close": {
+          // "Who is connected" is only useful with a way to act on it: an
+          // operator who sees a session they do not recognise must be able to
+          // close it from the same page. Accepts an id or an unambiguous prefix,
+          // because the console shows a shortened id.
+          const body = await readBody(req) as { id?: unknown } | undefined;
+          const wanted = String(body?.id ?? "");
+          if (!wanted) { json(res, 400, { ok: false, error: "id is required." }); return true; }
+          const match = [...state.sessions.entries()].find(([id]) => id === wanted || id.startsWith(wanted));
+          if (!match) { json(res, 404, { ok: false, error: "会话不存在（可能已经自己断开）。" }); return true; }
+          const [closedId, session] = match;
+          state.sessions.delete(closedId);
+          void session.transport.close();
+          json(res, 200, { ok: true, closed: closedId, sessions: sessionViews() });
+          return true;
+        }
         case "/settings/action": {
           const result = await handleSettingsAction(await readBody(req));
           const closing = result.ok && result.deferStop;
@@ -314,6 +333,52 @@ export async function apiRouteHandler(
     }
     switch (route) {
       case "/status": json(res, 200, { ok: true, status: getBridgeStatus() }); return true;
+      case "/sessions": json(res, 200, { ok: true, sessions: sessionViews(), locks: lockSnapshot() }); return true;
+      case "/tools": {
+        const profile = String((getBridgeStatus() as Record<string, unknown>).tool_profile ?? "full");
+        const tools = listToolDefinitions().map(tool => ({
+          name: tool.name,
+          description: firstLine(tool.description),
+          core: CORE_TOOLS.has(tool.name),
+        }));
+        json(res, 200, { ok: true, profile, count: tools.length, tools });
+        return true;
+      }
+      case "/health": {
+        // A real report, not a restatement of /status: the public leg is an
+        // actual request through the tunnel, which is the only way to know a
+        // client could connect. Bounded by a timeout so the page cannot hang.
+        const status = getBridgeStatus() as Record<string, unknown>;
+        const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
+        const check = (name: string, ok: boolean, detail: string): void => { checks.push({ name, ok, detail }); };
+        check("instance", status.state === "running", `state=${String(status.state ?? "?")}`);
+        check("workspace", true, String(status.workspace_root ?? ""));
+        check("tools", Number(status.tool_count ?? 0) > 0,
+          `${String(status.tool_count ?? 0)} 个（${String(status.tool_profile ?? "?")}）`);
+        const publicUrl = typeof status.public_url === "string" ? status.public_url : "";
+        check("tunnel", true, publicUrl
+          ? `${String(status.tunnel_role ?? "?")} — ${publicUrl}`
+          : "未开启（仅本机可用）");
+        if (publicUrl && state.routeToken) {
+          const origin = new URL(publicUrl).origin;
+          const startedAt = Date.now();
+          try {
+            const probe = await fetch(`${origin}/healthz/${state.routeToken}`, {
+              headers: { "ngrok-skip-browser-warning": "true" },
+              signal: AbortSignal.timeout(6_000),
+            });
+            check("public", probe.ok, `HTTP ${probe.status}（${Date.now() - startedAt} ms）`);
+          } catch (error) {
+            check("public", false, `探测失败：${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+        const exposure = String(status.exposure ?? "local");
+        check("exposure", exposure !== "public-open", exposure === "public-open"
+          ? "公网可达且未开启鉴权：拿到 URL 的人都能读写文件、执行命令"
+          : exposure);
+        json(res, 200, { ok: true, health: { checks, exposure } });
+        return true;
+      }
       case "/services": json(res, 200, { ok: true, services: listServiceViews() }); return true;
       case "/activity": json(res, 200, { ok: true, activity: state.activity }); return true;
       case "/usage": json(res, 200, { ok: true, usage: getUsageStats() }); return true;
@@ -334,6 +399,27 @@ export async function apiRouteHandler(
     json(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
     return true;
   }
+}
+
+/** One row per live MCP session: who, how idle, what it is doing. */
+function sessionViews(): Array<Record<string, unknown>> {
+  const now = Date.now();
+  return [...state.sessions.entries()]
+    .sort((a, b) => b[1].lastUsed - a[1].lastUsed)
+    .map(([id, session]) => ({
+      id,
+      client: session.client ?? "未标识客户端",
+      last_used: new Date(session.lastUsed).toISOString(),
+      idle_ms: Math.max(0, now - session.lastUsed),
+      active_requests: session.activeRequests,
+      todos: Array.isArray(session.todos) ? session.todos.length : 0,
+    }));
+}
+
+/** Tool descriptions are long; the catalog page wants one line per tool. */
+function firstLine(text: unknown): string {
+  const value = typeof text === "string" ? text : "";
+  return value.split("\n")[0]!.trim();
 }
 
 let shutdownHook: (() => Promise<void>) | undefined;

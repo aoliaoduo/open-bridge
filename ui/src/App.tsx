@@ -1,30 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, copyText, type SecretPayload, type SettingsActionResult, type SettingsState } from "./api";
+import { ROUTES, currentRoute, navigate, routePath, type RouteId } from "./routes";
 import { StatusTab } from "./components/StatusTab";
 import { SettingsTab } from "./components/SettingsTab";
 import { TokensTab } from "./components/TokensTab";
 import { LogsTab } from "./components/LogsTab";
 import { StatsTab } from "./components/StatsTab";
 import { ServicesTab } from "./components/ServicesTab";
-
-type TabId = "status" | "settings" | "tokens" | "services" | "logs" | "stats";
-
-const TABS: Array<{ id: TabId; label: string }> = [
-  { id: "status", label: "状态" },
-  { id: "settings", label: "设置" },
-  { id: "tokens", label: "令牌" },
-  { id: "services", label: "服务" },
-  { id: "logs", label: "日志" },
-  { id: "stats", label: "统计" },
-];
+import { SessionsPage } from "./components/SessionsPage";
+import { ToolsPage } from "./components/ToolsPage";
+import { HealthPage } from "./components/HealthPage";
 
 export interface ToastMsg { text: string; isError: boolean; key: number }
 
 export function App() {
-  const [tab, setTab] = useState<TabId>("status");
+  // The URL is the source of truth for which page is open (see routes.ts): each
+  // page survives a reload, can be bookmarked, and can be opened in a second
+  // window — none of which was possible while the tabs were component state.
+  const [route, setRoute] = useState<RouteId>(() => currentRoute());
   const [settings, setSettings] = useState<SettingsState | null>(null);
   const [toast, setToast] = useState<ToastMsg | null>(null);
   const [secret, setSecret] = useState<SecretPayload | null>(null);
+  // Bumped by 刷新本页 so the open page remounts and re-reads its data.
+  const [reloadKey, setReloadKey] = useState(0);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const showToast = useCallback((text: string, isError = false) => {
@@ -42,6 +40,19 @@ export function App() {
   }, [showToast]);
 
   useEffect(() => { void refreshSettings(); }, [refreshSettings]);
+
+  // Back/forward buttons must move between pages too, otherwise pushState would
+  // leave the address bar and the rendered page disagreeing.
+  useEffect(() => {
+    const onPopState = () => setRoute(currentRoute());
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const open = useCallback((id: RouteId) => {
+    navigate(id);
+    setRoute(id);
+  }, []);
 
   /** Run one settings action; applies state/toast/secret/copy side effects. */
   const act = useCallback(async (action: Record<string, unknown>): Promise<SettingsActionResult | null> => {
@@ -75,24 +86,57 @@ export function App() {
         </span>
       </div>
 
-      <div className="tabs">
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            className={`tab ${tab === t.id ? "active" : ""}`}
-            onClick={() => setTab(t.id)}
+      <nav className="tabs">
+        {ROUTES.map(item => (
+          <a
+            key={item.id}
+            className={`tab ${route === item.id ? "active" : ""}`}
+            href={routePath(item.id)}
+            title={item.hint}
+            onClick={event => {
+              // Real links: ctrl/cmd-click and "open in new tab" keep working,
+              // because only plain left-clicks are turned into pushState.
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              event.preventDefault();
+              open(item.id);
+            }}
           >
-            {t.label}
-          </button>
+            {item.label}
+          </a>
         ))}
+      </nav>
+
+      <div className="quick">
+        <span className="crumb mono" title="当前页面路径">{routePath(route)}</span>
+        <button
+          className="small"
+          disabled={!settings?.mcpUrl}
+          onClick={() => { void copyText(settings?.mcpUrl ?? ""); showToast("MCP 地址已复制。"); }}
+        >
+          复制 MCP 地址
+        </button>
+        <button className="small" onClick={() => open("health")}>一键体检</button>
+        <button
+          className="small"
+          onClick={() => { setReloadKey(key => key + 1); void refreshSettings(); showToast("已刷新。"); }}
+        >
+          刷新本页
+        </button>
       </div>
 
-      {tab === "status" && <StatusTab settings={settings} act={act} onRefresh={refreshSettings} />}
-      {tab === "settings" && <SettingsTab settings={settings} act={act} />}
-      {tab === "tokens" && <SettingsStateGuard settings={settings}><TokensTab settings={settings!} act={act} /></SettingsStateGuard>}
-      {tab === "services" && <ServicesTab />}
-      {tab === "logs" && <LogsTab />}
-      {tab === "stats" && <StatsTab />}
+      <div className="page" key={`${route}-${reloadKey}`}>
+        {route === "status" && <StatusTab settings={settings} act={act} onRefresh={refreshSettings} />}
+        {route === "sessions" && <SessionsPage />}
+        {route === "tools" && <ToolsPage />}
+        {route === "health" && <HealthPage />}
+        {route === "services" && <ServicesTab />}
+        {route === "logs" && <LogsTab />}
+        {route === "stats" && <StatsTab />}
+        {route === "tokens" && (
+          <SettingsStateGuard settings={settings}><TokensTab settings={settings!} act={act} /></SettingsStateGuard>
+        )}
+        {route === "settings" && <SettingsTab settings={settings} act={act} />}
+      </div>
 
       <div className={`toast ${toast ? "show" : ""} ${toast?.isError ? "error" : ""}`} key={toast?.key}>
         {toast?.text}

@@ -1,7 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { App } from "./App";
-import type { BridgeStatus, SettingsActionResult, SettingsState, UsageStats } from "./api";
+import type {
+  BridgeStatus,
+  HealthReport,
+  LockSnapshot,
+  SessionView,
+  SettingsActionResult,
+  SettingsState,
+  ToolCatalog,
+  UsageStats,
+} from "./api";
 
 const mocks = vi.hoisted(() => ({
   status: vi.fn(),
@@ -12,6 +21,12 @@ const mocks = vi.hoisted(() => ({
   bridgeStart: vi.fn(),
   bridgeStop: vi.fn(),
   bridgeRotate: vi.fn(),
+  services: vi.fn(),
+  serviceAction: vi.fn(),
+  sessions: vi.fn(),
+  closeSession: vi.fn(),
+  tools: vi.fn(),
+  health: vi.fn(),
   copyText: vi.fn(async () => undefined),
 }));
 
@@ -25,6 +40,12 @@ vi.mock("./api", () => ({
     bridgeStart: mocks.bridgeStart,
     bridgeStop: mocks.bridgeStop,
     bridgeRotate: mocks.bridgeRotate,
+    services: mocks.services,
+    serviceAction: mocks.serviceAction,
+    sessions: mocks.sessions,
+    closeSession: mocks.closeSession,
+    tools: mocks.tools,
+    health: mocks.health,
   },
   copyText: mocks.copyText,
   consoleToken: () => "test-token",
@@ -40,11 +61,19 @@ class FakeEventSource {
 
 beforeEach(() => {
   vi.stubGlobal("EventSource", FakeEventSource);
+  // Each test starts on 状态: the open page comes from the URL now, so a test
+  // that pushed a path would otherwise leak into the next one.
+  window.history.pushState({}, "", "/console/status");
   mocks.status.mockResolvedValue(bridgeStatus());
   mocks.activity.mockResolvedValue([]);
   mocks.usage.mockResolvedValue(usageStats());
   mocks.settings.mockResolvedValue(settingsState());
   mocks.settingsAction.mockResolvedValue({ ok: true, state: settingsState() });
+  mocks.services.mockResolvedValue([]);
+  mocks.sessions.mockResolvedValue({ sessions: [sessionView()], locks: lockSnapshot() });
+  mocks.closeSession.mockResolvedValue({ closed: "session-1", sessions: [] });
+  mocks.tools.mockResolvedValue(toolCatalog());
+  mocks.health.mockResolvedValue(healthReport());
 });
 
 afterEach(() => {
@@ -62,7 +91,7 @@ function bridgeStatus(overrides: Partial<BridgeStatus> = {}): BridgeStatus {
     mcp_url: "http://127.0.0.1:18080/mcp/tok",
     shell: "bash",
     allowed_directories: [],
-    active_sessions: 0,
+    active_sessions: 1,
     active_commands: 0,
     tool_profile: "full",
     tool_count: 54,
@@ -114,28 +143,152 @@ function usageStats(): UsageStats {
   };
 }
 
-const tabButton = (label: string): HTMLButtonElement =>
-  screen.getByRole("button", { name: label }) as HTMLButtonElement;
+function sessionView(overrides: Partial<SessionView> = {}): SessionView {
+  return {
+    id: "a1b2c3d4e5f60718",
+    client: "cursor/0.42",
+    last_used: new Date("2026-09-11T00:00:00Z").toISOString(),
+    idle_ms: 12_000,
+    active_requests: 0,
+    todos: 2,
+    ...overrides,
+  };
+}
+
+function lockSnapshot(): LockSnapshot {
+  return {
+    held: [{ key: "C:\\work", mode: "write", label: "write_file", held_ms: 1_500 }],
+    waiting: [{ keys: ["C:\\work"], mode: "write", label: "edit_file", waited_ms: 900 }],
+  };
+}
+
+function toolCatalog(): ToolCatalog {
+  return {
+    profile: "full",
+    count: 2,
+    tools: [
+      { name: "read_files", description: "Read one or more files.", core: true },
+      { name: "start_process", description: "Start a long-running process.", core: false },
+    ],
+  };
+}
+
+function healthReport(): HealthReport {
+  return {
+    exposure: "local",
+    checks: [
+      { name: "instance", ok: true, detail: "state=running" },
+      { name: "workspace", ok: true, detail: "C:\\work" },
+      { name: "tools", ok: true, detail: "54 个（full）" },
+      { name: "tunnel", ok: true, detail: "未开启（仅本机可用）" },
+      { name: "public", ok: true, detail: "HTTP 200（312 ms）" },
+      { name: "exposure", ok: true, detail: "local" },
+    ],
+  };
+}
+
+const tabLink = (label: string): HTMLAnchorElement =>
+  screen.getByRole("link", { name: label }) as HTMLAnchorElement;
 
 describe("App shell", () => {
-  test("renders every tab and opens on 状态", async () => {
+  test("renders every page link and opens on 状态", async () => {
     render(<App />);
 
-    for (const label of ["状态", "设置", "令牌", "日志", "统计"]) {
-      expect(tabButton(label)).toBeTruthy();
+    for (const label of ["状态", "会话", "工具", "体检", "服务", "日志", "统计", "令牌", "设置"]) {
+      expect(tabLink(label)).toBeTruthy();
     }
-    // StatusTab owns the endpoint card, so its heading proves which tab is open.
+    // Links carry the page path, so a page can be bookmarked or opened elsewhere.
+    expect(tabLink("会话").getAttribute("href")).toBe("/console/sessions");
+    // StatusTab owns the endpoint card, so its heading proves which page is open.
     expect(await screen.findByText("MCP 端点")).toBeTruthy();
   });
 
-  test("switching tabs swaps the panel", async () => {
+  test("switching pages swaps the panel and moves the URL", async () => {
     render(<App />);
     await screen.findByText("MCP 端点");
 
-    fireEvent.click(tabButton("设置"));
+    fireEvent.click(tabLink("设置"));
 
     expect(await screen.findByText("隧道（ngrok）")).toBeTruthy();
     expect(screen.queryByText("MCP 端点")).toBeNull();
+    expect(window.location.pathname).toBe("/console/settings");
+  });
+
+  test("deep-links straight to a page from the URL", async () => {
+    // The panel used to always start on 状态 no matter what the address bar
+    // said; now the path decides.
+    window.history.pushState({}, "", "/console/sessions");
+
+    render(<App />);
+
+    expect(await screen.findByText("已连接的客户端")).toBeTruthy();
+    expect(await screen.findByText("cursor/0.42")).toBeTruthy();
+  });
+
+  test("falls back to 状态 for an unknown console path", async () => {
+    window.history.pushState({}, "", "/console/nope");
+
+    render(<App />);
+
+    expect(await screen.findByText("MCP 端点")).toBeTruthy();
+  });
+
+  test("lists the locks that live sessions are holding", async () => {
+    window.history.pushState({}, "", "/console/sessions");
+
+    render(<App />);
+
+    expect(await screen.findByText("文件锁")).toBeTruthy();
+    expect(await screen.findByText("write_file")).toBeTruthy();
+    expect(await screen.findByText("edit_file")).toBeTruthy();
+  });
+
+  test("disconnects one session from 会话", async () => {
+    // "谁在连我" is only useful with a way to act on it.
+    window.history.pushState({}, "", "/console/sessions");
+    mocks.closeSession.mockResolvedValue({ closed: "a1b2c3d4e5f60718", sessions: [] });
+
+    render(<App />);
+    await screen.findByText("cursor/0.42");
+
+    fireEvent.click(screen.getByRole("button", { name: "断开" }));
+    fireEvent.click(await screen.findByRole("button", { name: "确认？" }));
+
+    expect(mocks.closeSession).toHaveBeenCalledWith("a1b2c3d4e5f60718");
+    expect(await screen.findByText(/已断开 a1b2c3d4/)).toBeTruthy();
+  });
+
+  test("shows what the instance advertises on 工具", async () => {
+    render(<App />);
+    await screen.findByText("MCP 端点");
+
+    fireEvent.click(tabLink("工具"));
+
+    expect(await screen.findByText("工具目录")).toBeTruthy();
+    expect(await screen.findByText("read_files")).toBeTruthy();
+    expect(await screen.findByText("共 2 个工具（核心 1 个）")).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("过滤工具"), { target: { value: "process" } });
+    expect(screen.queryByText("read_files")).toBeNull();
+    expect(screen.getByText("start_process")).toBeTruthy();
+  });
+
+  test("runs the checks on 体检 and reports them", async () => {
+    render(<App />);
+    await screen.findByText("MCP 端点");
+
+    fireEvent.click(screen.getByRole("button", { name: "一键体检" }));
+
+    expect(await screen.findByText("体检结果")).toBeTruthy();
+    expect(await screen.findByText("全部通过。")).toBeTruthy();
+    expect(mocks.health).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("公网连通")).toBeTruthy();
+  });
+
+  test("shows the console path of the open page", async () => {
+    render(<App />);
+
+    expect(await screen.findByText("/console/status")).toBeTruthy();
   });
 
   test("surfaces a settings failure as a toast", async () => {
@@ -158,7 +311,10 @@ describe("App shell", () => {
     // silently broken until the operator thought to refresh by hand.
     const reload = vi.fn();
     const original = Object.getOwnPropertyDescriptor(window, "location");
-    Object.defineProperty(window, "location", { configurable: true, value: { reload } });
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { reload, pathname: "/console/status", href: "http://localhost/console/status" },
+    });
     try {
       mocks.settingsAction.mockResolvedValue({
         ok: true,
@@ -191,7 +347,7 @@ describe("App shell", () => {
 
     render(<App />);
     await screen.findByText("MCP 端点");
-    fireEvent.click(tabButton("令牌"));
+    fireEvent.click(tabLink("令牌"));
     fireEvent.click(await screen.findByRole("button", { name: "新建令牌" }));
 
     fireEvent.click(await screen.findByRole("button", { name: "创建" }));

@@ -129,6 +129,48 @@ test("settings action with the console token works", async () => {
   assert.equal(body.state.usableCount, 1);
 });
 
+test("the panel endpoints answer for the console pages", async () => {
+  // 会话 / 工具 / 体检 read these three routes. The shapes asserted here are the
+  // ones ui/src/api.ts parses, so a rename on the server shows up as a failure
+  // instead of a blank page.
+  const sessions = await fetch(`${base()}/api/sessions`);
+  assert.equal(sessions.status, 200);
+  const sessionBody = await sessions.json();
+  assert.ok(Array.isArray(sessionBody.sessions), "sessions is a list");
+  assert.deepEqual(Object.keys(sessionBody.locks).sort(), ["held", "waiting"]);
+
+  const tools = await fetch(`${base()}/api/tools`);
+  assert.equal(tools.status, 200);
+  const toolBody = await tools.json();
+  assert.equal(toolBody.tools.length, toolBody.count, "count matches the catalog it returns");
+  assert.ok(toolBody.count >= 40, `catalog has ${toolBody.count} tools`);
+  assert.ok(toolBody.tools.some(tool => tool.name === "read_files" && tool.core === true), "core tools are flagged");
+  assert.ok(!toolBody.tools.some(tool => tool.name === "get_diagnostics"), "editor-only tools stay hidden");
+
+  const health = await fetch(`${base()}/api/health`);
+  assert.equal(health.status, 200);
+  const healthBody = await health.json();
+  assert.equal(healthBody.health.exposure, "local", "no tunnel in this suite");
+  const names = healthBody.health.checks.map(check => check.name);
+  for (const name of ["instance", "workspace", "tools", "tunnel", "exposure"]) {
+    assert.ok(names.includes(name), `health reports ${name}`);
+  }
+  // The public leg is only probed when there is a published URL: with no tunnel
+  // it must be skipped rather than reported as a failure.
+  assert.ok(!names.includes("public"), "no public check without a tunnel");
+});
+
+test("closing an unknown session reports 404 instead of silently succeeding", async () => {
+  const res = await fetch(`${base()}/api/sessions/close`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-open-bridge-console": routeToken },
+    body: JSON.stringify({ id: "deadbeef" }),
+  });
+  assert.equal(res.status, 404);
+  const body = await res.json();
+  assert.equal(body.ok, false);
+});
+
 test("console page is served with the token injected; ngrok Host is refused", async () => {
   const res = await fetch(`${base()}/console/`, { headers: { "x-open-bridge-console": routeToken } });
   assert.equal(res.status, 200);

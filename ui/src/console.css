@@ -298,3 +298,29 @@ label.check {
 .act-tool { width: 150px; flex: none; font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .act-msg { flex: 1; min-width: 0; font-size: 12.5px; overflow-wrap: break-word; }
 .act-time { color: var(--muted); font-size: 11.5px; flex: none; }
+
+/* --- pages, links and the quick-action bar ---------------------------------
+   The tabs are real <a> links now (one path per page), so they need the anchor
+   defaults the <button> version got for free, and the strip has to wrap at nine
+   entries instead of six. */
+.tabs { flex-wrap: wrap; }
+.tabs a.tab { display: inline-block; text-decoration: none; }
+
+.quick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+}
+.quick .crumb {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--mono);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+
+.page { min-height: 200px; }

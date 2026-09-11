@@ -69,6 +69,29 @@ export interface UsageStats {
   active_commands: number;
 }
 
+export interface SessionView {
+  id: string;
+  /** clientInfo from the handshake, or 未标识客户端 when the client sent none. */
+  client: string;
+  last_used: string;
+  /** Milliseconds since this session's last request — the reason to show the table. */
+  idle_ms: number;
+  active_requests: number;
+  todos: number;
+}
+
+export interface LockRow { key: string; mode?: string; label?: string; held_ms?: number }
+export interface LockWaiter { keys?: string[]; mode?: string; label?: string; waited_ms?: number }
+
+/** Same shape the 状态 card summarises, in full (src/bridge/resource-locks.ts). */
+export interface LockSnapshot { held: LockRow[]; waiting: LockWaiter[] }
+
+export interface ToolView { name: string; description: string; core: boolean }
+export interface ToolCatalog { profile: string; count: number; tools: ToolView[] }
+
+export interface HealthCheck { name: string; ok: boolean; detail: string }
+export interface HealthReport { checks: HealthCheck[]; exposure: string }
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(path);
   if (!res.ok) throw new Error(`GET ${path} → HTTP ${res.status}`);
@@ -100,6 +123,11 @@ export const api = {
   settingsAction: (action: Record<string, unknown>) =>
     postJson<SettingsActionResult>("/api/settings/action", action),
   services: () => getJson<{ services: ServiceView[] }>("/api/services").then(r => r.services),
+  sessions: () => getJson<{ sessions: SessionView[]; locks: LockSnapshot }>("/api/sessions"),
+  closeSession: (id: string) =>
+    postJson<{ closed: string; sessions: SessionView[] }>("/api/sessions/close", { id }),
+  tools: () => getJson<ToolCatalog>("/api/tools"),
+  health: () => getJson<{ health: HealthReport }>("/api/health").then(r => r.health),
   serviceAction: (action: "start" | "stop" | "restart", name: string) =>
     postJson<{ result: unknown; services: ServiceView[] }>("/api/services/action", { action, name }),
 };
