@@ -124,6 +124,7 @@ export type SettingsAction =
   | { command: "setAuthEnabled"; enabled: boolean }
   | { command: "setDefaultTtl"; seconds: number }
   | { command: "createToken"; label: string; ttlSeconds: number }
+  | { command: "armPublicLock"; label?: string; ttlSeconds?: number }
   | { command: "rotateToken" | "revokeToken" | "deleteToken"; id: string }
   | { command: "setConcurrency"; enabled: boolean; holdTimeoutMs: number; waitTimeoutMs: number }
   | { command: "setConfig"; key: SettingsConfigKey; value: unknown }
@@ -185,7 +186,7 @@ export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
   const command = typeof message.command === "string" ? message.command : "";
   const allowed: ReadonlySet<string> = new Set([
     "ready", "copyUrl", "copyPrompt", "start", "stop", "rotateEndpoint", "saveDomain",
-    "setAuthEnabled", "setDefaultTtl", "createToken", "rotateToken",
+    "setAuthEnabled", "setDefaultTtl", "createToken", "armPublicLock", "rotateToken",
     "revokeToken", "deleteToken", "purgeTokens", "revokeAll",
     "setConcurrency", "setConfig", "copyText", "copySecret", "dismissSecret",
     "clearStats", "healthCheck",
@@ -212,6 +213,17 @@ export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
     }
     case "createToken": {
       const label = str(message.label, 100);
+      const ttlSeconds = Number(message.ttlSeconds);
+      if (!Number.isFinite(ttlSeconds) || !TTL_SET.has(ttlSeconds)) return null;
+      return { command, label, ttlSeconds };
+    }
+    case "armPublicLock": {
+      // One step instead of two: mint a token (when there is none) and flip the
+      // bearer switch. Label and TTL are both optional — the host falls back to
+      // its configured default — so the console can arm the lock from the page
+      // that shows the risk, without visiting 令牌 first.
+      const label = str(message.label, 100);
+      if (message.ttlSeconds === undefined || message.ttlSeconds === null) return { command, label };
       const ttlSeconds = Number(message.ttlSeconds);
       if (!Number.isFinite(ttlSeconds) || !TTL_SET.has(ttlSeconds)) return null;
       return { command, label, ttlSeconds };

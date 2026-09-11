@@ -47,6 +47,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `window.location`（jsdom 与不同 vitest 池对它能否被重定义的答案不一致）。
 
 ### Added
+- **「一键开启第二道锁」。** 开启 Bearer 鉴权一直是两步：先在「令牌」页签发令牌、复制，
+  再回「设置」页打开开关——而这套流程恰恰是"失败关闭"设计下最容易做错的地方。现在公网可达
+  且未开鉴权时，「体检」页会出现一个两步确认的按钮，一次动作 = 签发令牌 + 打开 Bearer，明文令牌
+  照旧只在弹层里显示一次；开启后页面自动复检，`public-open` 会变成 `public-authed`。
+  边界都处理了：已有可用令牌就复用而不是再签一个；已经开着就返回幂等的 no-op；
+  万一打开开关失败，会把刚签发的令牌删掉，绝不留下"有密钥却没有锁"的中间态。
+  接口是 `POST /api/settings/action` 的 `armPublicLock` 命令（标签与 TTL 都可省，缺省用配置里的默认有效期）。
+
+### Added
 - **The console has real pages, one path each.** The panel was a single page
   whose "tabs" were component state: the address bar never moved, nothing could
   be linked, bookmarked, reloaded into place or opened in a second window. Every

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type HealthCheck, type HealthReport } from "../api";
+import { api, type HealthCheck, type HealthReport, type SettingsActionResult } from "../api";
+import { ConfirmButton } from "./ConfirmButton";
 
 const LABELS: Record<string, string> = {
   instance: "实例",
@@ -13,7 +14,8 @@ const LABELS: Record<string, string> = {
 const EXPOSURE_TEXT: Record<string, { text: string; tone: "ok" | "warn" }> = {
   local: { text: "仅本机：/api 与 /console 只认回环地址，即使隧道开着也不会把它们暴露出去。", tone: "ok" },
   "public-open": {
-    text: "公网可达且未开启鉴权：拿到这个 URL 的人都能读写文件、执行命令。要收紧可以轮换端点，或在「令牌」页开启 Bearer 鉴权。",
+    text: "公网可达且未开启鉴权：拿到这个 URL 的人都能读写文件、执行命令。"
+      + "要收紧就点下面的「开启第二道锁」（签发令牌 + 打开 Bearer，一步完成），或先轮换端点。",
     tone: "warn",
   },
   "public-authed": { text: "公网可达，但每个请求都要带 Bearer 令牌。", tone: "ok" },
@@ -32,10 +34,13 @@ function levelOf(check: HealthCheck): "ok" | "warn" | "fail" {
  * checks server-side and, for the public leg, really does send a request through
  * the tunnel — the only way to know a client could connect.
  */
-export function HealthPage() {
+export function HealthPage(
+  { act }: { act: (action: Record<string, unknown>) => Promise<SettingsActionResult | null> },
+) {
   const [report, setReport] = useState<HealthReport | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [arming, setArming] = useState(false);
 
   const run = useCallback(async () => {
     setBusy(true);
@@ -49,6 +54,17 @@ export function HealthPage() {
   }, []);
 
   useEffect(() => { void run(); }, [run]);
+
+  // One action instead of the old two trips (mint on 令牌, copy, then flip the
+  // switch on 设置). The secret comes back once and the shell shows it in the
+  // mask, so this page only has to re-run the checks afterwards: the 暴露面 row
+  // should flip to public-authed without the operator reloading anything.
+  const arm = async () => {
+    setArming(true);
+    const result = await act({ command: "armPublicLock" });
+    if (result?.ok) await run();
+    setArming(false);
+  };
 
   const exposure = EXPOSURE_TEXT[report?.exposure ?? ""];
   const failed = (report?.checks ?? []).filter(check => levelOf(check) === "fail").length;
@@ -104,10 +120,31 @@ export function HealthPage() {
       <div className="card">
         <h2>暴露面</h2>
         {exposure ? (
-          <div className="row">
-            <span className={`pill ${exposure.tone === "warn" ? "warn" : "ok"}`}>{report?.exposure}</span>
-            <span>{exposure.text}</span>
-          </div>
+          <>
+            <div className="row">
+              <span className={`pill ${exposure.tone === "warn" ? "warn" : "ok"}`}>{report?.exposure}</span>
+              <span>{exposure.text}</span>
+            </div>
+            {report?.exposure === "public-open" && (
+              <div className="row">
+                <ConfirmButton
+                  className="primary"
+                  label={arming ? "开启中…" : "开启第二道锁"}
+                  onConfirm={() => void arm()}
+                />
+                <span className="section-note" style={{ margin: 0 }}>
+                  明文令牌只显示这一次；开启后只填 URL 的客户端会立刻连不上，随时可在「令牌」页关掉。
+                </span>
+              </div>
+            )}
+            {report?.exposure === "public-authed" && (
+              <div className="row">
+                <span className="section-note" style={{ margin: 0 }}>
+                  第二道锁在开着：客户端必须带 Bearer 令牌。要恢复「只填 URL」的用法，去「令牌」页关掉那个开关。
+                </span>
+              </div>
+            )}
+          </>
         ) : (
           <div className="section-note">读取中…</div>
         )}

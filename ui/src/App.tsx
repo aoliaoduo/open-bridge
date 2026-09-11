@@ -140,7 +140,7 @@ export function App() {
         {route === "status" && <StatusTab settings={settings} act={act} onRefresh={refreshSettings} />}
         {route === "sessions" && <SessionsPage />}
         {route === "tools" && <ToolsPage />}
-        {route === "health" && <HealthPage />}
+        {route === "health" && <HealthPage act={act} />}
         {route === "services" && <ServicesTab />}
         {route === "logs" && <LogsTab />}
         {route === "stats" && <StatsTab />}

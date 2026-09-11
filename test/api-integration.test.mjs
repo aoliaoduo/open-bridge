@@ -192,6 +192,57 @@ test("closing an unknown session reports 404 instead of silently succeeding", as
   assert.equal(body.ok, false);
 });
 
+test("one step arms the second lock: mint, enable, and /mcp really refuses", async () => {
+  // 「一键开启第二道锁」exists because the guarded two-step flow (mint on 令牌,
+  // then flip the switch) is easy to get wrong. The only proof that matters is
+  // an anonymous request actually being refused once it is armed.
+  const consolePost = (body) => fetch(`${base()}/api/settings/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-open-bridge-console": routeToken },
+    body: JSON.stringify(body),
+  });
+
+  // Start from zero usable tokens so the arm has to mint one itself.
+  assert.equal((await consolePost({ command: "revokeAll" })).status, 200);
+
+  const armed = await consolePost({ command: "armPublicLock", label: "integration-lock", ttlSeconds: 3_600 });
+  assert.equal(armed.status, 200);
+  const armedBody = await armed.json();
+  assert.equal(armedBody.ok, true);
+  assert.ok(armedBody.secret?.secret.startsWith("ob_"), "the arm returns the one-time secret");
+  assert.equal(armedBody.state.authEnabled, true);
+  assert.equal(armedBody.state.usableCount, 1, "exactly the token it just minted");
+
+  const status = await (await fetch(`${base()}/api/status`)).json();
+  assert.equal(status.status.auth_enabled, true, "status reports the gate as on");
+
+  const anonymous = await fetch(`${base()}/mcp/${routeToken}`);
+  assert.equal(anonymous.status, 401, "anonymous MCP requests are refused once the lock is on");
+  const bearer = await fetch(`${base()}/mcp/${routeToken}`, {
+    headers: { authorization: `Bearer ${armedBody.secret.secret}` },
+  });
+  assert.notEqual(bearer.status, 401, "the token the arm minted works");
+
+  // Arming again is a no-op, not a second token.
+  const again = await (await consolePost({ command: "armPublicLock" })).json();
+  assert.equal(again.ok, true);
+  assert.equal(again.secret, undefined, "already armed: no new secret");
+  assert.match(again.info ?? "", /已经开着/);
+
+  // Gate off but a usable token in place: arming reuses it.
+  assert.equal((await consolePost({ command: "setAuthEnabled", enabled: false })).status, 200);
+  const reused = await (await consolePost({ command: "armPublicLock" })).json();
+  assert.equal(reused.ok, true);
+  assert.equal(reused.secret, undefined, "reused the existing token instead of minting another");
+  assert.equal(reused.state.usableCount, 1);
+
+  // Leave the instance as found, so the rest of the suite runs unauthenticated.
+  const off = await (await consolePost({ command: "setAuthEnabled", enabled: false })).json();
+  assert.equal(off.state.authEnabled, false);
+  const anonymousAgain = await fetch(`${base()}/mcp/${routeToken}`);
+  assert.notEqual(anonymousAgain.status, 401, "lock off: the endpoint answers again");
+});
+
 test("console page is served with the token injected; ngrok Host is refused", async () => {
   const res = await fetch(`${base()}/console/`, { headers: { "x-open-bridge-console": routeToken } });
   assert.equal(res.status, 200);

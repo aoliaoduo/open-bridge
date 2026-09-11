@@ -290,6 +290,29 @@ describe("App shell", () => {
     expect(await screen.findByText("公网连通")).toBeTruthy();
   });
 
+  test("arms the second lock from 体检 in one step", async () => {
+    // The lock is the one action on this page that changes who can reach the
+    // endpoint, so it is a two-step confirm and it must hand back the only copy
+    // of the new token — into the mask, not just the toast.
+    window.history.pushState({}, "", "/console/health");
+    mocks.settingsAction.mockResolvedValue({
+      ok: true,
+      state: settingsState({ authEnabled: true, usableCount: 1 }),
+      secret: { kind: "minted", id: "t9", label: "public-lock", secret: "ob_lock_value", ttl: "1 小时" },
+      info: "第二道锁已开启",
+    } satisfies SettingsActionResult);
+
+    render(<App />);
+    await screen.findByText("体检结果");
+
+    fireEvent.click(screen.getByRole("button", { name: "开启第二道锁" }));
+    fireEvent.click(await screen.findByRole("button", { name: "确认？" }));
+
+    expect(mocks.settingsAction).toHaveBeenCalledWith({ command: "armPublicLock" });
+    expect(await screen.findByText("令牌已创建")).toBeTruthy();
+    expect(screen.getByText("ob_lock_value")).toBeTruthy();
+  });
+
   test("shows the console path of the open page", async () => {
     render(<App />);
 

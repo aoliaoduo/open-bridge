@@ -249,6 +249,47 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       return done({ secret: secretPayload(minted, "minted"), copyText: minted.secret });
     }
 
+    case "armPublicLock": {
+      // 「一键开启第二道锁」: the operator sees the risk (public-open, no bearer
+      // gate) on 体检 and wants it closed without a trip to 令牌 to mint, copy,
+      // and then flip a switch on the same page.
+      //
+      // Order is not cosmetic: the gate is fail-closed, so enabling it with zero
+      // usable tokens would refuse every client. Mint first, enable second, and
+      // if enabling fails, delete the token minted for it — a stray secret with
+      // no lock behind it is worse than nothing.
+      if (authEnabled()) {
+        return done({ info: "第二道锁本来就已经开着：/mcp 要求 Bearer 令牌。" });
+      }
+      const existing = await usableTokenCount();
+      let secret: SecretPayload | undefined;
+      let mintedId: string | undefined;
+      if (existing === 0) {
+        // A second token would just be one more thing to lose; reuse is the
+        // point of a one-step action.
+        const minted = await mintToken({
+          label: action.label || "public-lock",
+          ttlSeconds: action.ttlSeconds ?? tokenTtlSeconds(),
+        });
+        mintedId = minted.id;
+        secret = secretPayload(minted, "minted");
+      }
+      try {
+        await cfg.update("auth.enabled", true);
+      } catch (error) {
+        if (mintedId) await deleteToken(mintedId).catch(() => undefined);
+        throw error;
+      }
+      return done({
+        secret,
+        copyText: secret?.secret,
+        info: secret
+          ? "第二道锁已开启：已签发 1 个令牌并启用 Bearer 鉴权，客户端必须在请求头带 Authorization: Bearer <令牌>。"
+            + "只填 URL 的客户端（例如 ChatGPT 连接器）会立刻连不上；要恢复就在「令牌」页关掉那个开关。"
+          : `第二道锁已开启：复用了现有的 ${existing} 个有效令牌，客户端现在必须携带令牌（只填 URL 会连不上）。`,
+      });
+    }
+
     case "rotateToken": {
       const rotated = await rotateToken(action.id);
       return done({ secret: secretPayload(rotated, "rotated"), copyText: rotated.secret });

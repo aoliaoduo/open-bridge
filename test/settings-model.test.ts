@@ -49,6 +49,18 @@ test("normalize allowlists TTL values and trims labels", () => {
   );
 });
 
+test("normalize accepts the one-step lock command, TTL optional", () => {
+  // The console arms the lock from 体检 with no payload at all; the host then
+  // falls back to its configured default TTL.
+  assert.deepEqual(normalizeSettingsMessage({ command: "armPublicLock" }), { command: "armPublicLock", label: "" });
+  assert.deepEqual(
+    normalizeSettingsMessage({ command: "armPublicLock", label: " tunnel ", ttlSeconds: 3_600 }),
+    { command: "armPublicLock", label: "tunnel", ttlSeconds: 3_600 },
+  );
+  assert.deepEqual(normalizeSettingsMessage({ command: "armPublicLock", ttlSeconds: null }), { command: "armPublicLock", label: "" });
+  assert.equal(normalizeSettingsMessage({ command: "armPublicLock", ttlSeconds: 1_234 }), null, "arbitrary ttl rejected");
+});
+
 test("normalize validates the domain and concurrency payloads", () => {
   assert.deepEqual(normalizeSettingsMessage({ command: "saveDomain", domain: " my.ngrok-free.dev " }), { command: "saveDomain", domain: "my.ngrok-free.dev" });
   assert.equal(normalizeSettingsMessage({ command: "saveDomain", domain: "   " }), null);
