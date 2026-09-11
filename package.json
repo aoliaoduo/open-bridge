@@ -1,6 +1,6 @@
 {
   "name": "open-bridge",
-  "version": "1.0.0-alpha.2",
+  "version": "1.0.0-alpha.3",
   "description": "Standalone Streamable HTTP MCP bridge for local workspaces. 在本机安全暴露工作区能力的独立 MCP 桥接（CLI + Web 控制台）。",
   "keywords": [
     "mcp",
@@ -44,7 +44,7 @@
     "dev": "tsx src/cli.ts",
     "lint": "eslint .",
     "test": "npm run test:core && npm run test:ui",
-    "test:core": "tsx --test test/*.test.ts && node --test test/api-integration.test.mjs test/api-teardown-integration.test.mjs test/tunnel-integration.test.mjs test/guards-integration.test.mjs test/mcp-protocol-integration.test.mjs test/mcp-modern-protocol-integration.test.mjs test/oauth-integration.test.mjs test/multi-instance-integration.test.mjs test/crash-guards-integration.test.mjs test/clean-scope.test.mjs",
+    "test:core": "tsx --test test/*.test.ts && node --test test/api-integration.test.mjs test/api-teardown-integration.test.mjs test/tunnel-integration.test.mjs test/guards-integration.test.mjs test/mcp-protocol-integration.test.mjs test/mcp-modern-protocol-integration.test.mjs test/oauth-integration.test.mjs test/multi-instance-integration.test.mjs test/crash-guards-integration.test.mjs test/stop-guard-integration.test.mjs test/clean-scope.test.mjs",
     "test:ui": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.ui.json --noEmit",
     "verify": "npm run typecheck && npm run lint && npm run build && npm test",

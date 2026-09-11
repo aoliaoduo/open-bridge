@@ -29,6 +29,7 @@ import { currentWorkspaceRoot, workspaceSuffixFor } from "./bridge/paths.js";
 import { loadServices } from "./bridge/services.js";
 import { loadUsageStats } from "./bridge/usage-store.js";
 import { start, stop, setExtraRouteHandler, setLocalServerReadyHook } from "./bridge/lifecycle.js";
+import { markHostProcess, selfStopRefusal } from "./bridge/stop-guard.js";
 import { armShutdownDeadline } from "./bridge/shutdown-deadline.js";
 import { apiRouteHandler, setShutdownHook } from "./server/api-router.js";
 import {
@@ -54,6 +55,8 @@ const HELP = `open-bridge ${VERSION} — standalone MCP bridge for local workspa
 说明:
   serve     前台启动 Bridge；控制台地址打印在终端
   stop      停止「当前目录」那个实例（没有则按唯一运行中的实例）
+            由该实例自己启动的命令（例如走它的 MCP 工具执行）会被拒绝——那等于立刻断掉
+            自己正在用的连接；要真停，由人在终端里加 --force
   status    同上，打印状态、项目根、MCP URL 与暴露情况
   instances 列出共用同一数据目录的所有实例（一个目录一个实例）
   logs      读取/跟踪/清空日志文件（~/.open-bridge/logs/bridge.log）
@@ -268,6 +271,11 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
     fail(`项目根目录不存在: ${projectRoot}`);
   }
 
+  // Everything spawned from here on (run_command, shells, services, the tunnel)
+  // inherits this stamp, which is what lets `stop` tell "issued from inside the
+  // instance" apart from "a human at a terminal" — see stop-guard.ts.
+  markHostProcess();
+
   const { host: nodeHost } = installNodeHost({ homeDir: home, projectRoot, version: VERSION });
   // CLI flags override file config without persisting them.
   const innerGet = nodeHost.config.get.bind(nodeHost.config);
@@ -473,6 +481,11 @@ async function cmdStop(parsed: ParsedArgs): Promise<void> {
     }
     return;
   }
+  if (!parsed.flags.has("force")) {
+    const refusal = selfStopRefusal(process.env, runtime.pid, `http://127.0.0.1:${runtime.port}/console/`);
+    if (refusal) fail(refusal);
+  }
+
   let shutdownError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {

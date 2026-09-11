@@ -4,7 +4,20 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0-alpha.3] — 2026-09-12
+### Added
+- **一键启动脚本先问「工作目录」，再启动。** 「工作区」是 AI 权限的边界，而双击启动时它默认等于
+  `.cmd` 所在的目录（也就是本仓库自己）——想给别的项目用只能迂回。现在双击后先提示输入目录
+  （`"C:\Users\aolia\Desktop\aoliaoduo"` 与 `C:\Users\aolia\Desktop\aoliaoduo` 都收，引号自动去掉），
+  回车＝沿用上一次输入的目录（记在同目录的 `start-open-bridge.last-dir`，已加进 `.gitignore`）；
+  目录不存在会先问一句再建；也可以把目录当第一个参数传（桌面快捷方式/计划任务用得上）。
+  启动命令相应变成 `serve --root "<你输入的目录>" --open`。
+- **`open-bridge stop` 的「自停保护」。** 用 Bridge 的 MCP 去操作 Bridge 项目本身是安全的（改代码、
+  构建、删 `dist/` 都不影响正在服务的进程，本轮已实测），唯一真会把自己弄断线的动作是 `stop`
+  ——它停掉的正是承载这次会话的进程。现在 `serve` 启动时给自己的 pid 打一个 `OPEN_BRIDGE_HOST_PID`
+  标记，凡它启动的子进程（`run_command`、常驻 shell、服务、隧道）都会继承；当 `stop` 要停的那个实例
+  *就是* 这个标记指向的 pid 时，默认**拒绝执行**并说明原因与出路，`--force` 强制。人自己的终端
+  没有标记、停别的实例也不会被拦，所以 MCP 的用法与速度完全不变。
 ### Fixed
 - **关窗/挂断不再留下「活着但没人管」的实例。** `serve` 只处理 SIGINT/SIGTERM：控制台窗口关闭（Node 在 Windows 上报成 SIGHUP）与 Ctrl+Break（SIGBREAK）都没人接，于是窗口没了、进程还在，端口、runtime 文件与启动锁都还被它占着——下一次启动因此被拒（「该目录已有实例在运行」）。现在两个信号都走同一条优雅停机，并且停机在任何一步卡住时都有 **10 秒硬期限**（`src/bridge/shutdown-deadline.ts`，在第一次 await 之前就武装好），到点强制退出。
   实测（本轮探针）：控制台成员表证明长驻子进程与 serve 同属一个控制台——`sleep.exe`/`bash.exe` 出现在那个窗口的控制台进程列表里，修复前它们各自持有独立（隐形）控制台、关窗也不会退出。非交互会话里拿不到可关闭的真实控制台窗口，所以「点 X」这一步依赖 Windows 文档化的行为（关闭控制台窗口会终止其成员进程）＋ SIGHUP 处理作为双保险。新增 `test/shutdown-deadline.test.ts` 三条用例（到点触发、完成后取消、默认期限下限）。
