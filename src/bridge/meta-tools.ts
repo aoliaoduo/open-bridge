@@ -234,9 +234,11 @@ export function workspaceBrief(): Record<string, unknown> {
   });
   brief.instruction_files = instructionFiles;
 
-  // Git snapshot (branch + dirty file count, best-effort).
+  // Git snapshot (branch + dirty file count, best-effort). The timeout keeps a
+  // slow git (huge repo, wedged index.lock) from blocking the whole event loop
+  // indefinitely — workspace_brief runs synchronously on the request path.
   try {
-    const gitOpts = { cwd: rootPath, windowsHide: true } as const;
+    const gitOpts = { cwd: rootPath, windowsHide: true, timeout: 5_000, maxBuffer: 16 * 1024 * 1024 } as const;
     const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], gitOpts).toString().trim();
     const dirty = execFileSync("git", ["status", "--porcelain"], gitOpts).toString().split("\n").filter(l => l.trim()).length;
     brief.git = { branch, dirty_files: dirty };

@@ -133,7 +133,13 @@ export async function reviewChanges(args: JsonArgs): Promise<unknown> {
   const openCommit = await refCommit(gitRoot, refs.open);
   const baselineCommit = await refCommit(gitRoot, refs.baseline);
 
-  const maxPatchBytes = Math.max(0, Math.min(Number(args.max_patch_bytes ?? DEFAULT_PATCH_BYTES) || DEFAULT_PATCH_BYTES, 512 * 1024));
+  // `|| DEFAULT` treated an explicit 0 ("include no patch text") as unset and
+  // silently served 64 KiB; validate instead of coercing.
+  const requestedPatchBytes = Number(args.max_patch_bytes ?? DEFAULT_PATCH_BYTES);
+  const maxPatchBytes = Math.max(0, Math.min(
+    Number.isFinite(requestedPatchBytes) && requestedPatchBytes >= 0 ? Math.floor(requestedPatchBytes) : DEFAULT_PATCH_BYTES,
+    512 * 1024,
+  ));
 
   if (!openCommit || !baselineCommit) {
     // Anchor the open checkpoint at the current state when this workspace has

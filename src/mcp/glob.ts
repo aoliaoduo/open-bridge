@@ -60,8 +60,25 @@ export function globToRegExpSource(pattern: string): string {
       if (depth !== 0) {
         out += "\\{";
       } else {
-        const options = p.slice(i + 1, j).split(",").map(opt => globToRegExpSource(opt));
-        out += "(?:" + options.join("|") + ")";
+        // Split alternatives depth-aware: a plain split(",") cut through
+        // NESTED braces, so "{src,lib}/{a,{b,c}}.ts" compiled the truncated
+        // fragment "{b" as a literal and matched neither b nor c.
+        const body = p.slice(i + 1, j);
+        const options: string[] = [];
+        let part = "";
+        let inner = 0;
+        for (const c of body) {
+          if (c === "{") inner += 1;
+          else if (c === "}") inner -= 1;
+          if (c === "," && inner === 0) {
+            options.push(part);
+            part = "";
+          } else {
+            part += c;
+          }
+        }
+        options.push(part);
+        out += "(?:" + options.map(opt => globToRegExpSource(opt)).join("|") + ")";
         i = j;
       }
     } else if (ch === "/") {
