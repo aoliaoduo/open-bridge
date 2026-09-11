@@ -192,6 +192,14 @@ function applyHunksTracked(current: string, body: string, relative: string): { t
     const removeLines: string[] = [];
     const addLines: string[] = [];
     for (const line of lines) {
+      // "\ No newline at end of file" is not content: git emits it after the
+      // "-" and/or "+" line of an EOF change. Treating it as context (it
+      // starts with neither "-" nor "+" nor " ") appended the literal marker
+      // text to BOTH sides, so the hunk could never match and every git-style
+      // diff touching a file without a trailing newline failed loudly. The
+      // missing final terminator itself is already handled by the EOF
+      // fallback below (remove keeps its "\n"; the file's last line has none).
+      if (line.startsWith("\\")) continue;
       if (line.startsWith("-")) {
         removeLines.push(stripPrefix(line) + "\n");
       } else if (line.startsWith("+")) {
@@ -342,13 +350,43 @@ function applyHunksPreserving(rawCurrent: string, body: string, relative: string
 
 /** Collect the content of an Add File block; blank added lines stay blank. */
 function addedContent(body: string): string {
+  // A bodyless Add block creates an EMPTY file, not a one-newline file (the
+  // bare "" line here is the split artifact, not an added blank line).
+  if (body === "") return "";
   const lines = body.split(/\r?\n/);
   if (lines.length && lines[lines.length - 1] === "" && body.endsWith("\n")) lines.pop();
-  const content = lines
-    .filter(line => line.startsWith("+") || line === "")
+  const contentLines = lines.filter(line => line.startsWith("+") || line === "");
+  if (!contentLines.length) return "";
+  const content = contentLines
     .map(line => (line.startsWith("+") ? line.slice(1) : line))
     .join("\n");
   return content.endsWith("\n") ? content : `${content}\n`;
+}
+
+/**
+ * Read a file apply_patch is about to rewrite as text.
+ *
+ * apply_patch has no base64 path, so a binary or non-UTF-8 target would be
+ * decoded with U+FFFD replacements and written straight back — silent,
+ * unrecoverable corruption of regions the patch never touched. Same guard as
+ * edit_block's readEditableText.
+ */
+async function readPatchableText(file: string, label: string): Promise<string> {
+  const buf = await fs.readFile(file);
+  if (buf.subarray(0, Math.min(buf.length, 8192)).indexOf(0) !== -1) {
+    throw new Error(
+      `apply_patch cannot patch a binary file (NUL bytes found): ${label}. Use write_file with encoding=base64 instead.`,
+    );
+  }
+  const text = buf.toString("utf8");
+  // Undecodable bytes decode to U+FFFD, which does not round-trip; a file that
+  // legitimately contains U+FFFD does round-trip, so this stays a true positive.
+  if (text.includes("\uFFFD") && !buf.equals(Buffer.from(text, "utf8"))) {
+    throw new Error(
+      `apply_patch cannot patch a file that is not valid UTF-8: ${label}. Use write_file with encoding=base64 instead.`,
+    );
+  }
+  return text;
 }
 
 /**
@@ -397,7 +435,7 @@ export async function applyPatch(
           }
         }
       }
-      const rawCurrent = kind === "Add" ? "" : interim.has(file) ? interim.get(file)! : await fs.readFile(file, "utf8");
+      const rawCurrent = kind === "Add" ? "" : interim.has(file) ? interim.get(file)! : await readPatchableText(file, relative);
       if (!interim.has(file)) {
         originalContent.set(file, rawCurrent);
         assertExpectedHash(rawCurrent, expectedHashes[relative], relative);
@@ -421,16 +459,36 @@ export async function applyPatch(
       lastBlockKind.set(file, "update");
     }
   } else {
-    const fileHeaders = [...normalized.matchAll(/^---\s+([^\n]+)\n\+\+\+\s+([^\n]+)\n/gm)];
+    // Classic unified diff. The lookahead keeps hunk BODY lines that merely
+    // start with "-- "/"++ " (removed/added content rendering as ---/+++)
+    // from being mistaken for a new file section — git headers are always
+    // followed by an @@ hunk.
+    const fileHeaders = [...normalized.matchAll(/^---\s+([^\n]+)\n\+\+\+\s+([^\n]+)\n(?=@@)/gm)];
     if (!fileHeaders.length) throw new Error("Expected ShunCode patch format or unified diff headers.");
     for (let i = 0; i < fileHeaders.length; i++) {
-      const relative = patchFilePath(fileHeaders[i][2].split(/\s+/)[0]);
-      const file = await workspace.resolveSecure(relative);
+      // "+++ /dev/null" names a DELETION: the --- side carries the file. The
+      // code used to take +++ unconditionally, so patchFilePath("/dev/null")
+      // threw and aborted the ENTIRE multi-file patch.
+      const plusPath = fileHeaders[i][2].split(/\s+/)[0];
+      const isDeletion = plusPath === "/dev/null";
+      const relative = patchFilePath(isDeletion ? fileHeaders[i][1].split(/\s+/)[0] : plusPath);
+      const file = await workspace.resolveSecure(relative, isDeletion);
       const body = normalized.slice(
         fileHeaders[i].index! + fileHeaders[i][0].length,
         i + 1 < fileHeaders.length ? fileHeaders[i + 1].index! : normalized.length,
       );
-      const rawCurrent = interim.has(file) ? interim.get(file)! : await fs.readFile(file, "utf8");
+      if (isDeletion) {
+        if (interim.has(file)) interim.delete(file);
+        else {
+          const rawCurrent = await readPatchableText(file, relative);
+          originalContent.set(file, rawCurrent);
+          assertExpectedHash(rawCurrent, expectedHashes[relative], relative);
+        }
+        operations.push({ kind: "delete", relative, file });
+        lastBlockKind.set(file, "delete");
+        continue;
+      }
+      const rawCurrent = interim.has(file) ? interim.get(file)! : await readPatchableText(file, relative);
       if (!interim.has(file)) {
         originalContent.set(file, rawCurrent);
         assertExpectedHash(rawCurrent, expectedHashes[relative], relative);
@@ -464,13 +522,43 @@ export async function applyPatch(
       diff: raw ? boundedText(raw, PATCH_DIFF_MAX_CHARS).text : "",
     });
   }
+  // Pre-flight every target directory BEFORE any content changes, so one bad
+  // path fails the patch without leaving earlier files already rewritten.
   for (const operation of finalActions.values()) {
-    if (operation.kind === "delete") {
-      await fs.unlink(operation.file);
-    } else {
-      await fs.mkdir(path.dirname(operation.file), { recursive: true });
-      await writeText(operation.file, operation.content ?? "");
+    if (operation.kind !== "delete") await fs.mkdir(path.dirname(operation.file), { recursive: true });
+  }
+  // Apply, rolling back on failure: a crash partway (locked file, disk full)
+  // used to leave a half-applied patch with no record of what landed. Files
+  // this patch created are removed again; pre-existing files get their
+  // original content back (writeText is atomic per file, so restores are too).
+  const filesExistedBefore = new Set<string>();
+  for (const operation of finalActions.values()) {
+    if (operation.kind !== "add") filesExistedBefore.add(operation.file);
+  }
+  const written: string[] = [];
+  try {
+    for (const operation of finalActions.values()) {
+      if (operation.kind === "delete") {
+        await fs.unlink(operation.file);
+      } else {
+        await writeText(operation.file, operation.content ?? "");
+        written.push(operation.file);
+      }
     }
+  } catch (error) {
+    for (const file of written) {
+      try {
+        if (filesExistedBefore.has(file) && originalContent.has(file)) {
+          await fs.writeFile(file, originalContent.get(file) ?? "", "utf8");
+        } else {
+          await fs.rm(file, { force: true });
+        }
+      } catch { /* best-effort rollback; the primary error is rethrown below */ }
+    }
+    throw new Error(
+      `Patch aborted partway; the files it had already written were restored. `
+      + `Cause: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   return { changed, changes };
 }

@@ -38,8 +38,11 @@ export async function ensureWritableBufferTarget(_fullPath: string, _allowDirty:
  * Persist text content for a file path.
  *
  * Inside an editor host the write goes through the editor API (undo stack,
- * dirty-buffer guard). The standalone host writes directly to disk — there is
- * no in-memory buffer that could diverge from the file.
+ * dirty-buffer guard). The standalone host writes to a same-directory temp
+ * file and renames into place: a plain in-place write left a torn/truncated
+ * file behind when the process died mid-write (or when a concurrent reader
+ * walked in during the write), while the rename is atomic on every supported
+ * platform and replaces the existing target.
  */
 export async function persistText(
   fullPath: string,
@@ -48,6 +51,13 @@ export async function persistText(
 ): Promise<PersistResult> {
   // Intentionally ignored outside an editor host; retain the parameter for API parity.
   void _opts;
-  await fs.writeFile(fullPath, content, "utf8");
+  const temp = `${fullPath}.${process.pid}.tmp`;
+  try {
+    await fs.writeFile(temp, content, "utf8");
+    await fs.rename(temp, fullPath);
+  } catch (error) {
+    await fs.rm(temp, { force: true }).catch(() => undefined);
+    throw error;
+  }
   return { via: "disk" };
 }

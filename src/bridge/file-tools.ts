@@ -160,6 +160,50 @@ function resolveRipgrepExecutable(): string {
   return resolvedRipgrep;
 }
 
+/**
+ * Same-directory temp file + rename: an interrupted (or concurrent-reader)
+ * in-place write used to leave a torn/truncated target behind, while the
+ * rename is atomic on every supported platform and replaces the target.
+ */
+async function writeAtomic(file: string, data: Buffer | string): Promise<void> {
+  const temp = `${file}.${process.pid}.tmp`;
+  try {
+    await fs.writeFile(temp, data);
+    await fs.rename(temp, file);
+  } catch (error) {
+    await fs.rm(temp, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
+ * Read existing bytes with ENOENT as the ONLY degradation to "absent".
+ * A swallowed EACCES/EBUSY (Windows sharing violations are common) used to
+ * turn a guarded write or an append into a blind overwrite.
+ */
+async function readFileOrAbsent(file: string): Promise<Buffer | null> {
+  try {
+    return await fs.readFile(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+/**
+ * rename(2) fails with EXDEV across volumes (C:→D: on Windows); a move is
+ * still possible via copy+delete, so fall back instead of erroring out.
+ */
+async function renameOrCopy(source: string, destination: string): Promise<void> {
+  try {
+    await fs.rename(source, destination);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+    await fs.cp(source, destination, { recursive: true, force: true });
+    await fs.rm(source, { recursive: true, force: true });
+  }
+}
+
 export async function listDirectory(args: Args): Promise<unknown> {
   const base = await securePath(args.path);
   const max = Number.isFinite(Number(args.max_entries)) ? Math.max(0, Number(args.max_entries)) : DEFAULT_MAX_DIRECTORY_ENTRIES;
@@ -432,8 +476,12 @@ export async function readFiles(args: Args): Promise<unknown> {
     // re-reading the whole file, keeping the operation O(requested range).
     const fullyRead = r.reached_eof;
     // truncated: a ranged read is "truncated" unless it covered the whole file
-    // (stream reached EOF and started at line 1); byte-budget hits always truncate.
-    const rangeTruncated = lineRange ? !(fullyRead && r.start_line <= 1) : false;
+    // (stream reached EOF, started at line 1 AND ran to the last line — the
+    // end_line stop with a small tail now reports the whole-file hash, but it
+    // still omitted the lines after end_line); byte-budget hits always truncate.
+    const rangeTruncated = lineRange
+      ? !(fullyRead && r.start_line <= 1 && r.end_line >= (r.lines_total ?? Number.POSITIVE_INFINITY))
+      : false;
     return {
       path: String(p),
       ...(fullyRead ? { sha256: r.sha256 } : {}),
@@ -472,7 +520,7 @@ export async function writeFile(args: Args): Promise<unknown> {
     // Read the existing bytes only when a check or append actually needs them.
     const hashRequested = args.expected_sha256 !== undefined && args.expected_sha256 !== "";
     const previousBuf = hashRequested || args.mode === "append"
-      ? await fs.readFile(file).catch(() => null)
+      ? await readFileOrAbsent(file)
       : null;
     // Same stale-write guard as the text path, but over raw bytes: read_files
     // reports whole-file byte hashes for base64 content, so compare against that.
@@ -491,7 +539,7 @@ export async function writeFile(args: Args): Promise<unknown> {
     // re-encode as UTF-8), so the dirty-editor rule is enforced directly.
     await ensureWritableBufferTarget(file, args.allow_dirty === true);
     if (args.mode === "append" && previousBuf !== null) await fs.appendFile(file, buf);
-    else await fs.writeFile(file, buf);
+    else await writeAtomic(file, buf);
     const finalBuf = args.mode === "append" && previousBuf !== null
       ? Buffer.concat([previousBuf, buf])
       : buf;
@@ -507,6 +555,15 @@ export async function writeFile(args: Args): Promise<unknown> {
   await fs.mkdir(path.dirname(file), { recursive: true });
   await rejectSymlink(path.dirname(file));
   if (args.mode === "append") {
+    // The base64 branch checks the stale-write guard before appending; the
+    // text path silently skipped it, so a guarded append could land on a file
+    // a human (or another process) had changed in the meantime.
+    const hashRequested = args.expected_sha256 !== undefined && args.expected_sha256 !== "";
+    if (hashRequested) {
+      const previousBuf = await readFileOrAbsent(file);
+      const previous = previousBuf === null ? "" : previousBuf.toString("utf8");
+      assertExpectedHash(previous, args.expected_sha256, String(args.path));
+    }
     // Same dirty-buffer guard the base64 branch and persistText enforce: an
     // append must not land on disk behind an editor buffer with unsaved human
     // changes (the human's later save would silently drop the appended bytes).
@@ -526,8 +583,11 @@ export async function writeFile(args: Args): Promise<unknown> {
   // file size) in memory for no benefit.
   const hashRequested = args.expected_sha256 !== undefined && args.expected_sha256 !== "";
   if (hashRequested) {
-    const previous = await fs.readFile(file, "utf8").catch(() => "");
-    assertExpectedHash(previous, args.expected_sha256, String(args.path));
+    // ENOENT hashes as "" (create intent); any other read failure must fail
+    // the call — conflating EACCES/EBUSY with an empty file let a guard
+    // against a locked non-empty file pass and the overwrite proceed blind.
+    const previousBuf = await readFileOrAbsent(file);
+    assertExpectedHash(previousBuf === null ? "" : previousBuf.toString("utf8"), args.expected_sha256, String(args.path));
   }
   await persistText(file, content, { allowDirty: args.allow_dirty === true });
   return {
@@ -695,17 +755,27 @@ export async function moveFile(args: Args): Promise<unknown> {
       );
       await fs.rename(destination, aside);
       try {
-        await fs.rename(source, destination);
+        await renameOrCopy(source, destination);
       } catch (error) {
-        await fs.rename(aside, destination).catch(() => { /* restore is best-effort */ });
+        // Restore is best-effort, but a failed restore must surface: the
+        // caller believes the destination is intact while its content lives
+        // in `aside`, which a retry would then treat as "destination exists".
+        try {
+          await fs.rename(aside, destination);
+        } catch (restoreError) {
+          throw new Error(
+            `${error instanceof Error ? error.message : String(error)} — restoring the original destination failed too `
+            + `(its content is preserved at ${aside}): ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+          );
+        }
         throw error;
       }
       await fs.rm(aside, { recursive: true, force: true }).catch(() => { /* leftover aside is harmless */ });
     } else {
-      await fs.rename(source, destination);
+      await renameOrCopy(source, destination);
     }
   } else {
-    await fs.rename(source, destination);
+    await renameOrCopy(source, destination);
   }
   return { source: String(args.source), destination: String(args.destination) };
 }

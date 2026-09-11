@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { applyPatch } from "../src/mcp/patch.js";
@@ -429,4 +430,71 @@ test("Delete then Add in one patch recreates the file", () =>
     ].join("\n");
     await applyPatch(patch, ws);
     assert.equal(await readFile(file, "utf8"), "new\n");
+  }));
+
+// Ported from the throwaway `scripts/patch-check.mjs` probe: four shapes a real
+// git diff produces that the unified-diff reader used to flatly reject.
+
+test("a git no-newline marker diff applies on both sides", () =>
+  withSandbox(async (root, ws) => {
+    const file = path.join(root, "nonl.txt");
+    await writeFile(file, "old", "utf8");
+    const patch = [
+      "--- a/nonl.txt",
+      "+++ b/nonl.txt",
+      "@@ -1 +1 @@",
+      "-old",
+      "\\ No newline at end of file",
+      "+new",
+      "\\ No newline at end of file",
+      "",
+    ].join("\n");
+    await applyPatch(patch, ws);
+    assert.equal(await readFile(file, "utf8"), "new");
+  }));
+
+test("a unified diff deleting to /dev/null removes the file and keeps later sections", () =>
+  withSandbox(async (root, ws) => {
+    const gone = path.join(root, "gone.txt");
+    const kept = path.join(root, "kept.txt");
+    await writeFile(gone, "bye\n", "utf8");
+    await writeFile(kept, "keep\nmore\n", "utf8");
+    const patch = [
+      "--- a/gone.txt",
+      "+++ /dev/null",
+      "@@ -1 +0,0 @@",
+      "-bye",
+      "--- a/kept.txt",
+      "+++ b/kept.txt",
+      "@@ -1,2 +1,2 @@",
+      " keep",
+      "-more",
+      "+changed",
+      "",
+    ].join("\n");
+    await applyPatch(patch, ws);
+    assert.equal(existsSync(gone), false, "a deletion whose +++ is /dev/null must remove the file");
+    assert.equal(await readFile(kept, "utf8"), "keep\nchanged\n");
+  }));
+
+test("an Add File section with no content creates an empty file", () =>
+  withSandbox(async (root, ws) => {
+    await applyPatch("*** Begin Patch\n*** Add File: empty.txt\n*** End Patch", ws);
+    assert.equal((await stat(path.join(root, "empty.txt"))).size, 0);
+  }));
+
+test("a hunk body line starting with -- is content, not the next file header", () =>
+  withSandbox(async (root, ws) => {
+    const file = path.join(root, "dashes.txt");
+    await writeFile(file, "-- normal\n", "utf8");
+    const patch = [
+      "--- a/dashes.txt",
+      "+++ b/dashes.txt",
+      "@@ -1 +1 @@",
+      "--- normal",
+      "++ changed",
+      "",
+    ].join("\n");
+    await applyPatch(patch, ws);
+    assert.equal(await readFile(file, "utf8"), "+ changed\n");
   }));
