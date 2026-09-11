@@ -14,8 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   won and one Bridge's token vanished. All three now share one store
   implementation that re-reads when the file changes and merges immediately
   before writing, atomically (temp file + rename) so a direct reader such as the
-  CLI never sees a half-written file. Found by the new multi-instance suite on
-  Linux CI, where the timing differs from Windows.
+  CLI never sees a half-written file. Writers also serialise on a `<file>.lock`
+  (created with `open(..., "wx")`, with a staleness escape) and re-read inside
+  it: merging "just before writing" still left a gap where two instances
+  starting in lockstep each published a map missing the other's key — the first
+  attempt at this fix passed on Windows and on ubuntu 22 and still lost a token
+  on ubuntu 24. Found by the new multi-instance suite on Linux CI, where the
+  timing differs from Windows.
 - **`open-bridge stop` no longer reports failure when the instance really did
   stop.** The shutdown endpoint answers and then closes the listener, so a reset
   socket can race the reply: the CLI now retries once, treats "the process is

@@ -111,22 +111,63 @@ class SharedJsonStore {
     this.data[key] = value;
     this.writeTail = this.writeTail
       .then(async () => {
-        // Merge once more at write time: the gap between the reload above and
-        // this write is where a concurrent instance's key would otherwise be lost.
-        const onDisk = readJsonSync(this.file);
-        const merged = {
-          ...(onDisk && typeof onDisk === "object" ? onDisk : {}),
-          ...this.data,
-          [key]: value,
-        };
-        const temp = `${this.file}.${process.pid}.tmp`;
-        await fsp.writeFile(temp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
-        await fsp.rename(temp, this.file);
-        this.data = merged;
-        this.loadedMtimeMs = this.mtimeMs();
+        await this.withFileLock(async () => {
+          // Re-read INSIDE the lock. Merging "just before writing" was not
+          // enough: two instances starting together could each read the file
+          // before the other's rename landed, and one key would be lost for
+          // good. The lock is what makes read-merge-write actually atomic
+          // across processes.
+          const onDisk = readJsonSync(this.file);
+          const merged = {
+            ...(onDisk && typeof onDisk === "object" ? onDisk : {}),
+            ...this.data,
+            [key]: value,
+          };
+          const temp = `${this.file}.${process.pid}.tmp`;
+          await fsp.writeFile(temp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
+          await fsp.rename(temp, this.file);
+          this.data = merged;
+          this.loadedMtimeMs = this.mtimeMs();
+        });
       })
       .catch(() => undefined);
     await this.writeTail;
+  }
+
+  /**
+   * A cross-process mutex around writes to a shared file.
+   *
+   * open(path, "wx") is atomic on every platform this runs on, so the file's
+   * own existence is the lock. A crashed writer must not wedge the data dir
+   * forever, hence the staleness check; contention is a few milliseconds of
+   * jittered backoff because writers here are short-lived.
+   */
+  private async withFileLock<T>(body: () => Promise<T>): Promise<T | undefined> {
+    const lock = `${this.file}.lock`;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      let handle: Awaited<ReturnType<typeof fsp.open>>;
+      try {
+        handle = await fsp.open(lock, "wx");
+      } catch (error) {
+        if ((error as { code?: string }).code !== "EEXIST") throw error;
+        try {
+          const stat = await fsp.stat(lock);
+          if (Date.now() - stat.mtimeMs > 5_000) {
+            await fsp.rm(lock, { force: true }).catch(() => undefined);
+            continue;
+          }
+        } catch { /* the lock vanished between EEXIST and stat: retry */ }
+        await new Promise(resolve => setTimeout(resolve, 15 + Math.random() * 35));
+        continue;
+      }
+      try {
+        return await body();
+      } finally {
+        await handle.close().catch(() => undefined);
+        await fsp.rm(lock, { force: true }).catch(() => undefined);
+      }
+    }
+    return undefined;
   }
 }
 

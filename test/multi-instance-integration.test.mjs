@@ -132,9 +132,13 @@ test("each instance reports the directory it was started in", async () => {
   assert.notEqual(a.status.mcp_url, b.status.mcp_url, "the route tokens differ per workspace");
 });
 
-test("the two instances do not share a route token", async () => {
-  assert.ok(routeTokenFor(dirA) && routeTokenFor(dirB));
-  assert.notEqual(routeTokenFor(dirA), routeTokenFor(dirB));
+test("each instance gets a route token of its own, and both survive", async () => {
+  const both = await waitFor(() => {
+    const a = routeTokenFor(dirA);
+    const b = routeTokenFor(dirB);
+    return a && b ? { a, b } : undefined;
+  }, "both route tokens", 15_000);
+  assert.notEqual(both.a, both.b, "the two instances must not share a route token");
 });
 
 test("`open-bridge status` answers for the directory it is typed in", async () => {
