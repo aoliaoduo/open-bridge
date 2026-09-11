@@ -10,6 +10,9 @@ import {
   state,
   type SessionState,
 } from "./state.js";
+
+/** Bytes of the previous ready-scan window re-examined by the next one (boundary split protection). */
+const READY_PATTERN_OVERLAP_BYTES = 4 * 1024;
 import { workspacePath } from "./paths.js";
 import { availableHint } from "./error-hints.js";
 import { maybeStripAnsi } from "../process/ansi.js";
@@ -92,7 +95,13 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
         // trailing 64 KiB): clamping to the tail let an early ready line that
         // was pushed out of the window by a >= 64 KiB burst between polls go
         // untested forever, falsely timing out a healthy process.
-        const start = Math.max(inspectedOffset, current.bufferStartOffset);
+        // Each new window re-examines a small tail of the previous one: a
+        // ready line split across the window boundary would otherwise be
+        // tested against a truncated half in window N and be absent from
+        // window N+1 (already advanced), and a healthy server would be
+        // reported ready_timeout. A ready line is short; 4 KiB of overlap is
+        // orders of magnitude beyond one.
+        const start = Math.max(inspectedOffset - READY_PATTERN_OVERLAP_BYTES, current.bufferStartOffset);
         const window = commandState.output.read(start, READY_PATTERN_WINDOW_BYTES);
         ready = await testReadyPattern(patternText, window.data.toString("utf8"), READY_PATTERN_TEST_TIMEOUT_MS);
         // Advance by the bytes actually scanned so a poll that only read part

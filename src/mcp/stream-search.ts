@@ -25,6 +25,14 @@ const BINARY_PROBE_BYTES = 65_536;
  */
 const MAX_LINE_CHARS = 1 << 20;
 
+/**
+ * Total characters one matcher batch may carry. Each batch is structured-
+ * cloned into a fresh worker, so 500 × 1 MiB lines meant a ~0.5 GB clone
+ * spike when regex-searching long-line (minified) files. Batches are split
+ * again by this budget before they reach the worker.
+ */
+const BATCH_CHAR_BUDGET = 4 * 1024 * 1024;
+
 export interface StreamSearchMatch {
   /** 1-based line number. */
   line: number;
@@ -78,9 +86,13 @@ async function* iterateLines(file: string): AsyncGenerator<string> {
   let line = "";
   let truncated = false;
   const take = (): string => {
-    const text = line;
+    let text = line;
     line = "";
     truncated = false;
+    // A CRLF whose \r and \n land in different stream chunks leaves the CR on
+    // the yielded line (the piece-based strip below only fires when both bytes
+    // are in the same chunk); a stray \r in `text` breaks exact-match clients.
+    if (text.endsWith("\r")) text = text.slice(0, -1);
     return text;
   };
   const append = (piece: string): void => {
@@ -150,7 +162,26 @@ export async function searchFileStream(
     const start = batchStartLine;
     batch = [];
     // Once the limit is reached we only feed context_after; skip matching.
-    const indices = accepting() ? new Set(await matcher(lines)) : new Set<number>();
+    const indices = new Set<number>();
+    if (accepting()) {
+      // Split oversized batches by total characters: the whole slice is
+      // structured-cloned into a worker, and long-line files made that clone
+      // hundreds of megabytes. Index space is the batch's, so sub-results
+      // re-offset to the full batch.
+      let from = 0;
+      while (from < lines.length) {
+        let end = from;
+        let chars = 0;
+        while (end < lines.length) {
+          const len = lines[end].length + 1;
+          if (chars + len > BATCH_CHAR_BUDGET && end > from) break;
+          chars += len;
+          end += 1;
+        }
+        for (const i of await matcher(lines.slice(from, end))) indices.add(from + i);
+        from = end;
+      }
+    }
     for (let i = 0; i < lines.length && needsMoreLines(); i += 1) {
       const text = lines[i];
       for (const m of pending) {

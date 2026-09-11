@@ -38,6 +38,8 @@ const execFileAsync = promisify(execFile);
  * wedge the session (pendingMarker could never be cleared).
  */
 const MARKER_SCAN_CHUNK_BYTES = 1024 * 1024;
+/** Bytes of the previous scan chunk re-examined by the next one (a marker line is ~50 chars). */
+const MARKER_SCAN_OVERLAP_BYTES = 256;
 
 interface ShellSession {
   name: string;
@@ -225,11 +227,18 @@ async function sendToShellInner(args: Args): Promise<Record<string, unknown>> {
   const scanForMarker = (marker: string): number | null => {
     const stateNow = cmd.output.state();
     let from = Math.max(s.scannedOffset, stateNow.bufferStartOffset);
+    // Each chunk re-examines a tail of the previous one: a marker (or its
+    // "=<code>" digits) straddling the chunk boundary used to be missed
+    // entirely — wedging the session on pendingMarker — or, worse, matched
+    // with TRUNCATED digits, silently reporting a wrong exit code.
+    let carry: Buffer = Buffer.alloc(0);
     while (from < stateNow.totalBytes) {
       const read = cmd.output.read(from, Math.min(MARKER_SCAN_CHUNK_BYTES, stateNow.totalBytes - from));
       if (read.data.length === 0) break;
-      const code = scanMarkerExitCode(read.data.toString("utf8"), marker);
       s.scannedOffset = Math.max(s.scannedOffset, read.endOffset);
+      const combined = carry.length > 0 ? Buffer.concat([carry, read.data]) : read.data;
+      carry = combined.subarray(Math.max(0, combined.length - MARKER_SCAN_OVERLAP_BYTES));
+      const code = scanMarkerExitCode(combined.toString("utf8"), marker);
       if (code !== null) return code;
       from = read.endOffset;
     }

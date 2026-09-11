@@ -14,6 +14,9 @@
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 
+/** Bytes past an end_line stop that are still streamed (small tail ⇒ whole-file hash). */
+const END_LINE_HASH_TAIL_BYTES = 8 * 1024 * 1024;
+
 export interface StreamReadOptions {
   /** 1-based inclusive first line to return (default 1). */
   startLine?: number;
@@ -144,6 +147,17 @@ export function streamReadLines(
     let returnedEnd = -1;
     let returnedCount = 0;
     let stoppedEarly = false;
+    /**
+     * True when collection stopped because end_line was reached AND the
+     * remaining tail is small enough to justify streaming on: the stream then
+     * reaches EOF and the whole-file sha256 is reported. The schema promises
+     * that hash for optimistic writes, and a ranged read of lines
+     * 1..last-line used to destroy the stream one line early and omit it.
+     * A genuinely large remainder keeps the early stop (a "lines 5-10 of a
+     * 2 GB log" read must not become a full-file scan just for a hash).
+     */
+    let stoppedByEndLine = false;
+    let consumedBytes = 0;
     let binary = false;
 
     const settle = (result: StreamReadResult) => {
@@ -200,20 +214,31 @@ export function streamReadLines(
           returnedCount += 1;
         }
       }
-      if (end !== null && lineNo >= end) stoppedEarly = true;
+      if (end !== null && lineNo >= end) {
+        stoppedEarly = true;
+        // Stream on to EOF only when the un-read tail is small: the common
+        // "read to the last line" case then still reports the whole-file
+        // hash, while a deep range into a huge file keeps its early stop.
+        const remaining = sizeHint - consumedBytes;
+        if (remaining <= END_LINE_HASH_TAIL_BYTES) stoppedByEndLine = true;
+      }
     };
 
     stream.on("data", (chunk: unknown) => {
       try {
         const buf = B(chunk);
         hash.update(buf);
+        consumedBytes += buf.length;
         pending = (pending.length ? Buffer.concat([pending, buf]) : buf) as Buffer;
         let nl: number;
         while ((nl = pending.indexOf(0x0a)) !== -1) {
           const lineBuf = pending.subarray(0, nl + 1);   // include the "\n" (and any preceding "\r")
           pending = pending.subarray(nl + 1);
           handleLine(lineBuf);
-          if (stoppedEarly || binary) { stream.destroy(); return; }
+          if (binary) { stream.destroy(); return; }
+          // A byte-budget stop needs no more bytes; a small-remainder end_line
+          // stop keeps streaming so the whole-file hash can still be reported.
+          if (stoppedEarly && !stoppedByEndLine) { stream.destroy(); return; }
         }
       } catch (e) {
         if (e instanceof BinaryFileError) { binary = true; stream.destroy(); return; }
@@ -228,7 +253,7 @@ export function streamReadLines(
         try { handleLine(pending); }
         catch (e) { if (e instanceof BinaryFileError) { fail(e); return; } throw e; }
       }
-      const fullyRead = !stoppedEarly;
+      const fullyRead = !stoppedEarly || stoppedByEndLine;
       settle({
         content: collected,
         lines_total: fullyRead ? lineNo : null,
@@ -237,7 +262,7 @@ export function streamReadLines(
         end_line: returnedEnd < 0 ? (end ?? Math.max(lineNo, 1)) : returnedEnd,
         bytes_total: sizeHint,
         bytes_returned: collectedBytes,
-        byte_truncated: stoppedEarly && end === null && returnedCount > 0,
+        byte_truncated: stoppedEarly && !stoppedByEndLine && end === null && returnedCount > 0,
         sha256: fullyRead ? hash.digest("hex") : null,
         reached_eof: true,
         binary: false,

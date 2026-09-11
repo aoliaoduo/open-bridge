@@ -19,7 +19,7 @@ function tmpFile(name: string, content: Buffer | string): string {
   return f;
 }
 
-test("ranged read stops early: content correct, total/sha unknown (O(range))", async () => {
+test("ranged read stops early: content is exact, whole-file hash still reported", async () => {
   const body = "l1\nl2\nl3\nl4\nl5\n";
   const f = tmpFile("a.txt", body);
   const r = await streamReadLines(f, { startLine: 2, endLine: 4, maxBytes: 1 << 20 }, Buffer.byteLength(body));
@@ -27,9 +27,10 @@ test("ranged read stops early: content correct, total/sha unknown (O(range))", a
   assert.equal(r.lines_returned, 3);
   assert.equal(r.start_line, 2);
   assert.equal(r.end_line, 4);
-  // Stopped at end_line before EOF: whole-file totals are deliberately unknown.
-  assert.equal(r.lines_total, null);
-  assert.equal(r.sha256, null);
+  // Small remainder: the stream runs on to EOF so the schema's promise holds
+  // (whole-file sha256 for optimistic writes) while content stays the range.
+  assert.equal(r.lines_total, 5);
+  assert.equal(r.sha256, createHash("sha256").update(body).digest("hex"));
   assert.equal(r.binary, false);
 });
 
@@ -48,13 +49,17 @@ test("preserves CRLF byte-for-byte on ranged reads", async () => {
   const f = tmpFile("crlf.txt", body);
   const r = await streamReadLines(f, { startLine: 1, endLine: 2, maxBytes: 1 << 20 }, Buffer.byteLength(body));
   assert.equal(r.content, "a\r\nb\r\n");
-  // end_line reached before EOF -> did not read whole file
-  assert.equal(r.lines_total, null);
-  assert.equal(r.sha256, null);
+  // end_line reached: content stops at line 2, but the stream continues to
+  // EOF (small remainder) so the WHOLE-file sha256 is still reported for
+  // optimistic writes.
+  assert.equal(r.lines_total, 4);
+  assert.equal(r.sha256, createHash("sha256").update(body).digest("hex"));
 });
 
 test("large file: only requested lines are materialized (early stop, O(range))", async () => {
-  // ~50k lines, ~2 MB; ask only for lines 1000-1002
+  // ~50k lines, ~2 MB; ask only for lines 1000-1002. The remainder is small,
+  // so the stream continues to EOF for the whole-file hash (collection stops
+  // at line 1002 — memory stays O(range)); content is unaffected either way.
   const lines: string[] = [];
   for (let i = 1; i <= 50000; i++) lines.push(`line-number-${i}`);
   const body = lines.join("\n") + "\n";
@@ -62,6 +67,19 @@ test("large file: only requested lines are materialized (early stop, O(range))",
   const size = Buffer.byteLength(body);
   const r = await streamReadLines(f, { startLine: 1000, endLine: 1002, maxBytes: 1 << 20 }, size);
   assert.equal(r.content, "line-number-1000\nline-number-1001\nline-number-1002\n");
+  assert.equal(r.lines_returned, 3);
+  assert.equal(r.lines_total, 50000); // small remainder: streamed to EOF
+  assert.equal(r.sha256, createHash("sha256").update(body).digest("hex"));
+});
+
+test("deep range into a huge file keeps the early stop (no whole-file scan for the hash)", async () => {
+  // 40 MiB of lines; asking for the first 3 lines leaves a remainder far
+  // beyond the hash-tail budget, so the stream must destroy early.
+  const line = "x".repeat(1000) + "\n";
+  const body = line.repeat(40 * 1024);
+  const f = tmpFile("huge.txt", body);
+  const size = Buffer.byteLength(body);
+  const r = await streamReadLines(f, { startLine: 1, endLine: 3, maxBytes: 1 << 20 }, size);
   assert.equal(r.lines_returned, 3);
   assert.equal(r.lines_total, null); // stopped at end_line, never saw EOF
   assert.equal(r.sha256, null);
