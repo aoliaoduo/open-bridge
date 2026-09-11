@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { App } from "./App";
 import type {
   BridgeStatus,
@@ -422,8 +422,14 @@ test("the directory whitelist is a textarea: every line survives editing", async
   expect(area).toBeTruthy();
   expect(area.value).toBe("C:\\work\\one\nC:\\work\\two");
 
-  fireEvent.change(area, { target: { value: "C:\\work\\one\nC:\\work\\three" } });
-  fireEvent.blur(area);
+  const edited = "C:\\work\\one\nC:\\work\\three";
+  area.focus();
+  fireEvent.input(area, { target: { value: edited } });
+  fireEvent.change(area, { target: { value: edited } });
+  // The textarea is controlled: if React did not take the edit, the commit on
+  // blur has nothing to send and this is where that should be reported.
+  expect(area.value).toBe(edited);
+  act(() => { area.blur(); });
 
   expect(mocks.settingsAction).toHaveBeenCalledWith({
     command: "setConfig",
