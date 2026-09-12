@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type LockSnapshot, type SessionView } from "../api";
-import { ConfirmButton } from "./ConfirmButton";
+import { CardHead } from "./CardHead";
 import { Chip } from "./Chip";
+import { ConfirmButton } from "./ConfirmButton";
+import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
+import { Skeleton } from "./Skeleton";
 
 /** "空闲 2 分 13 秒" and friends — idleness is the whole point of this table. */
 function idleLabel(ms: number): string {
@@ -27,6 +30,11 @@ function connectedLabel(iso: string): string {
   return `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`;
 }
 
+/** A session is 活跃 while it is serving a request. */
+const STALE_MS = 5 * 60 * 1000;
+
+type View = "all" | "active" | "idle";
+
 /**
  * 会话 — who is connected, and who is holding the file locks.
  *
@@ -36,12 +44,13 @@ function connectedLabel(iso: string): string {
  * POST /api/sessions/close acts on it — the "谁在连我 / 一键断开" pair the panel
  * never had.
  */
-export function SessionsPage() {
+export function SessionsPage({ notify }: { notify?: (text: string, isError?: boolean) => void } = {}) {
   const [sessions, setSessions] = useState<SessionView[] | null>(null);
   const [locks, setLocks] = useState<LockSnapshot>({ held: [], waiting: [] });
   const [note, setNote] = useState("");
   const [closingId, setClosingId] = useState("");
   const [query, setQuery] = useState("");
+  const [view, setView] = useState<View>("all");
   // Stale-response guard: a slow poll that lands after a newer one (or after
   // an action) used to overwrite fresh state with expired data.
   const pollSeq = useRef(0);
@@ -65,16 +74,23 @@ export function SessionsPage() {
   }, [refresh]);
 
   /**
-   * Filter by client name or session id. With one long-lived agent plus a
-   * browser opening and closing sessions all day, the table otherwise grew
-   * past the point where "which one is the stale one" was answerable by eye.
+   * Two filters, because they answer two different questions: the quick views
+   * answer "is anything stuck?", the search box answers "where is that client?".
+   * With one long-lived agent plus a browser opening and closing sessions all
+   * day, neither question was answerable by eye.
    */
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return sessions ?? [];
-    return (sessions ?? []).filter(session =>
-      session.client.toLowerCase().includes(needle) || session.id.toLowerCase().includes(needle));
-  }, [sessions, query]);
+    return (sessions ?? []).filter(session => {
+      if (view === "active" && session.active_requests <= 0) return false;
+      if (view === "idle" && session.idle_ms < STALE_MS) return false;
+      if (!needle) return true;
+      return session.client.toLowerCase().includes(needle) || session.id.toLowerCase().includes(needle);
+    });
+  }, [sessions, query, view]);
+
+  const activeCount = (sessions ?? []).filter(session => session.active_requests > 0).length;
+  const staleCount = (sessions ?? []).filter(session => session.idle_ms >= STALE_MS).length;
 
   const close = async (id: string) => {
     if (closingId) return;
@@ -99,11 +115,28 @@ export function SessionsPage() {
   return (
     <>
       <div className="card">
-        <h2>已连接的客户端</h2>
-        <div className="section-note">
-          一行是一个活着的 MCP 会话：客户端在 <span className="mono">initialize</span> 之后出现，空闲超过 60 分钟或被容量挤出时自动消失。
-          <span className="mono">断开</span> 只关掉这一个会话，不影响实例本身，也不影响别的客户端。
-        </div>
+        <CardHead
+          title="已连接的客户端"
+          desc={
+            <>
+              一行是一个活着的 MCP 会话：客户端在 <span className="mono">initialize</span> 之后出现，
+              空闲超过 60 分钟或被容量挤出时自动消失。<span className="mono">断开</span> 只关掉这一个会话。
+            </>
+          }
+          actions={
+            <div className="segmented" role="group" aria-label="会话视图">
+              <button type="button" className={view === "all" ? "active" : ""} onClick={() => setView("all")}>
+                全部 {sessions ? sessions.length : ""}
+              </button>
+              <button type="button" className={view === "active" ? "active" : ""} onClick={() => setView("active")}>
+                活跃 {activeCount}
+              </button>
+              <button type="button" className={view === "idle" ? "active" : ""} onClick={() => setView("idle")}>
+                空闲 ≥5 分 {staleCount}
+              </button>
+            </div>
+          }
+        />
 
         {sessions !== null && sessions.length > 0 && (
           <div className="toolbar">
@@ -126,13 +159,13 @@ export function SessionsPage() {
         )}
 
         {sessions === null ? (
-          <div className="section-note">读取中…</div>
+          <Skeleton lines={3} />
         ) : sessions.length === 0 ? (
           <EmptyState title="当前没有客户端连接。">
             把 <span className="mono">状态</span> 页里 MCP 端点卡片的地址填进客户端之后，这里会出现它的名字与空闲时间。
           </EmptyState>
         ) : visible.length === 0 ? (
-          <EmptyState title="没有匹配的会话。">换个关键词，或清空过滤框。</EmptyState>
+          <EmptyState title="没有匹配的会话。">换个关键词，或切回「全部」视图。</EmptyState>
         ) : (
           <div className="table-wrap">
             <table className="token-table">
@@ -142,24 +175,35 @@ export function SessionsPage() {
                   <th>会话</th>
                   <th>首次连接</th>
                   <th>空闲</th>
-                  <th>调用数</th>
-                  <th>进行中</th>
-                  <th>待办</th>
-                  <th>操作</th>
+                  <th className="num">调用数</th>
+                  <th className="num">进行中</th>
+                  <th className="num">待办</th>
+                  <th className="actions">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {visible.map(session => (
                   <tr key={session.id}>
-                    <td>{session.client}</td>
-                    <td className="mono" title={session.id}>{session.id.slice(0, 8)}…</td>
-                    <td title={session.connected_at}>{connectedLabel(session.connected_at)}</td>
+                    <td className="name">{session.client}</td>
+                    <td className="mono" title={session.id}>
+                      <span className="row-actions">
+                        {session.id.slice(0, 8)}…
+                        <CopyButton
+                          value={session.id}
+                          label="复制会话 ID"
+                          onCopied={() => notify?.(`已复制会话 ID ${session.id.slice(0, 8)}…`)}
+                        />
+                      </span>
+                    </td>
+                    <td className="muted" title={session.connected_at}>{connectedLabel(session.connected_at)}</td>
                     <td>{idleLabel(session.idle_ms)}</td>
-                    <td>{session.calls > 0 ? session.calls : "—"}</td>
-                    <td>{session.active_requests > 0 ? `${session.active_requests} 个请求` : "—"}</td>
-                    <td>{session.todos > 0 ? `${session.todos} 项` : "—"}</td>
-                    <td>
-                      <ConfirmButton label="断开" disabled={closingId === session.id} onConfirm={() => void close(session.id)} />
+                    <td className="num">{session.calls > 0 ? session.calls : "—"}</td>
+                    <td className="num">{session.active_requests > 0 ? session.active_requests : "—"}</td>
+                    <td className="num">{session.todos > 0 ? session.todos : "—"}</td>
+                    <td className="actions">
+                      <span className="row-actions">
+                        <ConfirmButton label="断开" disabled={closingId === session.id} onConfirm={() => void close(session.id)} />
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -167,15 +211,21 @@ export function SessionsPage() {
             </table>
           </div>
         )}
-        <div className="section-note">每 5 秒自动刷新。</div>
+        <div className="card-foot">
+          <span className="section-note" style={{ margin: 0 }}>每 5 秒自动刷新。</span>
+        </div>
       </div>
 
       <div className="card">
-        <h2>文件锁</h2>
-        <div className="section-note">
-          并发写同一个目录时，第二个调用者会等锁而不是覆盖对方。<span className="mono">持有</span> 是正在写文件的调用，
-          <span className="mono">等待</span> 是被挡住的调用；两者都会随时间自己消失。
-        </div>
+        <CardHead
+          title="文件锁"
+          desc={
+            <>
+              并发写同一个目录时，第二个调用者会等锁而不是覆盖对方。<span className="mono">持有</span> 是正在写文件的调用，
+              <span className="mono">等待</span> 是被挡住的调用；两者都会随时间自己消失。
+            </>
+          }
+        />
         {lockRows.length === 0 ? (
           <EmptyState title="当前没有加锁，也没有等待者。">
             多客户端同时写同一个目录时，这里会出现资源路径、调用名与已经等了多少。
@@ -189,7 +239,7 @@ export function SessionsPage() {
                   <th>资源</th>
                   <th>模式</th>
                   <th>调用</th>
-                  <th>已持续</th>
+                  <th className="num">已持续</th>
                 </tr>
               </thead>
               <tbody>
@@ -201,8 +251,8 @@ export function SessionsPage() {
                     <td>{row.kind === "持有" ? <Chip tone="ok">持有</Chip> : <Chip tone="warn">等待</Chip>}</td>
                     <td className="mono" title={row.key || undefined}>{row.key || "—"}</td>
                     <td>{row.mode || "—"}</td>
-                    <td>{row.label || "—"}</td>
-                    <td>{idleLabel(row.ms)}</td>
+                    <td className="muted">{row.label || "—"}</td>
+                    <td className="num">{idleLabel(row.ms)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -211,7 +261,7 @@ export function SessionsPage() {
         )}
       </div>
 
-      {note && <div className="card section-note">{note}</div>}
+      {note && <div className="card section-note" style={{ marginBottom: 0 }}>{note}</div>}
     </>
   );
 }

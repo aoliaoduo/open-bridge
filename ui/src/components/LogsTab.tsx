@@ -1,11 +1,32 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { copyText } from "../api";
+import { CardHead } from "./CardHead";
+import { Chip } from "./Chip";
+
+type Level = "error" | "warn" | "info" | "";
+
+/**
+ * Pull the level word out of a log line so the pane can colour it.
+ *
+ * The bridge writes one line per event; a wall of same-coloured text is exactly
+ * the thing an operator scrolls past without reading. The level is looked for
+ * anywhere in the line (not only at the start) because the prefix differs
+ * between the log file, the SSE stream and the audit log.
+ */
+function parseLine(line: string): { level: Level; tag: string; text: string } {
+  const match = /\b(ERROR|WARN|WARNING|INFO|DEBUG)\b/.exec(line.slice(0, 120));
+  if (!match) return { level: "", tag: "", text: line };
+  const word = match[1] === "WARNING" ? "WARN" : match[1] === "DEBUG" ? "" : match[1];
+  const level: Level = word === "ERROR" ? "error" : word === "WARN" ? "warn" : word === "INFO" ? "info" : "";
+  return { level, tag: word, text: line };
+}
 
 /** Live bridge log via SSE (/api/logs/stream). */
 export function LogsTab() {
   const [lines, setLines] = useState<string[]>([]);
   const [paused, setPaused] = useState(false);
   const [note, setNote] = useState("");
+  const [connected, setConnected] = useState(true);
   const boxRef = useRef<HTMLDivElement>(null);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
@@ -23,9 +44,11 @@ export function LogsTab() {
     // silently and the page just looked frozen — the operator had no way to
     // know the quiet stretch was missing lines rather than a quiet log.
     source.onopen = () => {
+      setConnected(true);
       setNote((prev: string) => (prev.startsWith("连接已断开") ? "" : prev));
     };
     source.onerror = () => {
+      setConnected(false);
       if (pausedRef.current) return;
       setNote("连接已断开，自动重连中……断线期间的日志行会缺失，完整审计在数据目录 audit.log。");
     };
@@ -37,10 +60,27 @@ export function LogsTab() {
     if (box) box.scrollTop = box.scrollHeight;
   }, [lines]);
 
+  const parsed = useMemo(() => lines.map(parseLine), [lines]);
+  const errorCount = parsed.filter(line => line.level === "error").length;
+
+  const dotState = !connected ? "offline" : paused ? "paused" : "";
+
   return (
     <div className="card">
-      <h2>日志</h2>
-      <div className="toolbar">
+      <CardHead
+        title="日志"
+        desc="实时日志流（最近 800 行）。断线期间的行会缺失；完整审计在数据目录的 audit.log。"
+        actions={
+          <div className="btn-group">
+            {errorCount > 0 ? <Chip tone="err">{errorCount} 条错误</Chip> : null}
+            <span className={`live-dot ${dotState}`}>
+              {!connected ? "已断开，重连中" : paused ? "已暂停" : "实时"}
+            </span>
+          </div>
+        }
+      />
+
+      <div className="logbar">
         <button className="small" onClick={() => setPaused(v => !v)}>{paused ? "继续" : "暂停"}</button>
         <button className="small" onClick={() => setLines([])}>清空视图</button>
         <button
@@ -55,11 +95,18 @@ export function LogsTab() {
         <span className="grow" />
         <span className="count">{lines.length} 行</span>
       </div>
-      <div className="section-note">
-        {note || "实时日志流（最近 800 行；完整审计在数据目录的 audit.log）"}
-      </div>
+
+      {note && <div className="section-note">{note}</div>}
+
       <div className="log-stream" ref={boxRef}>
-        {lines.length === 0 ? <span className="t">等待日志…</span> : lines.map((line, index) => <div key={index}>{line}</div>)}
+        {parsed.length === 0 ? (
+          <span className="t">等待日志…</span>
+        ) : parsed.map((line, index) => (
+          <div className={`log-line${line.level ? ` level-${line.level}` : ""}`} key={index}>
+            <span className="log-level">{line.tag}</span>
+            <span className="log-text">{line.text}</span>
+          </div>
+        ))}
       </div>
     </div>
   );

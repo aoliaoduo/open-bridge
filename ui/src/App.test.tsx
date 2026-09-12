@@ -632,3 +632,56 @@ describe("App shell: in-page filtering and rails", () => {
     expect(document.getElementById("set-oauth")).toBeTruthy();
   });
 });
+
+describe("App shell: card detail layer", () => {
+  test("explains each card in place instead of in a tooltip", async () => {
+    render(<App />);
+
+    // The sentence used to live in the tab's title attribute; a card header puts
+    // it on screen.
+    expect(await screen.findByText(/把这个 URL 填进 MCP 客户端/)).toBeTruthy();
+    // Property rows: the reachability answer sits next to the URL it describes.
+    expect(await screen.findByText("客户端可达")).toBeTruthy();
+    expect(screen.getByText("仅本机")).toBeTruthy();
+  });
+
+  test("copies an identifier from the row it belongs to", async () => {
+    window.history.pushState({}, "", "/console/sessions");
+
+    render(<App />);
+    const button = await screen.findByRole("button", { name: "复制会话 ID" });
+    fireEvent.click(button);
+
+    expect(mocks.copyText).toHaveBeenCalledWith("a1b2c3d4e5f60718");
+    // The button confirms itself, so a toast is not the only evidence of which
+    // row went to the clipboard.
+    expect(await screen.findByRole("button", { name: "复制会话 ID（已复制）" })).toBeTruthy();
+  });
+
+  test("shows skeletons instead of a bare 读取中 while a page loads", async () => {
+    mocks.tools.mockReturnValue(new Promise(() => undefined));
+    window.history.pushState({}, "", "/console/tools");
+
+    const { container } = render(<App />);
+    await screen.findByText("工具目录");
+
+    expect(container.querySelectorAll(".skeleton").length).toBeGreaterThan(0);
+  });
+
+  test("renders booleans as switches that are still checkboxes", async () => {
+    window.history.pushState({}, "", "/console/settings");
+
+    const { container } = render(<App />);
+    await screen.findByText("隧道（ngrok）");
+
+    const switches = [...container.querySelectorAll("input.switch")] as HTMLInputElement[];
+    expect(switches.length).toBeGreaterThanOrEqual(3);
+    expect(switches.every(input => input.type === "checkbox")).toBe(true);
+
+    // And they still write the same config key they wrote as a plain checkbox.
+    const autoReconnect = switches.find(input => input.checked);
+    expect(autoReconnect).toBeTruthy();
+    fireEvent.click(autoReconnect!);
+    expect(mocks.settingsAction).toHaveBeenCalledWith({ command: "setConfig", key: "autoReconnect", value: false });
+  });
+});

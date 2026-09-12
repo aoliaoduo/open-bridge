@@ -189,14 +189,14 @@ export function App() {
           <PageHeader title={spec.label} hint={spec.hint} />
           <div className="page" key={`${route}-${reloadKey}`}>
             {route === "status" && <StatusTab act={act} onRefresh={refreshSettings} notify={showToast} />}
-            {route === "sessions" && <SessionsPage />}
-            {route === "tools" && <ToolsPage />}
+            {route === "sessions" && <SessionsPage notify={showToast} />}
+            {route === "tools" && <ToolsPage notify={showToast} />}
             {route === "health" && <HealthPage act={act} />}
-            {route === "services" && <ServicesTab />}
+            {route === "services" && <ServicesTab notify={showToast} />}
             {route === "logs" && <LogsTab />}
             {route === "stats" && <StatsTab />}
             {route === "tokens" && (
-              <SettingsStateGuard settings={settings}><TokensTab settings={settings!} act={act} /></SettingsStateGuard>
+              <SettingsStateGuard settings={settings}><TokensTab settings={settings!} act={act} notify={showToast} /></SettingsStateGuard>
             )}
             {route === "settings" && <SettingsTab settings={settings} act={act} notify={showToast} />}
           </div>

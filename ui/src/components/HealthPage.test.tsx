@@ -68,3 +68,16 @@ describe("HealthPage", () => {
     expect(table.parentElement?.className).toContain("table-wrap");
   });
 });
+
+describe("HealthPage: summary meter", () => {
+  test("shows how much of the run passed, not only a sentence", async () => {
+    healthMock.mockResolvedValue(healthReport());
+
+    renderPage();
+
+    expect(await screen.findByText(/6 \/ 7 项已通过/)).toBeTruthy();
+    // One 提醒 and no 异常: the bar is amber, not red — the state is a risk the
+    // operator may have chosen, not a defect.
+    expect(document.querySelector(".meter-fill")?.className).toContain("warn");
+  });
+});

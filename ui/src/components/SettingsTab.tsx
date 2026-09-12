@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { api, type OAuthConsoleView, type SettingsActionResult, type SettingsState } from "../api";
+import { CardHead } from "./CardHead";
+import { Chip } from "./Chip";
+import { Field } from "./Field";
 import { SectionNav } from "./SectionNav";
+import { Skeleton } from "./Skeleton";
 
 interface Props {
   settings: SettingsState | null;
@@ -9,8 +13,6 @@ interface Props {
   notify?: (text: string, isError?: boolean) => void;
 }
 
-/** Bounds mirror the server's CONFIG_SPEC (src/bridge/settings-model.ts) so a
- *  value the UI accepts never comes back as an inscrutable 400. */
 /**
  * 设置 card order, mirrored by the section rail under the page header. Ids are
  * explicit strings rather than titles run through a slugifier: a reworded
@@ -26,6 +28,8 @@ const SETTINGS_SECTIONS = [
   { id: "set-oauth", label: "OAuth" },
 ];
 
+/** Bounds mirror the server's CONFIG_SPEC (src/bridge/settings-model.ts) so a
+ *  value the UI accepts never comes back as an inscrutable 400. */
 const NUMBER_BOUNDS = {
   port: { min: 0, max: 65_535, label: "本地端口" },
   publicHealthTimeoutMs: { min: 3_000, max: 120_000, label: "公网健康检查" },
@@ -113,10 +117,30 @@ function DraftField({
   );
 }
 
+/** A switch field: label on top, the switch plus its current state under it. */
+function SwitchField(
+  { label, hint, checked, onChange }: {
+    label: string;
+    hint?: string;
+    checked: boolean;
+    onChange: (next: boolean) => void;
+  },
+) {
+  return (
+    <div className="field">
+      <label className="check">
+        <input type="checkbox" className="switch" checked={checked} onChange={e => onChange(e.target.checked)} />
+        <span className="field-label">{label}</span>
+      </label>
+      {hint ? <span className="field-hint">{hint}</span> : null}
+    </div>
+  );
+}
+
 export function SettingsTab({ settings, act, notify }: Props) {
   const [domain, setDomain] = useState<string | null>(null);
 
-  if (!settings) return <div className="card">加载中…</div>;
+  if (!settings) return <div className="card"><Skeleton lines={4} /></div>;
   const cfg = settings.config;
   const domainValue = domain ?? settings.configuredDomain;
 
@@ -142,157 +166,168 @@ export function SettingsTab({ settings, act, notify }: Props) {
       <SectionNav items={SETTINGS_SECTIONS} />
 
       <div className="card" id="set-tunnel">
-        <h2>隧道（ngrok）</h2>
-        <div className="row">
-          <span className="label">提供商</span>
-          <select value={cfg.tunnelProvider} onChange={e => setConfig("tunnelProvider", e.target.value)}>
-            <option value="ngrok">ngrok</option>
-            <option value="none">none（仅本地）</option>
-          </select>
-        </div>
-        <div className="row">
-          <span className="label">预留域名</span>
-          <input
-            type="text"
-            value={domainValue}
-            placeholder="example.ngrok-free.dev"
-            onChange={e => setDomain(e.target.value)}
+        <CardHead
+          title="隧道（ngrok）"
+          desc="隧道让公网上的客户端连到这台机器；不开隧道时只有本机能访问。"
+        />
+        <div className="form-grid">
+          <Field label="提供商" hint="none 表示只用本机回环地址，适合纯本机客户端。">
+            <select value={cfg.tunnelProvider} onChange={e => setConfig("tunnelProvider", e.target.value)}>
+              <option value="ngrok">ngrok</option>
+              <option value="none">none（仅本地）</option>
+            </select>
+          </Field>
+
+          <div className="field">
+            <span className="field-label">预留域名</span>
+            <span className="field-control">
+              <input
+                type="text"
+                value={domainValue}
+                placeholder="example.ngrok-free.dev"
+                onChange={e => setDomain(e.target.value)}
+              />
+              <button
+                className="small"
+                disabled={domain === null}
+                onClick={() => {
+                  // Reset the draft only on success: a rejected domain (bad
+                  // format) used to wipe the operator's typing along with the
+                  // toast, making them retype it from scratch.
+                  void act({ command: "saveDomain", domain: domainValue }).then(result => {
+                    if ((result as SettingsActionResult | null)?.ok) setDomain(null);
+                  });
+                }}
+              >
+                保存域名
+              </button>
+            </span>
+            <span className="field-hint">留空则使用 ngrok 分配的随机地址；改动后需要重启隧道。</span>
+          </div>
+
+          <Field label="ngrok 可执行文件" hint="留空则使用 PATH 里的 ngrok。">
+            <DraftField
+              value={cfg.ngrokExecutable}
+              placeholder="ngrok"
+              onCommit={raw => setConfig("ngrokExecutable", raw)}
+            />
+          </Field>
+
+          <SwitchField
+            label="隧道意外退出时自动重连"
+            hint="伴随进程退出时按退避重试，不需要人工点重新启动。"
+            checked={cfg.autoReconnect}
+            onChange={next => setConfig("autoReconnect", next)}
           />
-          <button
-            className="small"
-            disabled={domain === null}
-            onClick={() => {
-              // Reset the draft only on success: a rejected domain (bad
-              // format) used to wipe the operator's typing along with the
-              // toast, making them retype it from scratch.
-              void act({ command: "saveDomain", domain: domainValue }).then(result => {
-                if ((result as SettingsActionResult | null)?.ok) setDomain(null);
-              });
-            }}
-          >
-            保存域名
-          </button>
-        </div>
-        <div className="row">
-          <span className="label">ngrok 可执行文件</span>
-          <DraftField
-            value={cfg.ngrokExecutable}
-            onCommit={raw => setConfig("ngrokExecutable", raw)}
+          <SwitchField
+            label="ngrok 继承系统代理"
+            hint="公司网络需要走代理时打开；直连环境关掉更快。"
+            checked={cfg.ngrokUseHttpProxy}
+            onChange={next => setConfig("ngrokUseHttpProxy", next)}
           />
-        </div>
-        <div className="row">
-          <label className="check">
-            <input type="checkbox" checked={cfg.autoReconnect} onChange={e => setConfig("autoReconnect", e.target.checked)} />
-            隧道意外退出时自动重连
-          </label>
-          <label className="check">
-            <input type="checkbox" checked={cfg.ngrokUseHttpProxy} onChange={e => setConfig("ngrokUseHttpProxy", e.target.checked)} />
-            ngrok 继承系统代理
-          </label>
         </div>
       </div>
 
       <div className="card" id="set-network">
-        <h2>网络</h2>
-        <div className="row">
-          <span className="label">本地端口</span>
-          <DraftField
-            type="number"
-            min={NUMBER_BOUNDS.port.min}
-            max={NUMBER_BOUNDS.port.max}
-            value={String(cfg.port)}
-            onCommit={raw => commitNumber("port", raw)}
-            onInvalid={invalidFor("port")}
-          />
-          <span className="section-note" style={{ margin: 0 }}>0 = 自动选择空闲端口（重启 Bridge 生效）；失焦时保存</span>
-        </div>
-        <div className="row">
-          <span className="label">公网健康检查</span>
-          <DraftField
-            type="number"
-            min={NUMBER_BOUNDS.publicHealthTimeoutMs.min}
-            max={NUMBER_BOUNDS.publicHealthTimeoutMs.max}
-            step={1000}
-            value={String(cfg.publicHealthTimeoutMs)}
-            onCommit={raw => commitNumber("publicHealthTimeoutMs", raw)}
-            onInvalid={invalidFor("publicHealthTimeoutMs")}
-          />
-          <span className="section-note" style={{ margin: 0 }}>毫秒（3000-120000）；失焦时保存</span>
+        <CardHead title="网络" desc="本机监听端口与公网健康检查的超时。" />
+        <div className="form-grid">
+          <Field label="本地端口" hint="0 = 自动选择空闲端口（重启 Bridge 生效）；失焦时保存。">
+            <DraftField
+              type="number"
+              min={NUMBER_BOUNDS.port.min}
+              max={NUMBER_BOUNDS.port.max}
+              value={String(cfg.port)}
+              onCommit={raw => commitNumber("port", raw)}
+              onInvalid={invalidFor("port")}
+            />
+          </Field>
+          <Field label="公网健康检查" hint="毫秒（3000–120000）；失焦时保存。">
+            <DraftField
+              type="number"
+              min={NUMBER_BOUNDS.publicHealthTimeoutMs.min}
+              max={NUMBER_BOUNDS.publicHealthTimeoutMs.max}
+              step={1000}
+              value={String(cfg.publicHealthTimeoutMs)}
+              onCommit={raw => commitNumber("publicHealthTimeoutMs", raw)}
+              onInvalid={invalidFor("publicHealthTimeoutMs")}
+            />
+          </Field>
         </div>
       </div>
 
       <div className="card" id="set-files">
-        <h2>文件访问</h2>
-        <div className="row">
-          <label className="check">
-            <input type="checkbox" checked={cfg.unrestrictedFileAccess} onChange={e => setConfig("unrestrictedFileAccess", e.target.checked)} />
-            允许访问项目根之外的路径（个人本机推荐）
-          </label>
-        </div>
+        <CardHead
+          title="文件访问"
+          desc="默认允许访问项目根之外的路径（个人本机推荐）；关掉之后只有下面列出的目录可读写。"
+        />
+        <SwitchField
+          label="允许访问项目根之外的路径"
+          checked={cfg.unrestrictedFileAccess}
+          onChange={next => setConfig("unrestrictedFileAccess", next)}
+        />
         {!cfg.unrestrictedFileAccess && (
-          <div className="row" style={{ flexDirection: "column", alignItems: "stretch" }}>
-            {/* A textarea, not an input: HTML value sanitization strips \n from
-                text inputs, so the list silently merged into one bogus path
-                the moment the operator edited and blurred the field. */}
-            <DraftField
-              multiline
-              value={cfg.allowedDirectories.join("\n")}
-              placeholder={"每行一个绝对目录，如\nC:\\projects\\shared"}
-              onCommit={raw => setConfig("allowedDirectories", raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean))}
-            />
-            <span className="section-note">每行一个绝对目录；失焦时保存</span>
+          <div className="field">
+            <span className="field-label">允许的目录</span>
+            <span className="field-control">
+              {/* A textarea, not an input: HTML value sanitization strips \n from
+                  text inputs, so the list silently merged into one bogus path
+                  the moment the operator edited and blurred the field. */}
+              <DraftField
+                multiline
+                value={cfg.allowedDirectories.join("\n")}
+                placeholder={"每行一个绝对目录，如\nC:\\projects\\shared"}
+                onCommit={raw => setConfig("allowedDirectories", raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean))}
+              />
+            </span>
+            <span className="field-hint">每行一个绝对目录；失焦时保存</span>
           </div>
         )}
       </div>
 
       <div className="card" id="set-shell">
-        <h2>Shell 与工具</h2>
-        <div className="row">
-          <span className="label">Shell 路径</span>
-          <DraftField
-            value={cfg.shellPath}
-            placeholder="留空自动探测（Git Bash → pwsh → powershell）"
-            onCommit={raw => setConfig("shellPath", raw)}
-          />
-        </div>
-        <div className="row">
-          <span className="label">Shell 参数</span>
-          <DraftField
-            value={cfg.shellArgs.join(" ")}
-            placeholder="留空使用默认参数"
-            onCommit={raw => setConfig("shellArgs", raw.trim() ? raw.trim().split(/\s+/) : [])}
-          />
-        </div>
-        <div className="row">
-          <span className="label">工具集</span>
-          <select value={cfg.toolProfile} onChange={e => setConfig("toolProfile", e.target.value)}>
-            <option value="full">full（全部工具）</option>
-            <option value="core">core（精简常用）</option>
-          </select>
+        <CardHead title="Shell 与工具" desc="命令通过哪个 shell 执行，以及这台实例对外公布哪些工具。" />
+        <div className="form-grid">
+          <Field label="Shell 路径" hint="留空自动探测（Git Bash → pwsh → powershell）。">
+            <DraftField
+              value={cfg.shellPath}
+              placeholder="留空自动探测（Git Bash → pwsh → powershell）"
+              onCommit={raw => setConfig("shellPath", raw)}
+            />
+          </Field>
+          <Field label="Shell 参数" hint="留空使用默认参数。">
+            <DraftField
+              value={cfg.shellArgs.join(" ")}
+              placeholder="留空使用默认参数"
+              onCommit={raw => setConfig("shellArgs", raw.trim() ? raw.trim().split(/\s+/) : [])}
+            />
+          </Field>
+          <Field label="工具集" hint="core 只公布常用工具，客户端看到的清单更短。">
+            <select value={cfg.toolProfile} onChange={e => setConfig("toolProfile", e.target.value)}>
+              <option value="full">full（全部工具）</option>
+              <option value="core">core（精简常用）</option>
+            </select>
+          </Field>
         </div>
       </div>
 
       <div className="card" id="set-locks">
-        <h2>并发锁</h2>
-        <div className="row">
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={settings.concurrency.enabled}
-              onChange={e => void act({
-                command: "setConcurrency",
-                enabled: e.target.checked,
-                holdTimeoutMs: settings.concurrency.holdTimeoutMs,
-                waitTimeoutMs: settings.concurrency.waitTimeoutMs,
-              })}
-            />
-            串行化可能产生竞争的工具调用
-          </label>
-        </div>
+        <CardHead
+          title="并发锁"
+          desc="并发写同一个目录时让第二个调用者等待，而不是互相覆盖。"
+        />
+        <SwitchField
+          label="串行化可能产生竞争的工具调用"
+          checked={settings.concurrency.enabled}
+          onChange={next => void act({
+            command: "setConcurrency",
+            enabled: next,
+            holdTimeoutMs: settings.concurrency.holdTimeoutMs,
+            waitTimeoutMs: settings.concurrency.waitTimeoutMs,
+          })}
+        />
         {settings.concurrency.enabled && (
-          <>
-            <div className="row">
-              <span className="label">占用上限</span>
+          <div className="form-grid">
+            <Field label="占用上限" hint="毫秒，0 = 不限；失焦时保存。">
               <DraftField
                 type="number"
                 min={NUMBER_BOUNDS.holdTimeoutMs.min}
@@ -306,10 +341,8 @@ export function SettingsTab({ settings, act, notify }: Props) {
                 })}
                 onInvalid={invalidFor("holdTimeoutMs")}
               />
-              <span className="section-note" style={{ margin: 0 }}>毫秒，0 = 不限；失焦时保存</span>
-            </div>
-            <div className="row">
-              <span className="label">等待上限</span>
+            </Field>
+            <Field label="等待上限" hint="毫秒，0 = 无限等待；失焦时保存。">
               <DraftField
                 type="number"
                 min={NUMBER_BOUNDS.waitTimeoutMs.min}
@@ -323,54 +356,60 @@ export function SettingsTab({ settings, act, notify }: Props) {
                 })}
                 onInvalid={invalidFor("waitTimeoutMs")}
               />
-              <span className="section-note" style={{ margin: 0 }}>毫秒，0 = 无限等待；失焦时保存</span>
-            </div>
-          </>
+            </Field>
+          </div>
         )}
       </div>
 
       <div className="card" id="set-logs">
-        <h2>日志</h2>
-        <div className="section-note">
-          <span className="mono">bridge.log</span> 长到一个上限就轮转成{" "}
-          <span className="mono">bridge.log.1</span>（只留上一代，和审计日志、服务日志同一套做法），
-          旧的覆盖旧的，磁盘不再只涨不落。0 = 不轮转。重启 Bridge 生效。
-        </div>
-        <div className="row">
-          <span className="label">单文件上限</span>
-          <DraftField
-            type="number"
-            min={NUMBER_BOUNDS.logMaxBytes.min}
-            max={NUMBER_BOUNDS.logMaxBytes.max}
-            value={String(cfg.logMaxBytes)}
-            onCommit={raw => commitNumber("logMaxBytes", raw)}
-            onInvalid={invalidFor("logMaxBytes")}
-          />
-          <span className="section-note" style={{ margin: 0 }}>字节（默认 10485760 = 10 MiB，0 = 不轮转）；失焦时保存</span>
+        <CardHead
+          title="日志"
+          desc={
+            <>
+              <span className="mono">bridge.log</span> 长到一个上限就轮转成 <span className="mono">bridge.log.1</span>
+              （只留上一代，和审计日志、服务日志同一套做法），旧的覆盖旧的，磁盘不再只涨不落。0 = 不轮转。重启 Bridge 生效。
+            </>
+          }
+        />
+        <div className="form-grid">
+          <Field label="单文件上限" hint="字节（默认 10485760 = 10 MiB，0 = 不轮转）；失焦时保存。">
+            <DraftField
+              type="number"
+              min={NUMBER_BOUNDS.logMaxBytes.min}
+              max={NUMBER_BOUNDS.logMaxBytes.max}
+              value={String(cfg.logMaxBytes)}
+              onCommit={raw => commitNumber("logMaxBytes", raw)}
+              onInvalid={invalidFor("logMaxBytes")}
+            />
+          </Field>
         </div>
       </div>
 
       <div className="card" id="set-oauth">
-        <h2>OAuth 2.1（可选）</h2>
-        <div className="row">
+        <CardHead
+          title="OAuth 2.1（可选）"
+          desc="给客户端发它自己的凭据，而不是让所有人共用地址里的路由令牌。"
+        />
+        <div className="field">
           <label className="check">
             <input
               type="checkbox"
+              className="switch"
               checked={cfg["oauth.enabled"]}
               onChange={e => setConfig("oauth.enabled", e.target.checked)}
             />
-            启用 OAuth 2.1 授权服务器
+            <span className="field-label">启用 OAuth 2.1 授权服务器</span>
           </label>
-        </div>
-        {/* The consequence belongs next to the switch: turning this on is what
-            makes the URL stop being enough, and that is a decision, not a bug
-            report waiting in a client's logs. */}
-        <div className="section-note">
-          {cfg["oauth.enabled"]
-            ? "已开启 — /mcp 需要 OAuth 凭据：能走标准流程的客户端会先收到 401（这不是故障，正是它开始授权的信号），"
-              + "注册后拿到属于它自己的、可单独吊销的凭据。已经持有令牌的客户端不受影响：Authorization: Bearer 或 ?token= 照常通过。"
-            : "默认关闭 — 客户端在地址里带路由令牌即可接入。打开后，只认 URL 的客户端会收到 401 并要求走 OAuth；"
-              + "带不了头的那类客户端可以改用 ?token=<令牌> 的地址，或者不改、继续关着。"}
+          {/* The consequence belongs next to the switch: turning this on is what
+              makes the URL stop being enough, and that is a decision, not a bug
+              report waiting in a client's logs. */}
+          <span className="field-hint">
+            {cfg["oauth.enabled"]
+              ? "已开启 — /mcp 需要 OAuth 凭据：能走标准流程的客户端会先收到 401（这不是故障，正是它开始授权的信号），"
+                + "注册后拿到属于它自己的、可单独吊销的凭据。已经持有令牌的客户端不受影响：Authorization: Bearer 或 ?token= 照常通过。"
+              : "默认关闭 — 客户端在地址里带路由令牌即可接入。打开后，只认 URL 的客户端会收到 401 并要求走 OAuth；"
+                + "带不了头的那类客户端可以改用 ?token=<令牌> 的地址，或者不改、继续关着。"}
+          </span>
         </div>
         {cfg["oauth.enabled"] && <OAuthPanel hosts={cfg["oauth.allowedRedirectHosts"]} setConfig={setConfig} />}
       </div>
@@ -402,48 +441,69 @@ function OAuthPanel({ hosts, setConfig }: {
 
   return (
     <>
-      <div className="row" style={{ flexDirection: "column", alignItems: "stretch" }}>
-        <DraftField
-          multiline
-          value={hosts.join("\n")}
-          placeholder={"允许的回调主机，每行一个，如\nchatgpt.com"}
-          onCommit={raw => setConfig("oauth.allowedRedirectHosts", raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean))}
-        />
-        <span className="section-note">
+      <div className="field">
+        <span className="field-label">允许的回调主机</span>
+        <span className="field-control">
+          <DraftField
+            multiline
+            value={hosts.join("\n")}
+            placeholder={"允许的回调主机，每行一个，如\nchatgpt.com"}
+            onCommit={raw => setConfig("oauth.allowedRedirectHosts", raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean))}
+          />
+        </span>
+        <span className="field-hint">
           注册时按主机名精确匹配；localhost / 127.0.0.1 / [::1] 永远放行；留空 = 只用内置名单；失焦时保存
         </span>
       </div>
+
       {view === null ? (
-        <div className="section-note">{note || "读取中…"}</div>
+        <Skeleton lines={2} />
       ) : (
         <>
-          <div className="row">
-            <span className="label">在用凭据</span>
-            <span>
-              已注册客户端 {view.counts.clients} 个 · 在用访问令牌 {view.counts.activeAccessTokens} 个 · 刷新令牌 {view.counts.activeRefreshTokens} 个
-            </span>
+          <div className="props">
+            <div className="prop">
+              <span className="prop-label">在用凭据</span>
+              <span className="prop-value">
+                已注册客户端 {view.counts.clients} 个 · 在用访问令牌 {view.counts.activeAccessTokens} 个 · 刷新令牌 {view.counts.activeRefreshTokens} 个
+              </span>
+            </div>
+            <div className="prop">
+              <span className="prop-label">签发者</span>
+              <span className="prop-value mono">{view.issuer}</span>
+            </div>
+            <div className="prop">
+              <span className="prop-label">业主来源</span>
+              <span className="prop-value">
+                <Chip tone="idle">{view.ownerSource === "env" ? "环境变量" : "路由令牌"}</Chip>
+              </span>
+            </div>
           </div>
+          {note ? <div className="section-note">{note}</div> : null}
           {view.clients.length === 0 ? (
-            <div className="section-note">还没有客户端注册；第一个走标准流程的客户端连上来时会自动注册。</div>
+            <div className="section-note" style={{ marginBottom: 0 }}>
+              还没有客户端注册；第一个走标准流程的客户端连上来时会自动注册。
+            </div>
           ) : (
-            <table className="token-table">
-              <thead>
-                <tr>
-                  <th>客户端</th>
-                  <th>回调地址</th>
-                  <th>注册时间</th>
-                </tr>
-              </thead>
-              <tbody>
-                {view.clients.map(client => (
-                  <tr key={client.client_id}>
-                    <td>{client.client_name || client.client_id.slice(0, 12)}</td>
-                    <td className="mono">{client.redirect_uris.join(", ")}</td>
-                    <td>{new Date(client.client_id_issued_at).toISOString().slice(0, 16).replace("T", " ")}</td>
+            <div className="table-wrap">
+              <table className="token-table">
+                <thead>
+                  <tr>
+                    <th>客户端</th>
+                    <th>回调地址</th>
+                    <th className="num">注册时间</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {view.clients.map(client => (
+                    <tr key={client.client_id}>
+                      <td className="name">{client.client_name ?? client.client_id}</td>
+                      <td className="mono wrap">{client.redirect_uris.join("\n")}</td>
+                      <td className="num muted">{new Date(client.client_id_issued_at).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </>
       )}

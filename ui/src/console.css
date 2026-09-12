@@ -661,3 +661,197 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
   .topbar { gap: 8px; padding: 0 12px; }
   .topbar-actions .ghost { display: none; }
 }
+
+/* ==========================================================================
+   Detail layer (second pass).
+   The first pass replaced the frame; the pages inside it were still the old
+   card-with-a-grey-heading and label/control rows. Everything below is the
+   page-level vocabulary of the reference dashboards: card headers with a
+   description and right-aligned actions, property rows, real form fields,
+   switches, a tinted table head with right-aligned numbers, inline copy
+   buttons, segmented filters, skeletons and meters.
+   ========================================================================== */
+
+/* --- card header ----------------------------------------------------------- */
+
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 11px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.card-head h2 { font-size: 13.5px; font-weight: 600; margin: 0; padding: 0; border-bottom: none; }
+.card-desc { margin: 3px 0 0; color: var(--muted); font-size: 12.5px; max-width: 78ch; }
+.card-head-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.card-foot { margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+.card-foot .spacer { flex: 1; }
+
+/* --- property rows (label left, value right) ------------------------------- */
+
+.prop { display: flex; align-items: baseline; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.prop:last-child { border-bottom: none; }
+.prop:first-child { padding-top: 2px; }
+.prop-label { width: 132px; flex: none; color: var(--muted); font-size: 12.5px; }
+.prop-value { flex: 1; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
+.prop-value.mono { font-family: var(--mono); font-size: 12.5px; }
+.prop-actions { flex: none; display: inline-flex; gap: 6px; align-items: center; }
+
+/* --- form fields ----------------------------------------------------------- */
+
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; min-width: 0; }
+.field-label { font-size: 12.5px; font-weight: 500; color: var(--text); }
+.field-hint { font-size: 11.5px; color: var(--muted); }
+.field-control { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.field-control > input[type="text"], .field-control > select { width: 100%; max-width: 320px; }
+.field-control > input[type="number"] { width: 140px; }
+.field.row { flex-direction: row; align-items: center; gap: 10px; }
+.field.row .field-label { width: 132px; flex: none; font-weight: 400; color: var(--muted); }
+
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 26px; }
+.form-grid .span2 { grid-column: 1 / -1; }
+
+/* --- switch ---------------------------------------------------------------- */
+
+/* A styled checkbox, not a custom widget: it keeps checkbox semantics for
+   keyboard and for every test that drives it with click/change. */
+input.switch {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 34px;
+  height: 20px;
+  flex: none;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  position: relative;
+  cursor: pointer;
+  transition: background-color .15s, border-color .15s;
+}
+input.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform .15s, background-color .15s;
+}
+input.switch:checked { background: var(--accent); border-color: var(--accent); }
+input.switch:checked::after { transform: translateX(14px); background: #fff; }
+input.switch:disabled { opacity: .5; cursor: not-allowed; }
+
+/* --- two-column page body -------------------------------------------------- */
+
+.split { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.split > div > .card:last-child { margin-bottom: 0; }
+@media (max-width: 1080px) { .split { grid-template-columns: minmax(0, 1fr); } }
+
+/* --- code chips and inline copy -------------------------------------------- */
+
+.code-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.code-chip .value { min-width: 0; }
+
+button.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+button.copy-btn:hover { background: var(--hover); color: var(--text); border-color: transparent; }
+button.copy-btn.done { color: var(--ok); }
+button.copy-btn svg { width: 13px; height: 13px; }
+
+button.icon-text { display: inline-flex; align-items: center; gap: 6px; }
+button.icon-text svg { width: 14px; height: 14px; }
+
+.btn-group { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+/* --- segmented control ----------------------------------------------------- */
+
+.segmented { display: inline-flex; gap: 2px; padding: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; }
+.segmented button { border: none; background: none; padding: 4px 10px; font-size: 12px; border-radius: 7px; color: var(--muted); }
+.segmented button:hover { color: var(--text); background: var(--hover); border-color: transparent; }
+.segmented button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); font-weight: 500; }
+
+/* --- tables: tinted head, right-aligned numbers ---------------------------- */
+
+.token-table th { background: var(--surface-2); }
+.token-table th:first-child { border-top-left-radius: var(--radius-sm); }
+.token-table th:last-child { border-top-right-radius: var(--radius-sm); }
+.token-table th.num, .token-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.token-table td.name { font-weight: 500; }
+.token-table td.actions { text-align: right; white-space: nowrap; }
+.row-actions { display: inline-flex; gap: 6px; justify-content: flex-end; align-items: center; }
+.token-table td .muted { color: var(--muted); }
+
+/* --- meters and skeletons -------------------------------------------------- */
+
+.meter { display: flex; align-items: center; gap: 10px; margin: 2px 0 10px; }
+.meter-track { flex: 1; height: 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); overflow: hidden; }
+.meter-fill { height: 100%; background: var(--accent); }
+.meter-fill.ok { background: var(--ok); }
+.meter-fill.warn { background: var(--warn); }
+.meter-fill.err { background: var(--err); }
+.meter-label { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.skeleton {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--hover-strong) 37%, var(--surface-2) 63%);
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+.skeleton + .skeleton { margin-top: 9px; }
+.skeleton.w40 { width: 40%; }
+.skeleton.w60 { width: 60%; }
+.skeleton.w80 { width: 80%; }
+.skeleton.tall { height: 18px; }
+@keyframes skeleton-shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+
+/* --- log lines ------------------------------------------------------------- */
+
+.log-line { display: flex; gap: 10px; }
+.log-line .log-level { flex: none; width: 46px; color: var(--muted); }
+.log-line.level-error .log-level { color: var(--err); }
+.log-line.level-warn .log-level { color: var(--warn); }
+.log-line.level-info .log-level { color: var(--accent); }
+.log-line .log-text { flex: 1; min-width: 0; }
+.log-line.level-error .log-text { color: var(--err); }
+
+.logbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.live-dot { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.live-dot::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.live-dot.paused::before { background: var(--warn); }
+.live-dot.offline::before { background: var(--err); }
+
+/* --- activity list polish -------------------------------------------------- */
+
+.act-row .act-msg { color: var(--text); }
+.act-row .act-tool { color: var(--muted); }
+.act-row:hover { background: var(--surface-2); }
+
+/* --- toast with an edge ----------------------------------------------------- */
+
+.toast { border-left: 3px solid var(--accent); }
+.toast.error { border-left-color: var(--err); }

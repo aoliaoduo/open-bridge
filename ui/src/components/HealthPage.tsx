@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type HealthCheck, type HealthReport, type SettingsActionResult } from "../api";
-import { ConfirmButton } from "./ConfirmButton";
+import { CardHead } from "./CardHead";
 import { Chip } from "./Chip";
+import { ConfirmButton } from "./ConfirmButton";
+import { Props as PropList } from "./Props";
+import { Skeleton } from "./Skeleton";
 import { Stat } from "./Stat";
 
 const LABELS: Record<string, string> = {
@@ -72,6 +75,7 @@ export function HealthPage(
   };
 
   const exposure = EXPOSURE_TEXT[report?.exposure ?? ""];
+  const total = (report?.checks ?? []).length;
   const passed = (report?.checks ?? []).filter(check => levelOf(check) === "ok").length;
   const failed = (report?.checks ?? []).filter(check => levelOf(check) === "fail").length;
   const warned = (report?.checks ?? []).filter(check => levelOf(check) === "warn").length;
@@ -79,70 +83,90 @@ export function HealthPage(
   // (public-open with no Bearer gate). Both were 异常 before, which made every
   // healthy instance look broken.
   const summary = failed > 0 ? `${failed} 项异常。` : warned > 0 ? `无异常，${warned} 项提醒。` : "全部通过。";
+  const meterTone = failed > 0 ? "err" : warned > 0 ? "warn" : "ok";
 
   return (
     <>
-      {report && (
+      {report ? (
         <div className="stats three">
-          <Stat label="检查通过" value={passed} hint={`共 ${report.checks.length} 项检查`} tone="ok" />
+          <Stat label="检查通过" value={passed} hint={`共 ${total} 项检查`} tone="ok" />
           <Stat label="需要留意" value={warned} hint={warned > 0 ? "风险，未必是故障" : "没有需要留意的项"} tone={warned > 0 ? "warn" : "plain"} />
           <Stat label="失败项" value={failed} hint={failed > 0 ? "需要处理" : "没有失败项"} tone={failed > 0 ? "err" : "plain"} />
         </div>
-      )}
+      ) : null}
 
       <div className="card">
-        <h2>体检结果</h2>
-        <div className="row">
-          <button className="primary" disabled={busy} onClick={() => void run()}>
-            {busy ? "体检中…" : "重新体检"}
-          </button>
-          {report && <span className="section-note" style={{ margin: 0 }}>{summary}</span>}
-        </div>
-        <div className="section-note">
-          「公网连通」这一项会用真实请求穿过隧道访问 <span className="mono">/healthz</span>（6 秒超时），
-          所以它花的时间比别的项长；隧道没开时会跳过并标注为仅本机。
-        </div>
+        <CardHead
+          title="体检结果"
+          desc={
+            <>
+              「公网连通」会用真实请求穿过隧道访问 <span className="mono">/healthz</span>（6 秒超时），
+              所以它比别的项慢；隧道没开时会跳过并标注为仅本机。
+            </>
+          }
+          actions={
+            <div className="btn-group">
+              {report && <span className="section-note" style={{ margin: 0 }}>{summary}</span>}
+              <button type="button" className="primary small" disabled={busy} onClick={() => void run()}>
+                {busy ? "体检中…" : "重新体检"}
+              </button>
+            </div>
+          }
+        />
 
         {report === null ? (
-          <div className="section-note">{busy ? "体检中…" : "读取中…"}</div>
+          busy ? <Skeleton lines={4} /> : <Skeleton lines={4} />
         ) : (
-          <div className="table-wrap">
-            <table className="token-table">
-              <thead>
-                <tr>
-                  <th>结果</th>
-                  <th>检查项</th>
-                  <th>详情</th>
-                </tr>
-              </thead>
-              <tbody>
-                {report.checks.map(check => (
-                  <tr key={check.name}>
-                    <td>
-                      {levelOf(check) === "ok" && <Chip tone="ok">通过</Chip>}
-                      {levelOf(check) === "warn" && <Chip tone="warn">提醒</Chip>}
-                      {levelOf(check) === "fail" && <Chip tone="err">异常</Chip>}
-                    </td>
-                    <td>{LABELS[check.name] ?? check.name}</td>
-                    <td className="mono wrap">{check.detail}</td>
+          <>
+            <div className="meter">
+              <div className="meter-track">
+                <div
+                  className={`meter-fill ${meterTone}`}
+                  style={{ width: `${total ? Math.round((passed / total) * 100) : 0}%` }}
+                />
+              </div>
+              <span className="meter-label">{passed} / {total} 项已通过</span>
+            </div>
+            <div className="table-wrap">
+              <table className="token-table">
+                <thead>
+                  <tr>
+                    <th>结果</th>
+                    <th>检查项</th>
+                    <th>详情</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {report.checks.map(check => (
+                    <tr key={check.name}>
+                      <td>
+                        {levelOf(check) === "ok" && <Chip tone="ok">通过</Chip>}
+                        {levelOf(check) === "warn" && <Chip tone="warn">提醒</Chip>}
+                        {levelOf(check) === "fail" && <Chip tone="err">异常</Chip>}
+                      </td>
+                      <td className="name">{LABELS[check.name] ?? check.name}</td>
+                      <td className="mono wrap">{check.detail}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 
       <div className="card">
-        <h2>暴露面</h2>
+        <CardHead title="暴露面" desc="这个实例现在能被谁访问，以及要不要加第二道锁。" />
         {exposure ? (
           <>
-            <div className="row">
-              <Chip tone={exposure.tone === "warn" ? "warn" : "ok"}>{report?.exposure}</Chip>
-              <span>{exposure.text}</span>
-            </div>
+            <PropList
+              items={[
+                { label: "当前状态", value: <Chip tone={exposure.tone === "warn" ? "warn" : "ok"}>{report?.exposure}</Chip> },
+                { label: "含义", value: exposure.text },
+              ]}
+            />
             {report?.exposure === "public-open" && (
-              <div className="row">
+              <div className="card-foot">
                 <ConfirmButton
                   className="primary"
                   disabled={arming}
@@ -155,7 +179,7 @@ export function HealthPage(
               </div>
             )}
             {report?.exposure === "public-authed" && (
-              <div className="row">
+              <div className="card-foot">
                 <span className="section-note" style={{ margin: 0 }}>
                   第二道锁在开着：客户端必须带 Bearer 令牌。要恢复「只填 URL」的用法，去「令牌」页关掉那个开关。
                 </span>
@@ -163,7 +187,7 @@ export function HealthPage(
             )}
           </>
         ) : (
-          <div className="section-note">读取中…</div>
+          <Skeleton lines={2} />
         )}
       </div>
 

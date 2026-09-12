@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type ToolCatalog } from "../api";
+import { CardHead } from "./CardHead";
 import { Chip } from "./Chip";
+import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
+import { Skeleton } from "./Skeleton";
 
 /**
  * 工具 — what this instance actually advertises over MCP.
@@ -10,7 +13,7 @@ import { EmptyState } from "./EmptyState";
  * filter that removes editor-only tools, and the catalog itself were only visible
  * by asking a client. This page renders exactly what `tools/list` returns.
  */
-export function ToolsPage() {
+export function ToolsPage({ notify }: { notify?: (text: string, isError?: boolean) => void } = {}) {
   const [catalog, setCatalog] = useState<ToolCatalog | null>(null);
   const [note, setNote] = useState("");
   const [query, setQuery] = useState("");
@@ -37,24 +40,30 @@ export function ToolsPage() {
 
   return (
     <div className="card">
-      <h2>工具目录</h2>
-      <div className="section-note">
-        这份清单就是 <span className="mono">tools/list</span> 实际返回的内容：先按工具配置档过滤，再剔除本机不支持的工具
-        （独立版没有编辑器，所以 <span className="mono">get_diagnostics</span> / <span className="mono">lsp</span> 不会出现）。
-      </div>
+      <CardHead
+        title="工具目录"
+        desc={
+          <>
+            这份清单就是 <span className="mono">tools/list</span> 实际返回的内容：先按工具配置档过滤，再剔除本机不支持的工具
+            （独立版没有编辑器，所以 <span className="mono">get_diagnostics</span> / <span className="mono">lsp</span> 不会出现）。
+          </>
+        }
+        actions={
+          catalog ? (
+            <div className="btn-group">
+              <Chip tone="accent">配置档 {catalog.profile}</Chip>
+              <span className="section-note" style={{ margin: 0 }}>
+                共 {catalog.count} 个工具（核心 {coreCount} 个）
+              </span>
+            </div>
+          ) : null
+        }
+      />
 
       {catalog === null ? (
-        <div className="section-note">读取中…</div>
+        <Skeleton lines={5} />
       ) : (
         <>
-          <div className="row">
-            <span className="label">配置档</span>
-            <Chip tone="accent">{catalog.profile}</Chip>
-            <span className="section-note" style={{ margin: 0 }}>
-              共 {catalog.count} 个工具（核心 {coreCount} 个）
-            </span>
-          </div>
-
           <div className="toolbar">
             <label className="search">
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -70,7 +79,12 @@ export function ToolsPage() {
               />
             </label>
             <label className="check">
-              <input type="checkbox" checked={onlyCore} onChange={event => setOnlyCore(event.target.checked)} />
+              <input
+                type="checkbox"
+                className="switch"
+                checked={onlyCore}
+                onChange={event => setOnlyCore(event.target.checked)}
+              />
               只看核心
             </label>
             <span className="grow" />
@@ -87,14 +101,24 @@ export function ToolsPage() {
                     <th>名称</th>
                     <th>类型</th>
                     <th>说明</th>
+                    <th className="actions"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {visible.map(tool => (
                     <tr key={tool.name}>
-                      <td className="mono">{tool.name}</td>
+                      <td className="mono name">{tool.name}</td>
                       <td>{tool.core ? <Chip tone="ok">核心</Chip> : <Chip>扩展</Chip>}</td>
-                      <td>{tool.description || "—"}</td>
+                      <td className="muted">{tool.description || "—"}</td>
+                      <td className="actions">
+                        <span className="row-actions">
+                          <CopyButton
+                            value={tool.name}
+                            label="复制名称"
+                            onCopied={() => notify?.(`已复制工具名 ${tool.name}`)}
+                          />
+                        </span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

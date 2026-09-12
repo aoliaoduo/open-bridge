@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { api, type ActivityEntry, type UsageStats } from "../api";
+import { CardHead } from "./CardHead";
 import { ConfirmButton } from "./ConfirmButton";
 import { EmptyState } from "./EmptyState";
+import { Skeleton } from "./Skeleton";
 import { Stat } from "./Stat";
 
 function fmtUptime(ms: number): string {
@@ -20,10 +22,13 @@ const ACTIVITY_LABEL: Record<string, string> = {
   warning: "警告",
 };
 
+type ActivityView = "all" | "error" | "success";
+
 export function StatsTab() {
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [note, setNote] = useState("");
+  const [view, setView] = useState<ActivityView>("all");
 
   useEffect(() => {
     // Expired-response guard: drop a slow poll that landed after a newer one.
@@ -56,6 +61,13 @@ export function StatsTab() {
   const maxCalls = topTools.length ? topTools[0][1] : 1;
   const failureRate = usage && usage.calls > 0 ? Math.round((usage.failures / usage.calls) * 100) : 0;
 
+  const failures = activity.filter(entry => entry.status === "error" || entry.status === "warning").length;
+  const shown = activity
+    .filter(entry => view === "all"
+      || (view === "error" && (entry.status === "error" || entry.status === "warning"))
+      || (view === "success" && entry.status === "completed"))
+    .slice(0, 40);
+
   return (
     <>
       <div className="stats">
@@ -72,26 +84,44 @@ export function StatsTab() {
           hint={usage ? `占比 ${failureRate}%` : "\u00a0"}
           tone={(usage?.failures ?? 0) > 0 ? "err" : "plain"}
         />
-        <Stat label="运行时长" value={usage ? fmtUptime(usage.uptime_ms) : "…"} hint={usage ? `自 ${new Date(usage.started_at).toLocaleString()}` : "\u00a0"} />
+        <Stat
+          label="运行时长"
+          value={usage ? fmtUptime(usage.uptime_ms) : "…"}
+          hint={usage ? `自 ${new Date(usage.started_at).toLocaleString()}` : "\u00a0"}
+        />
       </div>
 
       <div className="card">
-        <h2>调用统计</h2>
-        <div className="row">
-          <ConfirmButton label="清空统计" onConfirm={() => void clearStats()} />
-          {note && <span className="section-note" style={{ margin: 0 }}>{note}</span>}
-        </div>
-        <div className="section-note">
-          统计自实例启动起累计；<span className="mono">清空统计</span> 只清零计数，不影响正在进行的调用。
-        </div>
+        <CardHead
+          title="调用统计"
+          desc="自实例启动起累计；清空只清零计数，不影响正在进行的调用。"
+          actions={
+            <div className="btn-group">
+              {note ? <span className="section-note" style={{ margin: 0 }}>{note}</span> : null}
+              <ConfirmButton label="清空统计" onConfirm={() => void clearStats()} />
+            </div>
+          }
+        />
+        {usage === null ? (
+          <Skeleton lines={2} />
+        ) : (
+          <div className="props">
+            <div className="prop">
+              <span className="prop-label">跟踪命令</span>
+              <span className="prop-value">{usage.tracked_commands}</span>
+            </div>
+            <div className="prop">
+              <span className="prop-label">进行中命令</span>
+              <span className="prop-value">{usage.active_commands}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="card">
-        <h2>按工具</h2>
+        <CardHead title="按工具" desc="调用次数排行（前 12 名）。" />
         {topTools.length === 0 ? (
-          <EmptyState title="还没有工具调用。">
-            客户端每调用一次工具，这里就会多一条计数与排行。
-          </EmptyState>
+          <EmptyState title="还没有工具调用。">客户端每调用一次工具，这里就会多一条计数与排行。</EmptyState>
         ) : topTools.map(([name, count]) => (
           <div className="bar-row" key={name}>
             <span className="name">{name}</span>
@@ -102,10 +132,24 @@ export function StatsTab() {
       </div>
 
       <div className="card">
-        <h2>最近活动</h2>
-        {activity.length === 0 ? (
-          <EmptyState title="暂无活动。">工具调用、服务启停与配置修改都会出现在这里。</EmptyState>
-        ) : activity.slice(0, 40).map((entry, index) => (
+        <CardHead
+          title="最近活动"
+          desc="工具调用、服务启停与配置修改都会记在这里。"
+          actions={
+            <div className="segmented" role="group" aria-label="活动过滤">
+              <button type="button" className={view === "all" ? "active" : ""} onClick={() => setView("all")}>全部</button>
+              <button type="button" className={view === "error" ? "active" : ""} onClick={() => setView("error")}>
+                失败/警告 {failures}
+              </button>
+              <button type="button" className={view === "success" ? "active" : ""} onClick={() => setView("success")}>完成</button>
+            </div>
+          }
+        />
+        {shown.length === 0 ? (
+          <EmptyState title={activity.length === 0 ? "暂无活动。" : "这个筛选下没有记录。"}>
+            {activity.length === 0 ? "工具调用、服务启停与配置修改都会出现在这里。" : "换一个筛选看看。"}
+          </EmptyState>
+        ) : shown.map((entry, index) => (
           <div className="act-row" key={index}>
             <span className={`act-status ${entry.status}`} title={entry.status}>
               {ACTIVITY_LABEL[entry.status] ?? entry.status}

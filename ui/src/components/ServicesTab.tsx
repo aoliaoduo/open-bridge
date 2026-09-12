@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type ServiceView } from "../api";
+import { CardHead } from "./CardHead";
 import { Chip } from "./Chip";
+import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
+import { Skeleton } from "./Skeleton";
 
 /**
  * Saved services (the MCP `save_service` definitions) with start/stop/restart.
@@ -11,7 +14,7 @@ import { EmptyState } from "./EmptyState";
  * could only be controlled by asking the agent again. Service definitions are
  * still created by the agent — this page drives them.
  */
-export function ServicesTab() {
+export function ServicesTab({ notify }: { notify?: (text: string, isError?: boolean) => void } = {}) {
   const [services, setServices] = useState<ServiceView[] | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState("");
@@ -52,12 +55,27 @@ export function ServicesTab() {
   };
 
   const logName = (file: string | null): string => (file ? file.split(/[\\/]/).pop() ?? file : "—");
+  const running = (services ?? []).filter(service => service.running).length;
 
   return (
     <div className="card">
-      <h2>服务（保存过的命名进程）</h2>
+      <CardHead
+        title="服务"
+        desc={
+          <>
+            由 MCP 工具 <span className="mono">save_service</span> 定义过的命名进程（例如一个开发服务器）。
+            这里只负责启停；健康检查与按组批量启停仍在 MCP 工具侧。
+          </>
+        }
+        actions={
+          <div className="btn-group">
+            {services ? <Chip tone={running > 0 ? "ok" : "idle"}>{running} / {services.length} 运行中</Chip> : null}
+          </div>
+        }
+      />
+
       {services === null ? (
-        <div className="section-note">读取中…</div>
+        <Skeleton lines={3} />
       ) : services.length === 0 ? (
         <EmptyState title="还没有保存过服务。">
           服务由 MCP 工具 <span className="mono">save_service</span> 定义（例如一个开发服务器），
@@ -71,49 +89,62 @@ export function ServicesTab() {
                 <th>名称</th>
                 <th>分组</th>
                 <th>状态</th>
-                <th>端口</th>
+                <th className="num">端口</th>
                 <th>命令</th>
                 <th>日志</th>
-                <th>操作</th>
+                <th className="actions">操作</th>
               </tr>
             </thead>
             <tbody>
               {services.map(service => (
                 <tr key={service.name}>
-                  <td className="mono">{service.name}</td>
+                  <td className="mono name">{service.name}</td>
                   <td>{service.group || "—"}</td>
                   <td>
                     {service.running
                       ? <Chip tone="ok">运行中</Chip>
                       : <Chip>已停止</Chip>}
                   </td>
-                  <td>{service.port ?? "—"}</td>
+                  <td className="num">{service.port ?? "—"}</td>
                   <td className="mono" title={service.command}>
                     {service.command.length > 46 ? `${service.command.slice(0, 46)}…` : service.command}
                   </td>
-                  <td className="mono" title={service.log_file ?? ""}>{logName(service.log_file)}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>
-                    <button
-                      className="small"
-                      disabled={busy === service.name || service.running}
-                      onClick={() => void run(service.name, "start")}
-                    >
-                      启动
-                    </button>{" "}
-                    <button
-                      className="small"
-                      disabled={busy === service.name || !service.running}
-                      onClick={() => void run(service.name, "stop")}
-                    >
-                      停止
-                    </button>{" "}
-                    <button
-                      className="small"
-                      disabled={busy === service.name || !service.running}
-                      onClick={() => void run(service.name, "restart")}
-                    >
-                      重启
-                    </button>
+                  <td className="mono" title={service.log_file ?? ""}>
+                    <span className="row-actions">
+                      {logName(service.log_file)}
+                      {service.log_file ? (
+                        <CopyButton
+                          value={service.log_file}
+                          label="复制日志路径"
+                          onCopied={() => notify?.("日志路径已复制。")}
+                        />
+                      ) : null}
+                    </span>
+                  </td>
+                  <td className="actions">
+                    <span className="row-actions">
+                      <button
+                        className="small"
+                        disabled={busy === service.name || service.running}
+                        onClick={() => void run(service.name, "start")}
+                      >
+                        启动
+                      </button>
+                      <button
+                        className="small"
+                        disabled={busy === service.name || !service.running}
+                        onClick={() => void run(service.name, "stop")}
+                      >
+                        停止
+                      </button>
+                      <button
+                        className="small"
+                        disabled={busy === service.name || !service.running}
+                        onClick={() => void run(service.name, "restart")}
+                      >
+                        重启
+                      </button>
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -121,8 +152,11 @@ export function ServicesTab() {
           </table>
         </div>
       )}
-      {note && <div className="section-note">{note}</div>}
-      <div className="section-note">状态每 5 秒自动刷新。健康检查与按组批量启停仍在 MCP 工具侧（service_status / start_all_services）。</div>
+      <div className="card-foot">
+        {note ? <span className="section-note" style={{ margin: 0 }}>{note}</span> : <span className="spacer" />}
+        <span className="spacer" />
+        <span className="section-note" style={{ margin: 0 }}>状态每 5 秒自动刷新。</span>
+      </div>
     </div>
   );
 }
