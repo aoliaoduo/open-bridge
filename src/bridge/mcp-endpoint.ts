@@ -25,6 +25,23 @@ import { invoke } from "./dispatcher.js";
 import { normalizeToolCall } from "./tool-call-shape.js";
 import { persistUsageStats } from "./usage-store.js";
 
+/**
+ * The typed payload for one tool result: `asStructuredContent`, minus the
+ * legacy-name note.
+ *
+ * `deprecated` is a hint for a caller still speaking the old vocabulary, so it
+ * belongs in the text block where it costs nothing — not in the object clients
+ * validate against the tool's declared outputSchema, which does not describe it.
+ * The note is top-level and added by the dispatcher (`annotateLegacyResult`).
+ */
+function structuredPayload(result: unknown): Record<string, unknown> {
+  const payload = asStructuredContent(result);
+  if (!Object.prototype.hasOwnProperty.call(payload, "deprecated")) return payload;
+  const typed = { ...payload };
+  delete typed.deprecated;
+  return typed;
+}
+
 /** SSE events retained for stream resumption (Last-Event-ID replay). */
 const SESSION_EVENT_STORE_LIMIT = 512;
 
@@ -168,7 +185,7 @@ export function createMcp(session: SessionState): Server {
       // name still gets the same typed payload instead of only text.
       const definition = (TOOL_DEFINITIONS as ReadonlyArray<{ name: string; outputSchema?: unknown }>)
         .find(tool => tool.name === normalizeToolCall(name).tool);
-      if (definition?.outputSchema) return { ...text(result), structuredContent: asStructuredContent(result) };
+      if (definition?.outputSchema) return { ...text(result), structuredContent: structuredPayload(result) };
       return text(result);
     } catch (e) {
       state.usage.failures += 1;
@@ -263,7 +280,7 @@ async function runToolCall(
     const definition = (TOOL_DEFINITIONS as ReadonlyArray<{ name: string; outputSchema?: unknown }>)
       .find(tool => tool.name === normalizeToolCall(name).tool);
     const payload = definition?.outputSchema
-      ? { ...text(result), structuredContent: asStructuredContent(result) }
+      ? { ...text(result), structuredContent: structuredPayload(result) }
       : text(result);
     return { ok: true, result: payload };
   } catch (e) {

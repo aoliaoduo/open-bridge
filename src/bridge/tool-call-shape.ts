@@ -30,6 +30,8 @@
  * it can run on every invocation and be tested exhaustively.
  */
 
+import { TOOL_DEFINITIONS } from "../mcp/tool-definitions.js";
+
 /** A tool call after normalization: an advertised name plus its own vocabulary. */
 export interface CanonicalCall {
   /** The name the catalog advertises (a family name for merged tools). */
@@ -67,6 +69,55 @@ export const FAMILY_ACTIONS = {
   connectivity: ["port", "http"],
   service_status: ["live", "definitions"],
 } as const;
+
+/**
+ * The boolean-typed input arguments of every advertised tool, read from the
+ * catalog rather than kept as a second hand-written list: a schema change cannot
+ * leave the normalization behind.
+ */
+const BOOLEAN_ARGS: ReadonlyMap<string, ReadonlySet<string>> = new Map(
+  (TOOL_DEFINITIONS as ReadonlyArray<{
+    name: string;
+    inputSchema?: { properties?: Record<string, { type?: unknown }> };
+  }>).map(definition => [
+    definition.name,
+    new Set(
+      Object.entries(definition.inputSchema?.properties ?? {})
+        .filter(([, schema]) => schema?.type === "boolean")
+        .map(([key]) => key),
+    ),
+  ]),
+);
+
+/**
+ * Read a declared boolean that arrived in another encoding.
+ *
+ * Schemas say `type: "boolean"`, but clients (and models) encode booleans as
+ * strings often enough to matter: `open_shell{list:"false"}` took the truthy
+ * branch and listed shells instead of opening one, while
+ * `file_op{overwrite:"false"}` was already read strictly. Normalizing at the one
+ * entry point keeps every handler's `=== true` check honest instead of asking
+ * each of them to re-implement the coercion. Anything that is not
+ * true/false/1/0 — "nope", 2, an object — is passed through untouched, so the
+ * handler still sees, and reports, a value it cannot read.
+ */
+function normalizeBooleanArgs(tool: string, args: Args): Args {
+  const declared = BOOLEAN_ARGS.get(tool);
+  if (!declared || declared.size === 0) return args;
+  let out: Args | undefined;
+  for (const key of declared) {
+    const value = args[key];
+    const normalized = value === "true" || value === "1" || value === 1
+      ? true
+      : value === "false" || value === "0" || value === 0
+        ? false
+        : undefined;
+    if (normalized === undefined || normalized === value) continue;
+    out ??= { ...args };
+    out[key] = normalized;
+  }
+  return out ?? args;
+}
 
 /** The arguments that select a family's behaviour, in a stable order. */
 const DISCRIMINATORS: readonly string[] = [...new Set(Object.values(FAMILY_PARAMS))];
@@ -162,8 +213,8 @@ export function legacyToolNames(): string[] {
  */
 export function normalizeToolCall(name: string, args: Args = {}): CanonicalCall {
   const rewrite = LEGACY_REWRITES[name];
-  if (!rewrite) return { tool: name, args };
-  const canonical = rewrite.map(args);
+  if (!rewrite) return { tool: name, args: normalizeBooleanArgs(name, args) };
+  const canonical = normalizeBooleanArgs(rewrite.tool, rewrite.map(args));
   return {
     tool: rewrite.tool,
     args: canonical,

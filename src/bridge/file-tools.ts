@@ -26,6 +26,99 @@ import type { JsonArgs } from "./json-args.js";
 
 type Args = JsonArgs;
 
+/**
+ * A required argument, or a refusal naming the field.
+ *
+ * File tools used to coerce their inputs with `String(...)`, so a caller that
+ * dropped `path` or `destination` did not get an error — it got the literal
+ * string "undefined", and the operation then ran against a file of that name:
+ * `create_directory` made it, `copy_file` wrote it, `delete_file` removed it and
+ * still answered `deleted: true`. Absence has to be louder than that, so every
+ * mutating file tool reads its paths through here.
+ */
+function requiredArg(args: Args, key: string): string {
+  const value = args[key];
+  if (value === undefined || value === null || (typeof value === "string" && value.trim() === "")) {
+    throw new Error(
+      `Missing "${key}". This operation needs an explicit ${key}; pass a workspace-relative path`
+      + " (look it up with list_directory or find_files first).",
+    );
+  }
+  return String(value);
+}
+
+/** The paths a file operation must never remove: the project, and the Bridge's own data. */
+function protectedTargets(): Array<{ path: string; label: string }> {
+  const candidates = [
+    { path: path.resolve(workspaceContext.root()), label: "the workspace root this Bridge is anchored to" },
+    { path: path.resolve(root()), label: "the workspace root this Bridge is anchored to" },
+    { path: path.resolve(host().storageDir()), label: "the Bridge's own data directory" },
+  ];
+  const unique: Array<{ path: string; label: string }> = [];
+  for (const candidate of candidates) {
+    if (unique.some(entry => entry.path === candidate.path)) continue;
+    unique.push(candidate);
+  }
+  return unique;
+}
+
+/** True when `candidate` is `other` or one of its ancestors (removing it takes `other` with it). */
+function isAtOrAbove(candidate: string, other: string): boolean {
+  const relative = path.relative(candidate, other);
+  return relative === ""
+    || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`));
+}
+
+/**
+ * Refuse an operation aimed at the ground the Bridge stands on.
+ *
+ * `unrestrictedFileAccess` (default on) is deliberate and untouched: absolute
+ * paths, parent directories and other volumes stay reachable, and this is not a
+ * sandbox. What it stops is the one call nobody means to make — `delete "."`,
+ * `delete ".."`, a move or delete that lands on the workspace root, the data
+ * directory or a drive root — where a single dropped or mistyped argument takes
+ * the whole project with it and `fs.rm` leaves no way back. `run_command` remains
+ * the deliberate way to do it.
+ */
+function refuseSelfDestruction(target: string, verb: string): void {
+  const resolved = path.resolve(target);
+  if (resolved === path.parse(resolved).root) {
+    throw new Error(
+      `Refusing to ${verb} "${resolved}": that is a drive root, not project content. `
+      + "File tools never target it; use run_command if you really mean it.",
+    );
+  }
+  const hit = protectedTargets().find(entry => isAtOrAbove(resolved, entry.path));
+  if (!hit) return;
+  throw new Error(
+    `Refusing to ${verb} "${resolved}": it is ${hit.label} (or a parent of it), so the call would take the whole project with it — unrecoverably. `
+    + "File tools never target that path; use run_command if you really mean it.",
+  );
+}
+
+/**
+ * Moving a file onto an existing directory is never what the caller meant.
+ *
+ * `overwrite: true` works by moving the existing destination aside, renaming the
+ * source into place and only then deleting the aside — right for swapping two
+ * files, catastrophic when the destination is a directory: the entire tree (and,
+ * for a destination like "..", everything around the project) is deleted while
+ * the call still answers success. `copy` needs no such guard: `fs.cp` refuses a
+ * non-directory source over a directory (`ERR_FS_CP_NON_DIR_TO_DIR`).
+ */
+async function refuseFileOverDirectory(source: string, destination: string, args: Args): Promise<void> {
+  const sourceIsDirectory = await fs.stat(source).then(stat => stat.isDirectory(), () => false);
+  if (sourceIsDirectory) return;
+  const destinationIsDirectory = await fs.stat(destination).then(stat => stat.isDirectory(), () => false);
+  if (!destinationIsDirectory) return;
+  const inside = `${String(args.destination).replace(/[\\/]+$/, "")}/${path.basename(source)}`;
+  throw new Error(
+    `Destination "${String(args.destination)}" is an existing directory, and moving a file onto it would delete that directory and everything inside. `
+    + `Name the file inside it instead (destination: "${inside}"), or delete the directory first.`,
+  );
+}
+
+
 /** Display-diff budget for edit_block results (head+tail bounded). */
 const EDIT_DIFF_MAX_CHARS = 16_000;
 
@@ -719,14 +812,17 @@ export async function editBlock(args: Args): Promise<unknown> {
 }
 
 export async function createDirectory(args: Args): Promise<unknown> {
-  const dir = await securePath(String(args.path), true);
+  const dir = await securePath(requiredArg(args, "path"), true);
   await fs.mkdir(dir, { recursive: true });
   return { path: String(args.path), created: true };
 }
 
 export async function moveFile(args: Args): Promise<unknown> {
-  const source = await securePath(String(args.source));
-  const destination = await securePath(String(args.destination), true);
+  const source = await securePath(requiredArg(args, "source"));
+  const destination = await securePath(requiredArg(args, "destination"), true);
+  refuseSelfDestruction(source, "move");
+  refuseSelfDestruction(destination, "move onto");
+  if (args.overwrite === true) await refuseFileOverDirectory(source, destination, args);
   if (args.overwrite !== true) {
     try {
       await fs.lstat(destination);
@@ -781,8 +877,8 @@ export async function moveFile(args: Args): Promise<unknown> {
 }
 
 export async function copyFile(args: Args): Promise<unknown> {
-  const source = await securePath(String(args.source));
-  const destination = await securePath(String(args.destination), true);
+  const source = await securePath(requiredArg(args, "source"));
+  const destination = await securePath(requiredArg(args, "destination"), true);
   if (args.overwrite !== true) {
     try {
       await fs.lstat(destination);
@@ -797,7 +893,8 @@ export async function copyFile(args: Args): Promise<unknown> {
 }
 
 export async function deleteFile(args: Args): Promise<unknown> {
-  const target = await securePath(String(args.path));
+  const target = await securePath(requiredArg(args, "path"));
+  refuseSelfDestruction(target, "delete");
   await fs.rm(target, { recursive: args.recursive === true, force: false });
   return { path: String(args.path), deleted: true };
 }

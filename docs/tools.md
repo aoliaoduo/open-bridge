@@ -88,6 +88,11 @@
 
 **file_op** — 见上文工具族：`create_directory`（`path`）· `copy` / `move`（`source`、`destination`、可选 `overwrite`）· `delete`（`path`、可选 `recursive`）。
 
+- `path` / `source` / `destination` 缺失时**直接报错**（`Missing "path".`），不再被 `String(undefined)` 变成名为 `undefined` 的文件。
+- **自毁护栏**：`delete` / `move` 的目标若命中**工作区根、Bridge 数据目录（`~/.open-bridge`）、盘根**，或它们的祖先目录，一律拒绝（`Refusing to delete "…"`）。`unrestrictedFileAccess` 不变 —— 工作区外的普通路径照旧可读写，真要清空请用 `run_command`。
+- `move` + `overwrite=true` 时，**文件不能落在已存在的目录上**（那会把整个目录换成一个文件）；写成 `destination: "d/<文件名>"` 即可放进目录里。
+- 字符串/数字形式的布尔值（`"false"`、`"0"`、`1`）按声明类型归一：`recursive:"false"` 就是 false，`list:"false"` 就是"开 shell"而不是"列 shell"。
+
 **set_todos** — 存**完整**任务列表（条目需 `id` / `title` / 合法 `status`）。多步工作的正式清单。
 
 **report_progress** — 报**瞬时**进度：写入活动日志并以 MCP `notifications/message` 推给客户端。`phase` 与 `category` 是**封闭词表**，表外取值会被丢掉；自由文本放进 `message`。

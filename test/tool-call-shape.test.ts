@@ -153,6 +153,41 @@ test("the canonical call is described the way a hint would write it", () => {
   assert.deepEqual(normalizeToolCall("wait", { ms: 5 }), { tool: "wait", args: { ms: 5 } });
 });
 
+test("a declared boolean is read in any encoding a client sends", () => {
+  const tools = TOOL_DEFINITIONS as ReadonlyArray<{
+    name: string;
+    inputSchema?: { properties?: Record<string, { type?: unknown }> };
+  }>;
+  let checked = 0;
+  for (const tool of tools) {
+    for (const [key, schema] of Object.entries(tool.inputSchema?.properties ?? {})) {
+      if (schema?.type !== "boolean") continue;
+      checked += 1;
+      assert.equal(normalizeToolCall(tool.name, { [key]: "false" }).args[key], false,
+        `${tool.name}.${key} must read the string "false" as false`);
+      assert.equal(normalizeToolCall(tool.name, { [key]: "true" }).args[key], true,
+        `${tool.name}.${key} must read the string "true" as true`);
+      assert.equal(normalizeToolCall(tool.name, { [key]: 0 }).args[key], false,
+        `${tool.name}.${key} must read 0 as false`);
+    }
+  }
+  assert.ok(checked >= 10, `the catalog declares boolean inputs; saw ${checked}`);
+});
+
+test("a legacy name normalizes its booleans in the canonical vocabulary", () => {
+  assert.deepEqual(normalizeToolCall("delete_file", { path: "a", recursive: "true" }).args,
+    { path: "a", recursive: true, op: "delete" });
+  assert.deepEqual(normalizeToolCall("open_shell", { list: "false" }).args, { list: false });
+  assert.deepEqual(normalizeToolCall("list_shells", {}).args, { list: true });
+});
+
+test("a value that is not a boolean stays untouched for the handler to refuse", () => {
+  const call = normalizeToolCall("file_op", { op: "copy", source: "a", destination: "b", overwrite: "nope" });
+  assert.deepEqual(call.args, { op: "copy", source: "a", destination: "b", overwrite: "nope" });
+  const unknown = normalizeToolCall("no_such_tool", { flag: "false" });
+  assert.deepEqual(unknown.args, { flag: "false" });
+});
+
 test("the core profile points at tools that still exist", () => {
   // The reviewer's everyday set must not name something the merge removed.
   const gone = [...CORE_TOOLS].filter(name => !advertised.has(name));
