@@ -277,7 +277,7 @@ npm run dev -- serve --no-tunnel   # tsx 免编译直接跑
 
 测试分层：`test/*.test.ts` 是单元测试；`test/*-integration.test.mjs` 会**真的启动 `bin/open-bridge.js` 并走 HTTP**（外壳、鉴权闸门、两代 MCP 协议、多实例），其中鉴权闸门与协议不变量两份套件是从扩展时代移植过来的——它们当初是用真实事故换来的断言。
 
-架构：`src/bridge|http|mcp|network|process|shell|workspace` 是零宿主依赖的核心；`src/host/` 是宿主抽象（Host 接口 + 文件版实现）；`src/server/` 是 API/控制台；`src/cli.ts` 是入口。任何宿主（Tauri 壳、甚至回归 VS Code 壳）只需实现一次 Host 接口。
+架构：`src/bridge|http|mcp|network|process|shell|workspace` 是零宿主依赖的核心；`src/host/` 是宿主抽象（Host 接口 + 文件版实现）；`src/server/` 是 API/控制台；`src/cli.ts` 是入口。任何宿主（Tauri 壳、甚至回归 VS Code 壳）只需实现一次 Host 接口。`src/bridge/` 一个文件一个职责：`lifecycle.ts` 只管何时启动/停止与公开域名归谁，`http-listener.ts` 管 socket 与两代 MCP 分发，`tunnel.ts` 管 ngrok 进程与重连，`session-table.ts` / `peer-registry.ts` / `mcp-endpoint.ts` 各管会话表、peer 注册表、协议端点，`route-hooks.ts` 是宿主钩子（依赖单向、无环）。
 
 依赖：运行时只有 `@modelcontextprotocol/server` + `@modelcontextprotocol/node`（2.x，负责 2026-07-28 的按请求协议）与 `@modelcontextprotocol/sdk`（1.x，负责 2025 世代的会话式传输）。**没有任何 Web 框架**——`/mcp`、`/api`、`/console` 全部挂在 `node:http` 上。
 

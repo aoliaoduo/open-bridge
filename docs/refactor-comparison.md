@@ -14,7 +14,7 @@
 1. **「OAuth 作为第二把钥匙与路由令牌并存，不是门槛」——与实现不符，已按实现改正。**
    `authorizeRequest` 在 `oauth.enabled=true` 且个人令牌门禁关闭时直接按 OAuth 判定：`/mcp/<路由令牌>`
    上只带 URL 的请求一律 401。两条路只能选一条，而「放行只带 URL 的请求」会让 OAuth 彻底失去门槛意义
-   ——能走到这个闸门的请求**必然**带着正确的路由令牌（`lifecycle.ts` 先按路径匹配），所以放行等于全放行。
+   ——能走到这个闸门的请求**必然**带着正确的路由令牌（`http-listener.ts` 先按路径匹配；该文件于 2026-09-12 从 `lifecycle.ts` 拆出），所以放行等于全放行。
    结论：**OAuth 是一道独立的门**，打开后 `/mcp` 需要 OAuth 凭据；「URL 即凭据」这个前提本身不成立
    （`bearerFrom` 只读 `Authorization` 头与 `?token=` 查询串，从不读路径）。
 2. **真正的缺陷是另一件事：出示了令牌的客户端被断线。** 个人令牌门禁关着时，OAuth 会抢在令牌校验之前
@@ -66,7 +66,7 @@
 
 ### OAuth 的最终取舍与实现（已完成）
 
-上一版把 OAuth 列为 P0，依据是「ChatGPT 连接器只填 URL、带不了自定义头」。**这个依据对本项目不成立**：`/mcp/<路由令牌>` 的令牌就在路径里（`lifecycle.ts` 注释写明 "the route token IS the credential"），任何只会贴 URL 的客户端**今天就能带凭据接入**。
+上一版把 OAuth 列为 P0，依据是「ChatGPT 连接器只填 URL、带不了自定义头」。**这个依据对本项目不成立**：`/mcp/<路由令牌>` 的令牌就在路径里（`http-listener.ts` 注释写明 "the route token IS the credential"；2026-09-12 从 `lifecycle.ts` 拆出），任何只会贴 URL 的客户端**今天就能带凭据接入**。
 
 于是 OAuth 的真实收益收窄为「**按客户端签发、可单独吊销**」——它**不是可达性门槛**（门槛是协议版本，已由 P1 解决），而是凭据管理的升级。据此把它从 P0 降到 P2，并且**作为第二把钥匙与路由令牌并存**，而不是取代它。（**这句与最终实现不符，见文末「审计修正」**）
 
@@ -441,7 +441,7 @@ taskquay 的 README 有 222 行，其中**多处自我披露未验证**，值得
 | 2 | **TypeScript 版本** | 当前 **5.9.3**；v2 的 `.d.mts` README 提示「TS ≥6.0 不再自动包含 `@types/*`，需显式 `"types": ["node"]`」。我们 `skipLibCheck: true` 可能掩盖问题——**升级后必须跑 `npm run typecheck`** |
 | 3 | zod 版本 | 已确认 `node_modules/zod` 为 **4.6.1**，`server@2` 要求 `zod@^4.2.0` ✅ |
 | 4 | Node 版本 | 我们要求 `>=22`；v2 要求 `>=20` ✅ |
-| 5 | v1→v2 迁移面 | 我们只用了 `Server`、`StreamableHTTPServerTransport`、`ListToolsRequestSchema`、`CallToolRequestSchema`、`EventStore`（`lifecycle.ts` + `state.ts`），面很窄，可控 |
+| 5 | v1→v2 迁移面 | 我们只用了 `Server`、`StreamableHTTPServerTransport`、`ListToolsRequestSchema`、`CallToolRequestSchema`、`EventStore`（`http-listener.ts` / `mcp-endpoint.ts` + `state.ts`，2026-09-12 从 `lifecycle.ts` 拆出），面很窄，可控 |
 | 6 | 测试栈是否仍成立 | 现有集成测试是**裸 JSON-RPC over HTTP**，不依赖 SDK 客户端 —— 换 SDK 后应大体不变，但 `mcp-protocol-integration.test.mjs` 需复核 |
 | 7 | 合规 | 三个参照项目均为 **MIT**（taskquay 另有 `NOTICE` + `THIRD_PARTY_NOTICES.md` 保留上游 `Copyright (c) 2026 Waishnav`）。我方同为 MIT：**移植代码必须保留上游版权声明**，并在 `NOTICE`/`THIRD_PARTY_NOTICES` 中登记来源 |
 | 8 | **窃锁缺陷可复现（§2.6，已复现）** | 临时探针：`holdTimeoutMs: 150` → acquire → 不释放 → 等 400 ms → 第二个调用者抢同一 key。**实测输出 `reclaimedByHoldTimeout: true` + `secondCallerAcquiredSameKey: true` → 缺陷成立**。修复后应双双为 `false` |

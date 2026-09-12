@@ -19,6 +19,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   参数：`source`（必填）、`timeout_ms`（默认 30s，上限 300s）、`max_calls`（默认 60，上限 200）；返回体超过 64 KB 会截断并置 `truncated`。
   子调用沿用 `batch` 的口径（`countUsage: false`），保证 `calls == successes + failures` 依旧成立，同时以 `by_tool` 明细
   保留可见性。单测 `test/script-sandbox.test.ts`。
+### Changed
+- **`src/bridge/lifecycle.ts` 拆成 9 个模块，一个文件一个职责。** 原文件 1677 行里同时住着：HTTP 监听与两代 MCP 协议分发、ngrok 进程与域名归属、会话表与回收、peer 注册表发布、路由令牌、健康报告、发给客户端的 instructions。现在：
+  - `lifecycle.ts`（277 行）只做编排：start/stop 串行队列、隧道归属决策、路由令牌、`webAiPrompt`、健康报告；
+  - `http-listener.ts`（420 行）loopback 监听器：host/令牌路由（含 peer 代理）、预检、鉴权闸门、请求追踪、两代协议分发、会话查找、自检与停机排空；
+  - `tunnel.ts`（502 行）ngrok 子进程、重连策略、公开健康探测、共享域名观察（沿用 peer 隧道或接手空出的域名）；
+  - `mcp-endpoint.ts`（309 行）instructions 文本、每会话 MCP server、2026-07-28 世代 handler；
+  - `session-table.ts`（64 行）会话表、空闲回收、容量与定期清扫；
+  - `peer-registry.ts`（114 行）peer 注册表读写与定期重发布；
+  - `route-hooks.ts`（55 行）宿主钩子（额外路由 + 「监听已就绪」回调）；
+  - `lifecycle-queue.ts`（17 行）转换串行队列；`http/request-body.ts`（59 行）带体积上限的请求体读取。
+
+  **拆法是机械的，不是手抄**：先按「括号深度回到 0」把原文件切成顶层块（注释/字符串/模板插值感知，并断言原文件每一行恰好属于一个块），再由生成器把块分配到模块、**按块里真正出现的标识符重算 import**、给跨模块引用的声明补 `export`。所以 `tsc --noEmit` 与 `eslint` 就是验收条件：漏 import 编不过，多 import 被判 unused（这套流程当场抓出 4 个真实错误：一个从未被 import 的 `ToolCallOutcome`、三个只在注释/字符串/对象键里「出现过」的假引用）。
+
+  **依赖单向、无环**：`lifecycle.ts` → `http-listener.ts` / `tunnel.ts` / `session-table.ts` / `peer-registry.ts` / `mcp-endpoint.ts`；`tunnel.ts` 不 import `lifecycle.ts`，唯一的反向需求（接手空出的共享域名＝重启整个实例）由 `setInstanceRestart()` 注入。独立依赖图检查：`src/` 下 84 个模块、224 条内部 import 边，**没有环**。
+
+  **对外接口一个没动**：全仓库只有 3 个文件 import `lifecycle.ts`（`src/cli.ts`、`src/server/api-router.ts`、`src/server/settings-handler.ts`），签名与行为不变；`cli.ts` 的宿主钩子（`setExtraRouteHandler` / `setLocalServerReadyHook`）改从 `route-hooks.ts` 取，`enqueueLifecycle` 从 `lifecycle-queue.ts` 取。
+
+  验证：`npm run verify` 全绿（355 单测 / 101 集成 / 38 UI，与拆分前完全一致）；声明审计确认原文件 67 个顶层声明**一个不少、没有一个重复**；真机演练 13/13 全绿（临时实例：MCP 握手 + 56 个工具 + 两代协议、`run_command`、`run_script` 调子工具、文件读写往返、`/console/` 与控制台路由、构建新鲜度信号由 false 变 true、停机排空）。
 ### Fixed
 - **死代码与「导出噪音」按证据清了一遍，另有一处注释与代码互相矛盾。** 两个脚本（`ob-repo-sweep.py` 粗筛 → `ob-repo-sweep2.py` 精判：**定义处就是该符号唯一的出现**才算死）扫过 `src`、`ui/src`、`scripts`、`test`、`bin` 共 19,412 行，结论是只有 **1 个真正没人用的导出**：`src/http/auth.ts` 的 `invalidateAuthCache`——它的注释写着「给测试用」，但全仓库没有任何测试引用它；而且它要失效的那个缓存是**按内容（字符串相等）**记忆的，永远不会过期，所以正确做法是删掉它，并把文件头那段与代码互相矛盾的说明改成实情（原文说「每次读都直连存储、解析很便宜」，代码其实做了内容级记忆化）。另有 **33 个内部符号挂着 `export`**（`TOOL_ANNOTATIONS`、`EDITOR_ONLY_TOOLS`、`MAX_AUDIT_LOG_BYTES`、`startInternal`/`stopInternal`、`cancelPendingRestarts`、`oauthDigestEquals`…）：全仓库（含测试与 CLI）只有自己模块在引用——多出来的 `export` 不是 API，而是一张没人认领的空头承诺，**它的实际危害是让「未被使用」这件事无法被工具发现**。去掉后模块边界与事实一致；类型与接口的导出保持不动（那是模块的对外契约，测试也在用）。顺手消掉一处复制粘贴：`lifecycle.ts` 里发给客户端的 `instructions` 长文本被 `createMcp` 与 `createSpecMcp`（两代协议）**逐字节抄了两份**，现在收敛为 `SERVER_INSTRUCTIONS_BASE` + `serverInstructions()` 一处来源，两代协议的话术不会再各自漂移。
 - **窗口标题不再被子进程改乱。** Windows 每个控制台只有**一个**标题字符串，任何挂在该控制台上的进程都能改写它

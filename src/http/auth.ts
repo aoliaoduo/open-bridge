@@ -319,7 +319,7 @@ export async function authorizeRequest(
   // Turning OAuth on must not disconnect a client that already holds a
   // credential: a presented token is verified below with the personal gate on
   // OR off. What OAuth does close is the URL-only door — the route token in
-  // `/mcp/<token>` is a routing key, not a credential (lifecycle.ts matches the
+  // `/mcp/<token>` is a routing key, not a credential (http-listener.ts matches
   // path before this gate runs, and bearerFrom never reads the path), so a
   // request that presents nothing gets the discovery challenge. That header, not
   // the status code, is how an OAuth client learns to authorize. A client that

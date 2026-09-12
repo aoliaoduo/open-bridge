@@ -38,8 +38,9 @@ import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
 import { resetUsageStats } from "../bridge/usage-store.js";
 import { host } from "../host/host.js";
 import {
-  start, rotateRouteToken, enqueueLifecycle, webAiPrompt, runHealthCheck, republishAfterRotate,
+  start, rotateRouteToken, webAiPrompt, runHealthCheck, republishAfterRotate,
 } from "../bridge/lifecycle.js";
+import { enqueueLifecycle } from "../bridge/lifecycle-queue.js";
 
 type AuthStatusView = { tokens: SettingsTokenRow[] };
 
