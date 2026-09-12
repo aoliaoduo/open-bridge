@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type OAuthConsoleView, type SettingsActionResult, type SettingsState } from "../api";
+import { SectionNav } from "./SectionNav";
 
 interface Props {
   settings: SettingsState | null;
@@ -10,6 +11,21 @@ interface Props {
 
 /** Bounds mirror the server's CONFIG_SPEC (src/bridge/settings-model.ts) so a
  *  value the UI accepts never comes back as an inscrutable 400. */
+/**
+ * 设置 card order, mirrored by the section rail under the page header. Ids are
+ * explicit strings rather than titles run through a slugifier: a reworded
+ * heading must not silently break every anchor on the page.
+ */
+const SETTINGS_SECTIONS = [
+  { id: "set-tunnel", label: "隧道" },
+  { id: "set-network", label: "端口" },
+  { id: "set-files", label: "目录" },
+  { id: "set-shell", label: "Shell" },
+  { id: "set-locks", label: "并发" },
+  { id: "set-logs", label: "日志轮转" },
+  { id: "set-oauth", label: "OAuth" },
+];
+
 const NUMBER_BOUNDS = {
   port: { min: 0, max: 65_535, label: "本地端口" },
   publicHealthTimeoutMs: { min: 3_000, max: 120_000, label: "公网健康检查" },
@@ -123,7 +139,9 @@ export function SettingsTab({ settings, act, notify }: Props) {
 
   return (
     <>
-      <div className="card">
+      <SectionNav items={SETTINGS_SECTIONS} />
+
+      <div className="card" id="set-tunnel">
         <h2>隧道（ngrok）</h2>
         <div className="row">
           <span className="label">提供商</span>
@@ -174,7 +192,7 @@ export function SettingsTab({ settings, act, notify }: Props) {
         </div>
       </div>
 
-      <div className="card">
+      <div className="card" id="set-network">
         <h2>网络</h2>
         <div className="row">
           <span className="label">本地端口</span>
@@ -203,7 +221,7 @@ export function SettingsTab({ settings, act, notify }: Props) {
         </div>
       </div>
 
-      <div className="card">
+      <div className="card" id="set-files">
         <h2>文件访问</h2>
         <div className="row">
           <label className="check">
@@ -227,7 +245,7 @@ export function SettingsTab({ settings, act, notify }: Props) {
         )}
       </div>
 
-      <div className="card">
+      <div className="card" id="set-shell">
         <h2>Shell 与工具</h2>
         <div className="row">
           <span className="label">Shell 路径</span>
@@ -254,7 +272,7 @@ export function SettingsTab({ settings, act, notify }: Props) {
         </div>
       </div>
 
-      <div className="card">
+      <div className="card" id="set-locks">
         <h2>并发锁</h2>
         <div className="row">
           <label className="check">
@@ -311,7 +329,7 @@ export function SettingsTab({ settings, act, notify }: Props) {
         )}
       </div>
 
-      <div className="card">
+      <div className="card" id="set-logs">
         <h2>日志</h2>
         <div className="section-note">
           <span className="mono">bridge.log</span> 长到一个上限就轮转成{" "}
@@ -332,7 +350,7 @@ export function SettingsTab({ settings, act, notify }: Props) {
         </div>
       </div>
 
-      <div className="card">
+      <div className="card" id="set-oauth">
         <h2>OAuth 2.1（可选）</h2>
         <div className="row">
           <label className="check">

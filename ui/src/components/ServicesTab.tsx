@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type ServiceView } from "../api";
+import { Chip } from "./Chip";
+import { EmptyState } from "./EmptyState";
 
 /**
  * Saved services (the MCP `save_service` definitions) with start/stop/restart.
@@ -57,10 +59,10 @@ export function ServicesTab() {
       {services === null ? (
         <div className="section-note">读取中…</div>
       ) : services.length === 0 ? (
-        <div className="section-note">
-          还没有保存过服务。服务由 MCP 工具 <span className="mono">save_service</span> 定义（例如一个开发服务器），
+        <EmptyState title="还没有保存过服务。">
+          服务由 MCP 工具 <span className="mono">save_service</span> 定义（例如一个开发服务器），
           保存后就能在这里启停，不必再让代理代劳。
-        </div>
+        </EmptyState>
       ) : (
         <div className="table-wrap">
           <table className="token-table">
@@ -82,15 +84,15 @@ export function ServicesTab() {
                   <td>{service.group || "—"}</td>
                   <td>
                     {service.running
-                      ? <span className="badge on">运行中</span>
-                      : <span className="badge off">已停止</span>}
+                      ? <Chip tone="ok">运行中</Chip>
+                      : <Chip>已停止</Chip>}
                   </td>
                   <td>{service.port ?? "—"}</td>
                   <td className="mono" title={service.command}>
                     {service.command.length > 46 ? `${service.command.slice(0, 46)}…` : service.command}
                   </td>
                   <td className="mono" title={service.log_file ?? ""}>{logName(service.log_file)}</td>
-                  <td>
+                  <td style={{ whiteSpace: "nowrap" }}>
                     <button
                       className="small"
                       disabled={busy === service.name || service.running}

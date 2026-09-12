@@ -6,6 +6,7 @@ import type { SettingsActionResult, SettingsState, SettingsTokenRow } from "../a
 // never restate.
 import { TTL_CHOICES } from "../../../src/bridge/settings-model.js";
 import { ConfirmButton } from "./ConfirmButton";
+import { Chip } from "./Chip";
 
 interface Props {
   settings: SettingsState;
@@ -37,9 +38,9 @@ export function TokensTab({ settings, act }: Props) {
   };
 
   const tokenPill = (token: SettingsTokenRow) => {
-    if (token.revoked) return <span className="pill dead">已吊销</span>;
-    if (token.expired) return <span className="pill dead">已过期</span>;
-    return <span className="pill ok">有效</span>;
+    if (token.revoked) return <Chip tone="err">已吊销</Chip>;
+    if (token.expired) return <Chip tone="err">已过期</Chip>;
+    return <Chip tone="ok">有效</Chip>;
   };
 
   return (
@@ -73,14 +74,15 @@ export function TokensTab({ settings, act }: Props) {
 
       <div className="card">
         <h2>令牌（{settings.usableCount} 有效 · {settings.deadCount} 失效）</h2>
-        <div className="row" style={{ justifyContent: "flex-end" }}>
+        <div className="toolbar">
+          <span className="grow" />
           <button className="small" onClick={() => setShowForm(v => !v)}>
             {showForm ? "收起" : "新建令牌"}
           </button>
         </div>
 
         {showForm && (
-          <div className="row" style={{ border: "1px dashed var(--border)", borderRadius: 8, padding: 12 }}>
+          <div className="row" style={{ border: "1px dashed var(--border-strong)", borderRadius: 8, padding: 12 }}>
             <input type="text" placeholder="标签（如 chatgpt-web）" value={label} onChange={e => setLabel(e.target.value)} />
             <select value={ttl} onChange={e => setTtl(Number(e.target.value))}>
               {TTL_CHOICES.map(choice => (

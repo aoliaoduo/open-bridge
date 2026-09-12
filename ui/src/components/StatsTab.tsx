@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, type ActivityEntry, type UsageStats } from "../api";
 import { ConfirmButton } from "./ConfirmButton";
+import { EmptyState } from "./EmptyState";
+import { Stat } from "./Stat";
 
 function fmtUptime(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -8,6 +10,15 @@ function fmtUptime(ms: number): string {
   if (s < 3600) return `${Math.floor(s / 60)} 分钟`;
   return `${Math.floor(s / 3600)} 小时 ${Math.floor((s % 3600) / 60)} 分`;
 }
+
+/** Activity rows carry raw server states; the list reads in Chinese. */
+const ACTIVITY_LABEL: Record<string, string> = {
+  completed: "完成",
+  error: "失败",
+  running: "进行中",
+  progress: "进行中",
+  warning: "警告",
+};
 
 export function StatsTab() {
   const [usage, setUsage] = useState<UsageStats | null>(null);
@@ -43,27 +54,44 @@ export function StatsTab() {
     ? Object.entries(usage.by_tool).sort((a, b) => b[1] - a[1]).slice(0, 12)
     : [];
   const maxCalls = topTools.length ? topTools[0][1] : 1;
+  const failureRate = usage && usage.calls > 0 ? Math.round((usage.failures / usage.calls) * 100) : 0;
 
   return (
     <>
+      <div className="stats">
+        <Stat label="总调用" value={usage?.calls ?? "…"} hint="本次运行" />
+        <Stat
+          label="成功"
+          value={usage?.successes ?? "…"}
+          hint={usage ? `占比 ${100 - failureRate}%` : "\u00a0"}
+          tone="ok"
+        />
+        <Stat
+          label="失败"
+          value={usage?.failures ?? "…"}
+          hint={usage ? `占比 ${failureRate}%` : "\u00a0"}
+          tone={(usage?.failures ?? 0) > 0 ? "err" : "plain"}
+        />
+        <Stat label="运行时长" value={usage ? fmtUptime(usage.uptime_ms) : "…"} hint={usage ? `自 ${new Date(usage.started_at).toLocaleString()}` : "\u00a0"} />
+      </div>
+
       <div className="card">
-        <h2>调用统计（本次运行 · 自 {usage ? new Date(usage.started_at).toLocaleString() : "…"} 起）</h2>
-        <div className="row" style={{ marginBottom: 10 }}>
+        <h2>调用统计</h2>
+        <div className="row">
           <ConfirmButton label="清空统计" onConfirm={() => void clearStats()} />
           {note && <span className="section-note" style={{ margin: 0 }}>{note}</span>}
         </div>
-        <div className="stat-grid">
-          <div><div className="stat-num">{usage?.calls ?? "…"}</div><div className="cap">总调用</div></div>
-          <div><div className="stat-num" style={{ color: "var(--ok)" }}>{usage?.successes ?? "…"}</div><div className="cap">成功</div></div>
-          <div><div className="stat-num" style={{ color: "var(--err)" }}>{usage?.failures ?? "…"}</div><div className="cap">失败</div></div>
-          <div><div className="stat-num">{usage ? fmtUptime(usage.uptime_ms) : "…"}</div><div className="cap">运行时长</div></div>
+        <div className="section-note">
+          统计自实例启动起累计；<span className="mono">清空统计</span> 只清零计数，不影响正在进行的调用。
         </div>
       </div>
 
       <div className="card">
         <h2>按工具</h2>
         {topTools.length === 0 ? (
-          <div className="section-note">还没有工具调用。</div>
+          <EmptyState title="还没有工具调用。">
+            客户端每调用一次工具，这里就会多一条计数与排行。
+          </EmptyState>
         ) : topTools.map(([name, count]) => (
           <div className="bar-row" key={name}>
             <span className="name">{name}</span>
@@ -76,13 +104,15 @@ export function StatsTab() {
       <div className="card">
         <h2>最近活动</h2>
         {activity.length === 0 ? (
-          <div className="section-note">暂无活动。</div>
+          <EmptyState title="暂无活动。">工具调用、服务启停与配置修改都会出现在这里。</EmptyState>
         ) : activity.slice(0, 40).map((entry, index) => (
-          <div className="row" key={index} style={{ padding: "3px 0", gap: 12 }}>
-            <span className="act-time">{entry.at}</span>
-            <span className={`act-status ${entry.status}`}>{entry.status}</span>
+          <div className="act-row" key={index}>
+            <span className={`act-status ${entry.status}`} title={entry.status}>
+              {ACTIVITY_LABEL[entry.status] ?? entry.status}
+            </span>
             <span className="act-tool">{entry.tool}</span>
             <span className="act-msg">{entry.message}</span>
+            <span className="act-time">{entry.at}</span>
           </div>
         ))}
       </div>

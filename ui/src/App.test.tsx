@@ -529,3 +529,106 @@ test("settings can turn OAuth on, and the card shows who holds a credential", as
   fireEvent.click(toggle);
   expect(mocks.settingsAction).toHaveBeenCalledWith({ command: "setConfig", key: "oauth.enabled", value: false });
 });
+
+describe("App shell: grouped navigation", () => {
+  afterEach(() => {
+    // Collapse and theme are remembered per browser; a test that toggles them
+    // must not decide the state of the next one.
+    window.localStorage.clear();
+    document.documentElement.removeAttribute("data-theme");
+  });
+
+  test("groups the pages instead of listing nine flat tabs", async () => {
+    render(<App />);
+    await screen.findByText("MCP 端点");
+
+    // Group headings, in order. Queried by class rather than by text: the
+    // breadcrumb repeats the group the open page belongs to, so a text query
+    // would match two elements and say nothing about the ordering.
+    const groups = [...document.querySelectorAll(".nav-group-label")].map(node => node.textContent);
+    expect(groups).toEqual(["实例", "运维", "配置"]);
+    // The open page is marked for assistive tech, not only by its tint.
+    expect(tabLink("状态").getAttribute("aria-current")).toBe("page");
+    expect(tabLink("会话").getAttribute("aria-current")).toBeNull();
+  });
+
+  test("collapses to an icon rail and remembers the choice", async () => {
+    render(<App />);
+    await screen.findByText("MCP 端点");
+
+    fireEvent.click(screen.getByRole("button", { name: "收起导航" }));
+
+    expect(document.querySelector(".shell")?.className).toContain("nav-collapsed");
+    // The labels stay in the DOM (visually clipped), so the links keep their
+    // accessible names while the rail is narrow.
+    expect(tabLink("会话")).toBeTruthy();
+    expect(window.localStorage.getItem("openBridge.console.nav.collapsed")).toBe("1");
+
+    fireEvent.click(screen.getByRole("button", { name: "展开导航" }));
+    expect(document.querySelector(".shell")?.className).not.toContain("nav-collapsed");
+    expect(window.localStorage.getItem("openBridge.console.nav.collapsed")).toBe("0");
+  });
+
+  test("cycles the colour theme and writes it on the document", async () => {
+    render(<App />);
+    await screen.findByText("MCP 端点");
+
+    const themeButton = screen.getByRole("button", { name: /主题：/ });
+    // jsdom ships no matchMedia, so 跟随系统 resolves to the light palette.
+    expect(document.documentElement.dataset.theme).toBe("light");
+
+    fireEvent.click(themeButton);
+    expect(screen.getByRole("button", { name: "主题：浅色" })).toBeTruthy();
+    expect(document.documentElement.dataset.theme).toBe("light");
+
+    fireEvent.click(screen.getByRole("button", { name: "主题：浅色" }));
+    expect(screen.getByRole("button", { name: "主题：深色" })).toBeTruthy();
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(window.localStorage.getItem("openBridge.console.theme")).toBe("dark");
+
+    fireEvent.click(screen.getByRole("button", { name: "主题：深色" }));
+    expect(screen.getByRole("button", { name: "主题：跟随系统" })).toBeTruthy();
+  });
+});
+
+describe("App shell: in-page filtering and rails", () => {
+  test("filters the sessions table in place", async () => {
+    // 会话 grew past the point where "which client is this" was answerable by
+    // eye, so the table filters instead of making the operator scan.
+    window.history.pushState({}, "", "/console/sessions");
+    mocks.sessions.mockResolvedValue({
+      sessions: [
+        sessionView(),
+        sessionView({ id: "ffffffffffffffff", client: "claude/1.0", calls: 2, idle_ms: 90_000 }),
+      ],
+      locks: lockSnapshot(),
+    });
+
+    render(<App />);
+    expect(await screen.findByText("cursor/0.42")).toBeTruthy();
+    expect(screen.getByText("claude/1.0")).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("过滤会话"), { target: { value: "claude" } });
+
+    expect(screen.queryByText("cursor/0.42")).toBeNull();
+    expect(screen.getByText("claude/1.0")).toBeTruthy();
+    expect(screen.getByText(/显示 1 \/ 共 2 个会话/)).toBeTruthy();
+  });
+
+  test("the 设置 rail marks the section it jumps to", async () => {
+    window.history.pushState({}, "", "/console/settings");
+
+    render(<App />);
+    await screen.findByText("隧道（ngrok）");
+
+    const item = screen.getByRole("button", { name: "日志轮转" });
+    expect(item.getAttribute("aria-current")).toBeNull();
+
+    fireEvent.click(item);
+
+    expect(item.getAttribute("aria-current")).toBe("true");
+    // The target exists: a rail entry that scrolls nowhere is worse than none.
+    expect(document.getElementById("set-logs")).toBeTruthy();
+    expect(document.getElementById("set-oauth")).toBeTruthy();
+  });
+});

@@ -38,8 +38,9 @@ export function LogsTab() {
   }, [lines]);
 
   return (
-    <>
-      <div className="row" style={{ marginBottom: 10 }}>
+    <div className="card">
+      <h2>日志</h2>
+      <div className="toolbar">
         <button className="small" onClick={() => setPaused(v => !v)}>{paused ? "继续" : "暂停"}</button>
         <button className="small" onClick={() => setLines([])}>清空视图</button>
         <button
@@ -51,13 +52,15 @@ export function LogsTab() {
         >
           复制日志
         </button>
-        <span className="section-note" style={{ margin: 0 }}>
-          {note || "实时日志流（最近 800 行；完整审计在数据目录的 audit.log）"}
-        </span>
+        <span className="grow" />
+        <span className="count">{lines.length} 行</span>
+      </div>
+      <div className="section-note">
+        {note || "实时日志流（最近 800 行；完整审计在数据目录的 audit.log）"}
       </div>
       <div className="log-stream" ref={boxRef}>
         {lines.length === 0 ? <span className="t">等待日志…</span> : lines.map((line, index) => <div key={index}>{line}</div>)}
       </div>
-    </>
+    </div>
   );
 }

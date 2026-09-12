@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, copyText, reloadConsole, type SecretPayload, type SettingsActionResult, type SettingsState } from "./api";
-import { ROUTES, currentRoute, navigate, routePath, type RouteId } from "./routes";
+import { currentRoute, navigate, routeSpec, type RouteId } from "./routes";
+import { applyTheme, initTheme, nextThemePref, storeThemePref, watchSystemTheme, type ThemePref } from "./theme";
+import { Sidebar } from "./components/Sidebar";
+import { Topbar } from "./components/Topbar";
+import { PageHeader } from "./components/PageHeader";
 import { StatusTab } from "./components/StatusTab";
 import { SettingsTab } from "./components/SettingsTab";
 import { TokensTab } from "./components/TokensTab";
@@ -13,16 +17,44 @@ import { HealthPage } from "./components/HealthPage";
 
 interface ToastMsg { text: string; isError: boolean }
 
+/** Sidebar collapse is a per-browser preference, not server state. */
+const NAV_KEY = "openBridge.console.nav.collapsed";
+
+function readCollapsed(): boolean {
+  try {
+    return window.localStorage?.getItem(NAV_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function storeCollapsed(value: boolean): void {
+  try {
+    window.localStorage?.setItem(NAV_KEY, value ? "1" : "0");
+  } catch {
+    // A browser that refuses storage still gets the collapsed state for this
+    // session; only remembering it fails.
+  }
+}
+
+/**
+ * The shell: navigation, header, toast and the one-time-secret dialog.
+ *
+ * The URL is the source of truth for which page is open (see routes.ts): each
+ * page survives a reload, can be bookmarked, and can be opened in a second
+ * window — none of which was possible while the tabs were component state.
+ */
 export function App() {
-  // The URL is the source of truth for which page is open (see routes.ts): each
-  // page survives a reload, can be bookmarked, and can be opened in a second
-  // window — none of which was possible while the tabs were component state.
   const [route, setRoute] = useState<RouteId>(() => currentRoute());
   const [settings, setSettings] = useState<SettingsState | null>(null);
   const [toast, setToast] = useState<ToastMsg | null>(null);
   const [secret, setSecret] = useState<SecretPayload | null>(null);
   // Bumped by 刷新本页 so the open page remounts and re-reads its data.
   const [reloadKey, setReloadKey] = useState(0);
+  const [collapsed, setCollapsed] = useState<boolean>(() => readCollapsed());
+  // Overlay drawer, narrow windows only; harmless (and invisible) on desktop.
+  const [drawer, setDrawer] = useState(false);
+  const [themePref, setThemePref] = useState<ThemePref>(() => initTheme());
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const secretBox = useRef<HTMLDivElement | null>(null);
 
@@ -53,9 +85,16 @@ export function App() {
   // With several consoles open (one per instance/port) the browser tab is the
   // only thing that says which page this one is.
   useEffect(() => {
-    const label = ROUTES.find(item => item.id === route)?.label ?? "控制台";
+    const label = routeSpec(route).label;
     document.title = `${label} · Open Bridge 控制台`;
   }, [route]);
+
+  // 跟随系统 has to keep following: an OS switch at dusk must repaint the console
+  // without a reload. An explicit 浅色/深色 ignores the OS until it is changed.
+  useEffect(() => {
+    if (themePref !== "system") return;
+    return watchSystemTheme(() => { applyTheme("system"); });
+  }, [themePref]);
 
   // The one-time secret is a modal, so it has to behave like one: Escape closes
   // it (there was no keyboard way out at all) and focus moves into it, otherwise
@@ -68,9 +107,33 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [secret]);
 
+  // The drawer is an overlay, so it needs the overlay's keyboard exit.
+  useEffect(() => {
+    if (!drawer) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setDrawer(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawer]);
+
   const open = useCallback((id: RouteId) => {
     navigate(id);
     setRoute(id);
+  }, []);
+
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed(previous => {
+      storeCollapsed(!previous);
+      return !previous;
+    });
+  }, []);
+
+  const cycleTheme = useCallback(() => {
+    setThemePref(previous => {
+      const next = nextThemePref(previous);
+      applyTheme(next);
+      storeThemePref(next);
+      return next;
+    });
   }, []);
 
   /** Run one settings action; applies state/toast/secret/copy side effects. */
@@ -96,75 +159,48 @@ export function App() {
     }
   }, [showToast]);
 
+  const spec = routeSpec(route);
+
   return (
-    <div className="shell">
-      <div className="topbar">
-        <svg className="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M2 17h20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-          <path d="M4 17v-3a8 8 0 0 1 16 0v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-          <path d="M8 17v-2.5M12 17v-4.5M16 17v-2.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-        <h1>Open Bridge 控制台</h1>
-        {settings?.version ? (
-          <span className="mono" style={{ fontSize: 12, opacity: 0.6 }} title="构建版本（package.json）">
-            v{settings.version}
-          </span>
-        ) : null}
-        <span className={`badge ${settings?.running ? "on" : "off"}`}>
-          {settings ? settings.statusText : "连接中…"}
-        </span>
-      </div>
+    <div className={`shell${collapsed ? " nav-collapsed" : ""}`}>
+      <Sidebar
+        route={route}
+        collapsed={collapsed}
+        drawerOpen={drawer}
+        onToggleCollapsed={toggleCollapsed}
+        onOpen={open}
+        onCloseDrawer={() => setDrawer(false)}
+      />
+      {drawer ? <div className="scrim" onClick={() => setDrawer(false)} /> : null}
 
-      <nav className="tabs">
-        {ROUTES.map(item => (
-          <a
-            key={item.id}
-            className={`tab ${route === item.id ? "active" : ""}`}
-            href={routePath(item.id)}
-            title={item.hint}
-            onClick={event => {
-              // Real links: ctrl/cmd-click and "open in new tab" keep working,
-              // because only plain left-clicks are turned into pushState.
-              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-              event.preventDefault();
-              open(item.id);
-            }}
-          >
-            {item.label}
-          </a>
-        ))}
-      </nav>
+      <div className="main">
+        <Topbar
+          route={route}
+          settings={settings}
+          themePref={themePref}
+          onCycleTheme={cycleTheme}
+          onOpen={open}
+          onCopyMcp={() => { void copyText(settings?.mcpUrl ?? ""); showToast("MCP 地址已复制。"); }}
+          onRefresh={() => { setReloadKey(key => key + 1); void refreshSettings(); showToast("已刷新。"); }}
+          onToggleDrawer={() => setDrawer(value => !value)}
+        />
 
-      <div className="quick">
-        <span className="crumb mono" title="当前页面路径">{routePath(route)}</span>
-        <button
-          className="small"
-          disabled={!settings?.mcpUrl}
-          onClick={() => { void copyText(settings?.mcpUrl ?? ""); showToast("MCP 地址已复制。"); }}
-        >
-          复制 MCP 地址
-        </button>
-        <button className="small" onClick={() => open("health")}>一键体检</button>
-        <button
-          className="small"
-          onClick={() => { setReloadKey(key => key + 1); void refreshSettings(); showToast("已刷新。"); }}
-        >
-          刷新本页
-        </button>
-      </div>
-
-      <div className="page" key={`${route}-${reloadKey}`}>
-        {route === "status" && <StatusTab act={act} onRefresh={refreshSettings} notify={showToast} />}
-        {route === "sessions" && <SessionsPage />}
-        {route === "tools" && <ToolsPage />}
-        {route === "health" && <HealthPage act={act} />}
-        {route === "services" && <ServicesTab />}
-        {route === "logs" && <LogsTab />}
-        {route === "stats" && <StatsTab />}
-        {route === "tokens" && (
-          <SettingsStateGuard settings={settings}><TokensTab settings={settings!} act={act} /></SettingsStateGuard>
-        )}
-        {route === "settings" && <SettingsTab settings={settings} act={act} notify={showToast} />}
+        <main className="content">
+          <PageHeader title={spec.label} hint={spec.hint} />
+          <div className="page" key={`${route}-${reloadKey}`}>
+            {route === "status" && <StatusTab act={act} onRefresh={refreshSettings} notify={showToast} />}
+            {route === "sessions" && <SessionsPage />}
+            {route === "tools" && <ToolsPage />}
+            {route === "health" && <HealthPage act={act} />}
+            {route === "services" && <ServicesTab />}
+            {route === "logs" && <LogsTab />}
+            {route === "stats" && <StatsTab />}
+            {route === "tokens" && (
+              <SettingsStateGuard settings={settings}><TokensTab settings={settings!} act={act} /></SettingsStateGuard>
+            )}
+            {route === "settings" && <SettingsTab settings={settings} act={act} notify={showToast} />}
+          </div>
+        </main>
       </div>
 
       {/* Persistent node on purpose: toggling .show on the same element is

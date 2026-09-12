@@ -169,3 +169,46 @@ describe("StatusTab build freshness", () => {
     expect(screen.queryByText(/磁盘上的构建比本实例新/)).toBeNull();
   });
 });
+
+describe("StatusTab KPIs and state labels", () => {
+  test("leads with the four numbers an operator checks first", async () => {
+    statusMock.mockResolvedValue(bridgeStatus({
+      active_sessions: 2,
+      active_commands: 1,
+      tool_count: 56,
+      locks: { held: 1, waiting: 3 },
+    }));
+
+    renderTab();
+
+    expect(await screen.findByText("对外工具")).toBeTruthy();
+    expect(screen.getByText("会话")).toBeTruthy();
+    expect(screen.getByText("活动命令")).toBeTruthy();
+    expect(screen.getByText("56")).toBeTruthy();
+    // The waiting count is the half of the lock line that says whether anything
+    // is actually blocked — it belongs in the hint, not 30px down the page.
+    expect(screen.getByText("等待 3 个")).toBeTruthy();
+  });
+
+  test("translates the run state instead of printing the server enum", async () => {
+    // 实时状态 used to render `running` verbatim in the middle of a Chinese page.
+    statusMock.mockResolvedValue(bridgeStatus({ state: "running" }));
+
+    renderTab();
+
+    expect(await screen.findByText("运行中")).toBeTruthy();
+    expect(screen.queryByText("running")).toBeNull();
+  });
+
+  test("says how exposed the endpoint is next to the URL", async () => {
+    statusMock.mockResolvedValue(bridgeStatus({
+      mcp_url: "https://example.ngrok-free.dev/mcp/live",
+      public_url: "https://example.ngrok-free.dev/mcp/live",
+      exposure: "public-open",
+    }));
+
+    renderTab();
+
+    expect(await screen.findByText("公网可达 · 无鉴权")).toBeTruthy();
+  });
+});

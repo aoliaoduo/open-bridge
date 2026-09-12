@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type HealthCheck, type HealthReport, type SettingsActionResult } from "../api";
 import { ConfirmButton } from "./ConfirmButton";
+import { Chip } from "./Chip";
+import { Stat } from "./Stat";
 
 const LABELS: Record<string, string> = {
   instance: "实例",
@@ -70,6 +72,7 @@ export function HealthPage(
   };
 
   const exposure = EXPOSURE_TEXT[report?.exposure ?? ""];
+  const passed = (report?.checks ?? []).filter(check => levelOf(check) === "ok").length;
   const failed = (report?.checks ?? []).filter(check => levelOf(check) === "fail").length;
   const warned = (report?.checks ?? []).filter(check => levelOf(check) === "warn").length;
   // 异常 is a defect; 提醒 is a risk the operator may be choosing on purpose
@@ -79,6 +82,14 @@ export function HealthPage(
 
   return (
     <>
+      {report && (
+        <div className="stats three">
+          <Stat label="检查通过" value={passed} hint={`共 ${report.checks.length} 项检查`} tone="ok" />
+          <Stat label="需要留意" value={warned} hint={warned > 0 ? "风险，未必是故障" : "没有需要留意的项"} tone={warned > 0 ? "warn" : "plain"} />
+          <Stat label="失败项" value={failed} hint={failed > 0 ? "需要处理" : "没有失败项"} tone={failed > 0 ? "err" : "plain"} />
+        </div>
+      )}
+
       <div className="card">
         <h2>体检结果</h2>
         <div className="row">
@@ -108,9 +119,9 @@ export function HealthPage(
                 {report.checks.map(check => (
                   <tr key={check.name}>
                     <td>
-                      {levelOf(check) === "ok" && <span className="pill ok">通过</span>}
-                      {levelOf(check) === "warn" && <span className="pill warn">提醒</span>}
-                      {levelOf(check) === "fail" && <span className="pill dead">异常</span>}
+                      {levelOf(check) === "ok" && <Chip tone="ok">通过</Chip>}
+                      {levelOf(check) === "warn" && <Chip tone="warn">提醒</Chip>}
+                      {levelOf(check) === "fail" && <Chip tone="err">异常</Chip>}
                     </td>
                     <td>{LABELS[check.name] ?? check.name}</td>
                     <td className="mono wrap">{check.detail}</td>
@@ -127,7 +138,7 @@ export function HealthPage(
         {exposure ? (
           <>
             <div className="row">
-              <span className={`pill ${exposure.tone === "warn" ? "warn" : "ok"}`}>{report?.exposure}</span>
+              <Chip tone={exposure.tone === "warn" ? "warn" : "ok"}>{report?.exposure}</Chip>
               <span>{exposure.text}</span>
             </div>
             {report?.exposure === "public-open" && (

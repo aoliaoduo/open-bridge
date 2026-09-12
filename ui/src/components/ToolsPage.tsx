@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type ToolCatalog } from "../api";
+import { Chip } from "./Chip";
+import { EmptyState } from "./EmptyState";
 
 /**
  * 工具 — what this instance actually advertises over MCP.
@@ -47,47 +49,58 @@ export function ToolsPage() {
         <>
           <div className="row">
             <span className="label">配置档</span>
-            <span className="mono">{catalog.profile}</span>
+            <Chip tone="accent">{catalog.profile}</Chip>
             <span className="section-note" style={{ margin: 0 }}>
               共 {catalog.count} 个工具（核心 {coreCount} 个）
             </span>
           </div>
-          <div className="row">
-            <input
-              type="text"
-              placeholder="按名称或说明过滤…"
-              value={query}
-              onChange={event => setQuery(event.target.value)}
-              aria-label="过滤工具"
-            />
+
+          <div className="toolbar">
+            <label className="search">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="11" cy="11" r="6" stroke="currentColor" strokeWidth="1.7" />
+                <path d="m16 16 4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+              </svg>
+              <input
+                type="text"
+                placeholder="按名称或说明过滤…"
+                value={query}
+                onChange={event => setQuery(event.target.value)}
+                aria-label="过滤工具"
+              />
+            </label>
             <label className="check">
               <input type="checkbox" checked={onlyCore} onChange={event => setOnlyCore(event.target.checked)} />
               只看核心
             </label>
-            <span className="section-note" style={{ margin: 0 }}>显示 {visible.length} 个</span>
+            <span className="grow" />
+            <span className="count">显示 {visible.length} 个</span>
           </div>
 
-          <div className="table-wrap">
-            <table className="token-table">
-              <thead>
-                <tr>
-                  <th>名称</th>
-                  <th>类型</th>
-                  <th>说明</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map(tool => (
-                  <tr key={tool.name}>
-                    <td className="mono">{tool.name}</td>
-                    <td>{tool.core ? <span className="pill ok">核心</span> : <span className="pill">扩展</span>}</td>
-                    <td>{tool.description || "—"}</td>
+          {visible.length === 0 ? (
+            <EmptyState title="没有匹配的工具。">换个关键词，或取消「只看核心」。</EmptyState>
+          ) : (
+            <div className="table-wrap">
+              <table className="token-table">
+                <thead>
+                  <tr>
+                    <th>名称</th>
+                    <th>类型</th>
+                    <th>说明</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {visible.length === 0 && <div className="section-note">没有匹配的工具，换个关键词试试。</div>}
+                </thead>
+                <tbody>
+                  {visible.map(tool => (
+                    <tr key={tool.name}>
+                      <td className="mono">{tool.name}</td>
+                      <td>{tool.core ? <Chip tone="ok">核心</Chip> : <Chip>扩展</Chip>}</td>
+                      <td>{tool.description || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </>
       )}
       {note && <div className="section-note">{note}</div>}

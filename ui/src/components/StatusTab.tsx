@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, copyText, type BridgeStatus, type SettingsActionResult } from "../api";
+import { Chip } from "./Chip";
+import { Stat } from "./Stat";
 
 interface Props {
   act: (action: Record<string, unknown>) => Promise<unknown>;
@@ -7,6 +9,20 @@ interface Props {
   /** Shell toast: the copy buttons confirm themselves through it. */
   notify?: (text: string, isError?: boolean) => void;
 }
+
+/** Server states are code words; the panel speaks Chinese. */
+const STATE_LABEL: Record<string, string> = {
+  running: "运行中",
+  stopped: "已停止",
+  starting: "启动中",
+  stopping: "停止中",
+};
+
+const EXPOSURE: Record<string, { label: string; tone: "ok" | "warn"; note: string }> = {
+  local: { label: "仅本机", tone: "ok", note: "只有这台机器上的客户端能访问。" },
+  "public-open": { label: "公网可达 · 无鉴权", tone: "warn", note: "任何拿到 URL 的人都能访问。" },
+  "public-authed": { label: "公网可达 · 需令牌", tone: "ok", note: "客户端必须带 Bearer 令牌。" },
+};
 
 export function StatusTab({ act, onRefresh, notify }: Props) {
   const [status, setStatus] = useState<BridgeStatus | null>(null);
@@ -34,6 +50,7 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
   // has to guess which of the two fields is populated.
   const url = status?.mcp_url || status?.local_url;
   const isPublic = Boolean(status?.public_url);
+  const exposure = EXPOSURE[status?.exposure ?? ""];
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -60,6 +77,34 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
 
   return (
     <>
+      {/* The four numbers an operator checks first. 实时状态 below used to carry
+          the same values at body-text size among eight other rows. */}
+      <div className="stats">
+        <Stat
+          label="会话"
+          value={status?.active_sessions ?? "…"}
+          hint={`上限 64 · 空闲 60 分钟回收`}
+          tone={(status?.active_sessions ?? 0) > 0 ? "accent" : "plain"}
+        />
+        <Stat
+          label="活动命令"
+          value={status?.active_commands ?? "…"}
+          hint="正在跑的子进程"
+          tone={(status?.active_commands ?? 0) > 0 ? "accent" : "plain"}
+        />
+        <Stat
+          label="对外工具"
+          value={status?.tool_count ?? "…"}
+          hint={`配置档 ${status?.tool_profile ?? "…"}`}
+        />
+        <Stat
+          label="文件锁"
+          value={status?.locks.held ?? 0}
+          hint={`等待 ${status?.locks.waiting ?? 0} 个`}
+          tone={(status?.locks.waiting ?? 0) > 0 ? "warn" : "plain"}
+        />
+      </div>
+
       <div className="card">
         <h2>MCP 端点</h2>
         <div className="row">
@@ -78,6 +123,11 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
           >
             复制接入提示词
           </button>
+        </div>
+        <div className="row tight">
+          <span className="label">暴露面</span>
+          {exposure ? <Chip tone={exposure.tone}>{exposure.label}</Chip> : <Chip>读取中…</Chip>}
+          <span className="section-note" style={{ margin: 0 }}>{exposure?.note ?? ""}</span>
         </div>
         <div className="section-note">
           把这个 URL 填进 MCP 客户端（ChatGPT 连接器、Claude、Cursor 等）。它本身就是凭证，请当作密钥保管。
@@ -133,14 +183,10 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
       <div className="card">
         <h2>实时状态</h2>
         <div className="grid2">
-          <div className="row"><span className="label">状态</span><span>{status?.state ?? "…"}</span></div>
-          <div className="row"><span className="label">会话</span><span>{status?.active_sessions ?? "…"}</span></div>
-          <div className="row"><span className="label">活动命令</span><span>{status?.active_commands ?? "…"}</span></div>
-          <div className="row"><span className="label">工具数</span><span>{status?.tool_count ?? "…"}（{status?.tool_profile ?? "…"}）</span></div>
+          <div className="row"><span className="label">状态</span><span>{STATE_LABEL[status?.state ?? ""] ?? status?.state ?? "…"}</span></div>
+          <div className="row"><span className="label">隧道角色</span><span>{status?.tunnel_role === "owner" ? "本实例持有隧道（owner）" : status?.tunnel_role === "follower" ? "跟随其他实例（follower）" : "未开启隧道"}</span></div>
           <div className="row"><span className="label">Shell</span><span className="mono">{status?.shell ?? "…"}</span></div>
-          <div className="row"><span className="label">版本</span><span className="mono">{status?.version ? `v${status.version}` : "…"}</span></div>
           <div className="row"><span className="label">鉴权</span><span>{status?.auth_enabled ? "已启用（Bearer）" : "关闭（仅凭 URL）"}</span></div>
-          <div className="row"><span className="label">锁</span><span>持有 {status?.locks.held ?? 0} · 等待 {status?.locks.waiting ?? 0}</span></div>
         </div>
       </div>
     </>
