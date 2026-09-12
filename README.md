@@ -138,7 +138,7 @@ open-bridge serve                     # 另一个实例，服务「项目B」，
 | `open-bridge serve [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]` | 前台启动 Bridge（工作区 = 当前目录） |
 | `open-bridge instances` | 列出共用同一数据目录的所有实例（别名 `list`） |
 | `open-bridge status` | 状态、工作区、MCP URL、暴露情况 |
-| `open-bridge health` | 体检：监听、工作区、隧道角色、暴露等级、工具数，并真连一次公网 |
+| `open-bridge health` | 体检：监听、工作区、隧道角色、暴露等级、工具数、构建新旧，并真连一次公网 |
 | `open-bridge url` | 打印当前 MCP URL |
 | `open-bridge prompt` | 打印「快速连接这个 MCP」接入提示词，直接粘给 AI 客户端 |
 | `open-bridge logs [--tail N] [--follow] [--clear]` | 读 / 跟踪 / 清空日志 |
@@ -158,10 +158,10 @@ open-bridge serve                     # 另一个实例，服务「项目B」，
 
 | 页面 | 路径 | 做什么 |
 | --- | --- | --- |
-| 状态 | `/console/status` | 工作区、MCP URL 复制、启动/停止/轮换端点、实时会话与锁；公网可达且未开鉴权时显示显式告警 |
+| 状态 | `/console/status` | 工作区、MCP URL 复制、启动/停止/轮换端点、实时会话与锁；公网可达且未开鉴权时显示显式告警；**重建过 `dist/` 却没重启**时提示「重启后生效」 |
 | 会话 | `/console/sessions` | 谁在连我：客户端名（来自 MCP 握手）、空闲时长、进行中的请求、待办数，可单独**断开**；下面是正在持有的文件锁与等待者 |
 | 工具 | `/console/tools` | 这台实例真正对外公布的 `tools/list`：按配置档与宿主能力过滤后的清单，核心工具高亮，可搜索 |
-| 体检 | `/console/health` | 逐项检查实例/工作区/工具/隧道/暴露面，并真的穿过隧道请求一次 `/healthz` 验证公网连通；公网可达且未开鉴权时，这里能**一键开启第二道锁**（签发令牌 + 打开 Bearer，一步完成） |
+| 体检 | `/console/health` | 逐项检查实例/工作区/工具/构建/隧道/暴露面，并真的穿过隧道请求一次 `/healthz` 验证公网连通；公网可达且未开鉴权时，这里能**一键开启第二道锁**（签发令牌 + 打开 Bearer，一步完成） |
 | 服务 | `/console/services` | 保存/启动/停止/重启本机服务定义 |
 | 日志 | `/console/logs` | 实时日志流（SSE），完整审计在数据目录 `audit.log` |
 | 统计 | `/console/stats` | 调用计数、按工具分布、最近活动 |

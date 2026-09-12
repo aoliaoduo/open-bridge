@@ -216,7 +216,7 @@ function serviceLogPathFor(service: ServiceDefinition, serviceName: string): str
  * followed by a manual start during the restart-delay window would resurrect
  * the old id and run two instances side by side.
  */
-export function cancelPendingRestarts(commandText: string): void {
+function cancelPendingRestarts(commandText: string): void {
   for (const command of state.commands.values()) {
     if (
       command.done &&

@@ -56,7 +56,7 @@ interface ShellSession {
   scannedOffset: number;
 }
 
-export const shellSessions = new Map<string, ShellSession>();
+const shellSessions = new Map<string, ShellSession>();
 
 /**
  * Per-session FIFO so two concurrent send_to_shell calls on the same shell can

@@ -14,10 +14,14 @@
  * module-level cache would freeze another process's mint/revoke out of this
  * one forever — a CLI-minted token answered 401 and a CLI-revoked token kept
  * authenticating until restart. Reads therefore go to the store every time
- * (the store already reloads on mtime change; parsing a small JSON array per
- * request is cheap), and writes are serialized per process and MERGED with the
- * rows on disk: rows with ids we have never seen are kept, so a token minted
- * by another instance milliseconds before our write cannot be deleted by it.
+ * (the store already reloads on mtime change), and the parse of what comes
+ * back is memoized by *content*: the cache is keyed on the stored text
+ * itself, so an unchanged store costs nothing while any write — ours or
+ * another process's — is picked up on the very next read. There is therefore
+ * no invalidation entry point, because there is no state that can go stale.
+ * Writes are serialized per process and MERGED with the rows on disk: rows
+ * with ids we have never seen are kept, so a token minted by another
+ * instance milliseconds before our write cannot be deleted by it.
  */
 
 import { host } from "../host/host.js";
@@ -107,15 +111,6 @@ async function readRecordsIndexed(): Promise<{ records: AuthTokenRecord[]; index
   const index = buildDigestIndex(records);
   parsedCache = { raw: raw ?? "", records, index };
   return { records, index };
-}
-
-/**
- * Drop the parse cache. Writes go through `mutateRecords`, which re-reads from
- * disk, so this exists for tests and for any caller that needs to prove a fresh
- * parse rather than depend on string identity.
- */
-export function invalidateAuthCache(): void {
-  parsedCache = undefined;
 }
 
 /**

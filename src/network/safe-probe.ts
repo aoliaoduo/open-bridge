@@ -13,11 +13,11 @@ import { createConnection, isIP } from "node:net";
  */
 export type ProbeNetworkScope = "loopback" | "public" | "loopback-and-public" | "any";
 
-export const DEFAULT_PROBE_NETWORK_SCOPE: ProbeNetworkScope = "loopback-and-public";
-export const DEFAULT_HTTP_PROBE_TIMEOUT_MS = 5_000;
-export const DEFAULT_TCP_PROBE_TIMEOUT_MS = 2_000;
+const DEFAULT_PROBE_NETWORK_SCOPE: ProbeNetworkScope = "loopback-and-public";
+const DEFAULT_HTTP_PROBE_TIMEOUT_MS = 5_000;
+const DEFAULT_TCP_PROBE_TIMEOUT_MS = 2_000;
 /** Redirects are opt-in: a 3xx response is a useful health result on its own. */
-export const DEFAULT_MAX_REDIRECTS = 0;
+const DEFAULT_MAX_REDIRECTS = 0;
 
 export type NetworkAddressKind =
   | "loopback"
@@ -161,7 +161,7 @@ export function parseHttpProbeUrl(input: string): URL {
 }
 
 /** Validate and canonicalize a standalone TCP hostname. */
-export function normalizeProbeHost(input: string): string {
+function normalizeProbeHost(input: string): string {
   let host = stripIpv6Brackets(input.trim());
   // A trailing dot is the fully-qualified DNS spelling.  Treat it as the
   // equivalent canonical hostname instead of needlessly rejecting it.

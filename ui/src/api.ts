@@ -48,6 +48,11 @@ export interface BridgeStatus {
   tool_count: number;
   auth_enabled: boolean;
   locks: { held: number; waiting: number };
+  /**
+   * True when `dist/` was rebuilt after this instance started, so the new code
+   * is not live yet. Absent when there is no build to compare (`npm run dev`).
+   */
+  build_stale?: boolean;
 }
 
 export interface ActivityEntry {

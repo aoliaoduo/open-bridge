@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
+- **重建了 `dist/` 却没重启，现在实例自己会说。** 重新编译对**已经在跑**的进程毫无影响：Node 早就把旧模块加载进内存了，新工具、新修复都要**重启**才生效。这件事此前在**任何地方都看不见**——实例照旧公布上一次的工具清单，唯一的发现方式是数一遍工具再和源码对照（本次开发就真的被绊过一次：运行中的实例公布 55 个工具，仓库里已经是 56 个，没有任何提示解释差在哪）。现在实例在**启动那一刻**记下自己加载的构建时间（`dist` 下所有 `.js` 里最新的 mtime），之后对比磁盘：`get_bridge_status` 多一个 `build_stale`，状态页在「运行控制」里显示橙色提醒（磁盘上的构建比本实例新…停止再启动），体检页多一行「构建」，`open-bridge health` 多一行 `[!!] build:`。只在**编译版**实例上有信号：`npm run dev`（tsx 跑源码）没有构建产物可比，返回 `undefined` 而不是假装「最新」——「没有信号」和「是最新的」是两句不同的话。磁盘侧按 5 秒 TTL 记忆，状态端点被控制台每 2 秒轮询也不会每次去走目录。`src/bridge/build-staleness.ts`，单测 `test/build-staleness.test.ts`。
 - **`run_script`：把多个工具调用写成一个脚本（Code Mode）。** 借鉴自 Chat-Plus 的 Code Mode：与其一次往返调一个工具，
   不如让调用方写一小段 JavaScript，用 `await tools.<工具名>(args)` 组合调用（循环、条件、`Promise.all`、过滤），
   **只 `return` 它真正需要的结果**。两件事同时变好：往返次数塌缩；更重要的是——**大块工具输出根本不必进入模型的上下文**，
@@ -19,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   子调用沿用 `batch` 的口径（`countUsage: false`），保证 `calls == successes + failures` 依旧成立，同时以 `by_tool` 明细
   保留可见性。单测 `test/script-sandbox.test.ts`。
 ### Fixed
+- **死代码与「导出噪音」按证据清了一遍，另有一处注释与代码互相矛盾。** 两个脚本（`ob-repo-sweep.py` 粗筛 → `ob-repo-sweep2.py` 精判：**定义处就是该符号唯一的出现**才算死）扫过 `src`、`ui/src`、`scripts`、`test`、`bin` 共 19,412 行，结论是只有 **1 个真正没人用的导出**：`src/http/auth.ts` 的 `invalidateAuthCache`——它的注释写着「给测试用」，但全仓库没有任何测试引用它；而且它要失效的那个缓存是**按内容（字符串相等）**记忆的，永远不会过期，所以正确做法是删掉它，并把文件头那段与代码互相矛盾的说明改成实情（原文说「每次读都直连存储、解析很便宜」，代码其实做了内容级记忆化）。另有 **33 个内部符号挂着 `export`**（`TOOL_ANNOTATIONS`、`EDITOR_ONLY_TOOLS`、`MAX_AUDIT_LOG_BYTES`、`startInternal`/`stopInternal`、`cancelPendingRestarts`、`oauthDigestEquals`…）：全仓库（含测试与 CLI）只有自己模块在引用——多出来的 `export` 不是 API，而是一张没人认领的空头承诺，**它的实际危害是让「未被使用」这件事无法被工具发现**。去掉后模块边界与事实一致；类型与接口的导出保持不动（那是模块的对外契约，测试也在用）。顺手消掉一处复制粘贴：`lifecycle.ts` 里发给客户端的 `instructions` 长文本被 `createMcp` 与 `createSpecMcp`（两代协议）**逐字节抄了两份**，现在收敛为 `SERVER_INSTRUCTIONS_BASE` + `serverInstructions()` 一处来源，两代协议的话术不会再各自漂移。
 - **窗口标题不再被子进程改乱。** Windows 每个控制台只有**一个**标题字符串，任何挂在该控制台上的进程都能改写它
   （`SetConsoleTitle`），而且**没有恢复机制**。因为我们的子进程是**有意共享控制台**的（关窗要连带停掉隧道与服务，
   见 `child-console.ts`），我们跑的命令也会往标题里写字：**自己拥有控制台**的 `cmd.exe`（双击 .cmd/.bat、`cmd /k` 新窗口）会把镜像路径写成窗口名：

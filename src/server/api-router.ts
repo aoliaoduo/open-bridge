@@ -26,6 +26,7 @@ import { getBridgeStatus, getUsageStats } from "../bridge/meta-tools.js";
 import { buildSettingsState, handleSettingsAction } from "./settings-handler.js";
 import { controlService, listServiceViews } from "../bridge/service-tools.js";
 import { start, stop, webAiPrompt } from "../bridge/lifecycle.js";
+import { buildStaleness } from "../bridge/build-staleness.js";
 import { nodeHost } from "../host/node-host.js";
 import { redactSensitiveText } from "../bridge/state.js";
 import { lockSnapshot } from "../bridge/resource-locks.js";
@@ -406,6 +407,14 @@ export async function apiRouteHandler(
         check("workspace", "ok", String(status.workspace_root ?? ""));
         check("tools", Number(status.tool_count ?? 0) > 0 ? "ok" : "fail",
           `${String(status.tool_count ?? 0)} 个（${String(status.tool_profile ?? "?")}）`);
+        // A rebuild does not touch a running process. Reporting it here keeps a
+        // green health page from hiding "you are running the previous build".
+        const build = buildStaleness();
+        if (build) {
+          check("build", build.stale ? "warn" : "ok", build.stale
+            ? "磁盘上的 dist 比运行中的实例新：重启后生效（open-bridge stop && open-bridge serve）"
+            : "与运行中的实例一致");
+        }
         const publicUrl = typeof status.public_url === "string" ? status.public_url : "";
         check("tunnel", "ok", publicUrl
           ? `${String(status.tunnel_role ?? "?")} — ${publicUrl}`

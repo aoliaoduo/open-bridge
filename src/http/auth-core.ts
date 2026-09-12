@@ -20,17 +20,17 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 export const AUTH_TOKEN_PREFIX = "ob_";
 
 /** Consecutive failures from one remote key before it is locked out. */
-export const AUTH_MAX_FAILURES = 5;
+const AUTH_MAX_FAILURES = 5;
 /** How long a remote key stays locked out once it trips the limit. */
-export const AUTH_LOCKOUT_MS = 5 * 60_000;
+const AUTH_LOCKOUT_MS = 5 * 60_000;
 /** Failure counter resets when the previous failure is older than this. */
-export const AUTH_FAILURE_WINDOW_MS = 5 * 60_000;
+const AUTH_FAILURE_WINDOW_MS = 5 * 60_000;
 /**
  * Hard cap on tracked remote keys. Only reached when the client can influence
  * its own remote key (a spoofed x-forwarded-for), so the map must not be
  * unbounded even though legitimate traffic never fills it.
  */
-export const AUTH_MAX_TRACKED_KEYS = 1_000;
+const AUTH_MAX_TRACKED_KEYS = 1_000;
 
 export interface AuthTokenRecord {
   /** Short public identifier used by revoke/rotate and the audit log. */

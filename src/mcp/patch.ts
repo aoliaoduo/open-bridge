@@ -39,7 +39,7 @@ export function resolvePatchSource(patch: unknown, patchFile: unknown): PatchSou
 }
 
 /** Strip diff a//b/ prefixes and reject invalid target paths. */
-export function patchFilePath(header: string): string {
+function patchFilePath(header: string): string {
   const clean = header.trim().replace(/^a[\\/]/, "").replace(/^b[\\/]/, "");
   if (!clean || clean === "/dev/null") throw new Error("Patch contains an invalid file path.");
   return clean;

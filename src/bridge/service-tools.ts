@@ -17,7 +17,7 @@ import type { JsonArgs } from "./json-args.js";
 
 type Args = JsonArgs;
 
-export function probeScope(value: unknown): ProbeNetworkScope {
+function probeScope(value: unknown): ProbeNetworkScope {
   const allowed = new Set<string>(["any", "loopback", "public", "loopback-and-public"]);
   return typeof value === "string" && allowed.has(value) ? (value as ProbeNetworkScope) : "any";
 }

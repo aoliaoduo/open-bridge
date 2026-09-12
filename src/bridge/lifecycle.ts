@@ -270,6 +270,20 @@ async function waitForTunnelReady(healthUrl: string, child: ChildProcessWithoutN
  * root layer only): injected into server instructions so every session sees
  * the project's conventions. Bounded; absent files are simply skipped.
  */
+/**
+ * The instructions every protocol era hands to a client: the base text, the
+ * workspace's own instructions, and whatever skills were discovered. Held as
+ * ONE literal because `createMcp` (stateful era) and `createSpecMcp`
+ * (2026-07-28 era) both hand their client the same guidance — two copies of a
+ * long prompt is how the two eras drift apart without anyone noticing.
+ */
+function serverInstructions(): string {
+  return SERVER_INSTRUCTIONS_BASE + projectInstructionSuffix() + skillsSuffix();
+}
+
+const SERVER_INSTRUCTIONS_BASE =
+  "You are connected to a local project workspace through the standalone Open Bridge. Relative paths, default command cwd, and project services always use that workspace. Other directories can be accessed only with explicit absolute paths; never let them change the workspace anchor. When starting work on an unfamiliar project, call workspace_brief once for orientation instead of exploring blindly. Use file tools for project management, run_command/start_process for commands, and wait_process/interact_with_process/restart_process/set_process_policy for supervised long-running services. Use check_port/check_http for readiness and save_service/list_services/start_service/stop_service/restart_service/delete_service/start_all_services/stop_all_services/service_status for reusable project orchestration. Use set_todos for multi-step work and report_progress for transient updates. Use batch to combine multiple tool calls in a single roundtrip. When a task needs several related calls or a tool result is large, prefer run_script: compose the calls in one JavaScript program and return only what you need. After finishing a batch of related edits, call review_changes so the user can see the full cumulative change set.";
+
 function projectInstructionSuffix(): string {
   const parts: string[] = [];
   for (const name of ["AGENTS.md", "CLAUDE.md"]) {
@@ -304,10 +318,7 @@ function createMcp(session: SessionState): Server {
     { name: "open-bridge", version: serverVersion },
     {
       capabilities: { tools: {}, logging: {} },
-      instructions:
-        "You are connected to a local project workspace through the standalone Open Bridge. Relative paths, default command cwd, and project services always use that workspace. Other directories can be accessed only with explicit absolute paths; never let them change the workspace anchor. When starting work on an unfamiliar project, call workspace_brief once for orientation instead of exploring blindly. Use file tools for project management, run_command/start_process for commands, and wait_process/interact_with_process/restart_process/set_process_policy for supervised long-running services. Use check_port/check_http for readiness and save_service/list_services/start_service/stop_service/restart_service/delete_service/start_all_services/stop_all_services/service_status for reusable project orchestration. Use set_todos for multi-step work and report_progress for transient updates. Use batch to combine multiple tool calls in a single roundtrip. When a task needs several related calls or a tool result is large, prefer run_script: compose the calls in one JavaScript program and return only what you need. After finishing a batch of related edits, call review_changes so the user can see the full cumulative change set."
-        + projectInstructionSuffix()
-        + skillsSuffix(),
+      instructions: serverInstructions(),
     },
   );
   mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: listToolDefinitions() }));
@@ -465,10 +476,7 @@ function createSpecMcp(): InstanceType<typeof SpecServer> {
     { name: "open-bridge", version: host().version() },
     {
       capabilities: { tools: {}, logging: {} },
-      instructions:
-        "You are connected to a local project workspace through the standalone Open Bridge. Relative paths, default command cwd, and project services always use that workspace. Other directories can be accessed only with explicit absolute paths; never let them change the workspace anchor. When starting work on an unfamiliar project, call workspace_brief once for orientation instead of exploring blindly. Use file tools for project management, run_command/start_process for commands, and wait_process/interact_with_process/restart_process/set_process_policy for supervised long-running services. Use check_port/check_http for readiness and save_service/list_services/start_service/stop_service/restart_service/delete_service/start_all_services/stop_all_services/service_status for reusable project orchestration. Use set_todos for multi-step work and report_progress for transient updates. Use batch to combine multiple tool calls in a single roundtrip. When a task needs several related calls or a tool result is large, prefer run_script: compose the calls in one JavaScript program and return only what you need. After finishing a batch of related edits, call review_changes so the user can see the full cumulative change set."
-        + projectInstructionSuffix()
-        + skillsSuffix(),
+      instructions: serverInstructions(),
     },
   );
   // `TOOL_DEFINITIONS` is `as const`, so its schemas carry `readonly` tuples
@@ -890,7 +898,7 @@ async function stopLocalServer(): Promise<void> {
   });
 }
 
-export async function startInternal(): Promise<void> {
+async function startInternal(): Promise<void> {
   if (state.server) {
     // The local server is up: Start is normally a no-op. But after the tunnel
     // gave up (a deterministic spawn failure stops the reconnect chain for
@@ -1481,7 +1489,7 @@ function spawnTunnel(domain: string, generation: number): ChildProcessWithoutNul
   return child;
 }
 
-export async function stopInternal(notify = true): Promise<void> {
+async function stopInternal(notify = true): Promise<void> {
   state.stopping = true;
   state.tunnelGeneration += 1; // invalidate any pending in-place reconnect timers
   stopPublicWatch();
@@ -1556,7 +1564,7 @@ export async function stop(notify = true): Promise<void> {
 
 // --- Route token management (persisted in the host secret store, per project) ---
 
-export async function loadRouteToken(): Promise<void> {
+async function loadRouteToken(): Promise<void> {
   const key = `${ROUTE_TOKEN_KEY}.${workspaceStateSuffix()}`;
   state.routeToken = (await host().secrets.get(key)) ?? "";
   if (!state.routeToken) {

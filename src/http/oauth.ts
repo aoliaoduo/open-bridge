@@ -103,7 +103,7 @@ function allowedRedirectHosts(): readonly string[] {
  * down while the server runs and a stale issuer would make discovery point at a
  * host that no longer answers.
  */
-export function oauthIssuer(): string {
+function oauthIssuer(): string {
   const publicUrl = state.tunnelUrl;
   if (publicUrl) {
     try {
@@ -116,7 +116,7 @@ export function oauthIssuer(): string {
 }
 
 /** The `resource` value this Bridge expects a token to be bound to. */
-export function oauthResource(): string {
+function oauthResource(): string {
   return `${oauthIssuer()}/mcp/${state.routeToken}`;
 }
 

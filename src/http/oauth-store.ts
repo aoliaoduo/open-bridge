@@ -38,7 +38,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { host } from "../host/host.js";
 
 /** Secret store key holding the OAuth document. */
-export const OAUTH_STORE_KEY = "openBridge.oauth";
+const OAUTH_STORE_KEY = "openBridge.oauth";
 
 /** Registered clients, keyed by client_id. */
 export interface OAuthClient {
@@ -103,7 +103,7 @@ export function generateOAuthSecret(prefix: string): string {
  * A length mismatch is a plain false: `timingSafeEqual` throws on differing
  * lengths, and the length of a sha256 hex digest is not a secret.
  */
-export function oauthDigestEquals(a: string, b: string): boolean {
+function oauthDigestEquals(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);

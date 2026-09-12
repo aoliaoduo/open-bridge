@@ -54,7 +54,7 @@ export interface SkillDiscovery {
 
 export const SKILL_FILE = "SKILL.md";
 export const MAX_SKILLS = 50;
-export const MAX_NAME_CHARS = 80;
+const MAX_NAME_CHARS = 80;
 export const MAX_DESCRIPTION_CHARS = 200;
 /** Only the head of a SKILL.md is parsed for front matter; the body is not read here. */
 const MAX_PARSE_BYTES = 64 * 1024;

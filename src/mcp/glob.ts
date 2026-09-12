@@ -9,7 +9,7 @@ function escapeForRegExp(source: string): string {
 }
 
 /** Translate a glob pattern into a RegExp source string (no anchors). */
-export function globToRegExpSource(pattern: string): string {
+function globToRegExpSource(pattern: string): string {
   const p = pattern.replace(/\\/g, "/");
   let out = "";
   for (let i = 0; i < p.length; i++) {

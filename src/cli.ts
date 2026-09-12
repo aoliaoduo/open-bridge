@@ -755,6 +755,13 @@ async function cmdHealth(parsed: ParsedArgs): Promise<void> {
   check("exposure", exposure !== "public-open", exposure === "public-open"
     ? "公网可达且未开启鉴权：拿到 URL 的人都能读写文件、执行命令（令牌页可开启 Bearer）"
     : exposure);
+  // Only a compiled instance can answer this; under `npm run dev` the field is
+  // absent and the line is skipped rather than guessed.
+  if (status.build_stale === true) {
+    check("build", false, "磁盘上的 dist 比运行中的实例新：重启后生效（open-bridge stop && open-bridge serve）");
+  } else if (status.build_stale === false) {
+    check("build", true, "与运行中的实例一致");
+  }
   console.log(`open-bridge health (v${VERSION})`);
   console.log(lines.join("\n"));
 }

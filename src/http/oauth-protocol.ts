@@ -44,7 +44,7 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 export const SUPPORTED_GRANT_TYPES: readonly string[] = Object.freeze(["authorization_code", "refresh_token"]);
 
 /** Only the authorization-code flow. */
-export const SUPPORTED_RESPONSE_TYPES: readonly string[] = Object.freeze(["code"]);
+const SUPPORTED_RESPONSE_TYPES: readonly string[] = Object.freeze(["code"]);
 
 /**
  * A redirect URI is acceptable when its host is explicitly allowed.

@@ -1,7 +1,7 @@
 import { host } from "../host/host.js";
 import { state, type UsageStats } from "./state.js";
 
-export const USAGE_STATE_PREFIX = "openBridge.usage.";
+const USAGE_STATE_PREFIX = "openBridge.usage.";
 
 /** Persisted shape of the cumulative tool-call counters, per workspace. */
 export interface UsageSnapshot {
@@ -15,7 +15,7 @@ export interface UsageSnapshot {
 
 let usagePersistTail: Promise<void> = Promise.resolve();
 
-export function usageStateKey(): string {
+function usageStateKey(): string {
   return `${USAGE_STATE_PREFIX}${state.activeWorkspaceRoot || "unbound"}`;
 }
 

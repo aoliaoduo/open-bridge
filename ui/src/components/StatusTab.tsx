@@ -98,6 +98,11 @@ export function StatusTab({ act, onRefresh }: Props) {
 
       <div className="card">
         <h2>运行控制</h2>
+        {status?.build_stale && (
+          <div className="section-note" style={{ color: "#b45309" }}>
+            ⚠️ 磁盘上的构建比本实例新：现在跑的仍是启动时加载的代码，新工具与修复要重启后才生效（点下面的「停止」再「启动」）。
+          </div>
+        )}
         <div className="row">
           <button className="primary" disabled={busy || running} onClick={() => void run(() => act({ command: "start" }))}>
             启动

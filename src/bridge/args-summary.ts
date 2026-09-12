@@ -18,7 +18,7 @@
  */
 
 export const ARGS_SUMMARY_MAX_CHARS = 300;
-export const MAX_STRING_VALUE_CHARS = 80;
+const MAX_STRING_VALUE_CHARS = 80;
 
 const BIG_VALUE_KEYS = new Set(["content", "content_base64", "patch", "new_text", "old_text"]);
 

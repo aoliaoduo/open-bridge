@@ -39,7 +39,7 @@ const NESTED_BATCH_ERROR = "nested batch not allowed (a batch call cannot contai
  * against 20^N fan-out); executor errors are captured as {ok:false, error}
  * and never thrown.
  */
-export function runOneBatchCall(call: BatchCall, exec: BatchExecutor): Promise<BatchResultItem> {
+function runOneBatchCall(call: BatchCall, exec: BatchExecutor): Promise<BatchResultItem> {
   const tool = call.tool;
   if (tool === "batch") {
     return Promise.resolve({ tool, ok: false, error: NESTED_BATCH_ERROR });

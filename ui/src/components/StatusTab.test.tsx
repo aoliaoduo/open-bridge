@@ -115,3 +115,24 @@ describe("StatusTab endpoint card", () => {
     expect(act).toHaveBeenCalledWith({ command: "copyPrompt" });
   });
 });
+
+describe("StatusTab build freshness", () => {
+  test("warns that a rebuilt dist needs a restart", async () => {
+    statusMock.mockResolvedValue(bridgeStatus({ build_stale: true }));
+
+    renderTab();
+
+    expect(await screen.findByText(/磁盘上的构建比本实例新/)).toBeTruthy();
+  });
+
+  test("stays quiet when the running build is the one on disk", async () => {
+    statusMock.mockResolvedValue(bridgeStatus({ build_stale: false }));
+
+    // Wait for the polled status to land before asserting on its absence,
+    // otherwise this would pass on the initial "no status yet" render.
+    renderTab();
+    await screen.findByText("http://127.0.0.1:18080/mcp/local-token");
+
+    expect(screen.queryByText(/磁盘上的构建比本实例新/)).toBeNull();
+  });
+});

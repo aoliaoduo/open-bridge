@@ -79,7 +79,7 @@ const PROCESS_CONTROL: ToolAnnotations = { readOnlyHint: false, idempotentHint: 
  * Every advertised tool's hints. Exhaustive by construction: a tool missing from
  * this table is a bug the test suite catches, not a silently unannotated entry.
  */
-export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotations>> = {
+const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotations>> = {
   // ---- Workspace reading -------------------------------------------------
   list_directory: READ,
   find_files: READ,

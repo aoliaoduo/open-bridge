@@ -21,7 +21,7 @@ import { CORE_TOOLS, TOOL_DEFINITIONS } from "../mcp/tool-definitions.js";
 import { annotationsFor } from "./tool-annotations.js";
 
 /** Editor-integration tools that only exist when the host ships a language server. */
-export const EDITOR_ONLY_TOOLS = new Set(["get_diagnostics", "lsp"]);
+const EDITOR_ONLY_TOOLS = new Set(["get_diagnostics", "lsp"]);
 
 /**
  * One tool as advertised: the definition verbatim, plus its behaviour hints when

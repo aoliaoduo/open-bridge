@@ -18,6 +18,7 @@ import { searchActivityLog } from "../mcp/activity-log.js";
 import { shellSpec } from "./processes.js";
 import { execFileSync } from "node:child_process";
 import { discoverWorkspaceSkills } from "./skills.js";
+import { buildStaleness } from "./build-staleness.js";
 
 type Args = JsonArgs;
 
@@ -56,6 +57,14 @@ export function getBridgeStatus(): Record<string, unknown> {
     tool_count: listToolDefinitions().length,
     /** The same string `open-bridge --version` prints: one version everywhere. */
     version: host().version(),
+    /**
+     * True when `dist/` on disk was rebuilt after this process loaded its
+     * modules: the running instance is still executing the old code, so new
+     * tools and fixes are not live yet. Absent under `npm run dev`, where
+     * there is no build to compare with — absent, not false, because "no
+     * signal" and "up to date" are different statements.
+     */
+    build_stale: buildStaleness()?.stale,
     auth_enabled: host().config.get<boolean>("auth.enabled", false) === true,
     /**
      * What guards this instance right now. "public-open" means anyone holding

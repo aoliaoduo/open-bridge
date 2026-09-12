@@ -29,7 +29,7 @@ export function bridgeTokenFromPath(pathname: string): { kind: "mcp" | "healthz"
 }
 
 /** Signal 0 performs the existence check without delivering anything. */
-export function isPidAlive(pid: number): boolean {
+function isPidAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid < 1) return false;
   try { process.kill(pid, 0); return true; } catch { return false; }
 }

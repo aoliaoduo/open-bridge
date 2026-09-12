@@ -9,7 +9,7 @@ import {
   type ProgressPhase,
 } from "./progress-vocabulary.js";
 
-export const TODOS_STATE_PREFIX = "openBridge.todos.";
+const TODOS_STATE_PREFIX = "openBridge.todos.";
 
 /**
  * One progress report. `phase` and `category` are typed as members of the
@@ -34,7 +34,7 @@ export interface TodoStoreSnapshot {
 
 let persistTail: Promise<void> = Promise.resolve();
 
-export function todoStoreKey(): string {
+function todoStoreKey(): string {
   return `${TODOS_STATE_PREFIX}${state.activeWorkspaceRoot || "unbound"}`;
 }
 
@@ -101,7 +101,7 @@ export function persistProgress(entry: {
   }));
 }
 
-export function loadRawStore(key?: string): TodoStoreSnapshot {
+function loadRawStore(key?: string): TodoStoreSnapshot {
   const k = key ?? todoStoreKey();
   const defaultSnapshot: TodoStoreSnapshot = {
     todos: [],
