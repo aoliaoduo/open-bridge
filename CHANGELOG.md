@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Fixed
+- **公网隧道的接管变快了。** 借用别人隧道的实例（follower）原本每 10 秒固定探一次；持有者退出后，实测
+  **约 2 分钟**才完成接管（`bridge.log`：08:46:48 `Public domain is free again; this window will claim it.`
+  → 08:46:51 已恢复公网），这段时间对所有远端客户端就是纯宕机。现在探测节奏**跟着上一次结果走**：
+  健康时 10 秒一次，一旦发现公网不再服务我们（端点没了/换成别人）就改成 4 秒一次，接管因此提前到
+  两次「free」判定之内。判定规则本身抽成纯函数（`src/bridge/tunnel-watch.ts`）并加了单测：**连续两次**
+  「ngrok 自己说这里没有端点」才允许抢占；`unknown`（超时/5xx）一律清零计数，绝不在猜测上开抢；
+  `busy`（正在重连或已有隧道子进程）时永不抢占，且计数**清零**，保证「连续两次」这条规则字面成立
+  —— 抢占永远不会跨着别人的一次重连拼凑出来。
 - **`open-bridge serve --help` 不再把服务真的起起来。** 分派把 `--help` 交给 `cmdServe` 后没有任何人看这个标志，
   于是「只想看用法」的一条命令会**真的发布一个实例**：监听端口、写 runtime 记录、占据公网 URL、参与隧道借用。
   这不是理论问题——开发过程中一次脚本里的 `serve --help`（输出还被重定向到了 /dev/null）就起了一台实例，

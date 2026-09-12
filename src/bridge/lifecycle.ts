@@ -29,6 +29,7 @@ import { buildWebAiPrompt } from "./onboarding.js";
 import { exchangeLine, isNoteworthy, traceId, tracedFormat, tracedMethod, type TracedEra } from "./request-trace.js";
 import { root, workspaceStateSuffix } from "./paths.js";
 import { discoverWorkspaceSkills, skillsIndexSuffix } from "./skills.js";
+import { nextFreeRounds, shouldClaimDomain, watchIntervalMs } from "./tunnel-watch.js";
 import { invoke } from "./dispatcher.js";
 import { loadTodoStore } from "./todo-store.js";
 import { persistUsageStats } from "./usage-store.js";
@@ -755,7 +756,9 @@ async function adoptSharedTunnel(domain: string): Promise<boolean> {
 }
 
 function stopPublicWatch(): void {
-  if (state.publicWatchTimer) clearInterval(state.publicWatchTimer);
+  // clearTimeout works on either kind of handle, and the watch re-arms itself,
+  // so a single cleared handle is enough to end the chain.
+  if (state.publicWatchTimer) clearTimeout(state.publicWatchTimer);
   state.publicWatchTimer = undefined;
 }
 
@@ -775,17 +778,31 @@ function startRepublishLoop(): void {
   state.rePublishTimer = setInterval(() => { void publishSelf(); }, 30_000);
 }
 
+/**
+ * Watch the shared domain. The cadence follows the last probe: a borrowed tunnel
+ * that answers is checked lazily, one that stopped answering is checked quickly —
+ * measured downtime on a real holder exit was ~2 minutes under the old fixed
+ * 10 s interval, most of it spent waiting for the next round (see tunnel-watch.ts).
+ */
 function startPublicWatch(domain: string): void {
   stopPublicWatch();
-  state.publicWatchTimer = setInterval(() => {
-    void watchPublicDomain(domain).catch(error => record("ngrok", "error", String(error)));
-  }, 10_000);
+  let healthy = true;
+  const schedule = (): void => {
+    state.publicWatchTimer = setTimeout(() => {
+      void watchPublicDomain(domain)
+        .then(wasHealthy => { healthy = wasHealthy; })
+        .catch(error => { record("ngrok", "error", String(error)); })
+        .finally(() => { if (state.publicWatchTimer !== undefined) schedule(); });
+    }, watchIntervalMs(healthy));
+  };
+  schedule();
 }
 
-async function watchPublicDomain(domain: string): Promise<void> {
+/** One watch round. Returns whether the public endpoint is serving us. */
+async function watchPublicDomain(domain: string): Promise<boolean> {
   if (await healthCheckUrl(`https://${domain}/healthz/${state.routeToken}`, 4_000)) {
     state.missingPublicRounds = 0;
-    if (state.tunnelRole === "follower") return;
+    if (state.tunnelRole === "follower") return true;
     state.tunnelRole = "follower";
     // Routed through a peer tunnel again: a future tunnel exit should start
     // reconnecting at the fast end of the backoff curve, not at the 60 s cap
@@ -794,27 +811,29 @@ async function watchPublicDomain(domain: string): Promise<void> {
     state.tunnelUrl = `https://${domain}/mcp/${state.routeToken}`;
     record("bridge", "completed", `Published through a peer tunnel: ${redactedPublicUrl(state.tunnelUrl)}`);
     host().ui.refresh();
-    return;
+    return true;
   }
   // Only ngrok's own "no endpoint here" answer is evidence that nobody holds the
   // domain. A timeout or a 5xx while the holder reconnects is NOT evidence, and
   // a round that is merely inconclusive resets the counter — the claim below
   // spawns a tunnel, so it must not be triggered by someone else's bad minute.
-  if ((await probePublicBridge(domain, state.routeToken)) !== "free") {
-    state.missingPublicRounds = 0;
-    return;
-  }
-  state.missingPublicRounds += 1;
-  if (state.missingPublicRounds < 2) return;
+  const verdict = await probePublicBridge(domain, state.routeToken);
+  // A busy instance is the other claimant (a reconnect is armed, or a tunnel
+  // child exists): never count towards a claim while it works. Resetting rather
+  // than merely skipping keeps the rule the docs promise — *two consecutive*
+  // free verdicts — so a claim can never be assembled across someone else's
+  // reconnect attempt.
+  const busy = Boolean(state.reconnectTimer || state.tunnel);
+  state.missingPublicRounds = busy ? 0 : nextFreeRounds(state.missingPublicRounds, verdict);
+  if (!shouldClaimDomain(state.missingPublicRounds, busy)) return false;
   state.missingPublicRounds = 0;
-  // The reconnect chain is the other claimant; two claimants race each other.
-  if (state.reconnectTimer || state.tunnel) return;
   stopPublicWatch();
   record("ngrok", "progress", "Public domain is free again; this window will claim it.");
   await enqueueLifecycle(async () => {
     await stopInternal(false);
     await startInternal();
   });
+  return true;
 }
 
 /** Close the loopback listener and clear its pointers (used by failure paths and stop). */
