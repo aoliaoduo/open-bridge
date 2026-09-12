@@ -30,7 +30,7 @@
  *    endpoint). It is the one hint that is about reach rather than mutation.
  *
  * Kept beside `tool-catalog.ts` rather than inline in `tool-definitions.ts`
- * (whose 56 entries are a single `as const` literal) so the hints are a typed,
+ * (whose entries are a single `as const` literal) so the hints are a typed,
  * separately testable table and the tool list stays free of per-entry noise.
  * `listToolDefinitions()` merges them at emission time, so `tools/list` reports
  * the same annotations on both protocol eras.
@@ -106,6 +106,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotations>> = {
 
   // ---- Command and process execution -------------------------------------
   run_command: MUTATING,
+  // A script composes real tool calls, so it inherits the strongest thing any of them
+  // can do: it runs arbitrary work. No hint here may pretend otherwise.
+  run_script: MUTATING,
   start_process: PROCESS_CONTROL,
   interact_with_process: MUTATING,
   open_shell: PROCESS_CONTROL,

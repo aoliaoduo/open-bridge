@@ -35,7 +35,7 @@
 | **P0 窃锁缺陷**（§2.6） | ✅ **已修** | `LockRelease.handOff()` 在移交时只关定时器不释放锁；回归测试 `test/resource-locks.test.ts` 两条（移交后不被回收 / 未移交仍被回收） |
 | **P1 双协议 `/mcp`**（§2.4） | ✅ **已落地** | `classifyInboundRequest` 按请求分流；现代路走 `createMcpHandler` + `legacy:"reject"`；`server/discover` 实测返回 `supportedVersions: ["2026-07-28"]`；新增 `test/mcp-modern-protocol-integration.test.mjs`（9 项） |
 | **P2a 鉴权 O(1)**（§2.7） | ✅ **已修** | digest 索引 + 按存储原文失效的解析缓存；`AuthFailureLimiter` 去掉排序；跨进程吊销测试仍通过 |
-| **P3a 行为标注**（§5 P2 第 13 条） | ✅ **已落地** | `src/bridge/tool-annotations.ts`，57 个定义齐备，**只告知不阻断**（新增测试断言非只读工具仍可无确认执行） |
+| **P3a 行为标注**（§5 P2 第 13 条） | ✅ **已落地** | `src/bridge/tool-annotations.ts`，58 个定义齐备，**只告知不阻断**（新增测试断言非只读工具仍可无确认执行） |
 | **P3b-1 关闭式进度词表** | ✅ **已落地** | `src/bridge/progress-vocabulary.ts`：`phase` / `category` 词表外的值**丢弃而非归默认**，运行时 `Object.freeze`（测试 `test/progress-vocabulary.test.ts`） |
 | **P3b-2 按请求可观测性** | ✅ **已落地** | `src/bridge/request-trace.ts`：方法白名单、session/tool 哈希、错误指纹 + 160 字符单行摘要、用 `close` 抓客户端中断；集成测试断言工具名不进日志 |
 | **P3b-3 优雅停机可观测** | ✅ **已落地** | 停机按阶段记录（开始 / 排空 N 个会话 / 宽限期到 / 完成），空闲停机仍只有一行 |

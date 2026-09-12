@@ -30,6 +30,7 @@ import {
   readServiceLogTool,
 } from "./service-tools.js";
 import { batchTool } from "./batch.js";
+import { runScript } from "./script-tools.js";
 import { buildArgsSummary } from "./args-summary.js";
 import { reviewChanges } from "./review.js";
 import {
@@ -110,6 +111,7 @@ const HANDLERS: Record<string, Handler> = {
   clear_activity_log: clearActivityLogTool,
   report_progress: reportProgress,
   batch: batchTool,
+  run_script: runScript,
 };
 
 /** Invoke one tool, updating usage stats and the activity log. Throws on unknown/failed tools. */
@@ -125,6 +127,16 @@ export async function invoke(
     const command = typeof args.command === "string" ? redactSensitiveText(args.command.trim()).slice(0, 300) : "";
     const cwd = typeof args.cwd === "string" && args.cwd.trim() ? args.cwd.trim() : ".";
     requestSummary = command ? `Request received · command: ${command} · cwd: ${cwd}` : requestSummary;
+  } else if (name === "run_script") {
+    // A script's first line, redacted and bounded, is the log's code preview: enough
+    // to see what was attempted without dumping a program into the activity log.
+    const raw = typeof args.source === "string" ? args.source.replace(/\r\n?/g, "\n").trim() : "";
+    const firstLine = raw.split("\n").find(line => line.trim().length > 0) ?? "";
+    const scriptLines = raw ? raw.split("\n").length : 0;
+    const preview = redactSensitiveText(firstLine.trim()).slice(0, 160);
+    requestSummary = preview
+      ? `Request received · script: ${preview}${scriptLines > 1 ? ` · ${scriptLines} line(s)` : ""}`
+      : requestSummary;
   } else if (name === "start_service" || name === "restart_service" || name === "stop_service") {
     requestSummary = `Request received · service: ${String(args.name ?? "")}`;
   }

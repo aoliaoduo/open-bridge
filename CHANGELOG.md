@@ -5,6 +5,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- **`run_script`：把多个工具调用写成一个脚本（Code Mode）。** 借鉴自 Chat-Plus 的 Code Mode：与其一次往返调一个工具，
+  不如让调用方写一小段 JavaScript，用 `await tools.<工具名>(args)` 组合调用（循环、条件、`Promise.all`、过滤），
+  **只 `return` 它真正需要的结果**。两件事同时变好：往返次数塌缩；更重要的是——**大块工具输出根本不必进入模型的上下文**，
+  脚本可以在返回前就把它压掉。要点：每个 `tools.x()` 都是**真实的 Bridge 调用**（资源锁、审计日志、脱敏、会话状态、
+  错误语义全部继承，见 `src/bridge/script-sandbox.ts` 的说明）；脚本只能调用本实例**已公布**的工具（`toolProfile` 与
+  宿主能力过滤照样生效），`run_script`/`batch` 自身不可从脚本内调用；**沙箱本身什么都没有**——没有文件系统、网络、进程、
+  `require`、定时器与 `eval`（`vm` 上下文 + 关闭字符串代码生成），工具名在父进程解析，所以写错的工具名会得到和直接调用
+  一样的「did you mean」提示；每次运行都是**全新作用域**，数据只能通过 `return` 传递。失败时返回固定字段的
+  `phase`/`error_type`/`line`/`code_preview`/`hint` 信封，让人（或模型）**改代码重跑，而不是道歉**。
+  参数：`source`（必填）、`timeout_ms`（默认 30s，上限 300s）、`max_calls`（默认 60，上限 200）；返回体超过 64 KB 会截断并置 `truncated`。
+  子调用沿用 `batch` 的口径（`countUsage: false`），保证 `calls == successes + failures` 依旧成立，同时以 `by_tool` 明细
+  保留可见性。单测 `test/script-sandbox.test.ts`。
 ### Fixed
 - **窗口标题不再被子进程改乱。** Windows 每个控制台只有**一个**标题字符串，任何挂在该控制台上的进程都能改写它
   （`SetConsoleTitle`），而且**没有恢复机制**。因为我们的子进程是**有意共享控制台**的（关窗要连带停掉隧道与服务，

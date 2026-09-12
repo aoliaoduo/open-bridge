@@ -56,7 +56,7 @@ Agent 委派、worktree、artifact、skills、生态分发、文件预览 UI 是
 | taskquay T5 | **活跃 claim 不被窃取** | `LockRelease.handOff()` + `test/resource-locks.test.ts`（两条回归） |
 | taskquay T6 | 能力派生只读，不从 prompt 推断 | 体现在工具标注与策略实现 |
 | DC-MCP M1 | 模糊匹配失败给出“最近似区域 + 漂移原因” | `src/bridge/fuzzy-match.ts`（**交叉验证：本来就有**） |
-| 三方共性 | **`destructiveHint`/`readOnlyHint` 式告知（不阻断）** | `src/bridge/tool-annotations.ts`，57 个定义齐备；测试断言非只读工具仍可无确认执行 |
+| 三方共性 | **`destructiveHint`/`readOnlyHint` 式告知（不阻断）** | `src/bridge/tool-annotations.ts`，58 个定义齐备；测试断言非只读工具仍可无确认执行 |
 | devspace D9（同日补上） | **skills 发现** | `src/bridge/skills.ts` + `list_skills` 工具 + 说明注入；`test/skills.test.ts` 13 条 + `test/skills-integration.test.mjs` 5 条；真机实测：本机 `~/.agents/skills` 的 11 个技能已出现在连接说明里 |
 
 > 另有一处**我们比三家都强的地方**：**鉴权路径 O(1)**（digest 索引 + 解析缓存）与 **锁不被偷**（P0）都是我们发现的缺陷并修掉的，
