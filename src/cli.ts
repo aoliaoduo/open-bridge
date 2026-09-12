@@ -246,9 +246,40 @@ function httpJson(
 }
 
 
+const SERVE_HELP = `open-bridge serve — 启动一个实例（前台运行，Ctrl+C 停止）
+
+用法:
+  open-bridge serve [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]
+
+参数:
+  --port N     监听端口（默认取配置；被占用时自动改用空闲端口并提示）。0 = 随机端口
+  --root DIR   这次运行的工作区（AI 能看到的边界）。默认＝当前目录
+  --home DIR   数据目录，默认 ~/.open-bridge（OPEN_BRIDGE_HOME 同效）
+  --no-tunnel  只在本机使用，不启动 ngrok 隧道
+  --open       启动后用浏览器打开控制台
+  --help, -h   只打印这段说明，不启动任何东西
+
+行为:
+  * 前台运行：服务端日志与三个地址（控制台 / 本地 MCP / 公网 MCP）打印在这个终端里；
+    Ctrl+C 是干净停止（清掉 runtime 记录与启动锁），关闭窗口会连带隧道与服务一起停。
+  * 一个目录一个实例：本目录已有实例在跑时会拒绝启动，并打印它的控制台地址。
+  * 端口固定与否不影响公网 URL —— 路由令牌按工作区生成，同一个目录的地址是稳定的。
+`;
+
 // --- serve ------------------------------------------------------------------
 
 async function cmdServe(parsed: ParsedArgs): Promise<void> {
+  // `serve --help` used to START a server: dispatch routed the flag into this
+  // function and nothing here looked at it, so a stray help request published a
+  // listener, a runtime record and a public URL (it really happened during
+  // development, from a script that only wanted the usage text). Help now prints
+  // and returns before a lock, a port or a registry file is touched.
+  // Note the second half: parseArgs only treats `--`-prefixed arguments as flags,
+  // so a single-dash `-h` arrives as a positional and has to be looked for.
+  if (parsed.flags.has("help") || parsed.flags.has("h") || parsed.rest.includes("-h")) {
+    console.log(SERVE_HELP);
+    return;
+  }
   const home = parsed.flags.get("home") as string | undefined;
   const root = parsed.flags.get("root") as string | undefined;
   const portFlag = parsed.flags.get("port");

@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+### Fixed
+- **`open-bridge serve --help` 不再把服务真的起起来。** 分派把 `--help` 交给 `cmdServe` 后没有任何人看这个标志，
+  于是「只想看用法」的一条命令会**真的发布一个实例**：监听端口、写 runtime 记录、占据公网 URL、参与隧道借用。
+  这不是理论问题——开发过程中一次脚本里的 `serve --help`（输出还被重定向到了 /dev/null）就起了一台实例，
+  事后靠进程父链才查出是谁启动的。现在 `serve --help` / `serve -h` 只打印 serve 的参数说明并退出，
+  **不碰锁、不绑端口、不写注册表**；`test/cli-surface-integration.test.mjs` 用「命令必须秒退 + 临时 home 里一个文件都不能有」钉住它。
+
 ## [1.0.0-alpha.4] — 2026-09-12
 ### Added
 - **技能发现（skills），补上对照里唯一被点名的「真缺」**（`docs/refactor-comparison.md` D9）。连接时，
