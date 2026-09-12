@@ -122,7 +122,7 @@ test("tools/list advertises the catalog and get_bridge_status agrees on the coun
   assert.equal(res.status, 200);
   const listed = await mcpCall(sessionId, "tools/list", {});
   const tools = listed.payload?.result?.tools ?? [];
-  assert.ok(tools.length >= 40, `expected the full catalog, got ${tools.length}`);
+  assert.ok(tools.length >= 36, `expected the full catalog, got ${tools.length}`);
   assert.ok(tools.every(tool => tool.name && tool.inputSchema), "every tool carries a schema");
   assert.equal(new Set(tools.map(tool => tool.name)).size, tools.length, "no duplicate tool names");
 

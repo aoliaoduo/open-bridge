@@ -22,6 +22,7 @@ import { asStructuredContent, record, state, text, type SessionState } from "./s
 import { root } from "./paths.js";
 import { discoverWorkspaceSkills, skillsIndexSuffix } from "./skills.js";
 import { invoke } from "./dispatcher.js";
+import { normalizeToolCall } from "./tool-call-shape.js";
 import { persistUsageStats } from "./usage-store.js";
 
 /** SSE events retained for stream resumption (Last-Event-ID replay). */
@@ -94,7 +95,7 @@ function serverInstructions(): string {
 }
 
 const SERVER_INSTRUCTIONS_BASE =
-  "You are connected to a local project workspace through the standalone Open Bridge. Relative paths, default command cwd, and project services always use that workspace. Other directories can be accessed only with explicit absolute paths; never let them change the workspace anchor. When starting work on an unfamiliar project, call workspace_brief once for orientation instead of exploring blindly. Use file tools for project management, run_command/start_process for commands, and wait_process/interact_with_process/restart_process/set_process_policy for supervised long-running services. Use check_port/check_http for readiness and save_service/list_services/start_service/stop_service/restart_service/delete_service/start_all_services/stop_all_services/service_status for reusable project orchestration. Use set_todos for multi-step work and report_progress for transient updates. Use batch to combine multiple tool calls in a single roundtrip. When a task needs several related calls or a tool result is large, prefer run_script: compose the calls in one JavaScript program and return only what you need. After finishing a batch of related edits, call review_changes so the user can see the full cumulative change set. Tool results are JSON objects with a fixed field set per tool: absent facts are explicit nulls or empty strings, so parse by field name and never by line presence; command tools return merged `output` plus separate `stdout`/`stderr`, and a non-zero exit code is not a call failure. Per-tool detail - limits, edge cases, and which sibling tool to prefer - is in docs/tools.md; read it when a description is not enough.";
+  "You are connected to a local project workspace through the standalone Open Bridge. Relative paths, default command cwd, and project services always use that workspace. Other directories can be accessed only with explicit absolute paths; never let them change the workspace anchor. When starting work on an unfamiliar project, call workspace_brief once for orientation instead of exploring blindly. Use file tools for project management, run_command/start_process for commands, and wait/interact_with_process/process_control/set_process_policy for supervised long-running services. Use connectivity for readiness and save_service/service/service_status for reusable project orchestration. Related single-purpose tools are grouped behind an action parameter: service{action}, file_op{op}, process_control{action}, bridge_status{section}, activity_log{action}, connectivity{target}; the older per-action names still work and are reported as deprecated. Use set_todos for multi-step work and report_progress for transient updates. Use batch to combine multiple tool calls in a single roundtrip. When a task needs several related calls or a tool result is large, prefer run_script: compose the calls in one JavaScript program and return only what you need. After finishing a batch of related edits, call review_changes so the user can see the full cumulative change set. Tool results are JSON objects with a fixed field set per tool: absent facts are explicit nulls or empty strings, so parse by field name and never by line presence; command tools return merged `output` plus separate `stdout`/`stderr`, and a non-zero exit code is not a call failure. Per-tool detail - limits, edge cases, and which sibling tool to prefer - is in docs/tools.md; read it when a description is not enough.";
 
 function projectInstructionSuffix(): string {
   const parts: string[] = [];
@@ -163,8 +164,10 @@ export function createMcp(session: SessionState): Server {
       record(name, "completed", message, undefined, activityChanges ? { changes: activityChanges } : undefined);
       // Tools declaring an outputSchema also return structuredContent so clients
       // can consume typed data directly; the text block stays for compatibility.
+      // The lookup follows the canonical name, so a caller that used a legacy
+      // name still gets the same typed payload instead of only text.
       const definition = (TOOL_DEFINITIONS as ReadonlyArray<{ name: string; outputSchema?: unknown }>)
-        .find(tool => tool.name === name);
+        .find(tool => tool.name === normalizeToolCall(name).tool);
       if (definition?.outputSchema) return { ...text(result), structuredContent: asStructuredContent(result) };
       return text(result);
     } catch (e) {
@@ -258,7 +261,7 @@ async function runToolCall(
     // Tools declaring an outputSchema also return structuredContent so clients
     // can consume typed data directly; the text block stays for compatibility.
     const definition = (TOOL_DEFINITIONS as ReadonlyArray<{ name: string; outputSchema?: unknown }>)
-      .find(tool => tool.name === name);
+      .find(tool => tool.name === normalizeToolCall(name).tool);
     const payload = definition?.outputSchema
       ? { ...text(result), structuredContent: asStructuredContent(result) }
       : text(result);

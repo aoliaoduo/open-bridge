@@ -17,28 +17,27 @@ const LOCK_CONTEXT: LockPlanContext = {
 };
 import {
   listDirectory, findFiles, searchFiles, readFiles, writeFile, editBlock,
-  createDirectory, moveFile, copyFile, deleteFile, getFileInfo, applyPatchTool,
+  getFileInfo, applyPatchTool,
 } from "./file-tools.js";
 import {
   runOrStartProcess, readProcessOutput, interactWithProcess,
-  forceTerminate, restartProcess, waitProcess, waitTool,
-  setProcessPolicy, getProcessSnapshot, listSessions, setTodos,
+  setProcessPolicy, getProcessSnapshot, setTodos,
 } from "./process-tools.js";
-import {
-  checkPortTool, checkHttpTool, saveService, listServices, startService, stopService,
-  restartService, deleteService, serviceStatus, startAllServices, stopAllServices,
-  readServiceLogTool,
-} from "./service-tools.js";
+import { saveService, readServiceLogTool } from "./service-tools.js";
 import { batchTool } from "./batch.js";
 import { runScript } from "./script-tools.js";
 import { buildArgsSummary } from "./args-summary.js";
 import { reviewChanges } from "./review.js";
 import {
-  getBridgeStatus, getConfig, setConfigValue, getRecentActivity, getUsageStats,
-  getDiagnostics, lsp, reportProgress, getTodos, searchActivityLogTool, clearActivityLogTool,
-  workspaceBrief, getAuthStatus, getLockStatus,
+  getConfig, setConfigValue, getUsageStats, getDiagnostics, lsp,
+  reportProgress, getTodos, workspaceBrief,
 } from "./meta-tools.js";
-import { openShell, sendToShell, closeShell, listShells } from "./shell-sessions.js";
+import { sendToShell, closeShell } from "./shell-sessions.js";
+import {
+  activityLogFamily, bridgeStatusFamily, connectivityFamily, fileOpFamily,
+  openShellFamily, processControlFamily, serviceFamily, serviceStatusFamily, waitFamily,
+} from "./tool-families.js";
+import { normalizeToolCall, type CanonicalCall } from "./tool-call-shape.js";
 import { listSkills } from "./skills.js";
 import { enrichFsError, suggestionHint } from "./error-hints.js";
 import type { JsonArgs } from "./json-args.js";
@@ -47,69 +46,67 @@ type Args = JsonArgs;
 type Handler = (args: Args, session?: SessionState) => unknown | Promise<unknown>;
 
 /** Tool name -> handler. Mirrors TOOL_DEFINITIONS (validated by the contract test). */
+/**
+ * Tool name -> handler. Mirrors TOOL_DEFINITIONS (validated by the contract test).
+ *
+ * The merged families appear once each and dispatch on their discriminator; the
+ * handlers they call are the same functions the single-purpose tools used, so
+ * what a name can do never moves — only how many names there are.
+ */
 const HANDLERS: Record<string, Handler> = {
+  // ---- workspace reading -------------------------------------------------
   list_directory: listDirectory,
   find_files: findFiles,
   search_files: searchFiles,
   read_files: readFiles,
+  get_file_info: getFileInfo,
+  workspace_brief: () => workspaceBrief(),
+  list_skills: () => listSkills(),
+  review_changes: reviewChanges,
+  get_todos: getTodos,
+
+  // ---- workspace writing -------------------------------------------------
   write_file: writeFile,
   edit_block: editBlock,
-  create_directory: createDirectory,
-  move_file: moveFile,
-  copy_file: copyFile,
-  delete_file: deleteFile,
-  get_file_info: getFileInfo,
   apply_patch: applyPatchTool,
+  file_op: fileOpFamily,
+  set_todos: (a, session) => setTodos(a, session),
+  report_progress: reportProgress,
 
+  // ---- commands and supervised processes ---------------------------------
   run_command: (a) => runOrStartProcess(a, "run_command"),
   start_process: (a) => runOrStartProcess(a, "start_process"),
+  read_process_output: readProcessOutput,
   interact_with_process: interactWithProcess,
-  force_terminate: forceTerminate,
-  restart_process: restartProcess,
-  wait_process: waitProcess,
-  wait: waitTool,
+  process_control: processControlFamily,
+  wait: waitFamily,
   set_process_policy: setProcessPolicy,
   get_process_snapshot: getProcessSnapshot,
-  read_process_output: readProcessOutput,
 
-
-  open_shell: openShell,
+  // ---- persistent shells -------------------------------------------------
+  open_shell: openShellFamily,
   send_to_shell: sendToShell,
   close_shell: closeShell,
-  list_shells: listShells,
 
-  check_port: checkPortTool,
-  check_http: checkHttpTool,
+  // ---- reachability ------------------------------------------------------
+  connectivity: connectivityFamily,
 
+  // ---- saved services ----------------------------------------------------
   save_service: saveService,
-  list_services: listServices,
-  start_service: startService,
-  stop_service: stopService,
-  restart_service: restartService,
-  delete_service: deleteService,
-  service_status: serviceStatus,
-  start_all_services: startAllServices,
-  stop_all_services: stopAllServices,
+  service: serviceFamily,
+  service_status: serviceStatusFamily,
   read_service_log: readServiceLogTool,
 
-  list_sessions: listSessions,
-  get_bridge_status: getBridgeStatus,
-  get_auth_status: getAuthStatus,
-  get_lock_status: getLockStatus,
+  // ---- Bridge introspection ---------------------------------------------
+  bridge_status: bridgeStatusFamily,
   get_config: getConfig,
   set_config_value: setConfigValue,
-  get_recent_activity: getRecentActivity,
+  activity_log: activityLogFamily,
   get_usage_stats: getUsageStats,
   get_diagnostics: getDiagnostics,
   lsp: lsp,
-  review_changes: reviewChanges,
-  workspace_brief: () => workspaceBrief(),
-  list_skills: () => listSkills(),
-  set_todos: (a, session) => setTodos(a, session),
-  get_todos: getTodos,
-  search_activity_log: searchActivityLogTool,
-  clear_activity_log: clearActivityLogTool,
-  report_progress: reportProgress,
+
+  // ---- orchestration -----------------------------------------------------
   batch: batchTool,
   run_script: runScript,
 };
@@ -121,33 +118,49 @@ export async function invoke(
   session?: SessionState,
   options?: { countUsage?: boolean },
 ): Promise<unknown> {
+  // One normalization point: a legacy name is rewritten into the call the
+  // catalog advertises today, and everything below — handler lookup, lock plan,
+  // activity log — works on canonical names only.
+  const call = normalizeToolCall(name, args ?? {});
+  const tool = call.tool;
+  const callArgs = call.args;
+
   // Include useful execution context in the log while redacting bridge secrets.
   let requestSummary = "Request received.";
-  if (name === "run_command" || name === "start_process") {
-    const command = typeof args.command === "string" ? redactSensitiveText(args.command.trim()).slice(0, 300) : "";
-    const cwd = typeof args.cwd === "string" && args.cwd.trim() ? args.cwd.trim() : ".";
+  if (tool === "run_command" || tool === "start_process") {
+    const command = typeof callArgs.command === "string" ? redactSensitiveText(callArgs.command.trim()).slice(0, 300) : "";
+    const cwd = typeof callArgs.cwd === "string" && callArgs.cwd.trim() ? callArgs.cwd.trim() : ".";
     requestSummary = command ? `Request received · command: ${command} · cwd: ${cwd}` : requestSummary;
-  } else if (name === "run_script") {
+  } else if (tool === "run_script") {
     // A script's first line, redacted and bounded, is the log's code preview: enough
     // to see what was attempted without dumping a program into the activity log.
-    const raw = typeof args.source === "string" ? args.source.replace(/\r\n?/g, "\n").trim() : "";
+    const raw = typeof callArgs.source === "string" ? callArgs.source.replace(/\r\n?/g, "\n").trim() : "";
     const firstLine = raw.split("\n").find(line => line.trim().length > 0) ?? "";
     const scriptLines = raw ? raw.split("\n").length : 0;
     const preview = redactSensitiveText(firstLine.trim()).slice(0, 160);
     requestSummary = preview
       ? `Request received · script: ${preview}${scriptLines > 1 ? ` · ${scriptLines} line(s)` : ""}`
       : requestSummary;
-  } else if (name === "start_service" || name === "restart_service" || name === "stop_service") {
-    requestSummary = `Request received · service: ${String(args.name ?? "")}`;
+  } else if (tool === "service") {
+    const target = typeof callArgs.name === "string" && callArgs.name.trim() ? callArgs.name.trim() : String(callArgs.action ?? "");
+    requestSummary = `Request received · service: ${target}`;
   }
   // Redacted argument summary for the audit log (T-1): secrets in parameters
   // are scrubbed by redactSensitiveText before the summary is recorded.
-  const argsSummary = buildArgsSummary(args ?? {}, redactSensitiveText);
-  record(name, "running", requestSummary, argsSummary);
+  const argsSummary = buildArgsSummary(callArgs, redactSensitiveText);
+  // The audit log keeps the name the caller used (that is the fact worth
+  // recording) and states what a legacy name resolved to, so a client still
+  // speaking the old vocabulary is visible instead of invisible.
+  record(
+    name,
+    "running",
+    call.alias ? `${requestSummary} · legacy name ${call.alias.used} -> ${call.alias.call}` : requestSummary,
+    argsSummary,
+  );
 
   // Record<string, Handler> indexing does not admit undefined; cast so the
   // unknown-name branch below stays reachable to the type checker.
-  const handler = HANDLERS[name] as Handler | undefined;
+  const handler = HANDLERS[tool] as Handler | undefined;
   // Count every resolved request, known name or not: the MCP layer records exactly
   // one success/failure per request, so skipping unknown names here (the original
   // F1) let every typo'd call add a failure without a call and broke
@@ -156,7 +169,9 @@ export async function invoke(
   // countUsage:false because they are counted once via the outer MCP request.
   if (options?.countUsage !== false) {
     state.usage.calls += 1;
-    if (handler) state.usage.byTool[name] = (state.usage.byTool[name] ?? 0) + 1;
+    // Counted under the canonical name: usage is about the capability being
+    // used, and a legacy spelling must not split a tool's statistics in two.
+    if (handler) state.usage.byTool[tool] = (state.usage.byTool[tool] ?? 0) + 1;
     persistUsageStats();
     // Per-session counter for the console's 会话 page: who is actually using
     // this instance, not just how busy it is overall. Batch sub-calls pass
@@ -165,18 +180,34 @@ export async function invoke(
   }
   if (!handler) throw new Error(`Unknown tool: "${name}".${suggestionHint(name, Object.keys(HANDLERS))}`);
 
-  const lease = await acquireForCall(name, args);
+  const lease = await acquireForCall(tool, callArgs);
   try {
-    const result = await handler(args ?? {}, session);
+    const result = await handler(callArgs, session);
+    const answer = call.alias ? annotateLegacyResult(result, call.alias) : result;
     // A declared-resource spawn keeps its lease until the process exits, so the
     // resource stays reserved for the process's lifetime.
-    if (lease.handOff && handOffToProcess(lease.release, result)) return result;
+    if (lease.handOff && handOffToProcess(lease.release, answer)) return answer;
     lease.release();
-    return result;
+    return answer;
   } catch (error) {
     lease.release();
     throw enrichFsError(error);
   }
+}
+
+/**
+ * Tell a caller that used a legacy name what it became.
+ *
+ * Only object results are annotated: wrapping an array or a scalar would change
+ * the shape a legacy caller is parsing, and a hint is not worth breaking a
+ * parser. Those callers still see the note in the activity log.
+ */
+function annotateLegacyResult(result: unknown, alias: NonNullable<CanonicalCall["alias"]>): unknown {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return result;
+  return {
+    ...(result as Record<string, unknown>),
+    deprecated: { name: alias.used, replaced_by: alias.replaced_by, call: alias.call },
+  };
 }
 
 /**

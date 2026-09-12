@@ -92,15 +92,14 @@ const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotations>> = {
   get_todos: READ,
 
   // ---- Workspace writing -------------------------------------------------
-  create_directory: ADDITIVE,
-  copy_file: ADDITIVE,
+  // create/copy are additive but delete is not, so the family carries the
+  // stronger hint: one conservative entry beats a per-action table nobody reads.
+  file_op: MUTATING,
   // An overwrite can lose what was there; append mode cannot, but the tool
   // supports both, so the stronger case wins.
   write_file: MUTATING,
   edit_block: MUTATING,
   apply_patch: MUTATING,
-  move_file: MUTATING,
-  delete_file: MUTATING,
   set_todos: MUTATING,
   report_progress: ADDITIVE,
 
@@ -114,43 +113,31 @@ const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotations>> = {
   open_shell: PROCESS_CONTROL,
   send_to_shell: MUTATING,
   close_shell: PROCESS_CONTROL,
-  force_terminate: PROCESS_CONTROL,
-  restart_process: PROCESS_CONTROL,
+  process_control: PROCESS_CONTROL,
   set_process_policy: MUTATING,
   wait: READ,
-  wait_process: READ,
 
   // ---- Process inspection ------------------------------------------------
-  list_shells: READ,
   get_process_snapshot: READ,
   read_process_output: READ,
 
   // ---- Connectivity probes (these leave the machine) ----------------------
-  check_port: READ_NETWORK,
-  check_http: READ_NETWORK,
+  connectivity: READ_NETWORK,
 
   // ---- Saved service orchestration ---------------------------------------
   save_service: MUTATING,
-  delete_service: MUTATING,
-  list_services: READ,
+  // start/stop are process control, delete is destructive: the family takes the
+  // stronger of what its actions can do.
+  service: MUTATING,
   service_status: READ_NETWORK,
-  start_service: PROCESS_CONTROL,
-  stop_service: PROCESS_CONTROL,
-  restart_service: PROCESS_CONTROL,
-  start_all_services: PROCESS_CONTROL,
-  stop_all_services: PROCESS_CONTROL,
   read_service_log: READ,
 
   // ---- Bridge introspection ----------------------------------------------
-  list_sessions: READ,
-  get_auth_status: READ,
-  get_lock_status: READ,
-  get_bridge_status: READ,
+  bridge_status: READ,
   get_config: READ,
-  get_recent_activity: READ,
+  // recent/search only read; clear truncates the log, so the family says so.
+  activity_log: MUTATING,
   get_usage_stats: READ,
-  search_activity_log: READ,
-  clear_activity_log: MUTATING,
   set_config_value: MUTATING,
 
   // ---- Batching ----------------------------------------------------------

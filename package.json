@@ -38,7 +38,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "start": "node bin/open-bridge.js serve --port 18080 --open",
+    "start": "node bin/open-bridge.js serve --port 18080",
     "build": "node scripts/clean.mjs && tsc -p tsconfig.json && vite build",
     "build:core": "node scripts/clean.mjs core && tsc -p tsconfig.json",
     "dev": "tsx src/cli.ts",
@@ -48,7 +48,7 @@
     "test:ui": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.ui.json --noEmit",
     "verify": "npm run typecheck && npm run lint && npm run build && npm test",
-    "start:local": "node bin/open-bridge.js serve --port 18080 --open --no-tunnel"
+    "start:local": "node bin/open-bridge.js serve --port 18080 --no-tunnel"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "^2.0.0",

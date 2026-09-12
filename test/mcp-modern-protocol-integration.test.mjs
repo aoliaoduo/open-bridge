@@ -152,7 +152,7 @@ test("tools/list answers with the full catalog and no handshake", async () => {
   assert.equal(sessionId, undefined, "no session id on the modern path");
 
   const tools = payload?.result?.tools ?? [];
-  assert.ok(tools.length >= 40, `expected the full catalog, got ${tools.length}`);
+  assert.ok(tools.length >= 36, `expected the full catalog, got ${tools.length}`);
   assert.ok(tools.every(tool => tool.name && tool.inputSchema), "every tool carries a schema");
   assert.equal(new Set(tools.map(tool => tool.name)).size, tools.length, "no duplicate tool names");
 
@@ -182,19 +182,20 @@ test("tools/list carries behaviour annotations but the same catalog", async () =
   // tool that can overwrite existing content never claims to be non-destructive.
   assert.equal(byName.get("read_files").annotations.readOnlyHint, true);
   assert.equal(byName.get("list_directory").annotations.readOnlyHint, true);
-  assert.equal(byName.get("get_bridge_status").annotations.readOnlyHint, true);
+  assert.equal(byName.get("bridge_status").annotations.readOnlyHint, true);
   assert.equal(byName.get("run_command").annotations.readOnlyHint, false);
   assert.notEqual(byName.get("run_command").annotations.destructiveHint, false,
     "an arbitrary shell command must not promise to be harmless");
-  assert.notEqual(byName.get("delete_file").annotations.destructiveHint, false);
-  assert.equal(byName.get("create_directory").annotations.destructiveHint, false,
-    "creating a directory only adds, so it may state that");
-  assert.equal(byName.get("check_http").annotations.openWorldHint, true,
-    "check_http leaves the machine");
+  assert.notEqual(byName.get("file_op").annotations.destructiveHint, false,
+    "the family can delete, so it must not claim to be non-destructive");
+  assert.equal(byName.get("file_op").annotations.readOnlyHint, false,
+    "the family owns a delete, so it is not read-only");
+  assert.equal(byName.get("connectivity").annotations.openWorldHint, true,
+    "a probe leaves the machine");
   assert.equal(byName.get("read_files").annotations.openWorldHint, false);
 
   // The added hints must not change which tools exist or what they accept.
-  assert.ok(tools.length >= 40, `the catalog is unchanged in size, got ${tools.length}`);
+  assert.ok(tools.length >= 36, `the merged catalog is smaller but not gutted, got ${tools.length}`);
   assert.ok(tools.every(tool => tool.inputSchema), "every tool still carries its input schema");
 });
 

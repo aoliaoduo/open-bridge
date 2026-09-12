@@ -39,6 +39,8 @@
 
 import { Worker } from "node:worker_threads";
 
+import { normalizeToolCall } from "./tool-call-shape.js";
+
 /** Hard caps. The defaults are what most callers should get; the maxima are where the Bridge says no. */
 export const SCRIPT_LIMITS = {
   DEFAULT_TIMEOUT_MS: 30_000,
@@ -100,7 +102,7 @@ export interface RunScriptOptions {
  *
  * Deliberate omissions inside the context: `require`, `process`, `globalThis`,
  * `fetch`, `XMLHttpRequest`, `WebSocket`, `setTimeout`/`setInterval`, `import`.
- * Waiting is a tool call (`wait`, `wait_process`), not a sandbox timer.
+ * Waiting is a tool call (`wait`), not a sandbox timer.
  */
 const SCRIPT_WORKER_SOURCE = String.raw`
 const { parentPort, workerData } = require("node:worker_threads");
@@ -564,7 +566,10 @@ export async function runScriptInSandbox(options: RunScriptOptions): Promise<Scr
         );
         return;
       }
-      if (!options.allowedTools.has(name)) {
+      // A legacy name is accepted when the tool it now means is in the catalog:
+      // a script written against the older vocabulary keeps working, while the
+      // session's own catalog still decides what is reachable.
+      if (!options.allowedTools.has(name) && !options.allowedTools.has(normalizeToolCall(name).tool)) {
         deny(`Unknown tool "${name}".${toolNameHint(name, options.allowedTools)}`);
         return;
       }

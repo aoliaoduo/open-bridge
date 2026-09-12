@@ -85,7 +85,7 @@ test("api status is loopback-readable without a token", async () => {
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.status.state, "running");
-  assert.ok(body.status.tool_count >= 40);
+  assert.ok(body.status.tool_count >= 36);
 });
 
 test("one version everywhere: package.json, /api/status and /api/settings agree", async () => {
@@ -176,7 +176,7 @@ test("the panel endpoints answer for the console pages", async () => {
   assert.equal(tools.status, 200);
   const toolBody = await tools.json();
   assert.equal(toolBody.tools.length, toolBody.count, "count matches the catalog it returns");
-  assert.ok(toolBody.count >= 40, `catalog has ${toolBody.count} tools`);
+  assert.ok(toolBody.count >= 36, `catalog has ${toolBody.count} tools`);
   assert.ok(toolBody.tools.some(tool => tool.name === "read_files" && tool.core === true), "core tools are flagged");
   assert.ok(!toolBody.tools.some(tool => tool.name === "get_diagnostics"), "editor-only tools stay hidden");
 

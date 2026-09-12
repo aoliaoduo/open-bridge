@@ -14,7 +14,7 @@
 ChatGPT 网页对话 / Claude / Cursor / 任意 MCP 客户端
         │  （经你掌控的 ngrok 隧道，或只在局域网/本机）
         ▼
-  open-bridge serve  ── /mcp/<路由令牌>   Streamable HTTP MCP（56 个工具，两代协议同端点）
+  open-bridge serve  ── /mcp/<路由令牌>   Streamable HTTP MCP（38 个工具，两代协议同端点）
         │            ── /console/         Web 控制台（仅本机回环可访问）
         │            ── /api/*            控制台后端（回环 + 令牌头双门控）
         ▼
@@ -57,7 +57,7 @@ ChatGPT 网页对话 / Claude / Cursor / 任意 MCP 客户端
 ```bash
 npm install -g .        # 在仓库目录里执行一次；之后任意目录都能用 open-bridge
 cd 你的项目目录
-open-bridge serve --open          # 或 --no-tunnel 只在本机用
+open-bridge serve                 # 或加 --no-tunnel 只在本机用；--open 才会自动开浏览器
 ```
 
 > 还没做全局注册时，也可以在仓库目录里直接跑 `node bin\open-bridge.js <命令>`。`npm link`（在仓库目录里
@@ -218,7 +218,7 @@ open-bridge config set oauth.enabled true
 
 ```bash
 open-bridge config set ngrokDomain <你预留的域名>.ngrok-free.dev
-open-bridge serve --open          # 注意：不带 --no-tunnel
+open-bridge serve                 # 注意：不带 --no-tunnel（--open 可选，自动打开控制台）
 ```
 
 - 免费 ngrok 账号只分配一个子域，**同一域名同时只能被一个实例占用**。旧的 VS Code 扩展实例正占着也不必先停它：本机实例注册表（`bridge-peers.json`）是跨实例共享的——持有隧道的实例按令牌摘要查表并转发到对应实例。应用会把自己的那一行登记进**已存在**的注册表（不会在别人目录里凭空建文件），于是公网请求经那条隧道转发到应用，`tunnel_role` 显示 `follower`，控制台会注明这条地址依赖那个实例；持有方退出后，应用在下一轮探测里自己接管域名（变成 `owner`）。需要额外路径时用 `sharedPeerRegistry`。
@@ -285,8 +285,9 @@ npm run dev -- serve --no-tunnel   # tsx 免编译直接跑
 
 ## 与 VS Code 扩展的关系
 
-独立版**在能力上继承扩展**（配置键名一一对应，工具定义逐字节一致：扩展 56 个定义；独立版另有
-`list_skills` 与 `run_script` 两个工具，共 58 个定义，按配置档与宿主能力过滤后对外 56 个），并去掉只在编辑器里有意义的壳（webview HTML、命令面板、`autoStart` 等），把宿主换成 CLI + 浏览器控制台。
+独立版**在能力上继承扩展**（配置键名一一对应：扩展 56 个定义；独立版另有 `list_skills` 与 `run_script` 两个工具，
+并把服务、文件系统、进程控制、桥状态、审计日志、连通性六组近义工具合并成带 action 参数的工具族，
+共 40 个定义，按配置档与宿主能力过滤后对外 38 个；旧工具名仍然可用，见 `docs/tools.md`），并去掉只在编辑器里有意义的壳（webview HTML、命令面板、`autoStart` 等），把宿主换成 CLI + 浏览器控制台。
 
 已经**强于扩展**的地方：
 

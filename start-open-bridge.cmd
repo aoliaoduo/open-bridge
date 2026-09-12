@@ -96,9 +96,10 @@ if "%NEED_BUILD%"=="1" (
   if errorlevel 1 goto failed
 )
 
-echo  [3/3] starting the server - the browser opens the console ...
+echo  [3/3] starting the server - the console URL is printed below.
+echo        Nothing opens by itself; add --open if you want the browser to.
 echo.
-node bin\open-bridge.js serve --root "%WORKSPACE%" --open %*
+node bin\open-bridge.js serve --root "%WORKSPACE%" %*
 set EXITCODE=%ERRORLEVEL%
 if not "%EXITCODE%"=="0" (
   echo.

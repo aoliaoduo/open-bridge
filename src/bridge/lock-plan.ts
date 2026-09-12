@@ -10,7 +10,7 @@
  *
  * Only tools whose effect can actually collide are listed. Discovery-only tools
  * (search_files, find_files, list_directory, review_changes, get_process_snapshot,
- * read_process_output, wait_process) take no lock: they neither mutate anything
+ * read_process_output, wait) take no lock: they neither mutate anything
  * nor return file contents, and gating a long blocking read behind an exclusive
  * lock would make a stuck process unkillable.
  *
@@ -52,15 +52,17 @@ export interface LockPlan {
 }
 
 /** Tools that mutate a single named file. */
-const SINGLE_PATH_WRITE = new Set(["write_file", "create_directory", "delete_file"]);
-/** Tools that mutate two named paths. */
-const PAIR_PATH_WRITE = new Set(["move_file", "copy_file"]);
+const SINGLE_PATH_WRITE = new Set(["write_file"]);
 /** Tools that read a named file's contents. */
 const SINGLE_PATH_READ = new Set(["get_file_info"]);
 /** Process lifecycle mutations, keyed by command id. */
-const COMMAND_LIFECYCLE = new Set(["force_terminate", "restart_process", "set_process_policy"]);
-/** Service lifecycle, keyed by service name. */
-const SERVICE_LIFECYCLE = new Set(["start_service", "stop_service", "restart_service", "delete_service"]);
+const COMMAND_LIFECYCLE = new Set(["set_process_policy"]);
+/** file_op operations that touch exactly one path. */
+const FILE_OP_SINGLE = new Set(["create_directory", "delete"]);
+/** file_op operations that touch two paths. */
+const FILE_OP_PAIR = new Set(["copy", "move"]);
+/** service actions that name exactly one service. */
+const SERVICE_ACTION_SINGLE = new Set(["start", "stop", "restart", "delete"]);
 /** Callers may declare their own resource keys on these. */
 const DECLARED_RESOURCES = new Set(["run_command", "start_process", "save_service"]);
 
@@ -117,10 +119,18 @@ export async function deriveLockPlan(
   if (SINGLE_PATH_WRITE.has(name)) {
     const key = fileKey(args.path, ctx);
     if (key) keys.push(key);
-  } else if (PAIR_PATH_WRITE.has(name)) {
-    for (const field of ["source", "destination"]) {
-      const key = fileKey(args[field], ctx);
+  } else if (name === "file_op") {
+    // The plan follows the operation, not the family: a delete and a copy of the
+    // same path must not look alike to the lock table.
+    const op = typeof args.op === "string" ? args.op.trim() : "";
+    if (FILE_OP_SINGLE.has(op)) {
+      const key = fileKey(args.path, ctx);
       if (key) keys.push(key);
+    } else if (FILE_OP_PAIR.has(op)) {
+      for (const field of ["source", "destination"]) {
+        const key = fileKey(args[field], ctx);
+        if (key) keys.push(key);
+      }
     }
   } else if (name === "edit_block") {
     keys.push(...editBlockPaths(args, ctx));
@@ -148,21 +158,28 @@ export async function deriveLockPlan(
     mode = "read";
     const key = fileKey(args.path, ctx);
     if (key) keys.push(key);
-  } else if (COMMAND_LIFECYCLE.has(name)) {
+  } else if (COMMAND_LIFECYCLE.has(name) || name === "process_control") {
+    // Both process-control actions act on one managed process, so the command id
+    // is the resource either way.
     const id = args.command_id;
     if (typeof id === "string" && id.trim()) keys.push(`cmd:${id.trim()}`);
-  } else if (SERVICE_LIFECYCLE.has(name)) {
-    const service = args.name;
-    if (typeof service === "string" && service.trim()) keys.push(`svc:${service.trim().toLowerCase()}`);
-  } else if (name === "start_all_services" || name === "stop_all_services") {
-    const group = typeof args.group === "string" && args.group.trim() ? args.group.trim().toLowerCase() : "";
-    // Expand to the concrete services the batch WILL touch: exact-key matching
-    // makes a literal "svc:*" or "svc:<group>" disjoint from "svc:<name>", so
-    // stop_all could tear a service down while start/restart of that same
-    // service ran next to it. Services saved after this plan was derived are
-    // not covered — the batch iterates the same snapshot, so the exposure is
-    // theoretical.
-    keys.push(...ctx.servicesInGroup(group).map(serviceName => `svc:${serviceName}`));
+  } else if (name === "service") {
+    const action = typeof args.action === "string" ? args.action.trim() : "";
+    if (SERVICE_ACTION_SINGLE.has(action)) {
+      const service = args.name;
+      if (typeof service === "string" && service.trim()) keys.push(`svc:${service.trim().toLowerCase()}`);
+    } else if (action === "start_all" || action === "stop_all") {
+      const group = typeof args.group === "string" && args.group.trim() ? args.group.trim().toLowerCase() : "";
+      // Expand to the concrete services the batch WILL touch: exact-key matching
+      // makes a literal "svc:*" or "svc:<group>" disjoint from "svc:<name>", so
+      // stop_all could tear a service down while start/restart of that same
+      // service ran next to it. Services saved after this plan was derived are
+      // not covered — the batch iterates the same snapshot, so the exposure is
+      // theoretical.
+      keys.push(...ctx.servicesInGroup(group).map(serviceName => `svc:${serviceName}`));
+    }
+    // Any other action is refused by the family handler; planning nothing is
+    // better than guessing at a resource the call will never touch.
   }
 
   if (DECLARED_RESOURCES.has(name)) keys.push(...declaredKeys(args.resource_keys));

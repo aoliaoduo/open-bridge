@@ -23,9 +23,15 @@ const fk = (p: string): string => {
 };
 
 test("single-path write tools lock exactly that file", async () => {
-  for (const tool of ["write_file", "create_directory", "delete_file"]) {
+  for (const tool of ["write_file"]) {
     const plan = await deriveLockPlan(tool, { path: "src/a.ts" }, ctx());
     assert.deepEqual(plan?.keys, [fk("src/a.ts")], tool);
+    assert.equal(plan?.mode, "write");
+  }
+  // The file system family routes by operation: create/delete are single-path.
+  for (const op of ["create_directory", "delete"]) {
+    const plan = await deriveLockPlan("file_op", { op, path: "src/a.ts" }, ctx());
+    assert.deepEqual(plan?.keys, [fk("src/a.ts")], op);
     assert.equal(plan?.mode, "write");
   }
 });
@@ -45,7 +51,7 @@ test("path casing follows the platform's file-system semantics", async () => {
 });
 
 test("pair tools lock both source and destination", async () => {
-  const plan = await deriveLockPlan("move_file", { source: "a.ts", destination: "b.ts" }, ctx());
+  const plan = await deriveLockPlan("file_op", { op: "move", source: "a.ts", destination: "b.ts" }, ctx());
   assert.deepEqual(plan?.keys, [fk("a.ts"), fk("b.ts")].sort());
 });
 
@@ -81,30 +87,30 @@ test("an unresolvable patch still serializes against other patches", async () =>
 });
 
 test("process lifecycle tools serialize per command id", async () => {
-  for (const tool of ["force_terminate", "restart_process", "set_process_policy"]) {
+  for (const tool of ["process_control", "set_process_policy"]) {
     const plan = await deriveLockPlan(tool, { command_id: "abc123" }, ctx());
     assert.deepEqual(plan?.keys, ["cmd:abc123"], tool);
     assert.equal(plan?.handOffToProcess, false);
   }
-  assert.equal(await deriveLockPlan("force_terminate", {}, ctx()), undefined, "no id, no lock");
+  assert.equal(await deriveLockPlan("process_control", { action: "terminate" }, ctx()), undefined, "no id, no lock");
 });
 
 test("service lifecycle tools serialize per service, and all_* on the group's concrete services", async () => {
-  for (const tool of ["start_service", "stop_service", "restart_service", "delete_service"]) {
-    assert.deepEqual((await deriveLockPlan(tool, { name: "API" }, ctx()))?.keys, ["svc:api"], tool);
+  for (const action of ["start", "stop", "restart", "delete"]) {
+    assert.deepEqual((await deriveLockPlan("service", { action, name: "API" }, ctx()))?.keys, ["svc:api"], action);
   }
   // all_* expands to the concrete services it will touch (exact-key matching):
   // a literal "svc:*" never conflicted with "svc:<name>", so a stop-all could
   // interleave with an individual start/restart of the same service.
-  const all = await deriveLockPlan("start_all_services", {}, ctx({
+  const all = await deriveLockPlan("service", { action: "start_all" }, ctx({
     servicesInGroup: () => ["api", "web"],
   }));
   assert.deepEqual(all?.keys, ["svc:api", "svc:web"]);
-  const web = await deriveLockPlan("stop_all_services", { group: "Web" }, ctx({
+  const web = await deriveLockPlan("service", { action: "stop_all", group: "Web" }, ctx({
     servicesInGroup: group => (group === "web" ? ["api", "web"] : []),
   }));
   assert.deepEqual(web?.keys, ["svc:api", "svc:web"]);
-  const empty = await deriveLockPlan("start_all_services", {}, ctx());
+  const empty = await deriveLockPlan("service", { action: "start_all" }, ctx());
   assert.equal(empty, undefined, "no saved services, nothing to serialize");
 });
 
