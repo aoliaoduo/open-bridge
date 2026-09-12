@@ -28,34 +28,22 @@ import { makeRoomForSession, pruneSessions, startSessionPruneLoop } from "./sess
 import { publishSelf, readablePeerFiles, startRepublishLoop } from "./peer-registry.js";
 import { readJsonBody } from "../http/request-body.js";
 
-
-/** Bind loopback, wire request handling (CORS, caps, sessions) and self-verify. */
+/** Ensure one slot is free before creating a session; false when all are busy. */
 /**
- * Reply to a request the bearer gate refused, and record it.
+ * clientInfo from the initialize request that is about to create a session.
  *
- * Extracted from the request handler: the rejection path is the security
- * boundary, and it is easier to audit on its own than nested three levels
- * deep in the transport setup.
+ * The session object is built inside `onsessioninitialized`, which never sees
+ * the parsed body, so the label travels through this variable. Single-threaded
+ * request handling makes that safe: it is written and consumed within one
+ * handleRequest() call.
  */
-function rejectUnauthorized(
-  res: ServerResponse,
-  gate: { status: number; reason: string; retryAfterMs?: number; challenge?: string },
-  securityHeaders: Record<string, string>,
-): void {
-  record("bridge", "error", `Unauthenticated request rejected (${gate.reason}).`);
-  const headers: Record<string, string> = {
-    ...securityHeaders,
-    "content-type": "application/json",
-    // An OAuth client finds the authorization server through this header, so the
-    // gate supplies the spec-shaped challenge (with resource_metadata) when it
-    // rejected for OAuth reasons, and the plain bearer challenge otherwise.
-    "www-authenticate": gate.challenge ?? 'Bearer realm="open-bridge", error="invalid_token"',
-  };
-  if (gate.retryAfterMs) headers["retry-after"] = String(Math.ceil(gate.retryAfterMs / 1000));
-  if (!res.headersSent) res.writeHead(gate.status, headers);
-  res.end(JSON.stringify({
-    error: gate.status === 429 ? "Too many failed attempts. Retry later." : "Unauthorized.",
-  }));
+let pendingClientLabel: string | undefined;
+
+function clientLabelFrom(body: unknown): string | undefined {
+  const info = (body as { params?: { clientInfo?: { name?: unknown; version?: unknown } } } | undefined)
+    ?.params?.clientInfo;
+  if (!info || typeof info.name !== "string" || !info.name) return undefined;
+  return typeof info.version === "string" && info.version ? `${info.name}/${info.version}` : info.name;
 }
 
 /** Close the loopback listener and clear its pointers (used by failure paths and stop). */
@@ -110,6 +98,36 @@ export async function stopLocalServer(): Promise<void> {
     }
   });
 }
+
+/**
+ * Reply to a request the bearer gate refused, and record it.
+ *
+ * Extracted from the request handler: the rejection path is the security
+ * boundary, and it is easier to audit on its own than nested three levels
+ * deep in the transport setup.
+ */
+function rejectUnauthorized(
+  res: ServerResponse,
+  gate: { status: number; reason: string; retryAfterMs?: number; challenge?: string },
+  securityHeaders: Record<string, string>,
+): void {
+  record("bridge", "error", `Unauthenticated request rejected (${gate.reason}).`);
+  const headers: Record<string, string> = {
+    ...securityHeaders,
+    "content-type": "application/json",
+    // An OAuth client finds the authorization server through this header, so the
+    // gate supplies the spec-shaped challenge (with resource_metadata) when it
+    // rejected for OAuth reasons, and the plain bearer challenge otherwise.
+    "www-authenticate": gate.challenge ?? 'Bearer realm="open-bridge", error="invalid_token"',
+  };
+  if (gate.retryAfterMs) headers["retry-after"] = String(Math.ceil(gate.retryAfterMs / 1000));
+  if (!res.headersSent) res.writeHead(gate.status, headers);
+  res.end(JSON.stringify({
+    error: gate.status === 429 ? "Too many failed attempts. Retry later." : "Unauthorized.",
+  }));
+}
+
+/** Bind loopback, wire request handling (CORS, caps, sessions) and self-verify. */
 export async function startHttpInternal(): Promise<void> {
   const configuredPort = host().config.get<number>("port", 0);
   // An ephemeral bind must not move on a rebind: the console was loaded from
@@ -177,7 +195,7 @@ export async function startHttpInternal(): Promise<void> {
     if (url.pathname !== `/mcp/${state.routeToken}`) {
       // App-shell surfaces (/api, /console) get a chance before the 404.
       const extraRoute = currentExtraRouteHandler();
-  if (extraRoute && await extraRoute(req, res, url)) return;
+      if (extraRoute && await extraRoute(req, res, url)) return;
       reject(404);
       return;
     }
@@ -400,21 +418,4 @@ export async function startHttpInternal(): Promise<void> {
     })
     .catch(error => error instanceof Error ? error.message : String(error));
   if (health) throw new Error(`Local Bridge health check failed: ${health}`);
-}
-
-/** Ensure one slot is free before creating a session; false when all are busy. */
-/**
- * clientInfo from the initialize request that is about to create a session.
- *
- * The session object is built inside `onsessioninitialized`, which never sees
- * the parsed body, so the label travels through this variable. Single-threaded
- * request handling makes that safe: it is written and consumed within one
- * handleRequest() call.
- */
-let pendingClientLabel: string | undefined;
-function clientLabelFrom(body: unknown): string | undefined {
-  const info = (body as { params?: { clientInfo?: { name?: unknown; version?: unknown } } } | undefined)
-    ?.params?.clientInfo;
-  if (!info || typeof info.name !== "string" || !info.name) return undefined;
-  return typeof info.version === "string" && info.version ? `${info.name}/${info.version}` : info.name;
 }

@@ -7,7 +7,6 @@
  */
 import { type IncomingMessage } from "node:http";
 
-
 // --- Lifecycle constants (ShunCode-derived hardening values) ---
 /** Hard cap on a single MCP request body; larger uploads are destroyed mid-stream. */
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;

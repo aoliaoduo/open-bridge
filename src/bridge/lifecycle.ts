@@ -75,6 +75,7 @@ async function startInternal(): Promise<void> {
   host().notify("info", "Open Bridge 已启动。请从控制面板复制 MCP URL。");
   host().notify("warn", "Treat this URL as a secret: it grants workspace access.");
 }
+
 async function stopInternal(notify = true): Promise<void> {
   state.stopping = true;
   state.tunnelGeneration += 1; // invalidate any pending in-place reconnect timers
@@ -124,6 +125,7 @@ async function stopInternal(notify = true): Promise<void> {
   record("bridge", "completed", "Stopped.");
   if (notify) host().notify("info", "Open Bridge stopped.");
 }
+
 export async function start(): Promise<void> {
   return enqueueLifecycle(() => startInternal());
 }
@@ -136,6 +138,7 @@ function isStopped(): boolean {
     && state.sessions.size === 0
     && ![...state.commands.values()].some(command => !command.done);
 }
+
 export async function stop(notify = true): Promise<void> {
   // The host can run BOTH its dispose callback and deactivate() on shutdown,
   // which used to queue the full teardown twice (double "Stopped.", double
@@ -155,6 +158,7 @@ async function loadRouteToken(): Promise<void> {
     await host().secrets.store(key, state.routeToken);
   }
 }
+
 export async function rotateRouteToken(): Promise<void> {
   state.routeToken = randomBytes(16).toString("hex");
   await host().secrets.store(
@@ -193,6 +197,7 @@ export function webAiPrompt(): string {
   if (!url) throw new Error("Start Bridge before copying the web AI prompt.");
   return buildWebAiPrompt({ url, isPublic: Boolean(state.tunnelUrl), authEnabled: authEnabled() });
 }
+
 export interface HealthReport {
   ok: boolean;
   /** One line, for the console toast and the activity log. */

@@ -107,6 +107,7 @@ async function waitForTunnelReady(healthUrl: string, child: ChildProcessWithoutN
     child.stderr.off("data", collect);
   }
 }
+
 async function waitForPublicHealth(url: string, abort?: AbortSignal): Promise<void> {
   const timeoutMs = host().config.get<number>("publicHealthTimeoutMs", 20_000);
   const until = Date.now() + timeoutMs;
@@ -159,6 +160,7 @@ function stopReconnectChain(): void {
   state.reconnectTimer = undefined;
   state.reconnectAttempt = 0;
 }
+
 function scheduleReconnect(domain: string, generation: number): void {
   if (state.stopping || generation !== state.tunnelGeneration) return;
   if (!state.server) return; // local side is gone; a reconnect has nothing to attach to
@@ -199,6 +201,18 @@ function scheduleReconnect(domain: string, generation: number): void {
     });
   }, delay);
 }
+
+async function adoptSharedTunnel(domain: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    if (await healthCheckUrl(`https://${domain}/healthz/${state.routeToken}`, 1_000)) {
+      await watchPublicDomain(domain);
+      return true;
+    }
+    await new Promise<void>(resolve => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
 export function stopPublicWatch(): void {
   // clearTimeout works on either kind of handle, and the watch re-arms itself,
   // so a single cleared handle is enough to end the chain.
@@ -260,16 +274,6 @@ async function watchPublicDomain(domain: string): Promise<boolean> {
   await claimFreedDomain();
   return true;
 }
-async function adoptSharedTunnel(domain: string): Promise<boolean> {
-  for (let attempt = 0; attempt < 10; attempt++) {
-    if (await healthCheckUrl(`https://${domain}/healthz/${state.routeToken}`, 1_000)) {
-      await watchPublicDomain(domain);
-      return true;
-    }
-    await new Promise<void>(resolve => setTimeout(resolve, 500));
-  }
-  return false;
-}
 
 /**
  * Drop the optimistic https URL and surface the live loopback URL instead.
@@ -279,85 +283,6 @@ async function adoptSharedTunnel(domain: string): Promise<boolean> {
 function revertToLocalUrl(): void {
   state.tunnelUrl = "";
   host().ui.refresh();
-}
-
-/**
- * ngrok Free rejects agents that connect through an HTTP(S) proxy
- * (ERR_NGROK_9009). Inheriting the environment is the long-standing behaviour
- * and keeps working setups untouched; opt-out strips proxy variables so ngrok
- * connects directly.
- */
-function ngrokProcessEnvironment(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  const useProxy = host().config.get<boolean>("ngrokUseHttpProxy", true);
-  if (!useProxy) {
-    for (const key of Object.keys(env)) {
-      if (/^(https?_proxy|all_proxy|no_proxy)$/i.test(key)) delete env[key];
-    }
-  }
-  return env;
-}
-function spawnTunnel(domain: string, generation: number): ChildProcessWithoutNullStreams {
-  // An empty stored value (the page allows clearing it back to "auto") must
-  // fall back to the PATH binary instead of spawning "".
-  const exe = String(host().config.get<string>("ngrokExecutable", "ngrok") ?? "").trim() || "ngrok";
-  const child: ChildProcessWithoutNullStreams = state.tunnel = spawn(
-    exe,
-    ["http", String(state.port), "--url", `https://${domain}`, "--log", "stdout"],
-    // Share our console when we have one, so closing the terminal window takes
-    // the agent with it (src/bridge/child-console.ts records the measurement).
-    { windowsHide: windowsHideForChild(), env: ngrokProcessEnvironment() },
-  );
-  child.stdout.on("data", d => {
-    try {
-      host().log(`[ngrok] ${d.toString().trim()}`);
-    } catch { /* a log write must never take the tunnel down */ }
-  });
-  child.stderr.on("data", d => {
-    try {
-      host().log(`[ngrok] ${d.toString().trim()}`);
-    } catch { /* a log write must never take the tunnel down */ }
-  });
-  child.once("error", e => {
-    if (state.tunnel !== child) return;
-    state.tunnel = undefined;
-    const code = (e as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") {
-      record(
-        "ngrok",
-        "error",
-        `ngrok executable not found (${exe}). Set ngrokExecutable in the console settings page `
-        + "(open-bridge config set ngrokExecutable <path>).",
-      );
-    } else {
-      record("ngrok", "error", `ngrok failed: ${e.message}`);
-    }
-    host().notify("error", `ngrok failed: ${e.message}`);
-    // Every spawn failure (missing executable, EACCES, EINVAL, ...) is
-    // deterministic: retrying cannot heal it. Revert the optimistic public
-    // URL/role so the panel does not advertise a dead https endpoint, and do
-    // NOT arm a reconnect here — scheduleReconnect's catch recognizes the
-    // NgrokSpawnError thrown by waitForTunnelReady and stops the chain. The
-    // old fallback call to scheduleReconnect bypassed that guard and produced
-    // an endless spawn-retry loop.
-    state.tunnelRole = "none";
-    state.tunnelUrl = "";
-    host().ui.refresh();
-  });
-  child.once("exit", () => {
-    if (state.tunnel !== child) return;
-    state.tunnel = undefined;
-    // The process carrying this URL is gone, so the endpoint is dead. Clearing
-    // it keeps `public_url` honest while the reconnect runs; a peer tunnel
-    // republishes after its own health check, and a successful reconnect
-    // republishes from startTunnelInternal.
-    if (state.tunnelRole !== "follower") {
-      state.tunnelRole = "none";
-      revertToLocalUrl();
-    }
-    scheduleReconnect(domain, generation);
-  });
-  return child;
 }
 
 /**
@@ -481,6 +406,86 @@ export async function startTunnelInternal(generation: number): Promise<void> {
       );
     }
   }
+}
+
+/**
+ * ngrok Free rejects agents that connect through an HTTP(S) proxy
+ * (ERR_NGROK_9009). Inheriting the environment is the long-standing behaviour
+ * and keeps working setups untouched; opt-out strips proxy variables so ngrok
+ * connects directly.
+ */
+function ngrokProcessEnvironment(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  const useProxy = host().config.get<boolean>("ngrokUseHttpProxy", true);
+  if (!useProxy) {
+    for (const key of Object.keys(env)) {
+      if (/^(https?_proxy|all_proxy|no_proxy)$/i.test(key)) delete env[key];
+    }
+  }
+  return env;
+}
+
+function spawnTunnel(domain: string, generation: number): ChildProcessWithoutNullStreams {
+  // An empty stored value (the page allows clearing it back to "auto") must
+  // fall back to the PATH binary instead of spawning "".
+  const exe = String(host().config.get<string>("ngrokExecutable", "ngrok") ?? "").trim() || "ngrok";
+  const child: ChildProcessWithoutNullStreams = state.tunnel = spawn(
+    exe,
+    ["http", String(state.port), "--url", `https://${domain}`, "--log", "stdout"],
+    // Share our console when we have one, so closing the terminal window takes
+    // the agent with it (src/bridge/child-console.ts records the measurement).
+    { windowsHide: windowsHideForChild(), env: ngrokProcessEnvironment() },
+  );
+  child.stdout.on("data", d => {
+    try {
+      host().log(`[ngrok] ${d.toString().trim()}`);
+    } catch { /* a log write must never take the tunnel down */ }
+  });
+  child.stderr.on("data", d => {
+    try {
+      host().log(`[ngrok] ${d.toString().trim()}`);
+    } catch { /* a log write must never take the tunnel down */ }
+  });
+  child.once("error", e => {
+    if (state.tunnel !== child) return;
+    state.tunnel = undefined;
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      record(
+        "ngrok",
+        "error",
+        `ngrok executable not found (${exe}). Set ngrokExecutable in the console settings page `
+        + "(open-bridge config set ngrokExecutable <path>).",
+      );
+    } else {
+      record("ngrok", "error", `ngrok failed: ${e.message}`);
+    }
+    host().notify("error", `ngrok failed: ${e.message}`);
+    // Every spawn failure (missing executable, EACCES, EINVAL, ...) is
+    // deterministic: retrying cannot heal it. Revert the optimistic public
+    // URL/role so the panel does not advertise a dead https endpoint, and do
+    // NOT arm a reconnect here — scheduleReconnect's catch recognizes the
+    // NgrokSpawnError thrown by waitForTunnelReady and stops the chain. The
+    // old fallback call to scheduleReconnect bypassed that guard and produced
+    // an endless spawn-retry loop.
+    state.tunnelRole = "none";
+    state.tunnelUrl = "";
+    host().ui.refresh();
+  });
+  child.once("exit", () => {
+    if (state.tunnel !== child) return;
+    state.tunnel = undefined;
+    // The process carrying this URL is gone, so the endpoint is dead. Clearing
+    // it keeps `public_url` honest while the reconnect runs; a peer tunnel
+    // republishes after its own health check, and a successful reconnect
+    // republishes from startTunnelInternal.
+    if (state.tunnelRole !== "follower") {
+      state.tunnelRole = "none";
+      revertToLocalUrl();
+    }
+    scheduleReconnect(domain, generation);
+  });
+  return child;
 }
 
 let restartInstance: (() => Promise<void>) | undefined;

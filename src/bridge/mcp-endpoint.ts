@@ -24,54 +24,6 @@ import { discoverWorkspaceSkills, skillsIndexSuffix } from "./skills.js";
 import { invoke } from "./dispatcher.js";
 import { persistUsageStats } from "./usage-store.js";
 
-const SERVER_INSTRUCTIONS_BASE =
-  "You are connected to a local project workspace through the standalone Open Bridge. Relative paths, default command cwd, and project services always use that workspace. Other directories can be accessed only with explicit absolute paths; never let them change the workspace anchor. When starting work on an unfamiliar project, call workspace_brief once for orientation instead of exploring blindly. Use file tools for project management, run_command/start_process for commands, and wait_process/interact_with_process/restart_process/set_process_policy for supervised long-running services. Use check_port/check_http for readiness and save_service/list_services/start_service/stop_service/restart_service/delete_service/start_all_services/stop_all_services/service_status for reusable project orchestration. Use set_todos for multi-step work and report_progress for transient updates. Use batch to combine multiple tool calls in a single roundtrip. When a task needs several related calls or a tool result is large, prefer run_script: compose the calls in one JavaScript program and return only what you need. After finishing a batch of related edits, call review_changes so the user can see the full cumulative change set.";
-
-// The advertised catalog (toolProfile + host-capability filters) lives in
-// tool-catalog.ts so tools/list and the status surface's tool_count agree.
-
-/**
- * Project instruction files (AGENTS.md / CLAUDE.md — DevSpace two-layer model,
- * root layer only): injected into server instructions so every session sees
- * the project's conventions. Bounded; absent files are simply skipped.
- */
-/**
- * The instructions every protocol era hands to a client: the base text, the
- * workspace's own instructions, and whatever skills were discovered. Held as
- * ONE literal because `createMcp` (stateful era) and `createSpecMcp`
- * (2026-07-28 era) both hand their client the same guidance — two copies of a
- * long prompt is how the two eras drift apart without anyone noticing.
- */
-function serverInstructions(): string {
-  return SERVER_INSTRUCTIONS_BASE + projectInstructionSuffix() + skillsSuffix();
-}
-function projectInstructionSuffix(): string {
-  const parts: string[] = [];
-  for (const name of ["AGENTS.md", "CLAUDE.md"]) {
-    try {
-      const raw = fsSync.readFileSync(path.join(root(), name), "utf8");
-      if (!raw.trim()) continue;
-      parts.push(`### ${name}\n${raw.slice(0, 8_000)}${raw.length > 8_000 ? "\n…[truncated]" : ""}`);
-    } catch {
-      // Missing or unreadable file: nothing to inject.
-    }
-  }
-  return parts.length ? `\n\n# Project instructions\n${parts.join("\n\n")}` : "";
-}
-
-/**
- * The skills index for the server instructions (see skills.ts). Read once per
- * server construction — each protocol era builds its own — so a skill added
- * later is picked up by `list_skills` rather than by a reconnect. A discovery
- * failure must never keep a session from starting.
- */
-function skillsSuffix(): string {
-  try {
-    return skillsIndexSuffix(discoverWorkspaceSkills().skills);
-  } catch {
-    return "";
-  }
-}
 /** SSE events retained for stream resumption (Last-Event-ID replay). */
 const SESSION_EVENT_STORE_LIMIT = 512;
 
@@ -119,7 +71,59 @@ class BoundedInMemoryEventStore implements EventStore {
     return previous.streamId;
   }
 }
+
 export const sharedEventStore = new BoundedInMemoryEventStore();
+
+// The advertised catalog (toolProfile + host-capability filters) lives in
+// tool-catalog.ts so tools/list and the status surface's tool_count agree.
+
+/**
+ * Project instruction files (AGENTS.md / CLAUDE.md — DevSpace two-layer model,
+ * root layer only): injected into server instructions so every session sees
+ * the project's conventions. Bounded; absent files are simply skipped.
+ */
+/**
+ * The instructions every protocol era hands to a client: the base text, the
+ * workspace's own instructions, and whatever skills were discovered. Held as
+ * ONE literal because `createMcp` (stateful era) and `createSpecMcp`
+ * (2026-07-28 era) both hand their client the same guidance — two copies of a
+ * long prompt is how the two eras drift apart without anyone noticing.
+ */
+function serverInstructions(): string {
+  return SERVER_INSTRUCTIONS_BASE + projectInstructionSuffix() + skillsSuffix();
+}
+
+const SERVER_INSTRUCTIONS_BASE =
+  "You are connected to a local project workspace through the standalone Open Bridge. Relative paths, default command cwd, and project services always use that workspace. Other directories can be accessed only with explicit absolute paths; never let them change the workspace anchor. When starting work on an unfamiliar project, call workspace_brief once for orientation instead of exploring blindly. Use file tools for project management, run_command/start_process for commands, and wait_process/interact_with_process/restart_process/set_process_policy for supervised long-running services. Use check_port/check_http for readiness and save_service/list_services/start_service/stop_service/restart_service/delete_service/start_all_services/stop_all_services/service_status for reusable project orchestration. Use set_todos for multi-step work and report_progress for transient updates. Use batch to combine multiple tool calls in a single roundtrip. When a task needs several related calls or a tool result is large, prefer run_script: compose the calls in one JavaScript program and return only what you need. After finishing a batch of related edits, call review_changes so the user can see the full cumulative change set.";
+
+function projectInstructionSuffix(): string {
+  const parts: string[] = [];
+  for (const name of ["AGENTS.md", "CLAUDE.md"]) {
+    try {
+      const raw = fsSync.readFileSync(path.join(root(), name), "utf8");
+      if (!raw.trim()) continue;
+      parts.push(`### ${name}\n${raw.slice(0, 8_000)}${raw.length > 8_000 ? "\n…[truncated]" : ""}`);
+    } catch {
+      // Missing or unreadable file: nothing to inject.
+    }
+  }
+  return parts.length ? `\n\n# Project instructions\n${parts.join("\n\n")}` : "";
+}
+
+/**
+ * The skills index for the server instructions (see skills.ts). Read once per
+ * server construction — each protocol era builds its own — so a skill added
+ * later is picked up by `list_skills` rather than by a reconnect. A discovery
+ * failure must never keep a session from starting.
+ */
+function skillsSuffix(): string {
+  try {
+    return skillsIndexSuffix(discoverWorkspaceSkills().skills);
+  } catch {
+    return "";
+  }
+}
+
 export function createMcp(session: SessionState): Server {
   const serverVersion = host().version();
   const mcp = new Server(
@@ -189,6 +193,7 @@ export function createMcp(session: SessionState): Server {
  * the host is not available at module-evaluation time.
  */
 let modernHandlerCache: { toNode: ReturnType<typeof toNodeHandler> } | undefined;
+
 export function modernNodeHandlerOf(): ReturnType<typeof toNodeHandler> {
   modernHandlerCache ??= {
     toNode: toNodeHandler(
@@ -219,6 +224,7 @@ export function headerValue(raw: string | string[] | undefined): string | undefi
  * structuredContent rules can never drift between eras.
  */
 type ToolCallOutcome = { ok: true; result: unknown } | { ok: false; message: string };
+
 async function runToolCall(
   name: string,
   args: Record<string, unknown>,

@@ -11,8 +11,10 @@ import { pruneCommands } from "./processes.js";
 
 /** Idle MCP sessions are reclaimed after this long without activity. */
 const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
+
 /** How often the idle-session reclamation sweep runs. */
 const SESSION_PRUNE_INTERVAL_MS = 60_000;
+
 export function pruneSessions(): void {
   // Idle reclamation: a client that walked away keeps its transport (and todo
   // state) alive forever otherwise. Busy sessions are never reclaimed.
@@ -37,6 +39,7 @@ export function pruneSessions(): void {
   }
   if (prunedAny) host().ui.update();
 }
+
 export function makeRoomForSession(): boolean {
   if (state.sessions.size < MAX_SESSIONS) return true;
   const evictable = [...state.sessions.entries()]
@@ -47,6 +50,7 @@ export function makeRoomForSession(): boolean {
   void evictable[1].transport.close();
   return true;
 }
+
 export function startSessionPruneLoop(): void {
   if (state.sessionPruneTimer) return;
   state.sessionPruneTimer = setInterval(() => {
@@ -58,6 +62,7 @@ export function startSessionPruneLoop(): void {
     try { pruneCommands(); } catch { /* best-effort sweep */ }
   }, SESSION_PRUNE_INTERVAL_MS);
 }
+
 export function stopSessionPruneLoop(): void {
   if (state.sessionPruneTimer) clearInterval(state.sessionPruneTimer);
   state.sessionPruneTimer = undefined;

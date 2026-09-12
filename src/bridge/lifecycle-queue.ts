@@ -8,7 +8,6 @@
  */
 import { state } from "./state.js";
 
-
 /** Serialize bridge lifecycle transitions so start/stop/rotate cannot overlap. */
 export function enqueueLifecycle(task: () => Promise<void>): Promise<void> {
   const next = state.lifecycleTail.then(task, task);

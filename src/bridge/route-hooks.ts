@@ -8,7 +8,6 @@
  */
 import { type IncomingMessage, type ServerResponse } from "node:http";
 
-
 /**
  * Extra route handler hook for the app shell: /api and /console live outside
  * the core (they are the standalone host's surfaces, not the Bridge's). The
@@ -19,10 +18,13 @@ export type ExtraRouteHandler = (
   res: ServerResponse,
   url: URL,
 ) => Promise<boolean>;
+
 let extraRouteHandler: ExtraRouteHandler | undefined;
+
 export function setExtraRouteHandler(handler: ExtraRouteHandler | undefined): void {
   extraRouteHandler = handler;
 }
+
 let localServerReadyHook: (() => void) | undefined;
 
 /**

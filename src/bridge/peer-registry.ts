@@ -13,7 +13,6 @@ import * as path from "node:path";
 import { peerRegistryCandidates, publishPeerTo, withdrawPeerFrom } from "../http/peers.js";
 import { record, state } from "./state.js";
 
-
 // Windows share one public tunnel: each instance advertises its token and loopback port,
 // and whichever owns ngrok forwards requests addressed to a peer token.
 function peersFile(): string {
@@ -69,6 +68,7 @@ function publishablePeerFiles(): string[] {
     && Boolean(host().config.get<string>("ngrokDomain", "").trim());
   return wantsTunnel ? [own, ...sharedPeerFiles()] : [own];
 }
+
 export async function publishSelf(): Promise<void> {
   const files = publishablePeerFiles();
   if (!files.length || !state.routeToken || !state.port) return;
@@ -84,6 +84,7 @@ export async function publishSelf(): Promise<void> {
     record("bridge", "error", `Peer registry write failed (${failed.file}): ${failed.error}`);
   }
 }
+
 export async function withdrawSelf(): Promise<void> {
   // Withdraw from every registry we might have advertised in: a row left behind
   // in the tunnel owner's file would keep routing traffic to a dead port.
@@ -97,6 +98,7 @@ export async function withdrawSelf(): Promise<void> {
     record("bridge", "error", `Peer registry cleanup failed (${failed.file}): ${failed.error}`);
   }
 }
+
 export function stopRepublishLoop(): void {
   if (state.rePublishTimer) clearInterval(state.rePublishTimer);
   state.rePublishTimer = undefined;
