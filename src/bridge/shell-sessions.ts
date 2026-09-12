@@ -21,6 +21,7 @@ import { shellSpec } from "./processes.js";
 import { ProcessOutputBuffer, type ProcessOutputRead } from "../process/output-buffer.js";
 import { MAX_CAPTURED_OUTPUT } from "./state.js";
 import { windowsHideForChild } from "./child-console.js";
+import { reassertServeConsoleTitle } from "./console-title.js";
 import { createMarker, scanMarkerExitCode, stripMarkerLines } from "../shell/session-marker.js";
 import { availableHint } from "./error-hints.js";
 import { maybeStripAnsi } from "../process/ansi.js";
@@ -149,6 +150,7 @@ function spawnSessionShell(name: string, cwd: string): { id: string; child: Chil
     registered.endedAt = Date.now();
     registered.lastEvent = registered.requestedStop ?? "exited";
     record("process", "completed", `${id} shell closed with code ${String(code)}`);
+    reassertServeConsoleTitle();
     host().ui.update();
   });
   // Register under state.commands so the panel / process tools see it as a live managed process.

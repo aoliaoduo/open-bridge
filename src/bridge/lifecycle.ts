@@ -30,6 +30,7 @@ import { exchangeLine, isNoteworthy, traceId, tracedFormat, tracedMethod, type T
 import { root, workspaceStateSuffix } from "./paths.js";
 import { discoverWorkspaceSkills, skillsIndexSuffix } from "./skills.js";
 import { nextFreeRounds, shouldClaimDomain, watchIntervalMs } from "./tunnel-watch.js";
+import { buildServeTitle, clearServeConsoleTitle, installServeConsoleTitle } from "./console-title.js";
 import { invoke } from "./dispatcher.js";
 import { loadTodoStore } from "./todo-store.js";
 import { persistUsageStats } from "./usage-store.js";
@@ -842,6 +843,7 @@ async function stopLocalServer(): Promise<void> {
   state.server = undefined;
   if (!activeServer) return;
   record("bridge", "progress", "Shutdown started: closing the MCP listener.");
+  clearServeConsoleTitle();
   try {
     // Drop idle keep-alive connections immediately so stop()/reload does not
     // wait on Node's keepAliveTimeout; in-flight requests still drain.
@@ -1226,6 +1228,11 @@ async function startHttpInternal(): Promise<void> {
   });
   state.port = (state.server.address() as { port: number }).port;
   state.boundPort = state.port;
+  // Name this window after the instance it is running. Children share the console
+  // (that is how closing the window stops the tunnel too), and cmd.exe/npm write
+  // their own titles into it — see console-title.ts. cosmetic, but it is the
+  // operator's only clue about which workspace this window is serving.
+  installServeConsoleTitle(buildServeTitle(path.basename(root()), state.port));
   try {
     localServerReadyHook?.();
   } catch {

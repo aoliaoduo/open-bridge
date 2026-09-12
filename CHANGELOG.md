@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Fixed
+- **窗口标题不再被子进程改乱。** Windows 每个控制台只有**一个**标题字符串，任何挂在该控制台上的进程都能改写它
+  （`SetConsoleTitle`），而且**没有恢复机制**。因为我们的子进程是**有意共享控制台**的（关窗要连带停掉隧道与服务，
+  见 `child-console.ts`），我们跑的命令也会往标题里写字：**自己拥有控制台**的 `cmd.exe`（双击 .cmd/.bat、`cmd /k` 新窗口）会把镜像路径写成窗口名：
+  `C:\Windows\system32\cmd.exe`；**只共享**我们控制台的 `cmd /c …` 实测不动标题。npm 则通过 `process.title` 写「npm …」（`npm/lib/cli/entry.js:4`、`npm/lib/npm.js:153`）。
+  子进程退出后窗口就保持它写的样子，操作者看到的就是「窗口名自己乱变」。现在：启动时**认领**标题
+  （`Open Bridge - <工作区名> (:端口)`），并在**每个子进程退出后重新认领**（`run_command` 与常驻 shell 两条路径），
+  停机时释放。纯外观改动，无控制台时（服务/CI/重定向输出）完全不动手；写入失败也绝不抛错影响服务。
 - **公网隧道的接管变快了。** 借用别人隧道的实例（follower）原本每 10 秒固定探一次；持有者退出后，实测
   **约 2 分钟**才完成接管（`bridge.log`：08:46:48 `Public domain is free again; this window will claim it.`
   → 08:46:51 已恢复公网），这段时间对所有远端客户端就是纯宕机。现在探测节奏**跟着上一次结果走**：

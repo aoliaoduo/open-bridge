@@ -9,6 +9,7 @@ import { maybeStripAnsi } from "../process/ansi.js";
 import { isBashLikeShell, visibleCapturePath, wrapWithTee, wrapWithTeeAppend } from "../process/tee-capture.js";
 import { showVisibleTerminal } from "./visible-terminal.js";
 import { windowsHideForChild } from "./child-console.js";
+import { reassertServeConsoleTitle } from "./console-title.js";
 import * as fsSync from "node:fs";
 import {
   MAX_CAPTURED_OUTPUT,
@@ -127,6 +128,9 @@ export function spawnManaged(
     commandState.endedAt = Date.now();
     commandState.lastEvent = commandState.requestedStop ?? (code === 0 ? "exited" : "crashed");
     record("process", "completed", `${id} ${commandState.lastEvent} with code ${String(code)}`);
+    // The child had this console and wrote its own title into it (cmd.exe puts its
+    // image path there, npm writes "npm …"): take the window back.
+    reassertServeConsoleTitle();
     // P1-1: best-effort push so a connected client hears about the exit without
     // polling; only non-zero, unrequested exits notify as errors.
     notifyLatestLogging(
