@@ -99,42 +99,44 @@ export function TokensTab({ settings, act }: Props) {
         {settings.tokens.length === 0 ? (
           <div className="section-note">还没有令牌。开启鉴权前必须先创建至少一个。</div>
         ) : (
-          <table className="token-table">
-            <thead>
-              <tr>
-                <th>标签</th>
-                <th>ID</th>
-                <th>状态</th>
-                <th>创建</th>
-                <th>过期</th>
-                <th>使用</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {settings.tokens.map(token => (
-                <tr key={token.id} className={token.revoked || token.expired ? "dead" : ""}>
-                  <td>{token.label}</td>
-                  <td className="mono">{token.id}</td>
-                  <td>{tokenPill(token)}</td>
-                  <td>{fmtDate(token.created_at)}</td>
-                  <td>{token.expires_at ? fmtDate(token.expires_at) : "永久"}</td>
-                  <td>{token.use_count}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>
-                    {!token.revoked && !token.expired && (
-                      <>
-                        <button className="small" onClick={() => void act({ command: "rotateToken", id: token.id })}>轮换</button>
-                        {" "}
-                        <ConfirmButton label="吊销" onConfirm={() => void act({ command: "revokeToken", id: token.id })} />
-                        {" "}
-                      </>
-                    )}
-                    <ConfirmButton label="删除" onConfirm={() => void act({ command: "deleteToken", id: token.id })} />
-                  </td>
+          <div className="table-wrap">
+            <table className="token-table">
+              <thead>
+                <tr>
+                  <th>标签</th>
+                  <th>ID</th>
+                  <th>状态</th>
+                  <th>创建</th>
+                  <th>过期</th>
+                  <th>使用</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {settings.tokens.map(token => (
+                  <tr key={token.id} className={token.revoked || token.expired ? "dead" : ""}>
+                    <td>{token.label}</td>
+                    <td className="mono">{token.id}</td>
+                    <td>{tokenPill(token)}</td>
+                    <td>{fmtDate(token.created_at)}</td>
+                    <td>{token.expires_at ? fmtDate(token.expires_at) : "永久"}</td>
+                    <td>{token.use_count}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      {!token.revoked && !token.expired && (
+                        <>
+                          <button className="small" onClick={() => void act({ command: "rotateToken", id: token.id })}>轮换</button>
+                          {" "}
+                          <ConfirmButton label="吊销" onConfirm={() => void act({ command: "revokeToken", id: token.id })} />
+                          {" "}
+                        </>
+                      )}
+                      <ConfirmButton label="删除" onConfirm={() => void act({ command: "deleteToken", id: token.id })} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
 
         <div className="row" style={{ marginTop: 12 }}>

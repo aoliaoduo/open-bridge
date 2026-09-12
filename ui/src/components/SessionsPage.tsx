@@ -96,36 +96,38 @@ export function SessionsPage() {
             当前没有客户端连接。把 <span className="mono">状态</span> 页里 MCP 端点卡片的地址填进客户端之后，这里会出现它的名字与空闲时间。
           </div>
         ) : (
-          <table className="token-table">
-            <thead>
-              <tr>
-                <th>客户端</th>
-                <th>会话</th>
-                <th>首次连接</th>
-                <th>空闲</th>
-                <th>调用数</th>
-                <th>进行中</th>
-                <th>待办</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.map(session => (
-                <tr key={session.id}>
-                  <td>{session.client}</td>
-                  <td className="mono" title={session.id}>{session.id.slice(0, 8)}…</td>
-                  <td title={session.connected_at}>{connectedLabel(session.connected_at)}</td>
-                  <td>{idleLabel(session.idle_ms)}</td>
-                  <td>{session.calls > 0 ? session.calls : "—"}</td>
-                  <td>{session.active_requests > 0 ? `${session.active_requests} 个请求` : "—"}</td>
-                  <td>{session.todos > 0 ? `${session.todos} 项` : "—"}</td>
-                  <td>
-                    <ConfirmButton label="断开" disabled={closingId === session.id} onConfirm={() => void close(session.id)} />
-                  </td>
+          <div className="table-wrap">
+            <table className="token-table">
+              <thead>
+                <tr>
+                  <th>客户端</th>
+                  <th>会话</th>
+                  <th>首次连接</th>
+                  <th>空闲</th>
+                  <th>调用数</th>
+                  <th>进行中</th>
+                  <th>待办</th>
+                  <th>操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {sessions.map(session => (
+                  <tr key={session.id}>
+                    <td>{session.client}</td>
+                    <td className="mono" title={session.id}>{session.id.slice(0, 8)}…</td>
+                    <td title={session.connected_at}>{connectedLabel(session.connected_at)}</td>
+                    <td>{idleLabel(session.idle_ms)}</td>
+                    <td>{session.calls > 0 ? session.calls : "—"}</td>
+                    <td>{session.active_requests > 0 ? `${session.active_requests} 个请求` : "—"}</td>
+                    <td>{session.todos > 0 ? `${session.todos} 项` : "—"}</td>
+                    <td>
+                      <ConfirmButton label="断开" disabled={closingId === session.id} onConfirm={() => void close(session.id)} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
         <div className="section-note">每 5 秒自动刷新。</div>
       </div>
@@ -139,31 +141,33 @@ export function SessionsPage() {
         {lockRows.length === 0 ? (
           <div className="section-note">当前没有加锁，也没有等待者。</div>
         ) : (
-          <table className="token-table">
-            <thead>
-              <tr>
-                <th>状态</th>
-                <th>资源</th>
-                <th>模式</th>
-                <th>调用</th>
-                <th>已持续</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* Key includes the index: two waiters can legally queue on the
-                  same resource (that is the whole point of the table), and a
-                  kind+key key collided between them. */}
-              {lockRows.map((row, index) => (
-                <tr key={`${row.kind}-${row.key}-${index}`}>
-                  <td>{row.kind === "持有" ? <span className="pill ok">持有</span> : <span className="pill dead">等待</span>}</td>
-                  <td className="mono" title={row.key || undefined}>{row.key || "—"}</td>
-                  <td>{row.mode || "—"}</td>
-                  <td>{row.label || "—"}</td>
-                  <td>{idleLabel(row.ms)}</td>
+          <div className="table-wrap">
+            <table className="token-table">
+              <thead>
+                <tr>
+                  <th>状态</th>
+                  <th>资源</th>
+                  <th>模式</th>
+                  <th>调用</th>
+                  <th>已持续</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {/* Key includes the index: two waiters can legally queue on the
+                    same resource (that is the whole point of the table), and a
+                    kind+key key collided between them. */}
+                {lockRows.map((row, index) => (
+                  <tr key={`${row.kind}-${row.key}-${index}`}>
+                    <td>{row.kind === "持有" ? <span className="pill ok">持有</span> : <span className="pill dead">等待</span>}</td>
+                    <td className="mono" title={row.key || undefined}>{row.key || "—"}</td>
+                    <td>{row.mode || "—"}</td>
+                    <td>{row.label || "—"}</td>
+                    <td>{idleLabel(row.ms)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

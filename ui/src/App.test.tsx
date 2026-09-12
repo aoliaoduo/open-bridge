@@ -426,6 +426,31 @@ describe("App shell", () => {
 
     expect(screen.queryByText("ob_secret_value")).toBeNull();
   });
+
+  test("the secret mask is a dialog: it takes focus and Escape dismisses it", async () => {
+    // The mask only closed on a click before: no role, no focus, and no keyboard
+    // way out of a modal that is showing a credential that will never be shown
+    // again.
+    mocks.settingsAction.mockResolvedValue({
+      ok: true,
+      state: settingsState({ usableCount: 1 }),
+      secret: { kind: "minted", id: "t2", label: "keyboard", secret: "ob_kbd_value", ttl: "永久" },
+    } satisfies SettingsActionResult);
+
+    render(<App />);
+    await screen.findByText("MCP 端点");
+    fireEvent.click(tabLink("令牌"));
+    fireEvent.click(await screen.findByRole("button", { name: "新建令牌" }));
+    fireEvent.click(await screen.findByRole("button", { name: "创建" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(document.activeElement).toBe(dialog);
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByText("ob_kbd_value")).toBeNull();
+  });
 });
 
 test("the directory whitelist is a textarea: every line survives editing", async () => {

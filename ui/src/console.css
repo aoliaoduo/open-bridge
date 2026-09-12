@@ -365,6 +365,14 @@ label.check {
 
 .section-note { color: var(--muted); font-size: 12.5px; margin: 4px 0 10px; }
 
+/* A warning note must follow the theme. #b45309 was hardcoded here once and the
+   dark panel put it at 3.3:1 - half the contrast of the theme's own --warn. */
+.section-note.note-warn { color: var(--warn); }
+
+/* 会话 has eight columns and 令牌 seven: on a narrow window the table scrolls
+   inside its card instead of dragging the whole page sideways. */
+.table-wrap { overflow-x: auto; }
+
 .act-status { width: 76px; flex: none; font-size: 12px; }
 .act-status.completed { color: var(--ok); }
 .act-status.error { color: var(--err); }

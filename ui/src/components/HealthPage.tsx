@@ -6,6 +6,9 @@ const LABELS: Record<string, string> = {
   instance: "实例",
   workspace: "工作区",
   tools: "工具目录",
+  // The build check arrived after this map did, so the row rendered the raw
+  // English name on a page where every other row is labelled.
+  build: "构建",
   tunnel: "隧道",
   public: "公网连通",
   exposure: "暴露面",
@@ -92,28 +95,30 @@ export function HealthPage(
         {report === null ? (
           <div className="section-note">{busy ? "体检中…" : "读取中…"}</div>
         ) : (
-          <table className="token-table">
-            <thead>
-              <tr>
-                <th>结果</th>
-                <th>检查项</th>
-                <th>详情</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.checks.map(check => (
-                <tr key={check.name}>
-                  <td>
-                    {levelOf(check) === "ok" && <span className="pill ok">通过</span>}
-                    {levelOf(check) === "warn" && <span className="pill warn">提醒</span>}
-                    {levelOf(check) === "fail" && <span className="pill dead">异常</span>}
-                  </td>
-                  <td>{LABELS[check.name] ?? check.name}</td>
-                  <td className="mono wrap">{check.detail}</td>
+          <div className="table-wrap">
+            <table className="token-table">
+              <thead>
+                <tr>
+                  <th>结果</th>
+                  <th>检查项</th>
+                  <th>详情</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {report.checks.map(check => (
+                  <tr key={check.name}>
+                    <td>
+                      {levelOf(check) === "ok" && <span className="pill ok">通过</span>}
+                      {levelOf(check) === "warn" && <span className="pill warn">提醒</span>}
+                      {levelOf(check) === "fail" && <span className="pill dead">异常</span>}
+                    </td>
+                    <td>{LABELS[check.name] ?? check.name}</td>
+                    <td className="mono wrap">{check.detail}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

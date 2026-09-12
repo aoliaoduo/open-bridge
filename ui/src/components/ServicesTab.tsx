@@ -62,60 +62,62 @@ export function ServicesTab() {
           保存后就能在这里启停，不必再让代理代劳。
         </div>
       ) : (
-        <table className="token-table">
-          <thead>
-            <tr>
-              <th>名称</th>
-              <th>分组</th>
-              <th>状态</th>
-              <th>端口</th>
-              <th>命令</th>
-              <th>日志</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {services.map(service => (
-              <tr key={service.name}>
-                <td className="mono">{service.name}</td>
-                <td>{service.group || "—"}</td>
-                <td>
-                  {service.running
-                    ? <span className="badge on">运行中</span>
-                    : <span className="badge off">已停止</span>}
-                </td>
-                <td>{service.port ?? "—"}</td>
-                <td className="mono" title={service.command}>
-                  {service.command.length > 46 ? `${service.command.slice(0, 46)}…` : service.command}
-                </td>
-                <td className="mono" title={service.log_file ?? ""}>{logName(service.log_file)}</td>
-                <td>
-                  <button
-                    className="small"
-                    disabled={busy === service.name || service.running}
-                    onClick={() => void run(service.name, "start")}
-                  >
-                    启动
-                  </button>{" "}
-                  <button
-                    className="small"
-                    disabled={busy === service.name || !service.running}
-                    onClick={() => void run(service.name, "stop")}
-                  >
-                    停止
-                  </button>{" "}
-                  <button
-                    className="small"
-                    disabled={busy === service.name || !service.running}
-                    onClick={() => void run(service.name, "restart")}
-                  >
-                    重启
-                  </button>
-                </td>
+        <div className="table-wrap">
+          <table className="token-table">
+            <thead>
+              <tr>
+                <th>名称</th>
+                <th>分组</th>
+                <th>状态</th>
+                <th>端口</th>
+                <th>命令</th>
+                <th>日志</th>
+                <th>操作</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {services.map(service => (
+                <tr key={service.name}>
+                  <td className="mono">{service.name}</td>
+                  <td>{service.group || "—"}</td>
+                  <td>
+                    {service.running
+                      ? <span className="badge on">运行中</span>
+                      : <span className="badge off">已停止</span>}
+                  </td>
+                  <td>{service.port ?? "—"}</td>
+                  <td className="mono" title={service.command}>
+                    {service.command.length > 46 ? `${service.command.slice(0, 46)}…` : service.command}
+                  </td>
+                  <td className="mono" title={service.log_file ?? ""}>{logName(service.log_file)}</td>
+                  <td>
+                    <button
+                      className="small"
+                      disabled={busy === service.name || service.running}
+                      onClick={() => void run(service.name, "start")}
+                    >
+                      启动
+                    </button>{" "}
+                    <button
+                      className="small"
+                      disabled={busy === service.name || !service.running}
+                      onClick={() => void run(service.name, "stop")}
+                    >
+                      停止
+                    </button>{" "}
+                    <button
+                      className="small"
+                      disabled={busy === service.name || !service.running}
+                      onClick={() => void run(service.name, "restart")}
+                    >
+                      重启
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {note && <div className="section-note">{note}</div>}
       <div className="section-note">状态每 5 秒自动刷新。健康检查与按组批量启停仍在 MCP 工具侧（service_status / start_all_services）。</div>

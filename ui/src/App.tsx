@@ -24,6 +24,7 @@ export function App() {
   // Bumped by 刷新本页 so the open page remounts and re-reads its data.
   const [reloadKey, setReloadKey] = useState(0);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const secretBox = useRef<HTMLDivElement | null>(null);
 
   const showToast = useCallback((text: string, isError = false) => {
     clearTimeout(toastTimer.current);
@@ -55,6 +56,17 @@ export function App() {
     const label = ROUTES.find(item => item.id === route)?.label ?? "控制台";
     document.title = `${label} · Open Bridge 控制台`;
   }, [route]);
+
+  // The one-time secret is a modal, so it has to behave like one: Escape closes
+  // it (there was no keyboard way out at all) and focus moves into it, otherwise
+  // the plaintext sat behind a keyboard-invisible wall.
+  useEffect(() => {
+    if (!secret) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setSecret(null); };
+    window.addEventListener("keydown", onKey);
+    secretBox.current?.focus();
+    return () => window.removeEventListener("keydown", onKey);
+  }, [secret]);
 
   const open = useCallback((id: RouteId) => {
     navigate(id);
@@ -142,7 +154,7 @@ export function App() {
       </div>
 
       <div className="page" key={`${route}-${reloadKey}`}>
-        {route === "status" && <StatusTab settings={settings} act={act} onRefresh={refreshSettings} />}
+        {route === "status" && <StatusTab act={act} onRefresh={refreshSettings} notify={showToast} />}
         {route === "sessions" && <SessionsPage />}
         {route === "tools" && <ToolsPage />}
         {route === "health" && <HealthPage act={act} />}
@@ -166,8 +178,16 @@ export function App() {
 
       {secret && (
         <div className="mask" onClick={() => setSecret(null)}>
-          <div className="card" onClick={event => event.stopPropagation()}>
-            <h2>{secret.kind === "minted" ? "令牌已创建" : "令牌已轮换"}</h2>
+          <div
+            className="card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="secret-title"
+            tabIndex={-1}
+            ref={secretBox}
+            onClick={event => event.stopPropagation()}
+          >
+            <h2 id="secret-title">{secret.kind === "minted" ? "令牌已创建" : "令牌已轮换"}</h2>
             <div className="section-note">
               {secret.label} · {secret.ttl} — 明文只显示这一次，请立即保存。
             </div>

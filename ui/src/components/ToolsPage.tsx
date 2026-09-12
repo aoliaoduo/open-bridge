@@ -67,24 +67,26 @@ export function ToolsPage() {
             <span className="section-note" style={{ margin: 0 }}>显示 {visible.length} 个</span>
           </div>
 
-          <table className="token-table">
-            <thead>
-              <tr>
-                <th>名称</th>
-                <th>类型</th>
-                <th>说明</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map(tool => (
-                <tr key={tool.name}>
-                  <td className="mono">{tool.name}</td>
-                  <td>{tool.core ? <span className="pill ok">核心</span> : <span className="pill">扩展</span>}</td>
-                  <td>{tool.description || "—"}</td>
+          <div className="table-wrap">
+            <table className="token-table">
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>类型</th>
+                  <th>说明</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {visible.map(tool => (
+                  <tr key={tool.name}>
+                    <td className="mono">{tool.name}</td>
+                    <td>{tool.core ? <span className="pill ok">核心</span> : <span className="pill">扩展</span>}</td>
+                    <td>{tool.description || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {visible.length === 0 && <div className="section-note">没有匹配的工具，换个关键词试试。</div>}
         </>
       )}

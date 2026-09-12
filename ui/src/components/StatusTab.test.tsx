@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StatusTab } from "./StatusTab";
 import type { BridgeStatus } from "../api";
 
@@ -38,8 +38,9 @@ function bridgeStatus(overrides: Partial<BridgeStatus> = {}): BridgeStatus {
 
 function renderTab() {
   const act = vi.fn(async () => null);
-  render(<StatusTab act={act} onRefresh={async () => undefined} />);
-  return { act };
+  const notify = vi.fn();
+  render(<StatusTab act={act} onRefresh={async () => undefined} notify={notify} />);
+  return { act, notify };
 }
 
 const button = (label: string): HTMLButtonElement =>
@@ -114,6 +115,38 @@ describe("StatusTab endpoint card", () => {
     // The console delegates the copy to the shared settings action.
     expect(act).toHaveBeenCalledWith({ command: "copyPrompt" });
   });
+});
+
+describe("StatusTab copy feedback and warnings", () => {
+    test("confirms the copy instead of doing it silently", async () => {
+      // Every other copy path in the console reports back; this one dropped the
+      // address on the clipboard and said nothing, so there was no way to tell a
+      // successful copy from a blocked one.
+      statusMock.mockResolvedValue(bridgeStatus());
+
+      const { notify } = renderTab();
+      fireEvent.click(await screen.findByRole("button", { name: "复制 URL" }));
+
+      await waitFor(() => expect(copyTextMock).toHaveBeenCalledWith("http://127.0.0.1:18080/mcp/local-token"));
+      expect(notify).toHaveBeenCalledWith("MCP 地址已复制。");
+    });
+
+    test("warns through the theme, not through a hardcoded colour", async () => {
+      // The amber used to be inline (#b45309, the light theme's warn). Against the
+      // dark panel that is 3.3:1 — under the 4.5:1 floor — so the warning was the
+      // least readable text on the page exactly where it matters most.
+      statusMock.mockResolvedValue(bridgeStatus({
+        mcp_url: "https://example.ngrok-free.dev/mcp/live",
+        public_url: "https://example.ngrok-free.dev/mcp/live",
+        exposure: "public-open",
+      }));
+
+      renderTab();
+
+      const warning = await screen.findByText(/公网可达且未开启鉴权/);
+      expect(warning.className).toContain("note-warn");
+      expect((warning as HTMLElement).style.color).toBe("");
+    });
 });
 
 describe("StatusTab build freshness", () => {

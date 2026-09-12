@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { api, copyText, type BridgeStatus, type SettingsActionResult, type SettingsState } from "../api";
+import { api, copyText, type BridgeStatus, type SettingsActionResult } from "../api";
 
 interface Props {
-  settings?: SettingsState | null;
   act: (action: Record<string, unknown>) => Promise<unknown>;
   onRefresh: () => Promise<void>;
+  /** Shell toast: the copy buttons confirm themselves through it. */
+  notify?: (text: string, isError?: boolean) => void;
 }
 
-export function StatusTab({ act, onRefresh }: Props) {
+export function StatusTab({ act, onRefresh, notify }: Props) {
   const [status, setStatus] = useState<BridgeStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [health, setHealth] = useState<{ ok: boolean; info: string; lines: string[] } | null>(null);
@@ -66,7 +67,7 @@ export function StatusTab({ act, onRefresh }: Props) {
           <button
             className="small"
             disabled={!url}
-            onClick={() => { void copyText(url!).then(() => undefined); }}
+            onClick={() => { void copyText(url!).then(() => notify?.("MCP 地址已复制。")); }}
           >
             复制 URL
           </button>
@@ -88,7 +89,7 @@ export function StatusTab({ act, onRefresh }: Props) {
             : " 当前仅本机可访问（未开启隧道）。")}
         </div>
         {status?.exposure === "public-open" && (
-          <div className="section-note" style={{ color: "#b45309" }}>
+          <div className="section-note note-warn">
             ⚠️ 公网可达且未开启鉴权：任何拿到这个 URL 的人都能读写本机文件、执行命令、启停服务。
             要收紧可在「令牌」页签发令牌开启 Bearer 鉴权（客户端需带 Authorization 头），
             或点「轮换端点」立即作废已经流出去的旧链接。
@@ -99,7 +100,7 @@ export function StatusTab({ act, onRefresh }: Props) {
       <div className="card">
         <h2>运行控制</h2>
         {status?.build_stale && (
-          <div className="section-note" style={{ color: "#b45309" }}>
+          <div className="section-note note-warn">
             ⚠️ 磁盘上的构建比本实例新：现在跑的仍是启动时加载的代码，新工具与修复要重启后才生效（点下面的「停止」再「启动」）。
           </div>
         )}
