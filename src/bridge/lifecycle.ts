@@ -28,6 +28,7 @@ import {
 import { buildWebAiPrompt } from "./onboarding.js";
 import { exchangeLine, isNoteworthy, traceId, tracedFormat, tracedMethod, type TracedEra } from "./request-trace.js";
 import { root, workspaceStateSuffix } from "./paths.js";
+import { discoverWorkspaceSkills, skillsIndexSuffix } from "./skills.js";
 import { invoke } from "./dispatcher.js";
 import { loadTodoStore } from "./todo-store.js";
 import { persistUsageStats } from "./usage-store.js";
@@ -281,6 +282,20 @@ function projectInstructionSuffix(): string {
   return parts.length ? `\n\n# Project instructions\n${parts.join("\n\n")}` : "";
 }
 
+/**
+ * The skills index for the server instructions (see skills.ts). Read once per
+ * server construction — each protocol era builds its own — so a skill added
+ * later is picked up by `list_skills` rather than by a reconnect. A discovery
+ * failure must never keep a session from starting.
+ */
+function skillsSuffix(): string {
+  try {
+    return skillsIndexSuffix(discoverWorkspaceSkills().skills);
+  } catch {
+    return "";
+  }
+}
+
 function createMcp(session: SessionState): Server {
   const serverVersion = host().version();
   const mcp = new Server(
@@ -289,7 +304,8 @@ function createMcp(session: SessionState): Server {
       capabilities: { tools: {}, logging: {} },
       instructions:
         "You are connected to a local project workspace through the standalone Open Bridge. Relative paths, default command cwd, and project services always use that workspace. Other directories can be accessed only with explicit absolute paths; never let them change the workspace anchor. When starting work on an unfamiliar project, call workspace_brief once for orientation instead of exploring blindly. Use file tools for project management, run_command/start_process for commands, and wait_process/interact_with_process/restart_process/set_process_policy for supervised long-running services. Use check_port/check_http for readiness and save_service/list_services/start_service/stop_service/restart_service/delete_service/start_all_services/stop_all_services/service_status for reusable project orchestration. Use set_todos for multi-step work and report_progress for transient updates. Use batch to combine multiple tool calls in a single roundtrip. After finishing a batch of related edits, call review_changes so the user can see the full cumulative change set."
-        + projectInstructionSuffix(),
+        + projectInstructionSuffix()
+        + skillsSuffix(),
     },
   );
   mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: listToolDefinitions() }));
@@ -449,7 +465,8 @@ function createSpecMcp(): InstanceType<typeof SpecServer> {
       capabilities: { tools: {}, logging: {} },
       instructions:
         "You are connected to a local project workspace through the standalone Open Bridge. Relative paths, default command cwd, and project services always use that workspace. Other directories can be accessed only with explicit absolute paths; never let them change the workspace anchor. When starting work on an unfamiliar project, call workspace_brief once for orientation instead of exploring blindly. Use file tools for project management, run_command/start_process for commands, and wait_process/interact_with_process/restart_process/set_process_policy for supervised long-running services. Use check_port/check_http for readiness and save_service/list_services/start_service/stop_service/restart_service/delete_service/start_all_services/stop_all_services/service_status for reusable project orchestration. Use set_todos for multi-step work and report_progress for transient updates. Use batch to combine multiple tool calls in a single roundtrip. After finishing a batch of related edits, call review_changes so the user can see the full cumulative change set."
-        + projectInstructionSuffix(),
+        + projectInstructionSuffix()
+        + skillsSuffix(),
     },
   );
   // `TOOL_DEFINITIONS` is `as const`, so its schemas carry `readonly` tuples

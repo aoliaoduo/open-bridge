@@ -35,11 +35,12 @@
 | **P0 窃锁缺陷**（§2.6） | ✅ **已修** | `LockRelease.handOff()` 在移交时只关定时器不释放锁；回归测试 `test/resource-locks.test.ts` 两条（移交后不被回收 / 未移交仍被回收） |
 | **P1 双协议 `/mcp`**（§2.4） | ✅ **已落地** | `classifyInboundRequest` 按请求分流；现代路走 `createMcpHandler` + `legacy:"reject"`；`server/discover` 实测返回 `supportedVersions: ["2026-07-28"]`；新增 `test/mcp-modern-protocol-integration.test.mjs`（9 项） |
 | **P2a 鉴权 O(1)**（§2.7） | ✅ **已修** | digest 索引 + 按存储原文失效的解析缓存；`AuthFailureLimiter` 去掉排序；跨进程吊销测试仍通过 |
-| **P3a 行为标注**（§5 P2 第 13 条） | ✅ **已落地** | `src/bridge/tool-annotations.ts`，56 个定义齐备，**只告知不阻断**（新增测试断言非只读工具仍可无确认执行） |
+| **P3a 行为标注**（§5 P2 第 13 条） | ✅ **已落地** | `src/bridge/tool-annotations.ts`，57 个定义齐备，**只告知不阻断**（新增测试断言非只读工具仍可无确认执行） |
 | **P3b-1 关闭式进度词表** | ✅ **已落地** | `src/bridge/progress-vocabulary.ts`：`phase` / `category` 词表外的值**丢弃而非归默认**，运行时 `Object.freeze`（测试 `test/progress-vocabulary.test.ts`） |
 | **P3b-2 按请求可观测性** | ✅ **已落地** | `src/bridge/request-trace.ts`：方法白名单、session/tool 哈希、错误指纹 + 160 字符单行摘要、用 `close` 抓客户端中断；集成测试断言工具名不进日志 |
 | **P3b-3 优雅停机可观测** | ✅ **已落地** | 停机按阶段记录（开始 / 排空 N 个会话 / 宽限期到 / 完成），空闲停机仍只有一行 |
 | **P2b OAuth 2.1**（§2.3） | ✅ **已落地** | 见下方「OAuth 的最终取舍与实现」 |
+| **D9 skills 发现**（§3.1） | ✅ **已落地**（2026-09-12） | `src/bridge/skills.ts`（只读、有界、索引优先）+ `list_skills` 工具 + 说明注入；`test/skills.test.ts` 12 条 + `test/skills-integration.test.mjs` 5 条；对照现状见 `docs/comparison-status-2026-09-12.md` |
 | **P3b-4 结构化错误** | ⏸ **主动降级** | 见下方「为什么结构化错误被降级」 |
 | P4 幂等键 / 长轮询 / skills / 用量四态 | ⏸ 未做 | 需要真实消费者，暂不引入 |
 
@@ -61,7 +62,7 @@
 
 `{code, blocking, nextAction}` 的价值是让模型知道「下一步做什么」而不是瞎重试。但实测我们的错误路径**已经**在做这件事，只是以人类可读句子的形式：资源锁超时明说 `retry, or raise concurrency.waitTimeoutMs (console settings page)`；`edit_block` 零命中时返回最近似区域与漂移原因；未知工具名给出编辑距离建议（`error-hints.ts`）。模型读得懂这些句子。
 
-再包一层结构化字段，收益是「可编程判别」，成本是给全部 56 个工具加码并改动既有错误契约。**在观察到具体误重试案例之前，这是没有证据支撑的改动**，故降级为「有证据再做」。这符合本项目的取舍习惯：不为看起来完整而改。
+再包一层结构化字段，收益是「可编程判别」，成本是给全部 57 个工具加码并改动既有错误契约。**在观察到具体误重试案例之前，这是没有证据支撑的改动**，故降级为「有证据再做」。这符合本项目的取舍习惯：不为看起来完整而改。
 
 ### OAuth 的最终取舍与实现（已完成）
 

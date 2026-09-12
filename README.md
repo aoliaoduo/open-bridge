@@ -14,7 +14,7 @@
 ChatGPT 网页对话 / Claude / Cursor / 任意 MCP 客户端
         │  （经你掌控的 ngrok 隧道，或只在局域网/本机）
         ▼
-  open-bridge serve  ── /mcp/<路由令牌>   Streamable HTTP MCP（54 个工具，两代协议同端点）
+  open-bridge serve  ── /mcp/<路由令牌>   Streamable HTTP MCP（55 个工具，两代协议同端点）
         │            ── /console/         Web 控制台（仅本机回环可访问）
         │            ── /api/*            控制台后端（回环 + 令牌头双门控）
         ▼
@@ -66,6 +66,18 @@ open-bridge serve --open          # 或 --no-tunnel 只在本机用
 `open-bridge stop` 有一条**自停保护**：如果这条命令是由那个实例自己启动的（比如通过它的 MCP 工具
 执行），默认会被拒绝——停掉它等于立刻断掉你自己正在用的连接；要真停，由人在终端里
 `open-bridge stop --force`，或直接在控制台里停止。
+
+### 项目约定与「技能」（skills）
+
+连接时，服务端会把两样东西写进给 AI 的说明里：**项目约定**（工作区根目录的 `AGENTS.md` / `CLAUDE.md`，
+每份最多 8000 字符）和**技能索引** —— 工作区里的 `skills/<名字>/SKILL.md`、`.agents/skills/`、
+`.claude/skills/`，以及数据目录（`~/.open-bridge/skills/`）与 `~/.agents/skills/` 下的技能。
+
+索引只带**名字、描述与文件路径**，正文不塞进上下文：AI 判断任务匹配后，用 `read_files` 去读那个
+SKILL.md 并照做。技能是**中途新增**的也不用重连——`list_skills` 每次调用都重新扫盘。
+同名技能以**工作区**里的为准（用户级同名会被遮蔽，遮蔽数量在 `list_skills` 里报出来）。
+整个机制**只读**：Bridge 不会创建、同步或改写任何技能文件。
+
 
 终端会打印三个地址，浏览器会自动打开控制台：
 
@@ -256,7 +268,7 @@ npm run dev -- serve --no-tunnel   # tsx 免编译直接跑
 
 ## 与 VS Code 扩展的关系
 
-独立版**在能力上继承扩展**（配置键名一一对应，工具定义逐字节一致：扩展 56 个定义，独立版对外暴露 54 个），并去掉只在编辑器里有意义的壳（webview HTML、命令面板、`autoStart` 等），把宿主换成 CLI + 浏览器控制台。
+独立版**在能力上继承扩展**（配置键名一一对应，工具定义逐字节一致：扩展 56 个定义，独立版另有自己的工具，对外暴露 55 个），并去掉只在编辑器里有意义的壳（webview HTML、命令面板、`autoStart` 等），把宿主换成 CLI + 浏览器控制台。
 
 已经**强于扩展**的地方：
 

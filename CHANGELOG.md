@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-alpha.4] — 2026-09-12
+### Added
+- **技能发现（skills），补上对照里唯一被点名的「真缺」**（`docs/refactor-comparison.md` D9）。连接时，
+  服务端说明里现在除了项目约定（`AGENTS.md`/`CLAUDE.md`）还会带一份**技能索引**：工作区的
+  `skills/<名字>/SKILL.md`、`.agents/skills/`、`.claude/skills/`，加上数据目录与 `~/.agents/skills/`。
+  索引只含**名字、描述、路径**——正文留在磁盘上，模型判断任务匹配后用 `read_files` 读取，
+  十个技能和一两个技能的上下文成本一样。做法取自 DevSpace/TaskQuay 的约定，但**没有引入它们的运行时依赖**，
+  也不像它们那样往用户目录里同步「托管技能」：本实现**只读**。
+- **新工具 `list_skills`**（只读，标注 `readOnlyHint`）：返回索引 + 扫过的目录 + 被遮蔽的同名技能数。
+  它在每次调用时重新扫盘，因此**会话中途新增的技能无需重连**即可被发现；`workspace_brief` 也带上技能摘要。
+- 有界：最多 50 个技能、名称 80 字符、描述 200 字符、只解析文件头部 64 KB；说明里最多列 20 行，其余
+  指向 `list_skills`。发现过程**永不抛错**（目录缺失/不可读一律跳过），不会拖住会话建立。
+- 测试：`test/skills.test.ts`（12 条：front matter、CRLF/引号、无 front matter 回退、未闭合围栏、
+  三种目录拼写、同名遮蔽、隐藏目录、缺失文件、数量上限、越界标记、索引渲染与截断、查找顺序）；
+  `test/skills-integration.test.mjs`（5 条端到端：说明里带索引、`list_skills` 在目录里且标注只读、
+  内容不外泄、用既有 `read_files` 读取、**中途新增技能下一次调用即可见**）。
+
 ## [1.0.0-alpha.3] — 2026-09-12
 ### Added
 - **一键启动脚本先问「工作目录」，再启动。** 「工作区」是 AI 权限的边界，而双击启动时它默认等于

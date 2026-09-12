@@ -87,6 +87,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotations>> = {
   read_files: READ,
   get_file_info: READ,
   workspace_brief: READ,
+  list_skills: READ,
   review_changes: READ,
   get_todos: READ,
 

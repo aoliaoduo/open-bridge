@@ -17,6 +17,7 @@ import { normalizeCategory, normalizeLevel, normalizePhase } from "./progress-vo
 import { searchActivityLog } from "../mcp/activity-log.js";
 import { shellSpec } from "./processes.js";
 import { execFileSync } from "node:child_process";
+import { discoverWorkspaceSkills } from "./skills.js";
 
 type Args = JsonArgs;
 
@@ -266,6 +267,13 @@ export function workspaceBrief(): Record<string, unknown> {
     active_commands: [...state.commands.values()].filter(c => !c.done).length,
     recent_activity: state.activity.slice(0, 5).map(a => `${a.tool} · ${a.message}`.slice(0, 120)),
   };
+
+  // Skills the model can follow (see skills.ts). Names only — the index lives in
+  // the instructions, and the bodies stay on disk until something reads them.
+  const skills = discoverWorkspaceSkills();
+  if (skills.skills.length) {
+    brief.skills = { count: skills.skills.length, names: skills.skills.slice(0, 10).map(skill => skill.name) };
+  }
   return brief;
 }
 

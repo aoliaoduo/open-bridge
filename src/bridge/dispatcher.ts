@@ -38,6 +38,7 @@ import {
   workspaceBrief, getAuthStatus, getLockStatus,
 } from "./meta-tools.js";
 import { openShell, sendToShell, closeShell, listShells } from "./shell-sessions.js";
+import { listSkills } from "./skills.js";
 import { enrichFsError, suggestionHint } from "./error-hints.js";
 import type { JsonArgs } from "./json-args.js";
 
@@ -102,6 +103,7 @@ const HANDLERS: Record<string, Handler> = {
   lsp: lsp,
   review_changes: reviewChanges,
   workspace_brief: () => workspaceBrief(),
+  list_skills: () => listSkills(),
   set_todos: (a, session) => setTodos(a, session),
   get_todos: getTodos,
   search_activity_log: searchActivityLogTool,
