@@ -25,6 +25,7 @@ import {
   processResult,
   outputRead,
   shellSpec,
+  requireRestartKnob,
 } from "./processes.js";
 import type { JsonArgs } from "./json-args.js";
 
@@ -372,8 +373,14 @@ export function setProcessPolicy(args: Args): Record<string, unknown> {
       s.restartTimer = undefined;
     }
   }
-  if (args.max_restarts !== undefined) s.maxRestarts = Math.max(0, Number(args.max_restarts));
-  if (args.restart_delay_ms !== undefined) s.restartDelayMs = Math.max(0, Number(args.restart_delay_ms));
+  // The same two knobs save_service validates, written here straight onto a LIVE
+  // process. `Math.max(0, Number("abc"))` is NaN, not 0 — it does not clamp — and
+  // NaN then disabled auto-restart (`restartCount < NaN` is always false) or fired
+  // `setTimeout(NaN)` at ~0 ms, turning one crash into a crash-loop.
+  if (args.max_restarts !== undefined) s.maxRestarts = requireRestartKnob(args.max_restarts, "max_restarts");
+  if (args.restart_delay_ms !== undefined) {
+    s.restartDelayMs = requireRestartKnob(args.restart_delay_ms, "restart_delay_ms");
+  }
   return {
     command_id: s.id, auto_restart: s.autoRestart,
     max_restarts: s.maxRestarts, restart_delay_ms: s.restartDelayMs,

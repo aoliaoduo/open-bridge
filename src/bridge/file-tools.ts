@@ -302,7 +302,16 @@ async function renameOrCopy(source: string, destination: string): Promise<void> 
 export async function listDirectory(args: Args): Promise<unknown> {
   const base = await securePath(args.path);
   const max = Number.isFinite(Number(args.max_entries)) ? Math.max(0, Number(args.max_entries)) : DEFAULT_MAX_DIRECTORY_ENTRIES;
-  const depth = Math.max(Number(args.depth ?? 1), 1);
+  // `Number("abc")` is NaN and `Math.max(NaN, 1)` is NaN, which made every
+  // `level < depth` test false: a garbage depth silently returned a depth-1
+  // listing instead of failing. Only non-finite input is refused — 0 and
+  // negatives still clamp to 1 and an over-large depth still recurses, so no
+  // call that used to work changes behaviour.
+  const rawDepth = Number(args.depth ?? 1);
+  if (!Number.isFinite(rawDepth)) {
+    throw new Error("depth must be a number: 1, 2 or 3. (expected 'depth': number)");
+  }
+  const depth = Math.max(Math.floor(rawDepth), 1);
   const includeHidden = args.include_hidden === true;
 
   // Shared budget so max_entries bounds the response across the WHOLE tree

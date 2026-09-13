@@ -8,7 +8,7 @@ import {
   state,
   type ServiceDefinition,
 } from "./state.js";
-import { terminateProcess, processSnapshot, spawnServiceProcess } from "./processes.js";
+import { terminateProcess, processSnapshot, spawnServiceProcess, requireRestartKnob } from "./processes.js";
 import { persistServices } from "./services.js";
 import { availableHint } from "./error-hints.js";
 import { workspacePath, workspaceStateSuffix } from "./paths.js";
@@ -120,18 +120,14 @@ async function saveServiceInner(args: Args): Promise<unknown> {
   // a string like "abc" produced NaN that silently persisted, disabling
   // autoRestart (restartCount < NaN is always false) or turning the restart
   // delay into an immediate crash-loop (setTimeout(NaN) fires at ~0 ms).
-  if (args.max_restarts !== undefined) {
-    const maxRestarts = Number(args.max_restarts);
-    if (!Number.isInteger(maxRestarts) || maxRestarts < 0) {
-      throw new Error("max_restarts must be a non-negative integer. (expected 'max_restarts': number)");
-    }
-  }
-  if (args.restart_delay_ms !== undefined) {
-    const restartDelayMs = Number(args.restart_delay_ms);
-    if (!Number.isInteger(restartDelayMs) || restartDelayMs < 0) {
-      throw new Error("restart_delay_ms must be a non-negative integer. (expected 'restart_delay_ms': number)");
-    }
-  }
+  // requireRestartKnob is now shared with set_process_policy, which writes the
+  // same two fields onto a live process and used to let NaN through untouched.
+  const maxRestarts = args.max_restarts === undefined
+    ? undefined
+    : requireRestartKnob(args.max_restarts, "max_restarts");
+  const restartDelayMs = args.restart_delay_ms === undefined
+    ? undefined
+    : requireRestartKnob(args.restart_delay_ms, "restart_delay_ms");
   let healthUrl: string | undefined;
   if (typeof args.health_url === "string" && args.health_url.trim() !== "") {
     const candidate = args.health_url.trim();
@@ -169,8 +165,8 @@ async function saveServiceInner(args: Args): Promise<unknown> {
     healthUrl,
     logFile: typeof args.log_file === "string" && args.log_file.trim() !== "" ? String(args.log_file).trim() : undefined,
     autoRestart: args.auto_restart === true,
-    maxRestarts: args.max_restarts === undefined ? 3 : Number(args.max_restarts),
-    restartDelayMs: args.restart_delay_ms === undefined ? 1000 : Number(args.restart_delay_ms),
+    maxRestarts: maxRestarts ?? 3,
+    restartDelayMs: restartDelayMs ?? 1000,
   });
   persistServices();
   host().ui.refresh();

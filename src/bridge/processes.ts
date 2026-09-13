@@ -29,6 +29,28 @@ const execFileAsync = promisify(execFile);
 
 export const shellSpec = (): ShellSpec => resolveShell();
 
+/**
+ * Validate one of the two auto-restart knobs and return it.
+ *
+ * `save_service` and `set_process_policy` both write `maxRestarts` /
+ * `restartDelayMs`, and a bare `Number()` on a string like "abc" yields NaN that
+ * silently persists: `restartCount < NaN` is always false, so auto-restart is
+ * quietly disabled, and `setTimeout(NaN)` fires at ~0 ms, which turns one crash
+ * into a crash-loop. One validator for both entry points so they cannot drift
+ * apart again — save_service already refused this shape while set_process_policy
+ * ran it through `Math.max(0, NaN)`, which is NaN, not 0.
+ *
+ * A negative value is an error rather than a clamp: the two entry points
+ * disagreed about it, and "restart -5 times" is a caller bug worth naming.
+ */
+export function requireRestartKnob(value: unknown, key: "max_restarts" | "restart_delay_ms"): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${key} must be a non-negative integer. (expected '${key}': number)`);
+  }
+  return parsed;
+}
+
 /** Drop command records that finished more than the retention window ago. */
 export function pruneCommands(): void {
   const cutoff = Date.now() - COMMAND_RETENTION_MS;

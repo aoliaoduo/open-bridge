@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **`connectivity` 的 `url` / `port`** 分别以字面量 `"undefined"` 和 `NaN` 进入探测，回来的是不点名参数的 `INVALID_URL` / `INVALID_PORT`。现在缺失先点名；**给了但非法仍走 `parseHttpProbeUrl` / `normalizePort` 自己的文案**，没有把它们的诊断吃掉。
   - 测试：`test/interact-input-integration.test.mjs` 扩写并改名为 `test/required-args-integration.test.mjs`（复用同一个实例、不增加启动开销），7 例覆盖上面四处，外加三条**能力保全**断言：空 `input` 仍是裸换行、空 `message` 仍能汇报、`get_process_snapshot` 仍可省略 `command_id`。
   - 踩到的一件事，记下来免得下次再踩：**集成测试跑的是 `bin/open-bridge.js` → `dist/`，不是 `src/`。** 源码改完不 `npm run build`，端到端测试会继续报旧行为（本轮就是这样：三处守卫已在 `src` 里、typecheck 与 lint 全绿，测试却仍然失败）。
+- **`set_process_policy` 会把 NaN 写到活进程上：自动重启被静默禁用，或退化成崩溃循环。** `Math.max(0, Number("abc"))` 是 NaN 而不是 0 —— 它并不钳位。NaN 落到 `CommandState` 之后，`restartCount < NaN` 恒为 false（自动重启悄悄失效），`setTimeout(NaN)` 约 0 ms 触发（一次崩溃变成崩溃循环）。**这正是 `save_service` 里那条注释记载过的同一次事故**：当时修了 `save_service`，写同两个字段的兄弟函数漏了，于是两个入口对同一条规则给出不同答案。现在两边共用 `processes.ts` 里的 `requireRestartKnob()`（该模块已被两者导入，不新增依赖边），规则不可能再漂移。负数从「钳到 0」改成报错，同样是为了两个入口一致 ——「重启 -5 次」是调用方的 bug，值得点名而不是悄悄改掉。
+- **`list_directory` 的 `depth` 传垃圾值时静默退化成一层。** `Math.max(Number("abc"), 1)` 是 NaN，而 `level < NaN` 恒为 false，于是所有目录都不展开：**返回一份 depth-1 的列表，且完全不报错**，调用方以为项目就这么浅。只有非有限值被拒；`0` 与负数照旧钳到 1、超大值照旧递归、数字字符串照旧强转，**原本能用的调用一个都不变**。
+- **`save_service` 此前零测试覆盖**，这轮补上：三个垃圾旋钮被拒且**什么都没持久化**、合法值存进去的正是校验过的那个数（而不是重新强转一遍的结果）。`requireRestartKnob` 另有 5 例纯函数单测（`test/restart-knobs.test.ts`），与既有的 `test/clamp-ms.test.ts` 同类同款 —— 那份文件的注释写的就是这一类事故（`Math.max(Number(x), 0)` 放过 NaN、`setTimeout(cb, NaN)` 约 0 ms 触发）。`test/required-args-integration.test.mjs` 从 7 例扩到 10 例。
 - **CHANGELOG 的 `[Unreleased]` 分区错位已修。** 上一条改动把 `### Fixed` 插在了 `### Changed` 的正下方，于是 `### Changed` 变成空标题，而原本属于 Changed 的两条（死代码清理、控制台按钮撤除）被归到了 Fixed 下面。按 Keep a Changelog 的 Added → Changed → Fixed 复位。
 
 ## [1.0.0-alpha.5] — 2026-09-13

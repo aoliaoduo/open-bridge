@@ -1,6 +1,7 @@
 /**
- * The required-argument contract, end to end: when a caller drops an argument
- * the schema marks required, the tool must NAME it — never coerce it.
+ * The argument contract, end to end: when a caller drops an argument the schema
+ * marks required — or supplies one the tool cannot honour — the tool must NAME
+ * it, never coerce it and carry on.
  *
  * `String(undefined)` is the literal text "undefined" and `?? ""` is a silent
  * no-op, so an unguarded handler answers success while having done the wrong
@@ -19,18 +20,26 @@
  *     notification, and reported success.
  *  ④ `connectivity` probed the literal host "undefined" / port NaN and answered
  *     with a generic INVALID_URL / INVALID_PORT that never named the argument.
+ *  ⑤ `set_process_policy` ran the two auto-restart knobs through
+ *     `Math.max(0, Number(x))`, which for NaN is NaN — not 0 — and wrote it
+ *     straight onto a LIVE process. `save_service` already refused that shape;
+ *     its sibling did not, so the two entry points disagreed about one rule.
+ *  ⑥ `list_directory` ran `depth` through `Math.max(Number(x), 1)`, and
+ *     `Math.max(NaN, 1)` is NaN: every `level < NaN` test is false, so a garbage
+ *     depth answered with a depth-1 listing and no error at all.
  *
- * Absence is refused; an explicit empty value is NOT. `input: ""` is still a
- * bare newline, `message: ""` still carries phase/category, and
- * `get_process_snapshot` still treats an omitted `command_id` as "every
- * command" — refusing those would trade a real bug for a lost capability.
+ * Absence is refused; an explicit empty or odd-but-workable value is NOT.
+ * `input: ""` is still a bare newline, `message: ""` still carries
+ * phase/category, `get_process_snapshot` still treats an omitted `command_id` as
+ * "every command", and `depth: 0` still clamps to 1 — refusing those would trade
+ * a real bug for a lost capability.
  */
 
 import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
 import { spawn } from "node:child_process";
 import http from "node:http";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { routeTokenFor, waitForRuntime } from "./lib/bridge-runtime.mjs";
@@ -210,6 +219,95 @@ test("`connectivity` names the argument it was not given, and still probes when 
     "by normalizePort's own message — the absence guard did not swallow it");
 });
 
+// --- ⑤ a value the tool cannot honour ------------------------------------
+
+test("`list_directory` refuses a garbage depth instead of silently listing one level", async () => {
+  // `Math.max(Number("abc"), 1)` is NaN, and every `level < NaN` test is false,
+  // so a garbage depth used to answer with a depth-1 listing and no error at all.
+  mkdirSync(path.join(workspace, "sub", "deeper"), { recursive: true });
+  writeFileSync(path.join(workspace, "sub", "deeper", "leaf.txt"), "x", "utf8");
+
+  const garbage = await callTool("list_directory", { path: ".", depth: "abc" });
+  assert.equal(garbage.isError, true, "a non-numeric depth must fail, not degrade");
+  assert.match(garbage.text, /depth must be a number/, "the refusal names the argument");
+
+  const objectDepth = await callTool("list_directory", { path: ".", depth: {} });
+  assert.equal(objectDepth.isError, true, "an object depth must fail too");
+
+  const shallow = await callTool("list_directory", { path: ".", depth: 1 });
+  assert.equal(shallow.isError, false, `depth 1 still works: ${shallow.text}`);
+  assert.doesNotMatch(shallow.text, /leaf\.txt/, "depth 1 does not reach the nested file");
+
+  const deep = await callTool("list_directory", { path: ".", depth: 3 });
+  assert.equal(deep.isError, false, `depth 3 still works: ${deep.text}`);
+  assert.match(deep.text, /leaf\.txt/, "and depth 3 does reach it");
+
+  // Capability preserved on purpose: a numeric string still coerces, and 0 or a
+  // negative still clamps to 1 exactly as before. Only non-finite input is
+  // refused, so no call that used to work changes behaviour.
+  const quoted = await callTool("list_directory", { path: ".", depth: "3" });
+  assert.equal(quoted.isError, false, `a quoted depth still coerces: ${quoted.text}`);
+  assert.match(quoted.text, /leaf\.txt/);
+
+  const zero = await callTool("list_directory", { path: ".", depth: 0 });
+  assert.equal(zero.isError, false, "depth 0 still clamps to 1 rather than erroring");
+});
+
+// --- ⑥ a garbage restart knob never reaches a live process ----------------
+
+test("`set_process_policy` refuses a garbage restart knob instead of writing NaN onto a live process", async () => {
+  const commandId = await startEcho();
+
+  // `Math.max(0, Number("abc"))` is NaN, not 0: it used to land on the running
+  // command, where `restartCount < NaN` is always false (auto-restart quietly
+  // disabled) and `setTimeout(NaN)` fires at ~0 ms (one crash becomes a loop).
+  for (const [key, value] of [["max_restarts", "abc"], ["restart_delay_ms", "5s"], ["max_restarts", -1], ["restart_delay_ms", 2.5]]) {
+    const res = await callTool("set_process_policy", { command_id: commandId, [key]: value });
+    assert.equal(res.isError, true, `${key}=${String(value)} must be refused`);
+    assert.match(res.text, new RegExp(`${key} must be a non-negative integer`), `${key} names itself`);
+  }
+
+  const snap = asObject(await callTool("get_process_snapshot", { command_id: commandId }));
+  assert.equal(snap.max_restarts, 3, "a refused write did not half-apply: the default survived");
+  assert.equal(snap.restart_delay_ms, 1000, "and so did the delay");
+  assert.ok(Number.isFinite(snap.max_restarts) && Number.isFinite(snap.restart_delay_ms),
+    "neither knob is NaN on the live process");
+
+  const ok = asObject(await callTool("set_process_policy", { command_id: commandId, max_restarts: 7, restart_delay_ms: 250 }));
+  assert.equal(ok.max_restarts, 7, "a valid knob still applies");
+  assert.equal(ok.restart_delay_ms, 250, "and so does a valid delay");
+
+  const quoted = asObject(await callTool("set_process_policy", { command_id: commandId, max_restarts: "9" }));
+  assert.equal(quoted.max_restarts, 9, "a quoted integer still coerces, as it always did");
+
+  await callTool("process_control", { action: "terminate", command_id: commandId });
+});
+
+test("`save_service` validates the same two knobs through the same validator, and persists the value it accepted", async () => {
+  const command = 'node -e "setInterval(() => {}, 1000)"';
+
+  for (const [key, value] of [["max_restarts", "abc"], ["restart_delay_ms", "5s"], ["max_restarts", -1]]) {
+    const bad = await callTool("save_service", { name: "knob-check", command, [key]: value });
+    assert.equal(bad.isError, true, `save_service must refuse ${key}=${String(value)}`);
+    assert.match(bad.text, new RegExp(`${key} must be a non-negative integer`));
+  }
+
+  const defsAfterRefusal = asItems(await callTool("service_status", { detail: "definitions" }));
+  assert.equal(defsAfterRefusal.some(s => s.name === "knob-check"), false,
+    "a refused save persisted nothing");
+
+  const good = await callTool("save_service", { name: "knob-check", command, max_restarts: 7, restart_delay_ms: 250 });
+  assert.equal(good.isError, false, `a valid definition still saves: ${good.text}`);
+
+  const defs = asItems(await callTool("service_status", { detail: "definitions" }));
+  const saved = defs.find(s => s.name === "knob-check");
+  assert.ok(saved, `the saved definition is listed: ${JSON.stringify(defs).slice(0, 300)}`);
+  assert.equal(saved.max_restarts, 7, "it kept the validated value rather than re-coercing it");
+  assert.equal(saved.restart_delay_ms, 250, "and the same for the delay");
+
+  await callTool("service", { action: "delete", name: "knob-check" });
+});
+
 // --- harness ---------------------------------------------------------------
 
 function rawRequest(method, reqPath, body, headers = {}) {
@@ -277,6 +375,13 @@ async function callTool(name, args) {
   const result = payload.result;
   const text = result.content?.[0]?.text ?? JSON.stringify(result);
   return { isError: result.isError === true, text };
+}
+
+/** The tool's payload as an array, whether it answered with one or with {items}. */
+function asItems(res) {
+  const parsed = asObject(res);
+  if (Array.isArray(parsed)) return parsed;
+  return Array.isArray(parsed.items) ? parsed.items : [];
 }
 
 /** The tool's own JSON payload, or `{}` when it answered with prose. */
