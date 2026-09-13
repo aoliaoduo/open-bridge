@@ -200,21 +200,6 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       };
     }
 
-    case "restart": {
-      // A restart that loads a new build cannot be a stop/start of THIS process:
-      // the modules are already in memory (which is why the console's old advice
-      // to stop and start never worked even when the page survived it). The CLI
-      // hands over to a successor once this response is flushed — hence
-      // deferRestart rather than doing anything here.
-      const before = await buildSettingsState();
-      return {
-        ok: true,
-        state: { ...before, running: false, statusText: "重启中", mcpUrl: "" },
-        info: "正在重启以加载磁盘上的最新构建：本地服务与隧道会短暂中断，控制台会自动重连，无需手动刷新。",
-        deferRestart: true,
-      };
-    }
-
     case "rotateEndpoint": {
       // Flip the token — an in-process assignment, no socket teardown: every
       // route compares state.routeToken per request — and then re-point the

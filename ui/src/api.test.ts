@@ -55,10 +55,10 @@ describe("POST helpers", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await api.bridgeStart();
+    await api.bridgeRotate();
 
     const [path, init] = fetchMock.mock.calls[0];
-    expect(path).toBe("/api/bridge/start");
+    expect(path).toBe("/api/bridge/rotate");
     expect(init.method).toBe("POST");
     expect((init.headers as Record<string, string>)["x-open-bridge-console"]).toBe("tok-1");
   });
@@ -70,7 +70,7 @@ describe("POST helpers", () => {
 
   test("falls back to a generic message when the body has none", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 500 })));
-    await expect(api.bridgeStop()).rejects.toThrow("POST /api/bridge/stop → HTTP 500");
+    await expect(api.bridgeRotate()).rejects.toThrow("POST /api/bridge/rotate → HTTP 500");
   });
 });
 

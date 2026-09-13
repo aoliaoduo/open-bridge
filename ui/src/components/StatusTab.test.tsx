@@ -3,25 +3,20 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { StatusTab } from "./StatusTab";
 import type { BridgeStatus } from "../api";
 
-const { statusMock, shutdownMock, copyTextMock, reloadMock } = vi.hoisted(() => ({
+const { statusMock, copyTextMock } = vi.hoisted(() => ({
   statusMock: vi.fn(),
-  shutdownMock: vi.fn(async () => ({ message: "Shutting down." })),
   copyTextMock: vi.fn(async () => undefined),
-  reloadMock: vi.fn(),
 }));
 
 vi.mock("../api", () => ({
-  api: { status: statusMock, shutdown: shutdownMock },
+  api: { status: statusMock },
   copyText: copyTextMock,
-  reloadConsole: reloadMock,
 }));
 
 afterEach(() => {
   cleanup();
   statusMock.mockReset();
-  shutdownMock.mockClear();
   copyTextMock.mockClear();
-  reloadMock.mockClear();
 });
 
 function bridgeStatus(overrides: Partial<BridgeStatus> = {}): BridgeStatus {
@@ -50,47 +45,6 @@ function renderTab() {
 
 const button = (label: string): HTMLButtonElement =>
   screen.getByRole("button", { name: label }) as HTMLButtonElement;
-
-describe("StatusTab run controls", () => {
-  test("exiting the process takes two clicks and says what happened", async () => {
-    statusMock.mockResolvedValue(bridgeStatus());
-
-    renderTab();
-
-    fireEvent.click(await screen.findByRole("button", { name: "退出进程" }));
-    // First click only arms: an operator reaching for 健康检查 must not end the
-    // process with one stray press.
-    expect(shutdownMock).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole("button", { name: "确认？" }));
-
-    await waitFor(() => expect(shutdownMock).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText(/已请求退出/)).toBeTruthy();
-  });
-
-  test("restarting hands over, waits for the bridge to answer, then reloads the page", async () => {
-    statusMock.mockResolvedValue(bridgeStatus());
-
-    const { act } = renderTab();
-
-    fireEvent.click(await screen.findByRole("button", { name: "重启" }));
-    fireEvent.click(await screen.findByRole("button", { name: "确认？" }));
-
-    await waitFor(() => expect(act).toHaveBeenCalledWith({ command: "restart" }));
-    expect(await screen.findByText(/正在重启/)).toBeTruthy();
-    // The page comes back on its own: the successor answers /api/status (the
-    // mock always does) and the console reloads instead of asking the operator
-    // to press F5 while nothing is listening.
-    await waitFor(() => expect(reloadMock).toHaveBeenCalled(), { timeout: 4_000 });
-  });
-
-  test("the exit button is unavailable while the instance is not running", async () => {
-    statusMock.mockResolvedValue(bridgeStatus({ state: "stopped" }));
-
-    renderTab();
-
-    await waitFor(() => expect(button("退出进程").disabled).toBe(true));
-  });
-});
 
 describe("StatusTab endpoint card", () => {
   test("shows the resolved mcp_url from the server", async () => {
