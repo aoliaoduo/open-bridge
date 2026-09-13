@@ -360,22 +360,29 @@ function fallbackState(): SettingsState {
     usableCount: 0,
     deadCount: 0,
     tokens: [],
-    concurrency: { enabled: true, holdTimeoutMs: 300_000, waitTimeoutMs: 120_000 },
+    concurrency: {
+      enabled: CONFIG_DEFAULTS["concurrency.enabled"] as boolean,
+      holdTimeoutMs: CONFIG_DEFAULTS["concurrency.holdTimeoutMs"] as number,
+      waitTimeoutMs: CONFIG_DEFAULTS["concurrency.waitTimeoutMs"] as number,
+    },
+    // Every value below is the canonical default, not a restatement: a future
+    // default change propagates here instead of silently diverging. Arrays are
+    // copied — CONFIG_DEFAULTS must never be aliased into mutable state.
     config: {
-      unrestrictedFileAccess: true,
-      allowedDirectories: [],
-      tunnelProvider: "ngrok",
-      ngrokExecutable: "ngrok",
+      unrestrictedFileAccess: CONFIG_DEFAULTS.unrestrictedFileAccess as boolean,
+      allowedDirectories: [...(CONFIG_DEFAULTS.allowedDirectories as string[])],
+      tunnelProvider: CONFIG_DEFAULTS.tunnelProvider as string,
+      ngrokExecutable: CONFIG_DEFAULTS.ngrokExecutable as string,
       logMaxBytes: CONFIG_DEFAULTS.logMaxBytes as number,
-      shellPath: "",
-      shellArgs: [],
-      port: 0,
-      publicHealthTimeoutMs: 20_000,
-      autoReconnect: true,
-      ngrokUseHttpProxy: true,
-      toolProfile: "full",
+      shellPath: CONFIG_DEFAULTS.shellPath as string,
+      shellArgs: [...(CONFIG_DEFAULTS.shellArgs as string[])],
+      port: CONFIG_DEFAULTS.port as number,
+      publicHealthTimeoutMs: CONFIG_DEFAULTS.publicHealthTimeoutMs as number,
+      autoReconnect: CONFIG_DEFAULTS.autoReconnect as boolean,
+      ngrokUseHttpProxy: CONFIG_DEFAULTS.ngrokUseHttpProxy as boolean,
+      toolProfile: CONFIG_DEFAULTS.toolProfile as string,
       "oauth.enabled": CONFIG_DEFAULTS["oauth.enabled"] as boolean,
-      "oauth.allowedRedirectHosts": CONFIG_DEFAULTS["oauth.allowedRedirectHosts"] as string[],
+      "oauth.allowedRedirectHosts": [...(CONFIG_DEFAULTS["oauth.allowedRedirectHosts"] as string[])],
     },
   };
 }

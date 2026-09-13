@@ -8,11 +8,10 @@ import {
   state,
   type ServiceDefinition,
 } from "./state.js";
-import { terminateProcess, processSnapshot, spawnServiceProcess, requireRestartKnob, stringEnv } from "./processes.js";
+import { terminateProcess, processSnapshot, spawnServiceProcess, requireRestartKnob, stringEnv, serviceLogPathFor } from "./processes.js";
 import { persistServices } from "./services.js";
 import { availableHint } from "./error-hints.js";
-import { workspacePath, workspaceStateSuffix } from "./paths.js";
-import { readServiceLogRange, serviceLogFilePath } from "./service-log.js";
+import { readServiceLogRange } from "./service-log.js";
 import type { JsonArgs } from "./json-args.js";
 
 type Args = JsonArgs;
@@ -392,10 +391,7 @@ export async function readServiceLogTool(args: Args): Promise<Record<string, unk
     if (!Number.isSafeInteger(value) || value < 0) throw new Error("offset must be a non-negative safe integer.");
     offset = value;
   }
-  const storageDir = host().storageDir() ?? "";
-  const logFile = storageDir || service.logFile
-    ? serviceLogFilePath({ name: serviceName, logFile: service.logFile }, { storageDir, workspaceHash: workspaceStateSuffix(), resolvePath: workspacePath })
-    : undefined;
+  const logFile = serviceLogPathFor(service, serviceName);
   if (!logFile) throw new Error("No storage location is available for this service log.");
   const read = await readServiceLogRange(logFile, offset, maxBytes);
   return { name: serviceName, log_file: logFile, ...read };

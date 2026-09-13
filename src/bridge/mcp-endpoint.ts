@@ -153,49 +153,21 @@ export function createMcp(session: SessionState): Server {
   );
   mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: listToolDefinitions() }));
   mcp.setRequestHandler(CallToolRequestSchema, async req => {
-    const name = req.params.name;
-    const startedAt = Date.now();
-    try {
-      session.lastUsed = Date.now();
-      const result = await invoke(name, (req.params.arguments ?? {}) as Record<string, unknown>, session);
-      state.usage.successes += 1;
-      persistUsageStats();
-      // apply_patch results carry per-file changes: surface them in the
-      // activity message and as structured data for the panel's diff badge.
-      const changeList = (result as { changes?: Array<{ path?: unknown; additions?: unknown; deletions?: unknown }> } | null)?.changes;
-      const activityChanges = Array.isArray(changeList)
-        ? changeList
-            .filter(c => c && typeof c === "object")
-            .map(c => ({
-              path: String((c as { path?: unknown }).path ?? ""),
-              additions: Number((c as { additions?: unknown }).additions) || 0,
-              deletions: Number((c as { deletions?: unknown }).deletions) || 0,
-            }))
-            .filter(c => c.path)
-        : undefined;
-      let message = `Completed in ${Date.now() - startedAt} ms.`;
-      if (activityChanges?.length) {
-        const summary = activityChanges.map(c => `${c.path} +${c.additions}/−${c.deletions}`).join(", ");
-        message = `Completed in ${Date.now() - startedAt} ms · ${summary}`;
-      }
-      record(name, "completed", message, undefined, activityChanges ? { changes: activityChanges } : undefined);
-      // Tools declaring an outputSchema also return structuredContent so clients
-      // can consume typed data directly; the text block stays for compatibility.
-      // The lookup follows the canonical name, so a caller that used a legacy
-      // name still gets the same typed payload instead of only text.
-      const definition = (TOOL_DEFINITIONS as ReadonlyArray<{ name: string; outputSchema?: unknown }>)
-        .find(tool => tool.name === normalizeToolCall(name).tool);
-      if (definition?.outputSchema) return { ...text(result), structuredContent: structuredPayload(result) };
-      return text(result);
-    } catch (e) {
-      state.usage.failures += 1;
-      persistUsageStats();
-      record(name, "error", `Failed in ${Date.now() - startedAt} ms.`);
+    // Same single tool surface as the 2026-07-28 era (runToolCall): the only
+    // era difference is error reporting — a failure here becomes an
+    // `{ isError: true }` result instead of a JSON-RPC error.
+    const outcome = await runToolCall(
+      req.params.name,
+      (req.params.arguments ?? {}) as Record<string, unknown>,
+      session,
+    );
+    if (!outcome.ok) {
       return {
         isError: true,
-        content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
+        content: [{ type: "text", text: outcome.message }],
       };
     }
+    return outcome.result;
   });
   return mcp;
 }
@@ -243,7 +215,12 @@ export function headerValue(raw: string | string[] | undefined): string | undefi
  * this one function so the catalog, usage counters, audit lines and
  * structuredContent rules can never drift between eras.
  */
-type ToolCallOutcome = { ok: true; result: unknown } | { ok: false; message: string };
+type ToolCallPayload = {
+  content: Array<{ type: "text"; text: string }>;
+  structuredContent?: Record<string, unknown>;
+};
+
+type ToolCallOutcome = { ok: true; result: ToolCallPayload } | { ok: false; message: string };
 
 async function runToolCall(
   name: string,
@@ -277,9 +254,11 @@ async function runToolCall(
     record(name, "completed", message, undefined, activityChanges ? { changes: activityChanges } : undefined);
     // Tools declaring an outputSchema also return structuredContent so clients
     // can consume typed data directly; the text block stays for compatibility.
+    // The lookup follows the canonical name, so a caller that used a legacy
+    // name still gets the same typed payload instead of only text.
     const definition = (TOOL_DEFINITIONS as ReadonlyArray<{ name: string; outputSchema?: unknown }>)
       .find(tool => tool.name === normalizeToolCall(name).tool);
-    const payload = definition?.outputSchema
+    const payload: ToolCallPayload = definition?.outputSchema
       ? { ...text(result), structuredContent: structuredPayload(result) }
       : text(result);
     return { ok: true, result: payload };
@@ -329,7 +308,7 @@ function createSpecMcp(): InstanceType<typeof SpecServer> {
       state.latestSession,
     );
     if (!outcome.ok) throw new Error(outcome.message);
-    return outcome.result as { content: Array<{ type: "text"; text: string }>; structuredContent?: unknown };
+    return outcome.result;
   });
   return server;
 }

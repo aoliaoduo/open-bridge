@@ -225,8 +225,8 @@ function exitNotification(commandState: CommandState): string {
   return `[ob-exit] ${commandState.id.slice(0, 8)} ${preview} exited code=${String(commandState.exitCode)} (${commandState.lastEvent}) — full output: read_process_output command_id=${commandState.id}`;
 }
 
-/** Resolve the persisted log file for a service (explicit log_file wins; else the globalStorage default). */
-function serviceLogPathFor(service: ServiceDefinition, serviceName: string): string | undefined {
+/** Resolve the persisted log file for a service (explicit log_file wins; else the globalStorage default). Shared by the spawner here and readServiceLogTool. */
+export function serviceLogPathFor(service: ServiceDefinition, serviceName: string): string | undefined {
   const storageDir = host().storageDir() ?? "";
   if (!storageDir && !service.logFile) return undefined;
   return serviceLogFilePath({ name: serviceName, logFile: service.logFile }, {
