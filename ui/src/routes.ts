@@ -125,7 +125,8 @@ export const ROUTES: RouteSpec[] = [
 export function routeSpec(id: RouteId): RouteSpec {
   // Every RouteId has a spec (the union and the array are written together), so
   // this cannot fall through; the fallback keeps the shell render total anyway.
-  return ROUTES.find(route => route.id === id) ?? ROUTES[0];
+  // The `!` restates that ROUTES is the non-empty literal array declared above.
+  return ROUTES.find(route => route.id === id) ?? ROUTES[0]!;
 }
 
 export function routeGroupLabel(id: RouteId): string {

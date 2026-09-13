@@ -36,15 +36,18 @@ function levenshtein(a: string, b: string): number {
     let rowMin = cur[0];
     for (let j = 1; j <= b.length; j += 1) {
       const cost = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1;
-      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
-      if (cur[j] < rowMin) rowMin = cur[j];
+      // `!`, not `?? 0`: both rows are sized b.length + 1, every cell read here
+      // was written by this loop or the one above it, and a silent 0 fallback
+      // would turn a bounds mistake into a plausible wrong similarity score.
+      cur[j] = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + cost);
+      if (cur[j]! < rowMin) rowMin = cur[j]!;
     }
     if (rowMin > LEVENSHTEIN_MAX_LENGTH) return Number.POSITIVE_INFINITY; // beyond any useful similarity
     const swap = prev;
     prev = cur;
     cur = swap;
   }
-  return prev[b.length];
+  return prev[b.length]!;
 }
 
 function similarityRatio(a: string, b: string): number {

@@ -86,11 +86,15 @@ export function utf8SafePrefix(buf: Buffer, maxBytes: number): Buffer {
   if (limit <= 0 || limit >= buf.length) return buf.subarray(0, limit);
   // Walk back over trailing continuation bytes to find the lead byte of a
   // character that might straddle the cut.
+  // Both indices are in range here (limit < buf.length, leadIndex >= 0). The
+  // `?? 0` fallbacks read as "not a UTF-8 lead or continuation byte", which
+  // makes both checks fall through to the plain cut — the safe answer, and the
+  // one that cannot produce a half character.
   let back = 0;
-  while (back < 3 && limit - 1 - back >= 0 && isUtf8Continuation(buf[limit - 1 - back])) back += 1;
+  while (back < 3 && limit - 1 - back >= 0 && isUtf8Continuation(buf[limit - 1 - back] ?? 0)) back += 1;
   const leadIndex = limit - 1 - back;
   if (leadIndex >= 0) {
-    const byte = buf[leadIndex];
+    const byte = buf[leadIndex] ?? 0;
     if (byte >= 0xc0 && byte <= 0xfd) {
       const length = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : 2;
       if (leadIndex + length > limit) return buf.subarray(0, leadIndex);

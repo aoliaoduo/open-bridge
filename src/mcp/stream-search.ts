@@ -141,10 +141,15 @@ export async function searchFileStream(
   const before: string[] = [];
 
   const emitReady = (): void => {
-    while (!stopped && pending.length > 0 && pending[0].context_after.length >= contextLines) {
-      const match = pending.shift()!;
+    // Read the head instead of testing `pending.length` and then indexing: same
+    // condition, one less thing for the compiler (and the reader) to reconcile,
+    // and the non-null assertion on shift() goes away with it.
+    for (;;) {
+      const head = pending[0];
+      if (stopped || !head || head.context_after.length < contextLines) break;
+      pending.shift();
       emitted += 1;
-      if (onMatch(match) === false) stopped = true;
+      if (onMatch(head) === false) stopped = true;
     }
   };
 
@@ -173,7 +178,7 @@ export async function searchFileStream(
         let end = from;
         let chars = 0;
         while (end < lines.length) {
-          const len = lines[end].length + 1;
+          const len = (lines[end] ?? "").length + 1;
           if (chars + len > BATCH_CHAR_BUDGET && end > from) break;
           chars += len;
           end += 1;
@@ -183,7 +188,7 @@ export async function searchFileStream(
       }
     }
     for (let i = 0; i < lines.length && needsMoreLines(); i += 1) {
-      const text = lines[i];
+      const text = lines[i] ?? "";
       for (const m of pending) {
         if (m.context_after.length < contextLines) m.context_after.push(text);
       }

@@ -58,7 +58,8 @@ export function StatsTab() {
   const topTools = usage
     ? Object.entries(usage.by_tool).sort((a, b) => b[1] - a[1]).slice(0, 12)
     : [];
-  const maxCalls = topTools.length ? topTools[0][1] : 1;
+  // `?? 1`, not `|| 1`: a top tool with zero calls must leave maxCalls at 0.
+  const maxCalls = topTools[0]?.[1] ?? 1;
   const failureRate = usage && usage.calls > 0 ? Math.round((usage.failures / usage.calls) * 100) : 0;
 
   const failures = activity.filter(entry => entry.status === "error" || entry.status === "warning").length;

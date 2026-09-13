@@ -80,6 +80,9 @@ function parseArgs(argv: string[]): ParsedArgs {
   const positional: string[] = [];
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
+    // Unreachable (i < rest.length), but stating it narrows `arg` to string for
+    // the whole body instead of sprinkling fallbacks over three use sites.
+    if (arg === undefined) break;
     if (arg.startsWith("--")) {
       const key = arg.slice(2);
       const next = rest[i + 1];
@@ -184,8 +187,9 @@ function resolveInstance(home: string, root: string): { runtime?: RuntimeInfo; n
   const own = readRuntime(home, root);
   if (own && pidAlive(own.pid)) return { runtime: own, live: readAllRuntimes(home) };
   const live = readAllRuntimes(home);
-  if (live.length === 1) {
-    return { runtime: live[0], note: `当前目录不是它的项目根（${live[0].root}），按唯一运行中的实例执行。`, live };
+  const only = live.length === 1 ? live[0] : undefined;
+  if (only) {
+    return { runtime: only, note: `当前目录不是它的项目根（${only.root}），按唯一运行中的实例执行。`, live };
   }
   return { live };
 }
@@ -887,7 +891,7 @@ async function cmdDoctor(parsed: ParsedArgs): Promise<void> {
     lines.push(`  [${ok ? "OK" : "!!"}] ${name}: ${detail}`);
   };
 
-  const [major] = process.versions.node.split(".").map(Number);
+  const [major = 0] = process.versions.node.split(".").map(Number);
   check("node", major >= 22, `${process.versions.node} (需要 >= 22)`);
   try {
     fs.mkdirSync(home, { recursive: true });

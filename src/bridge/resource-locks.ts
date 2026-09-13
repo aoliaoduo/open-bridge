@@ -135,7 +135,7 @@ function blockedByEarlierWriter(index: number): boolean {
   if (!waiter || waiter.mode === "write") return false;
   for (let i = 0; i < index; i += 1) {
     const earlier = waiting[i];
-    if (earlier.mode === "write" && overlaps(earlier.keys, waiter.keys)) return true;
+    if (earlier && earlier.mode === "write" && overlaps(earlier.keys, waiter.keys)) return true;
   }
   return false;
 }

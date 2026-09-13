@@ -328,6 +328,11 @@ export function displayProbeUrl(input: URL): string {
 function classifyIpv4(address: string): NetworkAddressKind {
   const octets = address.split(".").map(Number);
   const [a, b] = octets;
+  // Callers only reach here once isIP() said 4, so both are numbers. The guard
+  // is fail-CLOSED on purpose: this classifier decides which addresses may be
+  // probed, and falling through to "public" would wave a malformed target
+  // through instead of refusing it.
+  if (a === undefined || b === undefined) return "reserved";
   if (a === 127) return "loopback";
   if (a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) return "private";
   if (a === 169 && b === 254) return "link-local";
@@ -362,10 +367,18 @@ function classifyIpv6(address: string): NetworkAddressKind {
   }
   if (bytes.slice(0, 12).every(byte => byte === 0)) return classifyIpv4([...bytes.slice(12)].join("."));
 
-  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return "link-local"; // fe80::/10
-  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x00) return "reserved"; // fe00::/9
-  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0xc0) return "reserved"; // fec0::/10 (deprecated site-local)
-  if ((bytes[0] & 0xfe) === 0xfc) return "private"; // fc00::/7 (ULA)
+  // ipv6Bytes() returns 16 bytes or undefined, and the undefined case already
+  // threw above, so both are numbers. Same fail-closed reasoning as
+  // classifyIpv4: refuse an address we cannot read rather than guess at it.
+  const b0 = bytes[0];
+  const b1 = bytes[1];
+  if (b0 === undefined || b1 === undefined) {
+    throw new NetworkProbeError("INVALID_HOST", `Invalid IP address: ${address}`);
+  }
+  if (b0 === 0xfe && (b1 & 0xc0) === 0x80) return "link-local"; // fe80::/10
+  if (b0 === 0xfe && (b1 & 0xc0) === 0x00) return "reserved"; // fe00::/9
+  if (b0 === 0xfe && (b1 & 0xc0) === 0xc0) return "reserved"; // fec0::/10 (deprecated site-local)
+  if ((b0 & 0xfe) === 0xfc) return "private"; // fc00::/7 (ULA)
   if (bytes[0] === 0xff) return "multicast";
 
   // IETF-reserved/documentation/tunnel prefixes are not globally-routable
@@ -393,11 +406,18 @@ function ipv6Bytes(address: string): number[] | undefined {
     const output: number[] = [];
     for (let index = 0; index < parts.length; index += 1) {
       const part = parts[index];
+      // Unreachable (index < parts.length). Returning undefined means "not a
+      // valid address", which is this parser's fail-closed answer everywhere
+      // else too.
+      if (part === undefined) return undefined;
       if (part.includes(".")) {
         if (index !== parts.length - 1) return undefined;
         if (isIP(part) !== 4) return undefined;
         const octets = part.split(".").map(Number);
-        output.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
+        // isIP() just confirmed a dotted quad, so all four are numbers. `!` and
+        // not `?? 0`: a silent zero here would forge a DIFFERENT address, and
+        // this parser feeds the classifier that decides what may be probed.
+        output.push((octets[0]! << 8) | octets[1]!, (octets[2]! << 8) | octets[3]!);
       } else {
         if (!/^[0-9a-f]{1,4}$/i.test(part)) return undefined;
         output.push(Number.parseInt(part, 16));

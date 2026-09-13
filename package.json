@@ -48,6 +48,7 @@
     "test:ui": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.ui.json --noEmit",
     "verify": "npm run typecheck && npm run lint && npm run build && npm test",
+    "audit": "npm audit --registry=https://registry.npmjs.org",
     "start:local": "node bin/open-bridge.js serve --port 18080 --no-tunnel"
   },
   "dependencies": {

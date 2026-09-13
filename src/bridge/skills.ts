@@ -96,19 +96,23 @@ export function parseSkillFile(raw: string, fallbackName: string): { name: strin
   let description = "";
   const front = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text);
   if (front) {
-    for (const line of front[1].split("\n")) {
+    // Every group in both patterns is mandatory, so the `?? ""` fallbacks never
+    // fire; they only tell the compiler what the regex already guarantees. An
+    // empty string also degrades correctly: it matches neither key.
+    for (const line of (front[1] ?? "").split("\n")) {
       const match = /^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$/.exec(line.trim());
       if (!match) continue;
-      const value = unquote(match[2]);
+      const value = unquote(match[2] ?? "");
       if (!value) continue;
-      if (match[1].toLowerCase() === "name" && !name) name = value;
-      if (match[1].toLowerCase() === "description" && !description) description = value;
+      const key = (match[1] ?? "").toLowerCase();
+      if (key === "name" && !name) name = value;
+      if (key === "description" && !description) description = value;
     }
   }
   const body = front ? text.slice(front[0].length) : text;
   if (!name) {
     const heading = /^#\s+(.+)$/m.exec(body);
-    name = heading ? heading[1].trim() : fallbackName;
+    name = heading ? (heading[1] ?? "").trim() : fallbackName;
   }
   if (!description) {
     for (const line of body.split("\n")) {

@@ -48,10 +48,10 @@ export function buildContext(
   const context_before: LineRef[] = [];
   const context_after: LineRef[] = [];
   for (let i = Math.max(0, hitIndex - n); i < hitIndex; i++) {
-    context_before.push({ line: i + 1, text: lines[i] });
+    context_before.push({ line: i + 1, text: lines[i] ?? "" });
   }
   for (let i = hitIndex + 1; i <= Math.min(lines.length - 1, hitIndex + n); i++) {
-    context_after.push({ line: i + 1, text: lines[i] });
+    context_after.push({ line: i + 1, text: lines[i] ?? "" });
   }
   return { context_before, context_after };
 }

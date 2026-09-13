@@ -273,7 +273,9 @@ export function normalizeScriptSource(raw: unknown): string {
     throw new Error("source must be a non-empty JavaScript program (call tools.<name>(…) and return a value).");
   }
   const fenced = /^```[a-zA-Z0-9_-]*\n([\s\S]*?)\n?```$/.exec(text);
-  const body = (fenced ? fenced[1] : text).trim();
+  // Group 1 is not optional in that pattern, so a match always carries a string;
+  // `?? text` only ever fires when there was no fence at all.
+  const body = (fenced?.[1] ?? text).trim();
   if (!body) {
     throw new Error("source is empty after removing the Markdown fence.");
   }
@@ -359,7 +361,7 @@ export function scriptCodePreview(
   const code_preview: string[] = [];
   for (let current = from; current <= to; current += 1) {
     const marker = current === line ? ">" : " ";
-    code_preview.push(`${marker} ${String(current).padStart(width)} | ${lines[current - 1].slice(0, 200)}`);
+    code_preview.push(`${marker} ${String(current).padStart(width)} | ${(lines[current - 1] ?? "").slice(0, 200)}`);
   }
   return { line, column, code_preview };
 }

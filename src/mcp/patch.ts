@@ -176,7 +176,9 @@ function applyHunksTracked(current: string, body: string, relative: string): { t
   const hunks = matches.map((hunk, order) => ({
     oldStart: hunk[1] !== undefined ? Number(hunk[1]) : undefined,
     order,
-    bodyText: hunk[5],
+    // Group 5 is a mandatory `([\s\S]*?)`, so it is always a string (possibly
+    // empty). The fallback never fires; it only tells the compiler so.
+    bodyText: hunk[5] ?? "",
   }));
   const stripPrefix = (line: string): string => (line.startsWith("-") || line.startsWith("+") || line.startsWith(" ") ? line.slice(1) : line);
   const splitBody = (raw: string): string[] => {
@@ -263,13 +265,17 @@ function applyHunksTracked(current: string, body: string, relative: string): { t
       }
     }
     if (occurrences.length === 0) throw new Error(`Patch context not found in ${relative}.`);
-    let chosen = occurrences[0];
+    // `!` is backed by the `occurrences.length === 0` throw just above and, in
+    // the branch below, by `atTarget.length === 1`. Stating it keeps `chosen` a
+    // plain number: an undefined offset would turn the slice arithmetic into
+    // NaN and quietly corrupt the file.
+    let chosen = occurrences[0]!;
     if (occurrences.length > 1) {
       const atTarget = oldStart !== undefined
         ? occurrences.filter(idx => lineIndexOf(next, idx) === oldStart - 1)
         : [];
       if (atTarget.length === 1) {
-        chosen = atTarget[0];
+        chosen = atTarget[0]!;
       } else {
         const atLines = occurrences.map(idx => lineIndexOf(next, idx) + 1).join(", ");
         throw new Error(
@@ -338,9 +344,13 @@ function applyHunksPreserving(rawCurrent: string, body: string, relative: string
     const start = map[span.lfStart];
     const end = map[span.lfEnd];
     // Spans are applied bottom-up, so rawNext only ever changed ABOVE these
-    // positions; any out-of-range mapping means the coordinate assumption
-    // broke and the verified fallback below must take over.
-    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || end > rawNext.length) {
+    // positions; any missing or out-of-range mapping means the coordinate
+    // assumption broke and the verified fallback below must take over. The two
+    // `=== undefined` tests are also what let the comparisons after them
+    // type-check — Number.isInteger is not a narrowing guard.
+    if (start === undefined || end === undefined
+      || !Number.isInteger(start) || !Number.isInteger(end)
+      || start < 0 || end < start || end > rawNext.length) {
       return applyEol(text, eol);
     }
     rawNext = rawNext.slice(0, start) + toNative(span.replacement) + rawNext.slice(end);
@@ -416,10 +426,19 @@ export async function applyPatch(
 
   if (blocks.length) {
     for (let i = 0; i < blocks.length; i++) {
-      const kind = blocks[i][1] as "Update" | "Add" | "Delete";
-      const relative = blocks[i][2].trim();
+      const block = blocks[i];
+      const nextBlock = blocks[i + 1];
+      if (!block) continue; // unreachable: i < blocks.length
+      // Groups 1 and 2 are mandatory in the block pattern (`(Update|Add|Delete)`
+      // and `(.+)`), so both are strings. `!` rather than a fallback: a guessed
+      // kind or a defaulted empty path would silently patch the wrong thing,
+      // which is the one failure mode a patch applier must not have.
+      const kind = block[1]! as "Update" | "Add" | "Delete";
+      const relative = block[2]!.trim();
       const file = await workspace.resolveSecure(patchFilePath(relative), kind !== "Update");
-      const body = sliceBlockBody(normalized, blocks[i], i + 1 < blocks.length ? blocks[i + 1].index! : normalized.length);
+      // `nextBlock` is undefined exactly when this is the last block, which is
+      // what the old `i + 1 < blocks.length` test spelled out longhand.
+      const body = sliceBlockBody(normalized, block, nextBlock ? nextBlock.index! : normalized.length);
       if (kind === "Add") {
         // Add means "create this file": overwriting anything that already
         // exists is a client bug and silently destroys content. Only an Add
@@ -466,16 +485,22 @@ export async function applyPatch(
     const fileHeaders = [...normalized.matchAll(/^---\s+([^\n]+)\n\+\+\+\s+([^\n]+)\n(?=@@)/gm)];
     if (!fileHeaders.length) throw new Error("Expected ShunCode patch format or unified diff headers.");
     for (let i = 0; i < fileHeaders.length; i++) {
+      const header = fileHeaders[i];
+      const nextHeader = fileHeaders[i + 1];
+      if (!header) continue; // unreachable: i < fileHeaders.length
       // "+++ /dev/null" names a DELETION: the --- side carries the file. The
       // code used to take +++ unconditionally, so patchFilePath("/dev/null")
       // threw and aborted the ENTIRE multi-file patch.
-      const plusPath = fileHeaders[i][2].split(/\s+/)[0];
+      // Groups 0-2 are all mandatory here (`([^\n]+)` twice) and split() always
+      // yields a first element, so these `!`s restate guarantees the pattern
+      // already makes — no path is ever defaulted to "".
+      const plusPath = header[2]!.split(/\s+/)[0]!;
       const isDeletion = plusPath === "/dev/null";
-      const relative = patchFilePath(isDeletion ? fileHeaders[i][1].split(/\s+/)[0] : plusPath);
+      const relative = patchFilePath(isDeletion ? header[1]!.split(/\s+/)[0]! : plusPath);
       const file = await workspace.resolveSecure(relative, isDeletion);
       const body = normalized.slice(
-        fileHeaders[i].index! + fileHeaders[i][0].length,
-        i + 1 < fileHeaders.length ? fileHeaders[i + 1].index! : normalized.length,
+        header.index! + header[0]!.length,
+        nextHeader ? nextHeader.index! : normalized.length,
       );
       if (isDeletion) {
         if (interim.has(file)) interim.delete(file);

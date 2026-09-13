@@ -24,10 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **做了一次类型感知 lint 审计（`no-floating-promises` / `await-thenable` / `no-misused-promises` / `no-unnecessary-condition` / `no-unnecessary-type-assertion` / `eqeqeq` / `radix` 等），122 条命中，逐条判定后只改了上面两条。** 判定结果本身值得留下来，因为它决定了哪些「看起来该修」的东西**不能动**：
   - `no-floating-promises` **零命中** —— 没有漏 `await` 的悬空 promise。
   - `no-unnecessary-condition` 74 条里，绝大多数是**类型在撒谎、守卫是真的**：`JSON.stringify` 声明返回 `string`，但 `JSON.stringify(undefined)`（以及 replacer 对函数返回 `undefined`）运行时返回 `undefined`，`script-sandbox.ts` 正是靠这个判断「返回值没有 JSON 形态」；正则的可选捕获组未参与匹配时 `hunk[1]` 运行时是 `undefined`（`patch.ts`）；`.sort(...)[0]` 在过滤结果为空时是 `undefined`（`session-table.ts` 两处靠它判断「无可淘汰会话」）；`rest[i+1]` 越界是 `undefined`（CLI 参数解析）；`process-tools.ts` 的 `timedOut` 见上。**删掉这些守卫会真的引入 bug。**
-  - 根因是 `noUncheckedIndexedAccess` 没开。实测开启后 `tsc` 报 **85 处**（`patch.ts` 21、`safe-probe.ts` 20 占一半）。那是类型严格度升级而不是修 bug，且要动仓库里最 delicate 的补丁应用器，**本轮不做**，只记录代价。
+  - 根因是 `noUncheckedIndexedAccess` 没开。实测开启后 `tsc` 报 **85 处**（`patch.ts` 21、`safe-probe.ts` 20 占一半）。当时判断那是严格度迁移而不是修 bug、且要动仓库里最 delicate 的补丁应用器，所以只记录代价 —— **紧接着的一轮已经把它做完了**，见下面那条。
   - `eqeqeq` 2 处是 `== null` / `!= null` 惯用法（一次覆盖 `null` 与 `undefined`），是正确写法；若要开这条规则应配 `{ null: "ignore" }`。
   - `http-listener.ts:138` 的 `no-misused-promises`（async 函数交给 void 回调）是**有意为之且已加固**：整个 handler 体包在最外层 try/catch 里，源码注释说明得很清楚 —— 异步 handler 的 rejection 会变成 unhandled rejection，而 Node 的默认处置是杀进程，一行畸形请求就够了。
   - `require-await` 9 处、`no-unnecessary-type-assertion` 29 处、`return-await` 6 处：无行为影响，未动。
+- **`noUncheckedIndexedAccess` 已在两份 tsconfig 里开启：索引访问不再被当成一定有值。** 上一条把这 74 条 `no-unnecessary-condition` 判成「类型在撒谎、守卫是真的」，并实测开启这个开关要付 85 处报错的代价、当时只记录未执行。这轮做完了（core 85 处 + ui 4 处，共 15 个文件），因为**留着不做才是风险**：`arr[i]`、`match[1]`、`map[k]` 运行时确实可能是 `undefined`，而类型说不是，于是每个读代码的人都得自己把边界重推一遍。判据只有一句 —— **如果它真的是 `undefined`，你希望炸掉，还是希望得到一个看起来合理的错答案？** 想要后者的地方就绝不能用 `??` 兜底。
+  - **能消掉索引访问就消掉**：`batch-plan` 把 push 进去的值存成局部变量，而不是回读 `results[results.length - 1]`；`stream-search` 的 `emitReady` 改成先读队首再判断，顺带把 `pending.shift()!` 也去掉了；`cli.ts` 的实例解析把 `live[0]` 提成 `only`。
+  - **兜底语义无害时用 `??`**：`split()[0] ?? ""`、ripgrep 的上下文行文本、脚本失败的代码预览行、glob 的首段。
+  - **兜底会把错误悄悄算错时用 `!`，并在旁边注明它凭什么成立**：两处 Levenshtein 的 DP 表（`?? 0` 会把一次越界折成一个看起来合理的编辑距离）、补丁的 `chosen` 偏移量（`undefined` 会让 slice 算术变 NaN 并静默改坏文件）、`ipv6Bytes` 的八位组（`?? 0` 会**伪造出另一个 IP 地址**，而这个解析器喂的正是决定「哪些地址允许探测」的分类器）。
+  - **循环头一处收窄，整个函数体受益**：`cli.ts` 的参数解析、`glob.ts` 的 `ch`、`stream-search` 的 `text`、`patch.ts` 的 `block` / `header`（后两者顺带把 `i + 1 < X.length ? X[i + 1].index! : …` 简化成 `next ? next.index! : …` —— `next` 为 `undefined` 恰好就是「这是最后一块」）。
+  - **安全边界一律失败即拒绝**：`classifyIpv4` 读不出前两个八位组时返回 `"reserved"`，而不是往下走到 `"public"`；`classifyIpv6` 同样抛 `INVALID_HOST`。这两处若图省事写 `?? 0`，一个畸形地址就会判成公网并被放行探测 —— SSRF 闸门上的 fail-open。
+  - 顺带修掉一个真实的类型盲点：`patch.ts` 里 EOL 保持那段原来只靠 `Number.isInteger(start)` 把关，但 **`Number.isInteger` 不是收窄守卫**，所以后面的 `start < 0`、`end > rawNext.length` 一直是拿 `number | undefined` 在比较。现在显式加了 `=== undefined` 分支，走同一条「已验证的回退」。
+  - 收益不止于少撒谎：开关一开，上一条那批「恒假 / 类型无交集」里凡是数组越界与索引访问类的误报就**自动消失**了 —— 类型不再撒谎，守卫也就不再像死代码（`session-table` 的 `.sort(...)[0]`、`tool-call-shape` 的 `LEGACY_REWRITES[name]`、CLI 的 `rest[i + 1]`、`patch.ts` 的 `hunk[1]` 都属于这类，它们的守卫本来就是对的，只是编译器看不见）。
+- **`npm run audit` 现在能用了，依赖漏洞不再是盲区。** 本机 registry 指向 `registry.npmmirror.com`（国内镜像），而它没实现 npm 的安全通告端点：`npm audit` 会 POST `/-/npm/v1/security/advisories/bulk`，镜像回 **404 `[NOT_IMPLEMENTED] /-/npm/v1/security/* not implemented yet`**。既不是依赖有问题、也不是 npm 坏了，但结果就是这一项长期查不了。新脚本只给这一条命令换回官方源（`--registry=https://registry.npmjs.org`，经已配置的代理可达），安装依赖仍然走镜像。当前结果：`found 0 vulnerabilities`。
 
 ### Fixed
 - **`interact_with_process` 少了 `input` 不再往进程 stdin 里写 `undefined`。** schema 里 `input` 一直是必填，但处理器用 `String(args.input)` 兜底：调用方漏掉这个字段时，**工具返回成功**，而子进程 stdin 上真的收到了字面量 `undefined\n`（上一轮审计的现场探针：故意启动一个回显 stdin 的子进程，它打印出 `GOT:undefined`）。现在缺字段直接报错并点名 `input`，`read_process_output` 拿去只读；**空字符串照旧是合法输入**（就是一个裸换行），只拒绝「没有」，不收紧能力。端到端测试见 `test/required-args-integration.test.mjs`：漏字段被拒且进程侧什么也没收到、空字符串仍能送达。

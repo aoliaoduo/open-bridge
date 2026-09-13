@@ -32,15 +32,20 @@ function editDistance(a: string, b: string, cap = 2): number {
     cur[0] = i;
     for (let j = 1; j <= m; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      // `!` on the table cells, not `?? 0`. All three rows are sized m + 1 and
+      // every index below is inside [0, m] by construction, so the cells are
+      // numbers. A `?? 0` fallback would be strictly worse: if a bound were ever
+      // wrong it would fold the mistake into a plausible-looking distance
+      // instead of producing NaN that a test would catch.
+      cur[j] = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + cost);
       if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
-        cur[j] = Math.min(cur[j], prev2[j - 2] + 1);
+        cur[j] = Math.min(cur[j]!, prev2[j - 2]! + 1);
       }
     }
     prev2 = prev;
     prev = cur;
   }
-  return prev[m];
+  return prev[m]!;
 }
 
 /**

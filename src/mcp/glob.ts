@@ -14,6 +14,9 @@ function globToRegExpSource(pattern: string): string {
   let out = "";
   for (let i = 0; i < p.length; i++) {
     const ch = p[i];
+    // Unreachable (i < p.length), but it narrows `ch` to string for the whole
+    // body — the comparisons below tolerate undefined, escapeForRegExp does not.
+    if (ch === undefined) break;
     if (ch === "*") {
       if (p[i + 1] === "*") {
         // ** across path separators
@@ -116,9 +119,12 @@ export function isPathGlob(pattern: string): boolean {
 function simpleWildcardMatch(base: string, pattern: string): boolean {
   const text = base.toLowerCase();
   const parts = pattern.toLowerCase().split("*");
-  if (parts.length === 1) return text.includes(parts[0]);
-  if (!text.startsWith(parts[0])) return false;
-  let pos = parts[0].length;
+  // split() always yields at least one element, so the fallback never fires;
+  // naming it once keeps the three uses below from each restating the claim.
+  const first = parts[0] ?? "";
+  if (parts.length === 1) return text.includes(first);
+  if (!text.startsWith(first)) return false;
+  let pos = first.length;
   const last = parts.length - 1;
   for (let i = 1; i <= last; i++) {
     const segment = parts[i];

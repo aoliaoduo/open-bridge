@@ -16,7 +16,10 @@ type Level = "error" | "warn" | "info" | "";
 function parseLine(line: string): { level: Level; tag: string; text: string } {
   const match = /\b(ERROR|WARN|WARNING|INFO|DEBUG)\b/.exec(line.slice(0, 120));
   if (!match) return { level: "", tag: "", text: line };
-  const word = match[1] === "WARNING" ? "WARN" : match[1] === "DEBUG" ? "" : match[1];
+  // Group 1 is a mandatory alternation, so it is always one of those five
+  // words; "" (no tag) is the same answer this function gives for no match.
+  const found = match[1] ?? "";
+  const word = found === "WARNING" ? "WARN" : found === "DEBUG" ? "" : found;
   const level: Level = word === "ERROR" ? "error" : word === "WARN" ? "warn" : word === "INFO" ? "info" : "";
   return { level, tag: word, text: line };
 }

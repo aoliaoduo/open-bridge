@@ -57,7 +57,8 @@ describe("POST helpers", () => {
 
     await api.bridgeRotate();
 
-    const [path, init] = fetchMock.mock.calls[0];
+    expect(fetchMock.mock.calls.length, "bridgeRotate issued exactly one fetch").toBe(1);
+    const [path, init] = fetchMock.mock.calls[0]!;
     expect(path).toBe("/api/bridge/rotate");
     expect(init.method).toBe("POST");
     expect((init.headers as Record<string, string>)["x-open-bridge-console"]).toBe("tok-1");

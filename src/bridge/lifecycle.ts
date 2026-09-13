@@ -180,7 +180,9 @@ export async function rotateRouteToken(): Promise<void> {
  * here, without touching traffic.
  */
 export async function republishAfterRotate(): Promise<void> {
-  const prefix = state.tunnelUrl.split("/mcp/")[0];
+  // `?? ""` rather than `!`: split() always yields at least one element, and an
+  // empty prefix simply fails the https check below, which is the right answer.
+  const prefix = state.tunnelUrl.split("/mcp/")[0] ?? "";
   if (prefix.startsWith("https://")) state.tunnelUrl = `${prefix}/mcp/${state.routeToken}`;
   await publishSelf();
 }

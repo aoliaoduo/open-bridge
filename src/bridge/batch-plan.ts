@@ -81,8 +81,11 @@ export async function runBatchPlan(
   const results: BatchResultItem[] = [];
   let stoppedEarly = false;
   for (const call of calls) {
-    results.push(await runOneBatchCall(call, exec));
-    if (failFast && !results[results.length - 1].ok) {
+    // Held in a local rather than read back as `results[results.length - 1]`:
+    // same value, and it stops relying on an index the compiler cannot prove.
+    const result = await runOneBatchCall(call, exec);
+    results.push(result);
+    if (failFast && !result.ok) {
       stoppedEarly = true;
       break;
     }
