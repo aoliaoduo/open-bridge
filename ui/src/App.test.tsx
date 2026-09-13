@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App } from "./App";
 import type {
   BridgeStatus,
@@ -441,7 +441,11 @@ describe("App shell", () => {
 
     const dialog = await screen.findByRole("dialog");
     expect(dialog.getAttribute("aria-modal")).toBe("true");
-    expect(document.activeElement).toBe(dialog);
+    // Focus moves in an effect, which React flushes on its own schedule (it
+    // landed after this synchronous assertion on ubuntu/node 24 in CI, which is
+    // a timing artefact, not a behaviour change). The behaviour being pinned is
+    // "the dialog takes focus", so wait for it instead of assuming one tick.
+    await waitFor(() => expect(document.activeElement).toBe(dialog));
 
     fireEvent.keyDown(window, { key: "Escape" });
 
