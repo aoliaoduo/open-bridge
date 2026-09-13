@@ -113,6 +113,31 @@ test("normalize validates setConfig against the per-key spec", () => {
   }
 });
 
+test("setConfig shares the MCP validator: no silent coercion or truncation", () => {
+  // The drift this unification fixes: the console used to store `false` for
+  // a garbage boolean and keep relative directories / over-cap values.
+  assert.equal(normalizeSettingsMessage({ command: "setConfig", key: "autoReconnect", value: "yes" }), null, "garbage boolean refused, not stored as false");
+  assert.equal(normalizeSettingsMessage({ command: "setConfig", key: "unrestrictedFileAccess", value: 1 }), null);
+  assert.equal(normalizeSettingsMessage({ command: "setConfig", key: "allowedDirectories", value: ["relative/path"] }), null, "relative dir refused");
+  assert.equal(normalizeSettingsMessage({ command: "setConfig", key: "allowedDirectories", value: [""] }), null);
+  assert.deepEqual(
+    normalizeSettingsMessage({ command: "setConfig", key: "allowedDirectories", value: [" C:\\tools ", "/tmp/x"] }),
+    { command: "setConfig", key: "allowedDirectories", value: ["C:\\tools", "/tmp/x"] },
+    "absolute entries trimmed, not rejected",
+  );
+  assert.equal(normalizeSettingsMessage({ command: "setConfig", key: "shellArgs", value: new Array(51).fill("x") }), null, "over-cap rejected, not truncated");
+  assert.deepEqual(
+    normalizeSettingsMessage({ command: "setConfig", key: "oauth.allowedRedirectHosts", value: ["Example.COM "] }),
+    { command: "setConfig", key: "oauth.allowedRedirectHosts", value: ["example.com"] },
+    "hosts lowercased like the MCP path",
+  );
+  assert.deepEqual(
+    normalizeSettingsMessage({ command: "setConfig", key: "logMaxBytes", value: 1024 }),
+    { command: "setConfig", key: "logMaxBytes", value: 1024 },
+  );
+  assert.equal(normalizeSettingsMessage({ command: "setConfig", key: "logMaxBytes", value: -1 }), null);
+});
+
 // --- auth toggle guard -------------------------------------------------------
 
 test("auth toggle refuses to enable with zero usable tokens (fail-closed)", () => {

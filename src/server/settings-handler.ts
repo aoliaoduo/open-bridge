@@ -35,6 +35,7 @@ import {
   type SettingsTokenRow,
 } from "../bridge/settings-model.js";
 import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
+import * as path from "node:path";
 import { resetUsageStats } from "../bridge/usage-store.js";
 import { host } from "../host/host.js";
 import {
@@ -216,7 +217,13 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
     }
 
     case "setConfig": {
-      await cfg.update(action.key, action.value);
+      // Mirror the MCP write path: stored directories are resolved, so both
+      // entries persist the same canonical form (reads resolve again anyway).
+      const value =
+        action.key === "allowedDirectories" && Array.isArray(action.value)
+          ? (action.value as string[]).map(item => path.resolve(item))
+          : action.value;
+      await cfg.update(action.key, value);
       return done({ info: "已保存。" });
     }
 

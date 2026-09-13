@@ -7,6 +7,7 @@ import { validateNgrokDomain } from "../http/request-policy.js";
 import { authStatus } from "../http/auth.js";
 import { lockSnapshot } from "./resource-locks.js";
 import { CONFIG_DEFAULTS } from "./config-defaults.js";
+import { SETTING_VALUE_REQUIRED, validateConfigValue } from "./config-values.js";
 import { auditLogPath, clientMcpUrl, localMcpUrl, record, state } from "./state.js";
 import type { JsonArgs } from "./json-args.js";
 import { notifyLogging } from "./state.js";
@@ -120,74 +121,39 @@ export function getConfig(): Record<string, unknown> {
 
 export async function setConfigValue(args: Args): Promise<unknown> {
   const key = String(args.key ?? "").replace(/^openBridge\./, "");
-  const allowed = new Set([
-    "tunnelProvider", "ngrokDomain", "ngrokExecutable", "shellPath", "shellArgs",
-    "unrestrictedFileAccess", "allowedDirectories", "port", "publicHealthTimeoutMs", "autoReconnect",
-    "ngrokUseHttpProxy", "toolProfile",
-    "auth.enabled", "auth.tokenTtlSeconds",
-    "oauth.enabled", "oauth.allowedRedirectHosts",
-    "concurrency.enabled", "concurrency.holdTimeoutMs", "concurrency.waitTimeoutMs",
-  ]);
-  if (!allowed.has(key)) throw new Error(`Unsupported Open Bridge setting: ${key}`);
-  let value = args.value;
+  const value = args.value;
   // A missing value would "update" the key to undefined and silently reset it
   // to its default, so refuse instead of wiping a setting the user cares about.
-  if (value === undefined) throw new Error("value is required. (expected 'value': setting value)");
-  if (key === "tunnelProvider") {
-    if (value !== "none" && value !== "ngrok") throw new Error("tunnelProvider must be 'none' or 'ngrok'.");
-  } else if (key === "toolProfile") {
-    if (value !== "full" && value !== "core") throw new Error("toolProfile must be 'full' or 'core'.");
-  } else if (key === "ngrokDomain") {
-    value = validateNgrokDomain(value);
-  } else if (key === "ngrokExecutable" || key === "shellPath") {
-    if (typeof value !== "string" || !value.trim()) throw new Error(`${key} must be a non-empty string. (expected '${key}': string)`);
-    value = value.trim();
-  } else if (key === "shellArgs") {
-    if (!Array.isArray(value) || value.some(item => typeof item !== "string")) {
-      throw new Error("shellArgs must be an array of strings.");
-    }
-  } else if (["unrestrictedFileAccess", "autoReconnect", "ngrokUseHttpProxy", "concurrency.enabled", "oauth.enabled"].includes(key)) {
-    if (typeof value !== "boolean") throw new Error(`${key} must be a boolean. (expected '${key}': boolean)`);
-  } else if (key === "oauth.allowedRedirectHosts") {
-    // Hosts only, never full URLs: the registration check parses the redirect
-    // URI and compares its host, so a path or scheme here would never match and
-    // would silently narrow the allowlist to nothing.
-    if (!Array.isArray(value) || value.some(item => typeof item !== "string" || !item.trim())) {
-      throw new Error("oauth.allowedRedirectHosts must be an array of non-empty host strings.");
-    }
-    value = (value as string[]).map(item => item.trim().toLowerCase());
-  } else if (key === "auth.enabled") {
-    if (typeof value !== "boolean") throw new Error("auth.enabled must be a boolean.");
+  if (value === undefined) throw new Error(SETTING_VALUE_REQUIRED);
+  if (key === "ngrokDomain") {
+    // Node-only branch: shares validateNgrokDomain with the console's
+    // saveDomain flow (same function, so the two cannot drift).
+    const domain = validateNgrokDomain(value);
+    await host().config.update(key, domain);
+    return { key: `openBridge.${key}`, value: host().config.get(key, CONFIG_DEFAULTS[key]) };
+  }
+  // Every other key shares one validator with the console's generic setConfig
+  // path (config-values.ts): same rules, same messages, no drift.
+  const checked = validateConfigValue(key, value);
+  if (!checked.ok) throw new Error(checked.error);
+  let next = checked.value;
+  if (key === "allowedDirectories") {
+    next = (next as string[]).map(item => path.resolve(item));
+  }
+  if (key === "auth.enabled" && next === true) {
     // Enabling with no usable token would make the endpoint refuse everything
     // (the gate is fail-closed), so refuse the change rather than leave the
     // operator with a Bridge that answers 401 to everyone.
-    if (value === true) {
-      const status = await authStatus();
-      const usable = status.tokens.filter(token => !token.revoked && !token.expired);
-      if (!usable.length) {
-        throw new Error(
-          "Refusing to enable auth: no active token exists. The operator must mint one first "
-          + "in the Open Bridge web console (tokens are only shown once, so MCP cannot create them).",
-        );
-      }
-    }
-  } else if (["auth.tokenTtlSeconds", "concurrency.holdTimeoutMs", "concurrency.waitTimeoutMs"].includes(key)) {
-    if (!Number.isInteger(value) || (value as number) < 0) {
-      throw new Error(`${key} must be a non-negative integer. (expected '${key}': number)`);
-    }
-  } else if (key === "allowedDirectories") {
-    if (!Array.isArray(value) || value.some(item => typeof item !== "string" || !path.isAbsolute(item))) {
-      throw new Error("allowedDirectories must contain absolute path strings. (expected 'allowedDirectories': string[])");
-    }
-    value = value.map(item => path.resolve(item));
-  } else if (key === "port") {
-    if (!Number.isInteger(value) || value < 0 || value > 65535) throw new Error("port must be an integer between 0 and 65535.");
-  } else if (key === "publicHealthTimeoutMs") {
-    if (!Number.isInteger(value) || value < 3000 || value > 120000) {
-      throw new Error("publicHealthTimeoutMs must be an integer between 3000 and 120000.");
+    const status = await authStatus();
+    const usable = status.tokens.filter(token => !token.revoked && !token.expired);
+    if (!usable.length) {
+      throw new Error(
+        "Refusing to enable auth: no active token exists. The operator must mint one first "
+        + "in the Open Bridge web console (tokens are only shown once, so MCP cannot create them).",
+      );
     }
   }
-  await host().config.update(key, value);
+  await host().config.update(key, next);
   return { key: `openBridge.${key}`, value: host().config.get(key, CONFIG_DEFAULTS[key]) };
 }
 

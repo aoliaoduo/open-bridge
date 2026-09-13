@@ -1,10 +1,11 @@
 /**
  * The settings contract: action shapes, page state, validation, labels.
  *
- * Deliberately dependency-free — no host, no bridge state, no imports at
- * all — so it is the single definition shared by the HTTP layer (which
- * validates and serves it) and the React console (which imports these types
- * instead of restating them). Two copies of a contract drift; one cannot.
+ * Deliberately dependency-free — no host, no bridge state, and imports only
+ * from dependency-free sibling modules (`config-values.js`) — so it stays
+ * the single definition shared by the HTTP layer (which validates and serves
+ * it) and the React console (which imports these types instead of restating
+ * them). Two copies of a contract drift; one cannot.
  *
  * Design contract (carried over from the original panel rework):
  *  - three type sizes only (11px labels / 12px body / 11px meta), no more
@@ -15,6 +16,8 @@
  *  - the freshly minted secret is held by the HOST (never re-rendered away),
  *    displayed once in a full-page mask with copy + "I saved it" buttons.
  */
+
+import { validateConfigValue } from "./config-values.js";
 
 /** Whitelisted lifetimes for a newly created token (seconds; 0 = permanent). */
 export const TTL_CHOICES: ReadonlyArray<{ seconds: number; label: string }> = [
@@ -141,9 +144,11 @@ const COMMANDS_WITH_ID: ReadonlySet<string> = new Set(["rotateToken", "revokeTok
 const TTL_SET: ReadonlySet<number> = new Set(TTL_CHOICES.map(choice => choice.seconds));
 
 /**
- * Per-key validation for the page's generic config writes. Deliberately does
- * NOT include auth/concurrency/domain/TTL: those have dedicated, guarded
- * flows and must never be reachable through the generic path.
+ * Keys the page's generic config writes may touch. Deliberately does NOT
+ * include auth/concurrency/domain/TTL: those have dedicated, guarded flows
+ * and must never be reachable through the generic path. This is only the key
+ * allowlist (plus the bounds the console mirrors); the per-key rules live in
+ * config-values.ts, shared with `set_config_value`.
  */
 const CONFIG_SPEC = {
   unrestrictedFileAccess: { kind: "boolean" },
@@ -167,27 +172,6 @@ const CONFIG_SPEC = {
 
 export type SettingsConfigKey = keyof typeof CONFIG_SPEC;
 
-type ConfigSpecEntry = (typeof CONFIG_SPEC)[SettingsConfigKey];
-
-function normalizeConfigValue(spec: ConfigSpecEntry, value: unknown): unknown | null {
-  if (spec.kind === "boolean") return value === true;
-  if (spec.kind === "enum") {
-    const v = typeof value === "string" ? value.trim() : value;
-    return (spec.values as readonly string[]).includes(v as string) ? v : null;
-  }
-  if (spec.kind === "string") {
-    return typeof value === "string" ? value.trim().slice(0, spec.max) : null;
-  }
-  if (spec.kind === "stringArray") {
-    if (!Array.isArray(value) || value.some(item => typeof item !== "string")) return null;
-    return value
-      .map(item => (item as string).trim().slice(0, spec.maxLen))
-      .filter(item => item.length > 0)
-      .slice(0, spec.maxItems);
-  }
-  // int — booleans/strings must not coerce into a valid-looking number
-  return typeof value === "number" && Number.isInteger(value) && value >= spec.min && value <= spec.max ? value : null;
-}
 
 /**
  * Validate an inbound webview message against a strict allowlist. Anything
@@ -264,10 +248,12 @@ export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
     }
     case "setConfig": {
       const key = typeof message.key === "string" ? message.key : "";
-      const spec = (CONFIG_SPEC as Record<string, ConfigSpecEntry | undefined>)[key];
-      if (!spec) return null;
-      const value = normalizeConfigValue(spec, message.value);
-      return value === null ? null : { command, key: key as SettingsConfigKey, value };
+      if (!(CONFIG_SPEC as Record<string, unknown>)[key]) return null;
+      // Same validator as `set_config_value`: one function, no drift. A
+      // rejection here surfaces as the generic "无法识别的操作" — the same
+      // shape every invalid console input already gets.
+      const checked = validateConfigValue(key, message.value);
+      return checked.ok ? { command, key: key as SettingsConfigKey, value: checked.value } : null;
     }
     default:
       return { command } as SettingsAction;

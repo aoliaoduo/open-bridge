@@ -255,6 +255,26 @@ test("one step arms the second lock: mint, enable, and /mcp really refuses", asy
   assert.notEqual(anonymousAgain.status, 401, "lock off: the endpoint answers again");
 });
 
+test("console setConfig shares MCP validation: garbage refused, valid saved", async () => {
+  const consolePost = (body) => fetch(`${base()}/api/settings/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-open-bridge-console": routeToken },
+    body: JSON.stringify(body),
+  });
+  // The drift this unification fixes: garbage booleans used to be stored as
+  // `false`, relative directories kept as-is. Both are refused now, with the
+  // stored values untouched.
+  const badBool = await (await consolePost({ command: "setConfig", key: "autoReconnect", value: "yes" })).json();
+  assert.equal(badBool.ok, false);
+  const badDir = await (await consolePost({ command: "setConfig", key: "allowedDirectories", value: ["relative/path"] })).json();
+  assert.equal(badDir.ok, false);
+  assert.equal(badDir.state.config.autoReconnect, badBool.state.config.autoReconnect, "refused write changed nothing");
+  assert.deepEqual(badDir.state.config.allowedDirectories, badBool.state.config.allowedDirectories, "refused write changed nothing");
+  // A valid write still lands (same value back: harmless on the shared instance).
+  const sameBack = await (await consolePost({ command: "setConfig", key: "toolProfile", value: badDir.state.config.toolProfile })).json();
+  assert.equal(sameBack.ok, true);
+});
+
 test("console page is served with the token injected; ngrok Host is refused", async () => {
   const res = await fetch(`${base()}/console/`, { headers: { "x-open-bridge-console": routeToken } });
   assert.equal(res.status, 200);
