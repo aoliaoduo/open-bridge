@@ -21,7 +21,7 @@ import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
 import { spawn } from "node:child_process";
 import http from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { routeTokenFor, waitForRuntime } from "./lib/bridge-runtime.mjs";
@@ -115,6 +115,29 @@ test("a missing path or destination is an error, not a file named undefined", as
   assert.equal(created.isError, true, "file_op{op:create_directory} without path must fail");
   assert.equal(existsSync(path.join(workspace, "undefined")), false,
     "no operation may create a file named undefined as a stand-in for a missing argument");
+});
+
+test("a dropped path never becomes a file called undefined", async () => {
+  const trap = path.join(workspace, "undefined");
+  writeFileSync(trap, "A REAL FILE", "utf8");
+
+  const written = await callTool("write_file", { content: "CLOBBERED" });
+  assert.equal(written.isError, true, "write_file without a path must fail");
+  assert.match(written.text, /Missing "path"/);
+  assert.equal(readFileSync(trap, "utf8"), "A REAL FILE", "the real file named undefined was not overwritten");
+
+  const info = await callTool("get_file_info", {});
+  assert.equal(info.isError, true, "get_file_info without a path must fail");
+  assert.match(info.text, /Missing "path"/);
+
+  const edited = await callTool("edit_block", { old_text: "A REAL", new_text: "X" });
+  assert.equal(edited.isError, true, "edit_block without a path must fail");
+  assert.match(edited.text, /Missing "path"/);
+  assert.equal(readFileSync(trap, "utf8"), "A REAL FILE", "and it was not edited either");
+
+  const read = await callTool("read_files", { paths: [null] });
+  assert.equal(read.isError, true, "a null entry in paths must fail");
+  assert.match(read.text, /non-empty string/);
 });
 
 test("moving a file onto an existing directory is refused instead of deleting it", async () => {

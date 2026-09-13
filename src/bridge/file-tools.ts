@@ -33,8 +33,10 @@ type Args = JsonArgs;
  * dropped `path` or `destination` did not get an error — it got the literal
  * string "undefined", and the operation then ran against a file of that name:
  * `create_directory` made it, `copy_file` wrote it, `delete_file` removed it and
- * still answered `deleted: true`. Absence has to be louder than that, so every
- * mutating file tool reads its paths through here.
+ * still answered `deleted: true`. Later the same audit found `write_file` and
+ * `get_file_info` doing it too — the first one overwrote a real file that
+ * happened to be named "undefined". Absence has to be louder than that, so every
+ * path-taking file tool reads its paths through here.
  */
 function requiredArg(args: Args, key: string): string {
   const value = args[key];
@@ -506,11 +508,16 @@ export async function readFiles(args: Args): Promise<unknown> {
   if (!paths.length) throw new Error("paths must contain at least one workspace file. (expected 'paths': string[])");
   const asBase64 = args.encoding === "base64";
   const lineRange = args.start_line !== undefined || args.end_line !== undefined;
-  return Promise.all(paths.map(async p => {
+  return Promise.all(paths.map(async (p, index) => {
+    // `String(null)` is "null" and `String("")` resolves to the workspace root:
+    // both used to be read as if the caller had named a file that way.
+    if (typeof p !== "string" || p.trim() === "") {
+      throw new Error(`paths[${index}] must be a non-empty string. (expected 'paths': string[])`);
+    }
     const maxBytes = Number.isFinite(Number(args.max_bytes)) && Number(args.max_bytes) >= 0
       ? Number(args.max_bytes)
       : DEFAULT_MAX_READ_BYTES;
-    const fullPath = await securePath(String(p));
+    const fullPath = await securePath(p);
     const stat = await fs.stat(fullPath);
 
     // Explicit base64: bounded by max_bytes only for genuinely large files
@@ -595,7 +602,7 @@ export async function readFiles(args: Args): Promise<unknown> {
 }
 
 export async function writeFile(args: Args): Promise<unknown> {
-  const file = await securePath(String(args.path), true);
+  const file = await securePath(requiredArg(args, "path"), true);
   // A write with NEITHER payload silently truncated the target to zero bytes
   // (content defaulted to ""). Both payloads are optional in the schema only
   // so an explicit empty string can still create an empty file; a call that
@@ -717,7 +724,7 @@ async function readEditableText(file: string): Promise<string> {
 }
 
 export async function editBlock(args: Args): Promise<unknown> {
-  const file = await securePath(String(args.path));
+  const file = await securePath(requiredArg(args, "path"));
   const hasSingle = args.old_text !== undefined || args.new_text !== undefined;
   const hasEdits = args.edits !== undefined;
   if (hasSingle === hasEdits) {
@@ -900,7 +907,7 @@ export async function deleteFile(args: Args): Promise<unknown> {
 }
 
 export async function getFileInfo(args: Args): Promise<unknown> {
-  const file = await securePath(String(args.path));
+  const file = await securePath(requiredArg(args, "path"));
   const stat = await fs.stat(file);
   const isDirectory = stat.isDirectory();
   // Hashing needs the file in memory; beyond the cap we report null instead of
