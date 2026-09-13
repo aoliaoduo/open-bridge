@@ -5,7 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [1.0.0-alpha.5] — 2026-09-13
 ### Added
+- **控制台按三个真实项目重做了一遍，路径也是真的。** 之前是单页 + 状态切换的页签。现在外壳来自三份星标参考的合并：
+  shadcn-admin 的侧栏 / 面包屑 / KPI 排布、tabler 的表格行与活动列表、kiranism 的单色可折叠侧栏与列筛选；
+  **9 条真实路由** `/console/<id>`（带 URL、可刷新、可直达），细节层（列筛选、状态徽章、分块条形图、设置二级导航）
+  落在各页里。工具页去掉了「≈tokens」这类估算列（省 Token 不是目标），保留 4 条「描述必须与行为一致」的测试。
+  `9b81532` + `e00a6c0`。
 - **重建了 `dist/` 却没重启，现在实例自己会说。** 重新编译对**已经在跑**的进程毫无影响：Node 早就把旧模块加载进内存了，新工具、新修复都要**重启**才生效。这件事此前在**任何地方都看不见**——实例照旧公布上一次的工具清单，唯一的发现方式是数一遍工具再和源码对照（本次开发就真的被绊过一次：运行中的实例公布 55 个工具，仓库里已经是 56 个，没有任何提示解释差在哪）。现在实例在**启动那一刻**记下自己加载的构建时间（`dist` 下所有 `.js` 里最新的 mtime），之后对比磁盘：`get_bridge_status` 多一个 `build_stale`，状态页在「运行控制」里显示橙色提醒（磁盘上的构建比本实例新…停止再启动），体检页多一行「构建」，`open-bridge health` 多一行 `[!!] build:`。只在**编译版**实例上有信号：`npm run dev`（tsx 跑源码）没有构建产物可比，返回 `undefined` 而不是假装「最新」——「没有信号」和「是最新的」是两句不同的话。磁盘侧按 5 秒 TTL 记忆，状态端点被控制台每 2 秒轮询也不会每次去走目录。`src/bridge/build-staleness.ts`，单测 `test/build-staleness.test.ts`。
 - **`run_script`：把多个工具调用写成一个脚本（Code Mode）。** 借鉴自 Chat-Plus 的 Code Mode：与其一次往返调一个工具，
   不如让调用方写一小段 JavaScript，用 `await tools.<工具名>(args)` 组合调用（循环、条件、`Promise.all`、过滤），
@@ -20,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   子调用沿用 `batch` 的口径（`countUsage: false`），保证 `calls == successes + failures` 依旧成立，同时以 `by_tool` 明细
   保留可见性。单测 `test/script-sandbox.test.ts`。
 ### Changed
+- **工具目录收敛：公布 56 → 38，旧名一个都没失效。** 六个 service 动词、四个文件动词、四个自省读、三个日志读、
+  两个探针，各自变成「一个工具族 + 判别参数」（`service{action}`、`file_op{op}`、`process_control{action}`、
+  `bridge_status{section}`、`activity_log{action}`、`connectivity{target}`、`service_status{detail}`、`wait`、
+  `open_shell{list}`）。**能力零损失是结构而不是承诺**：每个族调用的还是原来那个 handler；旧名在**唯一入口**
+  （`src/bridge/tool-call-shape.ts`）改写一次，于是 handler 表、锁规划、标注、用量统计只认规范名；24 个旧名全部可用，
+  对象结果里多一个 `deprecated`（文本里也有），数组与标量原样返回、不破坏旧调用方的解析；`structuredContent`
+  同样按规范名查定义。另一轮把 22 条描述压到 200 字符内，**58/58 个工具的 name/inputSchema/outputSchema 逐字节未变**
+  （`staging/t40-aproof.py` 的机器比对），细节移进 `docs/tools.md`。`a020515` + `553307b`。
 - **`src/bridge/lifecycle.ts` 拆成 9 个模块，一个文件一个职责。** 原文件 1677 行里同时住着：HTTP 监听与两代 MCP 协议分发、ngrok 进程与域名归属、会话表与回收、peer 注册表发布、路由令牌、健康报告、发给客户端的 instructions。现在：
   - `lifecycle.ts`（277 行）只做编排：start/stop 串行队列、隧道归属决策、路由令牌、`webAiPrompt`、健康报告；
   - `http-listener.ts`（420 行）loopback 监听器：host/令牌路由（含 peer 代理）、预检、鉴权闸门、请求追踪、两代协议分发、会话查找、自检与停机排空；
@@ -38,6 +53,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   验证：`npm run verify` 全绿（355 单测 / 101 集成 / 38 UI，与拆分前完全一致）；声明审计确认原文件 67 个顶层声明**一个不少、没有一个重复**；真机演练 13/13 全绿（临时实例：MCP 握手 + 56 个工具 + 两代协议、`run_command`、`run_script` 调子工具、文件读写往返、`/console/` 与控制台路由、构建新鲜度信号由 false 变 true、停机排空）。
 ### Fixed
+- **参数缺失不再变成「名叫 undefined 的文件」。** `String(args.path)` 把漏传的路径变成一个字面量文件名：
+  `copy_file` 写出一个叫 `undefined` 的文件、`delete_file` 删掉它并回答 `deleted: true`；同一处缺陷还覆盖
+  `write_file`（**覆盖**了真实存在的同名文件并返回 ok）、`edit_block`、`get_file_info`（都去读写它）、
+  `read_files{paths:[null]}`（去 stat 一个叫 `null` 的文件）。现在全部走 `requiredArg`（`Missing "path".`）
+  与逐项非空校验；集成测试里**真的放一个名为 `undefined` 的文件**进去，证明这些调用被拒绝且它逐字节未变。
+  `cee3a9a` + `89625bf`。
+- **文件工具多了自毁护栏。** `file_op{op:"delete", path:".", recursive:true}`（旧名 `delete_file` 同样）会把工作区里的
+  文件递归删光，`path:".."` 连父目录内容与 Bridge 自己的数据目录（`secrets.json`、runtime 记录）一起删；
+  `move` + `overwrite:true` 落到**已存在的目录**上会把整棵目录换成一个文件，还返回成功。现在目标是工作区根 /
+  数据目录 / 盘根或它们的祖先时一律拒绝，文件不能落在目录路径上（错误信息给出正确写法）。
+  **`unrestrictedFileAccess` 一个字没改**：工作区外的普通路径照旧可读写可删（有专门用例钉住这个能力），
+  真要清空项目仍然可以用 `run_command`。
+- **`deprecated` 不再混进 `structuredContent`；字符串布尔按声明归一。** 旧名调用的结构化内容此前带着 schema 里
+  没有的 `deprecated`（现在只留在文本块）；`list:"false"` 这类字符串布尔过去按真值走（该开 shell 却去列 shell），
+  现在在同一个归一化入口按**目录里声明的布尔入参**处理（清单从 `inputSchema` 读出，不留第二份手写表），
+  `"nope"`、`2` 之类仍原样透传给 handler 拒绝。
 - **死代码与「导出噪音」按证据清了一遍，另有一处注释与代码互相矛盾。** 两个脚本（`ob-repo-sweep.py` 粗筛 → `ob-repo-sweep2.py` 精判：**定义处就是该符号唯一的出现**才算死）扫过 `src`、`ui/src`、`scripts`、`test`、`bin` 共 19,412 行，结论是只有 **1 个真正没人用的导出**：`src/http/auth.ts` 的 `invalidateAuthCache`——它的注释写着「给测试用」，但全仓库没有任何测试引用它；而且它要失效的那个缓存是**按内容（字符串相等）**记忆的，永远不会过期，所以正确做法是删掉它，并把文件头那段与代码互相矛盾的说明改成实情（原文说「每次读都直连存储、解析很便宜」，代码其实做了内容级记忆化）。另有 **33 个内部符号挂着 `export`**（`TOOL_ANNOTATIONS`、`EDITOR_ONLY_TOOLS`、`MAX_AUDIT_LOG_BYTES`、`startInternal`/`stopInternal`、`cancelPendingRestarts`、`oauthDigestEquals`…）：全仓库（含测试与 CLI）只有自己模块在引用——多出来的 `export` 不是 API，而是一张没人认领的空头承诺，**它的实际危害是让「未被使用」这件事无法被工具发现**。去掉后模块边界与事实一致；类型与接口的导出保持不动（那是模块的对外契约，测试也在用）。顺手消掉一处复制粘贴：`lifecycle.ts` 里发给客户端的 `instructions` 长文本被 `createMcp` 与 `createSpecMcp`（两代协议）**逐字节抄了两份**，现在收敛为 `SERVER_INSTRUCTIONS_BASE` + `serverInstructions()` 一处来源，两代协议的话术不会再各自漂移。
 - **窗口标题不再被子进程改乱。** Windows 每个控制台只有**一个**标题字符串，任何挂在该控制台上的进程都能改写它
   （`SetConsoleTitle`），而且**没有恢复机制**。因为我们的子进程是**有意共享控制台**的（关窗要连带停掉隧道与服务，
