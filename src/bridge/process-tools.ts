@@ -8,6 +8,7 @@ import {
   READY_PATTERN_WINDOW_BYTES,
   READY_PATTERN_TEST_TIMEOUT_MS,
   state,
+  type CommandState,
   type SessionState,
 } from "./state.js";
 
@@ -28,6 +29,32 @@ import {
 import type { JsonArgs } from "./json-args.js";
 
 type Args = JsonArgs;
+
+/**
+ * Look up the command a process tool was pointed at.
+ *
+ * `command_id` is required by every process tool, and `String(undefined)` is the
+ * literal text "undefined": a client that dropped the field used to be told
+ * `Unknown command id: "undefined"` — a misdiagnosis that sends it hunting for a
+ * stale id when the call was merely incomplete. Absence is now named, the way the
+ * file tools name a missing path. An id that IS present but unknown still lists
+ * the live ones: that is a different mistake with a different fix, and the hint
+ * is what lets a client recover a command_id it lost track of.
+ */
+function commandStateOrThrow(args: Args): CommandState {
+  const id = args.command_id;
+  if (typeof id !== "string" || id.trim() === "") {
+    throw new Error(
+      'Missing "command_id": pass the id returned by run_command or start_process.'
+      + availableHint("Active command ids", state.commands.keys()),
+    );
+  }
+  const found = state.commands.get(id);
+  if (!found) {
+    throw new Error(`Unknown command id: "${id}".${availableHint("Active command ids", state.commands.keys())}`);
+  }
+  return found;
+}
 
 /**
  * Resolve once the child has either started ('spawn') or failed to start
@@ -189,8 +216,7 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
 }
 
 export async function readProcessOutput(args: Args): Promise<Record<string, unknown>> {
-  const s = state.commands.get(String(args.command_id));
-  if (!s) throw new Error(`Unknown command id: "${String(args.command_id)}".${availableHint("Active command ids", state.commands.keys())}`);
+  const s = commandStateOrThrow(args);
   const stream = args.stream === undefined ? "merged" : String(args.stream);
   if (!["merged", "stdout", "stderr"].includes(stream)) {
     throw new Error('stream must be one of: merged, stdout, stderr.');
@@ -223,8 +249,7 @@ export async function readProcessOutput(args: Args): Promise<Record<string, unkn
 
 
 export async function interactWithProcess(args: Args): Promise<Record<string, unknown>> {
-  const s = state.commands.get(String(args.command_id));
-  if (!s) throw new Error(`Unknown command id: "${String(args.command_id)}".${availableHint("Active command ids", state.commands.keys())}`);
+  const s = commandStateOrThrow(args);
   if (s.done) throw new Error(`Process ${s.id} has exited (code ${String(s.exitCode)}). Read its output with read_process_output.`);
   // stdin can close between the liveness check and the write (racy exit, or
   // the process closed its own stdin); fail with an actionable error instead
@@ -240,6 +265,16 @@ export async function interactWithProcess(args: Args): Promise<Record<string, un
     stdout: s.stdoutOutput.state().totalBytes,
     stderr: s.stderrOutput.state().totalBytes,
   };
+  // `input` is required by the schema, and `String(undefined)` is the literal
+  // text "undefined": a client that dropped the field used to get a success back
+  // while the process received `undefined\n` on its stdin. Absence is refused;
+  // an empty string is still a real input (a bare newline).
+  if (args.input === undefined || args.input === null) {
+    throw new Error(
+      "Missing \"input\": interact_with_process needs the text to send. "
+      + "Use read_process_output to read a process without writing to it.",
+    );
+  }
   const stream = args.stream === undefined ? "merged" : String(args.stream);
   try {
     s.child.stdin.write(String(args.input) + (args.append_newline === false ? "" : "\n"));
@@ -254,8 +289,7 @@ export async function interactWithProcess(args: Args): Promise<Record<string, un
 
 
 export async function forceTerminate(args: Args): Promise<Record<string, unknown>> {
-  const s = state.commands.get(String(args.command_id));
-  if (!s) throw new Error(`Unknown command id: "${String(args.command_id)}".${availableHint("Active command ids", state.commands.keys())}`);
+  const s = commandStateOrThrow(args);
   // Always run the record through terminateProcess — even when it already
   // exited — because that is what cancels a pending auto-restart timer. A
   // crashed command with autoRestart waiting out restartDelayMs used to be
@@ -269,8 +303,7 @@ export async function forceTerminate(args: Args): Promise<Record<string, unknown
 }
 
 export async function restartProcess(args: Args): Promise<Record<string, unknown>> {
-  const s = state.commands.get(String(args.command_id));
-  if (!s) throw new Error(`Unknown command id: "${String(args.command_id)}".${availableHint("Active command ids", state.commands.keys())}`);
+  const s = commandStateOrThrow(args);
   // Capture the policy BEFORE termination: terminateProcess flips autoRestart
   // off and marks requestedStop, neither of which may leak into the fresh spawn.
   const policy = { autoRestart: s.autoRestart, maxRestarts: s.maxRestarts, restartDelayMs: s.restartDelayMs };
@@ -290,8 +323,7 @@ export async function restartProcess(args: Args): Promise<Record<string, unknown
 }
 
 export async function waitProcess(args: Args): Promise<Record<string, unknown>> {
-  const s = state.commands.get(String(args.command_id));
-  if (!s) throw new Error(`Unknown command id: "${String(args.command_id)}".${availableHint("Active command ids", state.commands.keys())}`);
+  const s = commandStateOrThrow(args);
   const timeout = clampMs(args.timeout_ms, 120_000);
   if (!s.done) {
     await new Promise<void>(resolve => {
@@ -329,8 +361,7 @@ export async function waitTool(args: Args): Promise<unknown> {
 }
 
 export function setProcessPolicy(args: Args): Record<string, unknown> {
-  const s = state.commands.get(String(args.command_id));
-  if (!s) throw new Error(`Unknown command id: "${String(args.command_id)}".${availableHint("Active command ids", state.commands.keys())}`);
+  const s = commandStateOrThrow(args);
   if (args.auto_restart !== undefined) {
     s.autoRestart = Boolean(args.auto_restart);
     // Turning auto-restart off must also drop an ALREADY scheduled restart:
@@ -351,11 +382,9 @@ export function setProcessPolicy(args: Args): Record<string, unknown> {
 
 export function getProcessSnapshot(args: Args): unknown {
   const id = typeof args.command_id === "string" ? args.command_id : "";
-  if (id) {
-    const s = state.commands.get(id);
-    if (!s) throw new Error(`Unknown command id: "${String(args.command_id)}".${availableHint("Active command ids", state.commands.keys())}`);
-    return processSnapshot(s);
-  }
+  // command_id is OPTIONAL here (omitted = every command), so the shared lookup
+  // only runs when one was actually supplied.
+  if (id) return processSnapshot(commandStateOrThrow(args));
   pruneCommands();
   return [...state.commands.values()].map(processSnapshot);
 }

@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 「磁盘上的构建比本实例新」的提示改成终端能真正做到的动作：**关掉承载实例的窗口，再双击一次一键启动脚本**（或在该窗口 Ctrl+C 后重新 `open-bridge serve`）——这也正是「重新加载新构建」在本模型下的唯一正解；
   - `/api/bridge/start|stop|rotate`、`/api/shutdown` 这些接口**保留不动**（CLI、脚本、以及将来的桌面壳仍在用），只是不再从网页暴露；`test/api-surface.test.ts` 的守卫改成：任何路由若无人调用即失败，而「控制台不驱动生命周期路由」变成一条显式断言。
 
+### Fixed
+- **`interact_with_process` 少了 `input` 不再往进程 stdin 里写 `undefined`。** schema 里 `input` 一直是必填，但处理器用 `String(args.input)` 兜底：调用方漏掉这个字段时，**工具返回成功**，而子进程 stdin 上真的收到了字面量 `undefined\n`（上一轮审计的现场探针：故意启动一个回显 stdin 的子进程，它打印出 `GOT:undefined`）。现在缺字段直接报错并点名 `input`，`read_process_output` 拿去只读；**空字符串照旧是合法输入**（就是一个裸换行），只拒绝「没有」，不收紧能力。端到端测试见 `test/required-args-integration.test.mjs`：漏字段被拒且进程侧什么也没收到、空字符串仍能送达。
+- **同一形状还有三处：漏传必填参数不再被静默兜底，而是一律点名。** 上一轮只跑到 `interact_with_process` 就中断了，这次把 `String(args.x)` / `?? ""` 的 69 处全过了一遍 —— `run_command`、`set_todos`、`apply_patch`、`read_files`、`save_service`、`find_files`、`search_files`、`send_to_shell`、`normalizeScriptSource`、`normalizePort`、`parseHttpProbeUrl`、`activity_log` 都已有守卫，未动；剩下三处真的会静默：
+  - **`command_id`（`process-tools.ts`，7 处查找）** 走的是 `state.commands.get(String(args.command_id))`：漏传时报 `Unknown command id: "undefined"`，把「参数没给」误诊成「id 过期」，客户端会去翻一个它从来没有过的 id。收敛成一个 `commandStateOrThrow()`：缺失点名 `Missing "command_id"`；**存在但未知仍然报 `Unknown command id` 并列出活跃 id** —— 那条 hint 正是客户端找回 id 的手段，不能连同误诊一起改掉。`get_process_snapshot` 的 `command_id` 是**可选**的（省略＝列全部），原语义保留。顺带把 7 份逐字重复的两行查找并成一份。
+  - **`report_progress` 的 `message`** 用 `?? ""` 兜底：漏传时写一条空审计记录、推一条空 logging 通知，然后**返回成功**，调用方完全不知道这次汇报没发生。只拒绝「没有」；显式空串照旧放行（`phase` / `category` / `percent` 本身就能承载一次汇报）。
+  - **`connectivity` 的 `url` / `port`** 分别以字面量 `"undefined"` 和 `NaN` 进入探测，回来的是不点名参数的 `INVALID_URL` / `INVALID_PORT`。现在缺失先点名；**给了但非法仍走 `parseHttpProbeUrl` / `normalizePort` 自己的文案**，没有把它们的诊断吃掉。
+  - 测试：`test/interact-input-integration.test.mjs` 扩写并改名为 `test/required-args-integration.test.mjs`（复用同一个实例、不增加启动开销），7 例覆盖上面四处，外加三条**能力保全**断言：空 `input` 仍是裸换行、空 `message` 仍能汇报、`get_process_snapshot` 仍可省略 `command_id`。
+  - 踩到的一件事，记下来免得下次再踩：**集成测试跑的是 `bin/open-bridge.js` → `dist/`，不是 `src/`。** 源码改完不 `npm run build`，端到端测试会继续报旧行为（本轮就是这样：三处守卫已在 `src` 里、typecheck 与 lint 全绿，测试却仍然失败）。
+- **CHANGELOG 的 `[Unreleased]` 分区错位已修。** 上一条改动把 `### Fixed` 插在了 `### Changed` 的正下方，于是 `### Changed` 变成空标题，而原本属于 Changed 的两条（死代码清理、控制台按钮撤除）被归到了 Fixed 下面。按 Keep a Changelog 的 Added → Changed → Fixed 复位。
+
 ## [1.0.0-alpha.5] — 2026-09-13
 ### Added
 - **控制台按三个真实项目重做了一遍，路径也是真的。** 之前是单页 + 状态切换的页签。现在外壳来自三份星标参考的合并：

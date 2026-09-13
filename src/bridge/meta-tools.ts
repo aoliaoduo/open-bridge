@@ -309,7 +309,15 @@ export async function lsp(): Promise<unknown> {
 }
 
 export function reportProgress(args: Args, session?: SessionState): Record<string, unknown> {
-  const message = String(args.message ?? "");
+  // `message` is required by the schema, and `?? ""` turned a dropped field into
+  // a successful no-op: an empty audit entry plus an empty logging notification,
+  // with nothing telling the caller the report never happened. Only ABSENCE is
+  // refused — an explicit "" still goes through, because phase/category/percent
+  // can carry a report on their own.
+  if (args.message === undefined || args.message === null) {
+    throw new Error('Missing "message": report_progress needs the text to report. (expected \'message\': string)');
+  }
+  const message = String(args.message);
   // The structured fields are a closed vocabulary; anything outside it is
   // dropped rather than stored (see progress-vocabulary.ts). The free-text
   // `message` is unaffected — it is the human-readable part.

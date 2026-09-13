@@ -24,6 +24,13 @@ function probeScope(value: unknown): ProbeNetworkScope {
 
 export async function checkPortTool(args: Args): Promise<unknown> {
   const host = String(args.host ?? "127.0.0.1");
+  // `Number(undefined)` is NaN, which normalizePort reported as "port must be an
+  // integer between 1 and 65535" — accurate, but it never says the argument was
+  // simply absent. Name it, the way the file tools name a missing path. A port
+  // that IS present and invalid still reaches normalizePort's own message.
+  if (args.port === undefined || args.port === null) {
+    throw new Error('Missing "port": connectivity{target:"port"} needs the port to probe. (expected \'port\': number)');
+  }
   const portNumber = Number(args.port);
   const result = await probeTcpPort(host, portNumber, {
     scope: probeScope(args.scope),
@@ -36,6 +43,12 @@ export async function checkHttpTool(args: Args): Promise<unknown> {
   const redirects = Number.isFinite(Number(args.max_redirects)) && Number(args.max_redirects) >= 0
     ? Number(args.max_redirects)
     : 5;
+  // Same shape as checkPortTool: absence is named here instead of reaching
+  // parseHttpProbeUrl as the literal text "undefined" and coming back as a
+  // generic INVALID_URL. A present-but-unparseable url still gets that message.
+  if (args.url === undefined || args.url === null || String(args.url).trim() === "") {
+    throw new Error('Missing "url": connectivity{target:"http"} needs the endpoint to probe. (expected \'url\': string)');
+  }
   return probeHttpHealth(String(args.url), {
     scope: probeScope(args.scope),
     timeoutMs: Number(args.timeout_ms ?? 5000),
