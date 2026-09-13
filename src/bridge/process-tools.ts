@@ -93,11 +93,14 @@ function throwIfSpawnFailed(commandState: { spawnError?: string }): void {
  * `setTimeout(cb, NaN)` fires at ~0 ms — the bug that once instantly "timed
  * out" running commands in run_command. MCP arguments are LLM-generated, so a
  * "30s" string or a null lands here more often than anyone would like.
+ * An optional `max` caps the result; callers without one keep the old
+ * behavior. `interact_with_process` passes 60000: its wait is a blind
+ * sleep (nothing wakes it early), unlike the event-bounded waits elsewhere.
  */
-export function clampMs(value: unknown, fallback: number): number {
+export function clampMs(value: unknown, fallback: number, max = Number.POSITIVE_INFINITY): number {
   if (value === undefined || value === null) return fallback;
   const n = Number(value);
-  return Number.isFinite(n) && n >= 0 ? n : fallback;
+  return Number.isFinite(n) && n >= 0 ? Math.min(n, max) : fallback;
 }
 
 export async function runOrStartProcess(args: Args, name: string): Promise<unknown> {
@@ -285,7 +288,10 @@ export async function interactWithProcess(args: Args): Promise<Record<string, un
   } catch (error) {
     throw new Error(`Failed to write to process ${s.id}: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const waitMs = clampMs(args.wait_ms, 250);
+  // Capped like read_process_output: unlike every other clampMs call site,
+  // this wait is a blind sleep — no output or exit wakes it early — so an
+  // uncapped value parks the caller for days instead of a minute.
+  const waitMs = clampMs(args.wait_ms, 250, 60_000);
   if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs));
   const effectiveOffset = args.offset !== undefined ? Number(args.offset) : preOffsets[stream] ?? preOffsets.merged;
   return outputRead(s, effectiveOffset, args.max_bytes, args.stream, args.strip_ansi);

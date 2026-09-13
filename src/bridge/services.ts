@@ -1,5 +1,6 @@
 import { host } from "../host/host.js";
 import { SERVICES_STATE_PREFIX, state } from "./state.js";
+import { requireRestartKnob } from "./processes.js";
 
 let servicePersistTail: Promise<void> = Promise.resolve();
 
@@ -12,6 +13,20 @@ export function persistServices(): void {
   servicePersistTail = servicePersistTail
     .then(() => host().globalState.update(key, snapshot))
     .catch(() => undefined);
+}
+
+/**
+ * One stored restart knob: same acceptance as the two live entries
+ * (save_service, set_process_policy) via requireRestartKnob, but a corrupt
+ * stored value falls back to the default instead of throwing — loadServices
+ * must never let one bad entry abort the whole load (see below).
+ */
+function storedKnob(raw: unknown, key: "max_restarts" | "restart_delay_ms", fallback: number): number {
+  try {
+    return requireRestartKnob(raw ?? fallback, key);
+  } catch {
+    return fallback;
+  }
 }
 
 /**
@@ -41,8 +56,8 @@ export function loadServices(): void {
         healthUrl: typeof service.healthUrl === "string" ? service.healthUrl : undefined,
         logFile: typeof service.logFile === "string" ? service.logFile : undefined,
         autoRestart: service.autoRestart === true,
-        maxRestarts: Number(service.maxRestarts ?? 3),
-        restartDelayMs: Number(service.restartDelayMs ?? 1000),
+        maxRestarts: storedKnob(service.maxRestarts, "max_restarts", 3),
+        restartDelayMs: storedKnob(service.restartDelayMs, "restart_delay_ms", 1000),
       });
     }
   } catch {

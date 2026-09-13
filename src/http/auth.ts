@@ -274,6 +274,7 @@ export async function usableTokenCount(): Promise<number> {
  */
 export async function rotateToken(idOrPrefix: string): Promise<MintedToken> {
   const needle = idOrPrefix.trim().toLowerCase();
+  if (!needle) throw new Error("Provide a token id. Token ids are listed on the Open Bridge settings page.");
   return mutateRecords(records => {
     const target = records.find(item => item.id.toLowerCase().startsWith(needle));
     if (!target) throw new Error(`No token matches "${idOrPrefix}".`);

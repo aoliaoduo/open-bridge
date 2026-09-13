@@ -107,7 +107,7 @@
 
 **read_process_output** — 分页读受监管命令的输出：`offset` / `max_bytes`，`stream` 只读一路，`wait_ms`（最大 60000）阻塞等待**新**输出。
 
-**interact_with_process** — 给进程送输入并返回**这次输入之后**产生的输出（不传 `offset` 就不必自己记游标）。面向普通非 PTY 管道；完整终端会话请用 `open_shell`。
+**interact_with_process** — 给进程送输入并返回**这次输入之后**产生的输出（不传 `offset` 就不必自己记游标；`wait_ms` 上限 60000，与 `read_process_output` 一致）。面向普通非 PTY 管道；完整终端会话请用 `open_shell`。
 
 **process_control** — `restart`（用原命令与原 cwd 重起，可带 `delay_ms`）· `terminate`（强制结束）。都按 `command_id`。
 

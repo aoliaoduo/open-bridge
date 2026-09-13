@@ -30,3 +30,15 @@ test("undefined takes the fallback, which is the documented default", () => {
   assert.equal(clampMs(undefined, 120_000), 120_000);
   assert.equal(clampMs(undefined, 0), 0);
 });
+
+test("an explicit max caps the value (interact_with_process waits at most 60 s)", () => {
+  assert.equal(clampMs(250, 250, 60_000), 250);
+  assert.equal(clampMs(600_000, 250, 60_000), 60_000);
+  assert.equal(clampMs(60_000, 250, 60_000), 60_000);
+  assert.equal(clampMs("abc", 250, 60_000), 250);
+  assert.equal(clampMs(undefined, 250, 60_000), 250);
+});
+
+test("without a max, large values still pass through (existing callers)", () => {
+  assert.equal(clampMs(3_600_000, 250), 3_600_000);
+});
