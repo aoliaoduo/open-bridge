@@ -101,10 +101,10 @@ test("a skill is read with the existing file tools — no new access path", asyn
 });
 
 test("a skill added mid-session appears on the next call, without reconnecting", async () => {
-  const before = JSON.parse(await callToolText("list_skills", {})).count;
+  const baseline = JSON.parse(await callToolText("list_skills", {})).count;
   writeSkill(path.join(workspace, "skills", "hotfix"), "hotfix", "Emergency path");
   const result = JSON.parse(await callToolText("list_skills", {}));
-  assert.equal(result.count, before + 1, "exactly the new skill was added");
+  assert.equal(result.count, baseline + 1, "exactly the new skill was added");
   assert.ok(result.skills.some(skill => skill.name === "hotfix"), "the fresh scan sees it");
 });
 

@@ -413,7 +413,7 @@ export function installNodeHost(options: NodeHostOptions = {}): { host: NodeHost
   );
   const rg = fs.existsSync(rgCandidate) ? rgCandidate : undefined;
 
-  const nodeHost: NodeHost = {
+  const installed: NodeHost = {
     config,
     secrets,
     globalState: state,
@@ -439,8 +439,8 @@ export function installNodeHost(options: NodeHostOptions = {}): { host: NodeHost
     bridgeLog: log,
   };
 
-  setHost(nodeHost);
-  return { host: nodeHost, ui };
+  setHost(installed);
+  return { host: installed, ui };
 }
 
 /** The installed host, typed with its Node-specific helpers. Throws when not installed. */

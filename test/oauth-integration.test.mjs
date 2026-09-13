@@ -130,7 +130,7 @@ let rpcId = 1;
 const rpc = (method, params) => ({ jsonrpc: "2.0", id: rpcId++, method, params: params ?? {} });
 
 /** Open a 2025-era session with the OAuth token, exactly as a client would. */
-async function openSessionWith(token) {
+async function openSessionWith(accessToken) {
   const res = await rawRequest("POST", `/mcp/${routeToken}`, JSON.stringify(rpc("initialize", {
     protocolVersion: "2025-06-18",
     capabilities: {},
@@ -138,14 +138,14 @@ async function openSessionWith(token) {
   })), {
     "content-type": "application/json",
     accept: "application/json, text/event-stream",
-    authorization: `Bearer ${token}`,
+    authorization: `Bearer ${accessToken}`,
   });
   const sessionId = res.headers["mcp-session-id"];
   if (sessionId) {
     await rawRequest("POST", `/mcp/${routeToken}`, JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }), {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
-      authorization: `Bearer ${token}`,
+      authorization: `Bearer ${accessToken}`,
       "mcp-session-id": sessionId,
     });
   }
@@ -153,13 +153,13 @@ async function openSessionWith(token) {
 }
 
 /** Handshake then list tools: the full path a real client takes. */
-async function listToolsWith(token) {
-  const opened = await openSessionWith(token);
+async function listToolsWith(accessToken) {
+  const opened = await openSessionWith(accessToken);
   if (opened.status !== 200) return opened;
   const res = await rawRequest("POST", `/mcp/${routeToken}`, JSON.stringify(rpc("tools/list", {})), {
     "content-type": "application/json",
     accept: "application/json, text/event-stream",
-    authorization: `Bearer ${token}`,
+    authorization: `Bearer ${accessToken}`,
     "mcp-session-id": opened.sessionId,
   });
   return { status: res.status, headers: res.headers, body: res.body };

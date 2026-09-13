@@ -23,7 +23,7 @@ function probeScope(value: unknown): ProbeNetworkScope {
 }
 
 export async function checkPortTool(args: Args): Promise<unknown> {
-  const host = String(args.host ?? "127.0.0.1");
+  const hostName = String(args.host ?? "127.0.0.1");
   // `Number(undefined)` is NaN, which normalizePort reported as "port must be an
   // integer between 1 and 65535" — accurate, but it never says the argument was
   // simply absent. Name it, the way the file tools name a missing path. A port
@@ -32,11 +32,11 @@ export async function checkPortTool(args: Args): Promise<unknown> {
     throw new Error('Missing "port": connectivity{target:"port"} needs the port to probe. (expected \'port\': number)');
   }
   const portNumber = Number(args.port);
-  const result = await probeTcpPort(host, portNumber, {
+  const result = await probeTcpPort(hostName, portNumber, {
     scope: probeScope(args.scope),
     timeoutMs: Number(args.timeout_ms ?? 2000),
   });
-  return { ...result, host, port: portNumber };
+  return { ...result, host: hostName, port: portNumber };
 }
 
 export async function checkHttpTool(args: Args): Promise<unknown> {

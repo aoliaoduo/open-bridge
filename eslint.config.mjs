@@ -15,6 +15,10 @@ export default tseslint.config(
     files: ["**/*.ts"],
     rules: {
       "no-undef": "off",
+      // The base rule misfires on TS-only constructs (enums, namespaces,
+      // declaration merging); the typed one understands them.
+      "no-shadow": "off",
+      "@typescript-eslint/no-shadow": "error",
     },
   },
   {
@@ -28,6 +32,12 @@ export default tseslint.config(
     rules: {
       "@typescript-eslint/no-explicit-any": "warn",
       "no-empty": ["error", { allowEmptyCatch: true }],
+      // A local that shadows an import or an outer function reads like the outer
+      // one. TypeScript would catch a real misuse at compile time, but it reads
+      // as a bug first and costs a re-read every time — and `host`, `root`,
+      // `record`, `before`/`after` are names this codebase already uses at
+      // module scope, so the confusion is not hypothetical.
+      "no-shadow": "error",
     },
   },
 );

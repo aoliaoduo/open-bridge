@@ -15,8 +15,8 @@ export const currentWorkspaceRoot = (): string => path.resolve(host().projectRoo
  * by this suffix, so it must be derived the same way everywhere — the CLI needs
  * it for a directory that has no running Bridge to ask, hence the pure form.
  */
-export const workspaceSuffixFor = (root: string): string =>
-  sha256(root || "<no-workspace>").slice(0, 24);
+export const workspaceSuffixFor = (rootPath: string): string =>
+  sha256(rootPath || "<no-workspace>").slice(0, 24);
 
 export const workspaceStateSuffix = (): string => workspaceSuffixFor(state.activeWorkspaceRoot);
 

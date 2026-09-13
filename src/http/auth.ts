@@ -160,14 +160,14 @@ export interface MintedToken {
   permanent: boolean;
 }
 
-function mintedView(record: AuthTokenRecord, secret: string): MintedToken {
+function mintedView(entry: AuthTokenRecord, secret: string): MintedToken {
   return {
-    id: record.id,
-    label: record.label,
+    id: entry.id,
+    label: entry.label,
     secret,
-    created_at: new Date(record.createdAt).toISOString(),
-    expires_at: record.expiresAt === null ? null : new Date(record.expiresAt).toISOString(),
-    permanent: record.expiresAt === null,
+    created_at: new Date(entry.createdAt).toISOString(),
+    expires_at: entry.expiresAt === null ? null : new Date(entry.expiresAt).toISOString(),
+    permanent: entry.expiresAt === null,
   };
 }
 
@@ -176,7 +176,7 @@ export async function mintToken(options: { label?: string; ttlSeconds?: number |
   const now = Date.now();
   const ttl = options.ttlSeconds === undefined ? tokenTtlSeconds() : options.ttlSeconds;
   const secret = generateSecret();
-  const record: AuthTokenRecord = {
+  const entry: AuthTokenRecord = {
     id: generateTokenId(),
     label: (options.label ?? "").trim() || `token-${new Date(now).toISOString().slice(0, 10)}`,
     hash: hashSecret(secret),
@@ -185,7 +185,7 @@ export async function mintToken(options: { label?: string; ttlSeconds?: number |
     lastUsedAt: null,
     useCount: 0,
   };
-  return mutateRecords(records => ({ records: [...records, record], result: mintedView(record, secret) }));
+  return mutateRecords(records => ({ records: [...records, entry], result: mintedView(entry, secret) }));
 }
 
 export async function listTokenViews(): Promise<ReturnType<typeof publicTokenView>[]> {

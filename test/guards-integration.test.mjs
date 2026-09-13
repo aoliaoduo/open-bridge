@@ -309,8 +309,8 @@ test("a token minted or revoked by another process (the CLI) is honoured at once
   const revoked = await cliToken(["revoke", id]);
   assert.equal(revoked.code, 0, revoked.out);
 
-  const after = await openSession(bearer(secret));
-  assert.equal(after.res.status, 401, "a CLI-revoked token must stop working at once");
+  const reopened = await openSession(bearer(secret));
+  assert.equal(reopened.res.status, 401, "a CLI-revoked token must stop working at once");
 
   assert.equal(serveExit, null, `serve died during the cross-process test:\n${serveOutput.slice(-600)}`);
 });

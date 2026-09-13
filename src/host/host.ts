@@ -69,8 +69,8 @@ export interface Host {
 
 let active: Host | undefined;
 
-export function setHost(host: Host): void {
-  active = host;
+export function setHost(next: Host): void {
+  active = next;
 }
 
 /** The injected host; throws early with a clear message when missing. */

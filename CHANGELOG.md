@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 服务端撤掉 `restart` 动作、`setRestartHook` 与 `src/bridge/restart.ts`（及其两个测试文件）；
   - 「磁盘上的构建比本实例新」的提示改成终端能真正做到的动作：**关掉承载实例的窗口，再双击一次一键启动脚本**（或在该窗口 Ctrl+C 后重新 `open-bridge serve`）——这也正是「重新加载新构建」在本模型下的唯一正解；
   - `/api/bridge/start|stop|rotate`、`/api/shutdown` 这些接口**保留不动**（CLI、脚本、以及将来的桌面壳仍在用），只是不再从网页暴露；`test/api-surface.test.ts` 的守卫改成：任何路由若无人调用即失败，而「控制台不驱动生命周期路由」变成一条显式断言。
+- **局部变量遮蔽模块级同名导入的 15 处已全部改名，`no-shadow` 现已强制。** 源码 7 处：`paths.ts` 的参数 `root` 遮蔽同文件导出的 `root()`、`service-tools.ts` 的局部 `host` 遮蔽导入的 `host()`、`host.ts` 的 `setHost(host)` 遮蔽同文件导出的 `host()`、`node-host.ts` 的局部 `nodeHost` 遮蔽导出的 `nodeHost()`、`auth.ts` 两处 `record` 遮蔽导入的 `record()`、`patch.ts` 的 `toNative(text)` 遮蔽同一作用域上一行解构出来的 `text`；测试里另有 8 处用局部 `before`/`after`/`token` 遮蔽 `node:test` 的同名导入与本文件自己的 `token()` OAuth 助手。**纯重命名，无行为变化**（`tsc` 本来就能挡住真正的误用，这 15 处没有一处是活的），但每一处都会先被读成 bug、再花一次重读去确认；而 `host`、`root`、`record`、`before`/`after` 恰恰是本仓库已在模块作用域使用的名字，混淆不是假设性的。规则一并写进 `eslint.config.mjs`（TS 用 `@typescript-eslint/no-shadow`，基础规则在 TS 上会误判 enum / namespace / 声明合并），免得回归。
 
 ### Fixed
 - **`interact_with_process` 少了 `input` 不再往进程 stdin 里写 `undefined`。** schema 里 `input` 一直是必填，但处理器用 `String(args.input)` 兜底：调用方漏掉这个字段时，**工具返回成功**，而子进程 stdin 上真的收到了字面量 `undefined\n`（上一轮审计的现场探针：故意启动一个回显 stdin 的子进程，它打印出 `GOT:undefined`）。现在缺字段直接报错并点名 `input`，`read_process_output` 拿去只读；**空字符串照旧是合法输入**（就是一个裸换行），只拒绝「没有」，不收紧能力。端到端测试见 `test/required-args-integration.test.mjs`：漏字段被拒且进程侧什么也没收到、空字符串仍能送达。

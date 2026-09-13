@@ -325,7 +325,7 @@ function applyHunksPreserving(rawCurrent: string, body: string, relative: string
   const lf = toLf(rawCurrent);
   const { text, spans } = applyHunksTracked(lf, body, relative);
   if (text === lf) return rawCurrent; // semantic no-op: keep the file byte-identical
-  const toNative = (text: string): string => (eol === "\r\n" ? text.replace(/\n/g, "\r\n") : text);
+  const toNative = (s: string): string => (eol === "\r\n" ? s.replace(/\n/g, "\r\n") : s);
   const map = buildLfToRawIndex(rawCurrent, lf.length);
   let rawNext = rawCurrent;
   for (const span of spans) {

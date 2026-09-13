@@ -191,7 +191,7 @@ test("CORS preflight is answered 204 and responses expose the session header", a
 
 test("usage counters stay consistent, and batch sub-calls are not double counted", async () => {
   const { sessionId } = await openSession();
-  const before = await usage();
+  const baseline = await usage();
 
   const ok = await callTool(sessionId, "get_bridge_status", {});
   assert.equal(ok.payload?.result?.isError, undefined);
@@ -208,10 +208,10 @@ test("usage counters stay consistent, and batch sub-calls are not double counted
   });
   assert.equal(batched.status, 200);
 
-  const after = await usage();
-  assert.equal(after.calls, after.successes + after.failures, "every call is exactly one outcome");
-  assert.equal(after.calls - before.calls, 3, "batch counts once, not once per sub-call");
-  assert.equal(after.by_tool.definitely_no_such_tool, undefined, "unknown tools stay out of by_tool");
+  const totals = await usage();
+  assert.equal(totals.calls, totals.successes + totals.failures, "every call is exactly one outcome");
+  assert.equal(totals.calls - baseline.calls, 3, "batch counts once, not once per sub-call");
+  assert.equal(totals.by_tool.definitely_no_such_tool, undefined, "unknown tools stay out of by_tool");
 });
 
 test("a command that cannot run reports a real failure, never a phantom success", async () => {
@@ -254,9 +254,9 @@ test("the session table reports the handshake time and a cumulative call count",
 
   await callTool(sessionId, "get_bridge_status", {});
   await callTool(sessionId, "list_services", {});
-  const after = await rowFor();
-  assert.equal(after.calls, 2, "each served call is counted once, on its own session");
-  assert.equal(after.connected_at, fresh.connected_at, "the handshake time does not move");
+  const counted = await rowFor();
+  assert.equal(counted.calls, 2, "each served call is counted once, on its own session");
+  assert.equal(counted.connected_at, fresh.connected_at, "the handshake time does not move");
 
   const listed = JSON.parse((await callTool(sessionId, "list_sessions", {})).text);
   const row = listed.find(entry => entry.session_id === sessionId);
@@ -297,7 +297,7 @@ test("closing a session needs an unambiguous id; an ambiguous prefix closes noth
   const exact = await close(pair[0]);
   assert.equal(exact.status, 200, exact.body);
   assert.equal(JSON.parse(exact.body).closed, pair[0], "the exact id closes exactly the session asked for");
-  const after = JSON.parse((await rawRequest("GET", "/api/sessions", null, {})).body).sessions.map(row => row.id);
-  assert.equal(after.includes(pair[0]), false, "the intended session is gone");
-  assert.ok(after.includes(pair[1]), "the other one is still connected");
+  const remaining = JSON.parse((await rawRequest("GET", "/api/sessions", null, {})).body).sessions.map(row => row.id);
+  assert.equal(remaining.includes(pair[0]), false, "the intended session is gone");
+  assert.ok(remaining.includes(pair[1]), "the other one is still connected");
 });
