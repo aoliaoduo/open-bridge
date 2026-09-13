@@ -333,7 +333,18 @@ export async function apiRouteHandler(
         }
         case "/settings/action": {
           const result = await handleSettingsAction(await readBody(req));
-          const closing = result.ok && result.deferStop;
+          if (result.ok && result.deferRestart && !restartAvailable()) {
+            // Refused before teardown: without a successor this process would
+            // stop and never come back, leaving the operator with a dead console
+            // and no way to start the replacement from the page.
+            json(res, 400, {
+              ...result,
+              ok: false,
+              error: "这个实例无法自我重启（启动时没有可复用的命令行）。请在终端里 open-bridge stop && open-bridge serve。",
+            });
+            return true;
+          }
+          const closing = result.ok && (result.deferStop || result.deferRestart);
           (closing ? jsonAndClose : json)(res, result.ok ? 200 : 400, result);
           // Stop tears down the socket this response is on, so it waits for the
           // reply to be fully flushed. Doing it first is what turned a
@@ -341,6 +352,9 @@ export async function apiRouteHandler(
           // it merely on the next tick still truncated the tail of a large body,
           // which reached the client as a socket error.
           if (result.ok && result.deferStop) afterResponse(res, () => { void stop(); });
+          // Same rule as stop, one step further: the successor needs the port,
+          // so the handover begins only once the reply is flushed.
+          if (result.ok && result.deferRestart) afterResponse(res, () => { void restartBridge(); });
           return true;
         }
         case "/shutdown": {
@@ -412,7 +426,7 @@ export async function apiRouteHandler(
         const build = buildStaleness();
         if (build) {
           check("build", build.stale ? "warn" : "ok", build.stale
-            ? "磁盘上的 dist 比运行中的实例新：重启后生效（open-bridge stop && open-bridge serve）"
+            ? "磁盘上的 dist 比运行中的实例新：重启后生效（控制台「重启」，或 open-bridge stop && open-bridge serve）"
             : "与运行中的实例一致");
         }
         const publicUrl = typeof status.public_url === "string" ? status.public_url : "";
@@ -489,6 +503,26 @@ function firstLine(text: unknown): string {
 }
 
 let shutdownHook: (() => Promise<void>) | undefined;
+let restartHook: (() => Promise<void>) | undefined;
+
+/**
+ * The CLI installs the handover-to-a-successor path. It stays undefined when this
+ * process has no replayable command line (an embedded `node -e`, a script that
+ * imported the server), in which case the restart action is refused BEFORE
+ * anything is torn down — a restart that cannot come back must not close the
+ * console that would have to fix it.
+ */
+export function setRestartHook(hook: (() => Promise<void>) | undefined): void {
+  restartHook = hook;
+}
+
+function restartAvailable(): boolean {
+  return restartHook !== undefined;
+}
+
+async function restartBridge(): Promise<void> {
+  if (restartHook) await restartHook();
+}
 
 /** The CLI installs the real shutdown path (lifecycle stop + process exit). */
 export function setShutdownHook(hook: () => Promise<void>): void {

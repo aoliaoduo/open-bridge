@@ -3,15 +3,17 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { StatusTab } from "./StatusTab";
 import type { BridgeStatus } from "../api";
 
-const { statusMock, shutdownMock, copyTextMock } = vi.hoisted(() => ({
+const { statusMock, shutdownMock, copyTextMock, reloadMock } = vi.hoisted(() => ({
   statusMock: vi.fn(),
   shutdownMock: vi.fn(async () => ({ message: "Shutting down." })),
   copyTextMock: vi.fn(async () => undefined),
+  reloadMock: vi.fn(),
 }));
 
 vi.mock("../api", () => ({
   api: { status: statusMock, shutdown: shutdownMock },
   copyText: copyTextMock,
+  reloadConsole: reloadMock,
 }));
 
 afterEach(() => {
@@ -19,6 +21,7 @@ afterEach(() => {
   statusMock.mockReset();
   shutdownMock.mockClear();
   copyTextMock.mockClear();
+  reloadMock.mockClear();
 });
 
 function bridgeStatus(overrides: Partial<BridgeStatus> = {}): BridgeStatus {
@@ -62,6 +65,22 @@ describe("StatusTab run controls", () => {
 
     await waitFor(() => expect(shutdownMock).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/已请求退出/)).toBeTruthy();
+  });
+
+  test("restarting hands over, waits for the bridge to answer, then reloads the page", async () => {
+    statusMock.mockResolvedValue(bridgeStatus());
+
+    const { act } = renderTab();
+
+    fireEvent.click(await screen.findByRole("button", { name: "重启" }));
+    fireEvent.click(await screen.findByRole("button", { name: "确认？" }));
+
+    await waitFor(() => expect(act).toHaveBeenCalledWith({ command: "restart" }));
+    expect(await screen.findByText(/正在重启/)).toBeTruthy();
+    // The page comes back on its own: the successor answers /api/status (the
+    // mock always does) and the console reloads instead of asking the operator
+    // to press F5 while nothing is listening.
+    await waitFor(() => expect(reloadMock).toHaveBeenCalled(), { timeout: 4_000 });
   });
 
   test("the exit button is unavailable while the instance is not running", async () => {

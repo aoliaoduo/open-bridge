@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type BridgeStatus, type SettingsActionResult } from "../api";
+import { api, reloadConsole, type BridgeStatus, type SettingsActionResult } from "../api";
 import { CardHead } from "./CardHead";
 import { ConfirmButton } from "./ConfirmButton";
 import { Chip } from "./Chip";
@@ -39,6 +39,8 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
   const [busy, setBusy] = useState(false);
   const [health, setHealth] = useState<{ ok: boolean; info: string; lines: string[] } | null>(null);
   const [exiting, setExiting] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [restartFailed, setRestartFailed] = useState(false);
   // Expired-response guard: a poll that started before an action and finished
   // after it used to overwrite the fresher state with stale data.
   const pollSeq = useRef(0);
@@ -75,6 +77,42 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
       setStatus(await api.status());
     } catch { /* the settings action already toasted */ }
     setBusy(false);
+  };
+
+  /**
+   * Restart, then bring this page back by itself.
+   *
+   * The reply to the action is sent before the listener goes down, but the page
+   * still cannot count on receiving it (nor on the first few polls after it):
+   * during the handover nothing answers. So "no answer" is not a failure — the
+   * page waits for the successor to answer /api/status and then reloads itself,
+   * which is also how it picks up the new build's injected console token.
+   */
+  const restart = async () => {
+    setBusy(true);
+    setRestartFailed(false);
+    setRestarting(true);
+    try {
+      await act({ command: "restart" });
+    } catch {
+      /* the listener went down mid-reply; that is the restart working, not failing */
+    }
+    setBusy(false);
+    const deadline = Date.now() + 60_000;
+    const waitForSuccessor = async (): Promise<void> => {
+      try {
+        await api.status();
+        reloadConsole();
+        return;
+      } catch { /* still handing over */ }
+      if (Date.now() > deadline) {
+        setRestarting(false);
+        setRestartFailed(true);
+        return;
+      }
+      window.setTimeout(() => void waitForSuccessor(), 700);
+    };
+    window.setTimeout(() => void waitForSuccessor(), 700);
   };
 
   const shutdown = async () => {
@@ -225,7 +263,9 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
             />
             {status?.build_stale && (
               <div className="section-note note-warn">
-                ⚠️ 磁盘上的构建比本实例新：现在跑的仍是启动时加载的代码，新工具与修复要重启后才生效（点「停止」再「启动」）。
+                ⚠️ 磁盘上的构建比本实例新：现在跑的仍是启动时加载的代码，新工具与修复要重启进程才生效。点「重启」即可 ——
+                它会交给一个新进程接手（本地与公网地址中断几秒），本页会自动重连。用「停止」再「启动」拿不到新构建：
+                停止会一并关掉这个控制台，而且同进程内启停并不会重新加载代码。
               </div>
             )}
             <div className="btn-group">
@@ -250,8 +290,20 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 健康检查
               </button>
-              <ConfirmButton label="退出进程" disabled={busy || !running} onConfirm={() => void shutdown()} />
+              <ConfirmButton label="重启" disabled={busy || restarting || !running} onConfirm={() => void restart()} />
+              <ConfirmButton label="退出进程" disabled={busy || restarting || !running} onConfirm={() => void shutdown()} />
             </div>
+            {restarting && (
+              <div className="section-note note-warn">
+                正在重启：旧实例已停止，新进程正在接手。本页会自动重连（通常几秒），无需手动刷新。
+                重启后实例由后台进程承载 —— 停止请用本页「退出进程」或 <code>open-bridge stop</code>。
+              </div>
+            )}
+            {restartFailed && (
+              <div className="section-note note-warn">
+                重启后本页没能连上：请双击一键启动脚本（或终端 <code>open-bridge serve</code>）重新启动。
+              </div>
+            )}
             {exiting && (
               <div className="section-note note-warn">
                 已请求退出：监听、隧道与 Node 进程都会结束，本页面随后断开。

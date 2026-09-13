@@ -82,6 +82,12 @@ export interface SettingsActionResult {
    * the very socket the response travels over.
    */
   deferStop?: boolean;
+  /**
+   * Perform the restart only after this response has been flushed: the successor
+   * needs the port this listener is holding, so the handover cannot start until
+   * the reply that announces it is on the wire.
+   */
+  deferRestart?: boolean;
   /** The page's injected console token is stale; the console reloads. */
   reloadRequired?: boolean;
 }
@@ -125,7 +131,7 @@ export interface SettingsState {
 
 export type SettingsAction =
   | { command: "ready" }
-  | { command: "copyUrl" | "copyPrompt" | "start" | "stop" | "rotateEndpoint" | "purgeTokens" | "revokeAll" | "copySecret" | "dismissSecret" }
+  | { command: "copyUrl" | "copyPrompt" | "start" | "stop" | "restart" | "rotateEndpoint" | "purgeTokens" | "revokeAll" | "copySecret" | "dismissSecret" }
   | { command: "clearStats" | "healthCheck" }
   | { command: "saveDomain"; domain: string }
   | { command: "setAuthEnabled"; enabled: boolean }
@@ -198,7 +204,7 @@ export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
   const message = raw as Record<string, unknown>;
   const command = typeof message.command === "string" ? message.command : "";
   const allowed: ReadonlySet<string> = new Set([
-    "ready", "copyUrl", "copyPrompt", "start", "stop", "rotateEndpoint", "saveDomain",
+    "ready", "copyUrl", "copyPrompt", "start", "stop", "restart", "rotateEndpoint", "saveDomain",
     "setAuthEnabled", "setDefaultTtl", "createToken", "armPublicLock", "rotateToken",
     "revokeToken", "deleteToken", "purgeTokens", "revokeAll",
     "setConcurrency", "setConfig", "copyText", "copySecret", "dismissSecret",

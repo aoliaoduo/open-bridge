@@ -32,7 +32,8 @@ import { start, stop } from "./bridge/lifecycle.js";
 import { setExtraRouteHandler, setLocalServerReadyHook } from "./bridge/route-hooks.js";
 import { markHostProcess, selfStopRefusal } from "./bridge/stop-guard.js";
 import { armShutdownDeadline } from "./bridge/shutdown-deadline.js";
-import { apiRouteHandler, setShutdownHook } from "./server/api-router.js";
+import { apiRouteHandler, setRestartHook, setShutdownHook } from "./server/api-router.js";
+import { spawnSuccessor, successorPlan, waitForSuccessor, type SuccessorPlan } from "./bridge/restart.js";
 import {
   deleteToken, listTokenViews, mintToken, revokeToken, rotateToken,
 } from "./http/auth.js";
@@ -437,6 +438,57 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   };
   setLocalServerReadyHook(publishRuntime);
 
+  /**
+   * Hand over to a successor process, then exit.
+   *
+   * The order is the contract: `stop()` frees the listener and the tunnel, and
+   * the runtime record and the serve lock are removed BEFORE the successor
+   * starts — both files are how the CLI decides "an instance is already running",
+   * and a leftover record naming a live pid would make the successor refuse to
+   * boot (and, worse, would make it look like this process was still there). If
+   * the successor never publishes its own record, this process comes back up
+   * in-process rather than leaving the operator with nothing.
+   */
+  async function restartInstance(plan: SuccessorPlan): Promise<void> {
+    const cancelDeadline = armShutdownDeadline(() => {
+      console.error("[open-bridge] restart did not finish in time; exiting now.");
+      process.exit(0);
+    });
+    try { await stop(); } catch { /* best-effort, exactly like shutdown */ }
+    await fsp.rm(runtimePath(nodeHost.storageDir(), projectRoot), { force: true }).catch(() => undefined);
+    await fsp.rm(serveLock, { force: true }).catch(() => undefined);
+    const legacy = readOneRuntime(legacyRuntimePath(nodeHost.storageDir()));
+    if (legacy && legacy.pid === process.pid) {
+      await fsp.rm(legacyRuntimePath(nodeHost.storageDir()), { force: true }).catch(() => undefined);
+    }
+    try {
+      const pid = await spawnSuccessor(plan);
+      console.log(`[open-bridge] restart: successor started (pid ${pid})`);
+      if (await waitForSuccessor(runtimePath(nodeHost.storageDir(), projectRoot), pid)) {
+        cancelDeadline();
+        process.exit(0);
+      }
+      console.error("[open-bridge] restart: the successor did not publish a runtime record in time.");
+    } catch (error) {
+      console.error(`[open-bridge] restart: could not start a successor (${error instanceof Error ? error.message : String(error)}).`);
+    }
+    // Fallback: back up in-process (still the old build) instead of a dead port.
+    console.error("[open-bridge] restart: coming back up in-process — the console keeps working, the build is unchanged.");
+    claimServeLock();
+    try { await start(); } catch (error) { console.error(`[open-bridge] restart: could not come back up (${error instanceof Error ? error.message : String(error)}).`); }
+    publishRuntime();
+    cancelDeadline();
+  }
+
+  // Registered only when this process's own command line can be replayed; the
+  // router refuses the action otherwise instead of stopping for good.
+  try {
+    const plan = successorPlan(process.argv, process.execPath, projectRoot);
+    setRestartHook(() => restartInstance(plan));
+  } catch (error) {
+    console.error(`[open-bridge] 控制台「重启」不可用：${error instanceof Error ? error.message : String(error)}`);
+  }
+
   await start();
   // Safety net for the paths where the hook does not fire, e.g. start()
   // short-circuiting because the Bridge was already running.
@@ -759,7 +811,7 @@ async function cmdHealth(parsed: ParsedArgs): Promise<void> {
   // Only a compiled instance can answer this; under `npm run dev` the field is
   // absent and the line is skipped rather than guessed.
   if (status.build_stale === true) {
-    check("build", false, "磁盘上的 dist 比运行中的实例新：重启后生效（open-bridge stop && open-bridge serve）");
+    check("build", false, "磁盘上的 dist 比运行中的实例新：重启后生效（控制台「重启」，或 open-bridge stop && open-bridge serve）");
   } else if (status.build_stale === false) {
     check("build", true, "与运行中的实例一致");
   }
