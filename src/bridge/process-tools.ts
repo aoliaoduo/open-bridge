@@ -177,15 +177,23 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
   // setTimeout fire at ~0 ms, instantly "timing out" a running command.
   const rawTimeout = Number(args.timeout_ms ?? 120000);
   const timeout = Number.isFinite(rawTimeout) && rawTimeout >= 0 ? rawTimeout : 120000;
-  let timedOut = false;
-  await new Promise<void>(resolve => {
-    const onClose = (): void => {
-      commandState.child.off("close", onClose);
+  // The timeout result flows out through the promise instead of a captured
+  // mutable flag. With `let timedOut = false` assigned inside the timer
+  // callback, TypeScript narrows the variable to the literal `false` at the
+  // `if` below — it does not track assignments made by nested functions — and
+  // so reports the whole "your command is still running" branch as dead code,
+  // which invites a future reader to delete it. It is not dead: it is the
+  // answer every agent gets when it starts a dev server in the foreground.
+  // Pinned by test/process-timeout-integration.test.mjs.
+  const timedOut = await new Promise<boolean>(resolve => {
+    const finish = (timed: boolean): void => {
+      commandState.child.off("close", onExit);
       clearTimeout(raceTimer);
-      resolve();
+      resolve(timed);
     };
-    commandState.child.once("close", onClose);
-    const raceTimer = setTimeout(() => { timedOut = true; onClose(); }, timeout);
+    const onExit = (): void => finish(false);
+    commandState.child.once("close", onExit);
+    const raceTimer = setTimeout(() => finish(true), timeout);
   });
   const snapshot = commandState.output.tail(MAX_INLINE_OUTPUT);
   if (timedOut && !commandState.done) {

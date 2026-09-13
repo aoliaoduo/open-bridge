@@ -898,9 +898,13 @@ async function cmdDoctor(parsed: ParsedArgs): Promise<void> {
   }
   const rg = nodeHost.bundledRipgrep();
   check("ripgrep", rg !== undefined, rg ?? "未内置，将回退到 PATH 中的 rg");
-  const ngrokExe = nodeHost.config.get("ngrokExecutable", "ngrok");
-  check("tunnel provider", true, `${nodeHost.config.get("tunnelProvider", "ngrok")} (${ngrokExe})`);
-  const domain = nodeHost.config.get("ngrokDomain", "");
+  // `<string>` on each read, like every other ngrokDomain/tunnelProvider read
+  // site: without the explicit type argument T infers from the literal
+  // fallback, so `domain` types as "" and `domain || "未配置…"` reads as a
+  // branch that can never be taken.
+  const ngrokExe = nodeHost.config.get<string>("ngrokExecutable", "ngrok");
+  check("tunnel provider", true, `${nodeHost.config.get<string>("tunnelProvider", "ngrok")} (${ngrokExe})`);
+  const domain = nodeHost.config.get<string>("ngrokDomain", "");
   check("ngrok domain", true, domain || "未配置（serve 时隧道需要，可先 --no-tunnel 本地用）");
   check("config file", true, nodeHost.configPath());
   const live = readAllRuntimes(home);

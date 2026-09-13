@@ -57,9 +57,13 @@ let sessionId;
 before(async () => {
   workspace = mkdtempSync(path.join(tmpdir(), "ob-reqargs-ws-"));
   home = mkdtempSync(path.join(tmpdir(), "ob-reqargs-home-"));
+  // The stdin listener is registered BEFORE the ready line, so a caller that
+  // sees READY knows the listener is attached — nothing left to guess at.
+  // `console.log` rather than `stdout.write("READY\n")`: this string is a JS
+  // literal inside a JS literal, and one level of escaping is easy to get wrong.
   writeFileSync(
     path.join(workspace, "echo-stdin.mjs"),
-    'process.stdin.on("data", d => process.stdout.write("GOT:" + d));\n',
+    'process.stdin.on("data", d => process.stdout.write("GOT:" + d));\nconsole.log("READY");\n',
     "utf8",
   );
   child = spawn(process.execPath, [
@@ -83,13 +87,22 @@ after(async () => {
   rmSync(home, { recursive: true, force: true });
 });
 
-/** Start the stdin echo and return its command id. */
+/** Start the stdin echo and return its command id, once it is really ready. */
 async function startEcho() {
-  const started = asObject(await callTool("start_process", { command: "node echo-stdin.mjs" }));
+  // ready_pattern instead of a fixed sleep. `node --test` runs the integration
+  // files in parallel and each one boots its own instance, so under load the
+  // 900 ms guess at "node has cold-started and attached its stdin listener"
+  // intermittently lost the race and the first test in this file failed. READY
+  // is printed only after that listener is registered, so waiting for it waits
+  // for exactly what these tests depend on — and no longer.
+  const started = asObject(await callTool("start_process", {
+    command: "node echo-stdin.mjs",
+    ready_pattern: "READY",
+    ready_timeout_ms: 30_000,
+  }));
   assert.ok(started.command_id, `start_process returned a command id: ${JSON.stringify(started).slice(0, 200)}`);
-  // The process needs a moment to attach its stdin listener; interact waits
-  // wait_ms after the write, so the echo is readable by then.
-  await delay(900);
+  assert.notEqual(started.ready, false,
+    `the echo process came up ready: status=${started.status} out=${String(started.output).slice(0, 300)} err=${String(started.stderr).slice(0, 300)}`);
   return started.command_id;
 }
 
