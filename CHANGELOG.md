@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [1.0.0-alpha.6] — 2026-09-14
 ### Added
 - **新增 `AGENTS.md`：把「踩过才知道」的那部分写下来。** `README.md` 是用户视角、`docs/tools.md` 是工具行为全集，都没有承载贡献者约定的地方，于是同一些坑被反复踩（「集成测试跑的是 `dist/` 不是 `src/`」这一条本轮就撞了两次）。里面记的是四件事：改完源码之后该跑什么、参数守卫的既有约定（只拒绝「没有」和「无法兑现」，绝不收紧能力；不要用 `Math.max(0, Number(x))` 兜底）、**哪些「类型说不可能」的守卫不能删**（`JSON.stringify` 会返回 `undefined`、可选捕获组与数组越界在运行时是 `undefined`、只在闭包里赋值的 `let` 会被 TS 收窄成字面量）、以及 `Host` 接口的边界 —— **保留它，但不再新增 host 形状的间接层**：一层间接如果只有一个实现、且没有第二个实现的现实计划，它就不是抽象，是绕路。
 
