@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type HealthCheck, type HealthReport, type SettingsActionResult } from "../api";
+import { api, type HealthCheck, type HealthReport } from "../api";
+import type { RouteId } from "../routes";
 import { CardHead } from "./CardHead";
 import { Chip } from "./Chip";
-import { ConfirmButton } from "./ConfirmButton";
-import { Props as PropList } from "./Props";
 import { Skeleton } from "./Skeleton";
 import { Stat } from "./Stat";
 
@@ -19,15 +18,6 @@ const LABELS: Record<string, string> = {
   exposure: "暴露面",
 };
 
-const EXPOSURE_TEXT: Record<string, { text: string; tone: "ok" | "warn" }> = {
-  local: { text: "仅本机：/api 与 /console 只认回环地址，即使隧道开着也不会把它们暴露出去。", tone: "ok" },
-  "public-open": {
-    text: "公网可达且未开启鉴权：拿到这个 URL 的人都能读写文件、执行命令。"
-      + "要收紧就点下面的「开启第二道锁」（签发令牌 + 打开 Bearer，一步完成），或先轮换端点。",
-    tone: "warn",
-  },
-  "public-authed": { text: "公网可达，但每个请求都要带 Bearer 令牌。", tone: "ok" },
-};
 
 /** Older servers sent only `ok`; treat a missing level as ok/fail. */
 function levelOf(check: HealthCheck): "ok" | "warn" | "fail" {
@@ -43,12 +33,11 @@ function levelOf(check: HealthCheck): "ok" | "warn" | "fail" {
  * the tunnel — the only way to know a client could connect.
  */
 export function HealthPage(
-  { act }: { act: (action: Record<string, unknown>) => Promise<SettingsActionResult | null> },
+  { onOpen }: { onOpen?: (id: RouteId) => void },
 ) {
   const [report, setReport] = useState<HealthReport | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-  const [arming, setArming] = useState(false);
 
   const run = useCallback(async () => {
     setBusy(true);
@@ -67,14 +56,6 @@ export function HealthPage(
   // switch on 设置). The secret comes back once and the shell shows it in the
   // mask, so this page only has to re-run the checks afterwards: the 暴露面 row
   // should flip to public-authed without the operator reloading anything.
-  const arm = async () => {
-    setArming(true);
-    const result = await act({ command: "armPublicLock" });
-    if (result?.ok) await run();
-    setArming(false);
-  };
-
-  const exposure = EXPOSURE_TEXT[report?.exposure ?? ""];
   const total = (report?.checks ?? []).length;
   const passed = (report?.checks ?? []).filter(check => levelOf(check) === "ok").length;
   const failed = (report?.checks ?? []).filter(check => levelOf(check) === "fail").length;
@@ -155,41 +136,9 @@ export function HealthPage(
         )}
       </div>
 
-      <div className="card">
-        <CardHead title="暴露面" desc="这个实例现在能被谁访问，以及要不要加第二道锁。" />
-        {exposure ? (
-          <>
-            <PropList
-              items={[
-                { label: "当前状态", value: <Chip tone={exposure.tone === "warn" ? "warn" : "ok"}>{report?.exposure}</Chip> },
-                { label: "含义", value: exposure.text },
-              ]}
-            />
-            {report?.exposure === "public-open" && (
-              <div className="card-foot">
-                <ConfirmButton
-                  className="primary"
-                  disabled={arming}
-                  label={arming ? "开启中…" : "开启第二道锁"}
-                  onConfirm={() => void arm()}
-                />
-                <span className="section-note" style={{ margin: 0 }}>
-                  明文令牌只显示这一次；开启后只填 URL 的客户端会立刻连不上，随时可在「令牌」页关掉。
-                </span>
-              </div>
-            )}
-            {report?.exposure === "public-authed" && (
-              <div className="card-foot">
-                <span className="section-note" style={{ margin: 0 }}>
-                  第二道锁在开着：客户端必须带 Bearer 令牌。要恢复「只填 URL」的用法，去「令牌」页关掉那个开关。
-                </span>
-              </div>
-            )}
-          </>
-        ) : (
-          <Skeleton lines={2} />
-        )}
-      </div>
+      <div className="card section-note">暴露面详情与加固去「安全」页。{onOpen ? (
+        <button type="button" className="small" onClick={() => onOpen("security")}>去安全页</button>
+      ) : null}</div>
 
       {note && <div className="card section-note">{note}</div>}
     </>

@@ -137,7 +137,7 @@
 
 ### 桥自身状态
 
-**bridge_status** — 一次一个 section：`overview`（健康与计数：`state` / `tool_count` / `build_stale` 等）· `auth`（Bearer 门禁状态、默认有效期、每个令牌的 id/标签/到期/最后使用；**密钥只在创建那一刻显示一次、从不落库**，签发与吊销在控制台「令牌」页完成）· `locks`（并发准入表：谁持有什么、等了多久、谁在排队）· `sessions`（当前活着的 MCP 会话）。
+**bridge_status** — 一次一个 section：`overview`（健康与计数：`state` / `tool_count` / `build_stale` 等）· `auth`（Bearer 门禁状态、默认有效期、每个令牌的 id/标签/到期/最后使用；**密钥只在创建那一刻显示一次、从不落库**，签发与吊销在控制台「安全」页完成）· `locks`（并发准入表：谁持有什么、等了多久、谁在排队）· `sessions`（当前活着的 MCP 会话）。
 
 **get_config** / **set_config_value** — 读/改运行配置（改完是否需要重启看具体键）。
 

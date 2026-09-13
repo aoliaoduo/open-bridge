@@ -257,8 +257,8 @@ export async function runHealthCheck(): Promise<HealthReport> {
     : undefined;
   const gateOk = gateStatus === undefined || gateStatus === 401;
   details.push(gateStatus === undefined
-    ? "Bearer 鉴权 未启用"
-    : (gateOk ? "Bearer 鉴权 已生效（匿名请求 401）" : `Bearer 鉴权 异常（匿名请求返回 ${gateStatus}，预期 401）`));
+    ? "Bearer 门禁 未启用"
+    : (gateOk ? "Bearer 门禁 已生效（匿名请求 401）" : `Bearer 门禁 异常（匿名请求返回 ${gateStatus}，预期 401）`));
   const ok = local.ok && publicCheck?.ok !== false && gateOk;
   const summary = `健康检查：本地 ${local.ok ? "正常" : "失败"}`
     + (publicCheck ? ` · 公网 ${publicCheck.ok ? "正常" : "失败"}` : " · 公网未开启")

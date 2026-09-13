@@ -14,7 +14,7 @@ const CAVEAT =
   "⚠️ 当前未开启隧道：下面的地址只有本机能访问，外部 AI 客户端（网页版等）连不上。"
   + "要发给外部客户端，请先在控制台「设置」页填写 ngrokDomain 并开启隧道，然后重新复制本提示词。";
 const AUTH_NOTE =
-  "\n\n注意：本 Bridge 已启用 Bearer 鉴权。除上面的 URL 外，请求还需带上请求头 "
+  "\n\n注意：本 Bridge 已启用 Bearer 门禁。除上面的 URL 外，请求还需带上请求头 "
   + "`Authorization: Bearer <token>`（令牌在 Open Bridge Web 控制台签发，"
   + "只在签发时显示一次）。若你的客户端只能填 URL、不能设置请求头，可改用 `?token=<token>` 形式。";
 

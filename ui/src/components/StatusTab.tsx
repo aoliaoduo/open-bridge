@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type BridgeStatus, type SettingsActionResult } from "../api";
+import type { LockSnapshot } from "../api";
+import type { RouteId } from "../routes";
 import { CardHead } from "./CardHead";
+import { EmptyState } from "./EmptyState";
+import { idleLabel } from "./SessionsPage";
 import { Chip } from "./Chip";
 import { CopyButton } from "./CopyButton";
 import { Props as PropList } from "./Props";
@@ -11,6 +15,7 @@ interface Props {
   onRefresh: () => Promise<void>;
   /** Shell toast: the copy buttons confirm themselves through it. */
   notify?: (text: string, isError?: boolean) => void;
+  onOpen?: (id: RouteId) => void;
 }
 
 /** Server states are code words; the panel speaks Chinese. */
@@ -33,7 +38,7 @@ function TunnelRole({ role }: { role?: string }) {
   return <span className="muted">未开启隧道</span>;
 }
 
-export function StatusTab({ act, onRefresh, notify }: Props) {
+export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
   const [status, setStatus] = useState<BridgeStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [health, setHealth] = useState<{ ok: boolean; info: string; lines: string[] } | null>(null);
@@ -84,6 +89,29 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
     setBusy(false);
   };
 
+  const [locks, setLocks] = useState<LockSnapshot>({ held: [], waiting: [] });
+
+  useEffect(() => {
+    let alive = true;
+    const pollLocks = async () => {
+      try {
+        const snapshot = await api.sessions();
+        if (alive) setLocks(snapshot.locks);
+      } catch {
+        /* The locks table keeps its last snapshot; the status poll beside
+           it reports reachability already. */
+      }
+    };
+    void pollLocks();
+    const timer = setInterval(() => void pollLocks(), 5_000);
+    return () => { alive = false; clearInterval(timer); };
+  }, []);
+
+  const lockRows = [
+    ...locks.held.map(lock => ({ kind: "持有" as const, key: lock.key, mode: lock.mode ?? "", label: lock.label ?? "", ms: lock.held_ms ?? 0 })),
+    ...locks.waiting.map(lock => ({ kind: "等待" as const, key: (lock.keys ?? []).join(" , "), mode: lock.mode ?? "", label: lock.label ?? "", ms: lock.waited_ms ?? 0 })),
+  ];
+
   return (
     <>
       {/* The four numbers an operator checks first. 实时状态 below used to carry
@@ -119,7 +147,7 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
           <div className="card">
             <CardHead
               title="MCP 端点"
-              desc="把这个 URL 填进 MCP 客户端（ChatGPT 连接器、Claude、Cursor 等）。它本身就是凭证，请当作密钥保管。"
+              desc="把这个 URL 填进 MCP 客户端（ChatGPT 连接器、Claude、Cursor 等）。它是地址。公网状态下请配合安全页的门禁使用。"
               actions={
                 <button
                   type="button"
@@ -172,9 +200,10 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
               </div>
               {status?.exposure === "public-open" && (
                 <div className="section-note note-warn" style={{ marginBottom: 0 }}>
-                  ⚠️ 公网可达且未开启鉴权：任何拿到这个 URL 的人都能读写本机文件、执行命令、启停服务。
-                  要收紧可在「令牌」页签发令牌开启 Bearer 鉴权（客户端需带 Authorization 头），
-                  或点「轮换端点」立即作废已经流出去的旧链接。
+                  ⚠️ 公网可达且未开启鉴权：详情与加固去「安全」页。
+                  {onOpen ? (
+                    <button type="button" className="small" onClick={() => onOpen("security")}>去安全页</button>
+                  ) : null}
                 </div>
               )}
             </div>
@@ -193,21 +222,9 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
             )}
             <div className="section-note">
               因此本页没有「启动 / 停止 / 重启」按钮：停止会一并关掉这个页面，按钮既点不到也不可靠。
-              下面两个操作只作用于当前进程内的配置与探测，不影响进程本身。
+              下面的健康检查只做探测，不影响进程本身。
             </div>
             <div className="btn-group">
-              <button
-                type="button"
-                className="small icon-text"
-                disabled={busy || !running}
-                onClick={() => void run(() => act({ command: "rotateEndpoint" }))}
-              >
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M19 5v5h-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M18.4 10a7 7 0 1 0 .2 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                </svg>
-                轮换端点
-              </button>
               <button
                 type="button"
                 className="small icon-text"
@@ -228,6 +245,54 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
               </div>
             )}
           </div>
+
+          <div className="card">
+            <CardHead
+              title="文件锁明细"
+              desc={
+                <>
+                  并发写同一个目录时，第二个调用者会等锁而不是覆盖对方。<span className="mono">持有</span> 是正在写文件的调用，
+                  <span className="mono">等待</span> 是被挡住的调用；两者都会随时间自己消失。
+                </>
+              }
+            />
+            {lockRows.length === 0 ? (
+              <EmptyState title="当前没有加锁，也没有等待者。">
+                多客户端同时写同一个目录时，这里会出现资源路径、调用名与已经等了多少。
+              </EmptyState>
+            ) : (
+              <div className="table-wrap">
+                <table className="token-table">
+                  <thead>
+                    <tr>
+                      <th>状态</th>
+                      <th>资源</th>
+                      <th>模式</th>
+                      <th>调用</th>
+                      <th className="num">已持续</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* Key includes the index: two waiters can legally queue on the
+                        same resource (that is the whole point of the table), and a
+                        kind+key key collided between them. */}
+                    {lockRows.map((row, index) => (
+                      <tr key={`${row.kind}-${row.key}-${index}`}>
+                        <td>{row.kind === "持有" ? <Chip tone="ok">持有</Chip> : <Chip tone="warn">等待</Chip>}</td>
+                        <td className="mono" title={row.key || undefined}>{row.key || "—"}</td>
+                        <td>{row.mode || "—"}</td>
+                        <td className="muted">{row.label || "—"}</td>
+                        <td className="num">{idleLabel(row.ms)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="card-foot">
+              <span className="section-note" style={{ margin: 0 }}>每 5 秒自动刷新。</span>
+            </div>
+          </div>
         </div>
 
         <div className="card">
@@ -236,7 +301,7 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
             items={[
               { label: "状态", value: STATE_LABEL[status?.state ?? ""] ?? status?.state ?? "…" },
               { label: "Shell", value: status?.shell ?? "…", mono: true },
-              { label: "鉴权", value: status?.auth_enabled ? "已启用（Bearer）" : "关闭（仅凭 URL）" },
+              { label: "鉴权", value: status?.auth_enabled ? "已启用（Bearer）" : "关闭（只填 URL 即可接入）" },
               { label: "工具配置档", value: status?.tool_profile ?? "…", mono: true },
               { label: "工作区数", value: status?.allowed_directories?.length ?? 0 },
             ]}

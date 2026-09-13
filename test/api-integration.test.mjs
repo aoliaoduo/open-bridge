@@ -205,7 +205,7 @@ test("closing an unknown session reports 404 instead of silently succeeding", as
 });
 
 test("one step arms the second lock: mint, enable, and /mcp really refuses", async () => {
-  // 「一键开启第二道锁」exists because the guarded two-step flow (mint on 令牌,
+  // 「签发令牌并启用门禁」exists because the guarded two-step flow (mint on 安全,
   // then flip the switch) is easy to get wrong. The only proof that matters is
   // an anonymous request actually being refused once it is armed.
   const consolePost = (body) => fetch(`${base()}/api/settings/action`, {
@@ -490,7 +490,7 @@ test("the counters can be cleared and the instance can be health-checked", async
   const lines = healthBody.healthLines.join(" | ");
   assert.match(lines, /本地端点 正常/);
   assert.match(lines, /公网隧道 未开启/);
-  assert.match(lines, /Bearer 鉴权 未启用/);
+  assert.match(lines, /Bearer 门禁 未启用/);
 });
 
 test("shutdown endpoint stops the process", async () => {

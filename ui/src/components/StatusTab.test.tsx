@@ -1,15 +1,16 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StatusTab } from "./StatusTab";
-import type { BridgeStatus } from "../api";
+import type { BridgeStatus, LockSnapshot } from "../api";
 
-const { statusMock, copyTextMock } = vi.hoisted(() => ({
+const { statusMock, sessionsMock, copyTextMock } = vi.hoisted(() => ({
   statusMock: vi.fn(),
+  sessionsMock: vi.fn(),
   copyTextMock: vi.fn(async () => undefined),
 }));
 
 vi.mock("../api", () => ({
-  api: { status: statusMock },
+  api: { status: statusMock, sessions: sessionsMock },
   copyText: copyTextMock,
 }));
 
@@ -36,9 +37,10 @@ function bridgeStatus(overrides: Partial<BridgeStatus> = {}): BridgeStatus {
   };
 }
 
-function renderTab() {
+function renderTab(locks: LockSnapshot = { held: [], waiting: [] }) {
   const act = vi.fn(async () => null);
   const notify = vi.fn();
+  sessionsMock.mockResolvedValue({ sessions: [], locks });
   render(<StatusTab act={act} onRefresh={async () => undefined} notify={notify} />);
   return { act, notify };
 }
@@ -210,5 +212,36 @@ describe("StatusTab KPIs and state labels", () => {
     renderTab();
 
     expect(await screen.findByText("公网可达 · 无鉴权")).toBeTruthy();
+  });
+});
+
+describe("StatusTab lock detail", () => {
+  test("lists the locks live sessions are holding", async () => {
+    // The 文件锁明细 table moved here from 会话: the KPI says how many,
+    // the table says which.
+    statusMock.mockResolvedValue(bridgeStatus());
+    renderTab({
+      held: [{ key: "C:\\work", mode: "write", label: "write_file", held_ms: 1500 }],
+      waiting: [{ keys: ["C:\\work"], mode: "write", label: "edit_file", waited_ms: 900 }],
+    });
+
+    expect(await screen.findByText("文件锁明细")).toBeTruthy();
+    expect(screen.getByText("write_file")).toBeTruthy();
+    expect(screen.getByText("edit_file")).toBeTruthy();
+  });
+
+  test("the public warning jumps to the 安全 page", async () => {
+    statusMock.mockResolvedValue(bridgeStatus({
+      mcp_url: "https://example.ngrok-free.dev/mcp/live",
+      public_url: "https://example.ngrok-free.dev/mcp/live",
+      exposure: "public-open",
+    }));
+
+    const onOpen = vi.fn();
+    const act = vi.fn(async () => null);
+    render(<StatusTab act={act} onRefresh={async () => undefined} notify={vi.fn()} onOpen={onOpen} />);
+    fireEvent.click(await screen.findByRole("button", { name: "去安全页" }));
+
+    expect(onOpen).toHaveBeenCalledWith("security");
   });
 });

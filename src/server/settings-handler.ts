@@ -247,7 +247,7 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       return done({
         info: action.enabled
           ? "鉴权已启用：客户端现在必须携带令牌。"
-          : "鉴权已关闭：端点回到仅凭 URL 访问。",
+          : "Bearer 门禁已关闭：只填 URL 即可访问。",
       });
     }
 
@@ -262,7 +262,7 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
     }
 
     case "armPublicLock": {
-      // 「一键开启第二道锁」: the operator sees the risk (public-open, no bearer
+      // 「签发令牌并启用门禁」: the operator sees the risk (public-open, no bearer
       // gate) on 体检 and wants it closed without a trip to 令牌 to mint, copy,
       // and then flip a switch on the same page.
       //
@@ -271,7 +271,7 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       // if enabling fails, delete the token minted for it — a stray secret with
       // no lock behind it is worse than nothing.
       if (authEnabled()) {
-        return done({ info: "第二道锁本来就已经开着：/mcp 要求 Bearer 令牌。" });
+        return done({ info: "Bearer 门禁本来就已经开着：/mcp 要求 Bearer 令牌。" });
       }
       const existing = await usableTokenCount();
       let secret: SecretPayload | undefined;
@@ -296,9 +296,9 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
         secret,
         copyText: secret?.secret,
         info: secret
-          ? "第二道锁已开启：已签发 1 个令牌并启用 Bearer 鉴权，客户端必须在请求头带 Authorization: Bearer <令牌>。"
-            + "只填 URL 的客户端（例如 ChatGPT 连接器）会立刻连不上；要恢复就在「令牌」页关掉那个开关。"
-          : `第二道锁已开启：复用了现有的 ${existing} 个有效令牌，客户端现在必须携带令牌（只填 URL 会连不上）。`,
+          ? "Bearer 门禁已启用：已签发 1 个令牌并打开门禁，客户端必须在请求头带 Authorization: Bearer <令牌>。"
+            + "只填 URL 的客户端（例如 ChatGPT 连接器）会立刻连不上；要恢复就在「安全」页关掉那个开关。"
+          : `Bearer 门禁已启用：复用了现有的 ${existing} 个有效令牌，客户端现在必须携带令牌（只填 URL 会连不上）。`,
       });
     }
 

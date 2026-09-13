@@ -7,7 +7,7 @@ import { Topbar } from "./components/Topbar";
 import { PageHeader } from "./components/PageHeader";
 import { StatusTab } from "./components/StatusTab";
 import { SettingsTab } from "./components/SettingsTab";
-import { TokensTab } from "./components/TokensTab";
+import { SecurityPage } from "./components/SecurityPage";
 import { LogsTab } from "./components/LogsTab";
 import { StatsTab } from "./components/StatsTab";
 import { ServicesTab } from "./components/ServicesTab";
@@ -188,15 +188,15 @@ export function App() {
         <main className="content">
           <PageHeader title={spec.label} hint={spec.hint} />
           <div className="page" key={`${route}-${reloadKey}`}>
-            {route === "status" && <StatusTab act={act} onRefresh={refreshSettings} notify={showToast} />}
+            {route === "status" && <StatusTab act={act} onRefresh={refreshSettings} notify={showToast} onOpen={open} />}
             {route === "sessions" && <SessionsPage notify={showToast} />}
             {route === "tools" && <ToolsPage notify={showToast} />}
-            {route === "health" && <HealthPage act={act} />}
+            {route === "health" && <HealthPage onOpen={open} />}
             {route === "services" && <ServicesTab notify={showToast} />}
             {route === "logs" && <LogsTab />}
             {route === "stats" && <StatsTab />}
-            {route === "tokens" && (
-              <SettingsStateGuard settings={settings}><TokensTab settings={settings!} act={act} notify={showToast} /></SettingsStateGuard>
+            {route === "security" && (
+              <SettingsStateGuard settings={settings}><SecurityPage settings={settings!} act={act} notify={showToast} /></SettingsStateGuard>
             )}
             {route === "settings" && <SettingsTab settings={settings} act={act} notify={showToast} />}
           </div>

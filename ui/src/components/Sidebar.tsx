@@ -17,8 +17,8 @@ interface Props {
  * Nine flat tabs across the top were the previous navigation. They survived the
  * move to real paths but they could not survive a tenth page, and a flat strip
  * says nothing about the shape of the console: 状态/会话/工具/体检 answer "what is
- * happening", 服务/日志/统计/令牌 are what you do about it, and 设置 is the only
- * group that writes config. The grouped sidebar is the reference layout for
+ * happening", 服务/日志/统计 are what you do about it, and 安全/设置 are the
+ * config pages that write config. The grouped sidebar is the reference layout for
  * exactly this reason (and it frees the top bar for breadcrumbs and actions).
  *
  * Collapsing keeps the labels in the DOM and hides them visually (`sr-only`-like

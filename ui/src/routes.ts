@@ -21,7 +21,7 @@ export type RouteId =
   | "services"
   | "logs"
   | "stats"
-  | "tokens"
+  | "security"
   | "settings";
 
 export type RouteGroupId = "instance" | "ops" | "config";
@@ -67,7 +67,7 @@ export const ROUTES: RouteSpec[] = [
   {
     id: "sessions",
     label: "会话",
-    hint: "谁连着这个实例，以及正在被占用的文件锁",
+    hint: "谁连着这个实例",
     group: "instance",
     icon: ["M8.5 11a3 3 0 100-6 3 3 0 000 6z", "M3 19.5a5.5 5.5 0 0111 0", "M16 5.6a3 3 0 010 5.8", "M17.2 14.4a5.5 5.5 0 014.3 5.1"],
   },
@@ -107,10 +107,10 @@ export const ROUTES: RouteSpec[] = [
     icon: ["M5 20V10.5", "M12 20V4", "M19 20v-6.5"],
   },
   {
-    id: "tokens",
-    label: "令牌",
-    hint: "鉴权令牌的创建、轮换与吊销",
-    group: "ops",
+    id: "security",
+    label: "安全",
+    hint: "暴露面、Bearer 门禁、令牌与 OAuth",
+    group: "config",
     icon: ["M6.5 11h11v9.5h-11z", "M9.5 11V8a2.5 2.5 0 015 0v3", "M12 15v2"],
   },
   {
@@ -150,6 +150,9 @@ export function currentRoute(pathname?: string): RouteId {
   const trimmed = (pathname ?? window.location?.pathname ?? "").replace(/\/+$/, "");
   if (trimmed !== CONSOLE_BASE && !trimmed.startsWith(`${CONSOLE_BASE}/`)) return "status";
   const tail = trimmed.slice(CONSOLE_BASE.length).replace(/^\/+/, "");
+  // The 令牌 page moved to 安全: old bookmarks land on the new page
+  // instead of falling through to 状态.
+  if (tail === "tokens") return "security";
   return ROUTES.some(route => route.id === tail) ? (tail as RouteId) : "status";
 }
 

@@ -217,7 +217,7 @@ describe("App shell", () => {
   test("renders every page link and opens on 状态", async () => {
     render(<App />);
 
-    for (const label of ["状态", "会话", "工具", "体检", "服务", "日志", "统计", "令牌", "设置"]) {
+    for (const label of ["状态", "会话", "工具", "体检", "服务", "日志", "统计", "安全", "设置"]) {
       expect(tabLink(label)).toBeTruthy();
     }
     // Links carry the page path, so a page can be bookmarked or opened elsewhere.
@@ -264,11 +264,11 @@ describe("App shell", () => {
   });
 
   test("lists the locks that live sessions are holding", async () => {
-    window.history.pushState({}, "", "/console/sessions");
+    window.history.pushState({}, "", "/console/status");
 
     render(<App />);
 
-    expect(await screen.findByText("文件锁")).toBeTruthy();
+    expect(await screen.findByText("文件锁明细")).toBeTruthy();
     expect(await screen.findByText("write_file")).toBeTruthy();
     expect(await screen.findByText("edit_file")).toBeTruthy();
   });
@@ -316,24 +316,28 @@ describe("App shell", () => {
     expect(screen.getByText("提醒")).toBeTruthy();
     expect(mocks.health).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("公网连通")).toBeTruthy();
+
+    // The exposure card moved to 安全; 体检 keeps only a pointer to it.
+    fireEvent.click(await screen.findByRole("button", { name: "去安全页" }));
+    expect(window.location.pathname).toBe("/console/security");
   });
 
-  test("arms the second lock from 体检 in one step", async () => {
-    // The lock is the one action on this page that changes who can reach the
-    // endpoint, so it is a two-step confirm and it must hand back the only copy
-    // of the new token — into the mask, not just the toast.
-    window.history.pushState({}, "", "/console/health");
+  test("arms the gate from 安全 in one step", async () => {
+    // The gate is the one action on the 安全 page that changes who can reach
+    // the endpoint, so it is a two-step confirm and it must hand back the only
+    // copy of the new token — into the mask, not just the toast.
+    window.history.pushState({}, "", "/console/security");
     mocks.settingsAction.mockResolvedValue({
       ok: true,
       state: settingsState({ authEnabled: true, usableCount: 1 }),
       secret: { kind: "minted", id: "t9", label: "public-lock", secret: "ob_lock_value", ttl: "1 小时" },
-      info: "第二道锁已开启",
+      info: "Bearer 门禁已启用：已签发 1 个令牌并打开门禁，客户端必须在请求头带 Authorization: Bearer <令牌>。",
     } satisfies SettingsActionResult);
 
     render(<App />);
-    await screen.findByText("体检结果");
+    await screen.findByText("个人令牌");
 
-    fireEvent.click(screen.getByRole("button", { name: "开启第二道锁" }));
+    fireEvent.click(screen.getByRole("button", { name: "签发令牌并启用门禁" }));
     fireEvent.click(await screen.findByRole("button", { name: "确认？" }));
 
     expect(mocks.settingsAction).toHaveBeenCalledWith({ command: "armPublicLock" });
@@ -392,7 +396,9 @@ describe("App shell", () => {
     render(<App />);
     await screen.findByText("MCP 端点");
 
-    fireEvent.click(screen.getByRole("button", { name: "轮换端点" }));
+    fireEvent.click(tabLink("安全"));
+
+    fireEvent.click(await screen.findByRole("button", { name: "轮换端点" }));
 
     expect(await screen.findByText(/控制台正在重新加载/)).toBeTruthy();
     await new Promise(resolve => setTimeout(resolve, 1400));
@@ -410,7 +416,7 @@ describe("App shell", () => {
 
     render(<App />);
     await screen.findByText("MCP 端点");
-    fireEvent.click(tabLink("令牌"));
+    fireEvent.click(tabLink("安全"));
     fireEvent.click(await screen.findByRole("button", { name: "新建令牌" }));
 
     fireEvent.click(await screen.findByRole("button", { name: "创建" }));
@@ -435,7 +441,7 @@ describe("App shell", () => {
 
     render(<App />);
     await screen.findByText("MCP 端点");
-    fireEvent.click(tabLink("令牌"));
+    fireEvent.click(tabLink("安全"));
     fireEvent.click(await screen.findByRole("button", { name: "新建令牌" }));
     fireEvent.click(await screen.findByRole("button", { name: "创建" }));
 
@@ -508,8 +514,8 @@ test("a number outside the server's bounds is refused with a toast, not saved", 
   expect((health as HTMLInputElement).value).toBe("20000");
 });
 
-test("settings can turn OAuth on, and the card shows who holds a credential", async () => {
-  window.history.pushState({}, "", "/console/settings");
+test("security page can turn OAuth on, and the card shows who holds a credential", async () => {
+  window.history.pushState({}, "", "/console/security");
   mocks.settings.mockResolvedValue(settingsState({
     config: { ...settingsState().config, "oauth.enabled": true, "oauth.allowedRedirectHosts": ["chatgpt.com"] },
   }));
@@ -629,7 +635,6 @@ describe("App shell: in-page filtering and rails", () => {
     expect(item.getAttribute("aria-current")).toBe("true");
     // The target exists: a rail entry that scrolls nowhere is worse than none.
     expect(document.getElementById("set-logs")).toBeTruthy();
-    expect(document.getElementById("set-oauth")).toBeTruthy();
   });
 });
 
@@ -684,4 +689,14 @@ describe("App shell: card detail layer", () => {
     fireEvent.click(autoReconnect!);
     expect(mocks.settingsAction).toHaveBeenCalledWith({ command: "setConfig", key: "autoReconnect", value: false });
   });
+});
+
+test("redirects the retired /console/tokens bookmark to 安全", async () => {
+  // The 令牌 page moved to 安全; old bookmarks must land on the new
+  // page instead of falling through to 状态.
+  window.history.pushState({}, "", "/console/tokens");
+
+  render(<App />);
+
+  expect(await screen.findByText("个人令牌")).toBeTruthy();
 });

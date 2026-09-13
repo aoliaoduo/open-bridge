@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { HealthPage } from "./HealthPage";
 import type { HealthReport } from "../api";
 
@@ -29,9 +29,9 @@ function healthReport(): HealthReport {
 }
 
 function renderPage() {
-  const act = vi.fn(async () => null);
-  render(<HealthPage act={act} />);
-  return { act };
+  const onOpen = vi.fn();
+  render(<HealthPage onOpen={onOpen} />);
+  return { onOpen };
 }
 
 describe("HealthPage", () => {
@@ -79,5 +79,17 @@ describe("HealthPage: summary meter", () => {
     // One 提醒 and no 异常: the bar is amber, not red — the state is a risk the
     // operator may have chosen, not a defect.
     expect(document.querySelector(".meter-fill")?.className).toContain("warn");
+  });
+});
+
+describe("HealthPage exposure pointer", () => {
+  test("offers a way to the 安全 page for exposure follow-up", async () => {
+    // The exposure card moved to 安全; 体检 keeps only a pointer to it.
+    healthMock.mockResolvedValue(healthReport());
+
+    const { onOpen } = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "去安全页" }));
+
+    expect(onOpen).toHaveBeenCalledWith("security");
   });
 });

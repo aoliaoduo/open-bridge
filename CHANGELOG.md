@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- 控制台导航重组：新增「安全」页收敛暴露面、Bearer 门禁、个人令牌与 OAuth 2.1（原「令牌」页、体检页暴露面卡、设置页 OAuth 卡迁入），「第二道锁」退役统一叫 Bearer 门禁，路由令牌不再称为凭证（只是地址）；体检回归只读诊断，状态页警告改为跳转；文件锁表以「文件锁明细」搬到状态页；/console/tokens 跳转新页，书签不断。纯前端重组，后端 API 零改动。
+
 ### Fixed
 - **终端输出对齐：手工垫空格改按显示列宽对齐。**中文/全角字符占两列、按字数只算一个，手工垫空格必然错位（`serve` 横幅里「本地/公网 MCP URL」的值就比别的行后退了一列）。`src/cli.ts` 新增 `displayWidth`/`padLabel`，横幅、`status`、`health`/`doctor`、`config list`、`token list`、`instances` 的标签列统一走它（纯 ASCII 标签输出不变）；告警块第二行改为与首行同级缩进（不再假设 ⚠️ 占两列）；`test/display-width.test.ts` 钉住列宽语义。README 架构图的改成两个 Markdown 表格（流程 + 出口：渲染器自动对列，不依赖等宽字体、前导空格和任何宽字符的宽度），serve 示例输出去掉行首缩进，并把三处「宿主能力过滤 / 40 个定义」的过期说法改成 v6 之后的现实（38 个定义、只剩配置档过滤）。纯显示层改动，不碰任何行为。
 

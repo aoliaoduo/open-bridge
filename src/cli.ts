@@ -484,7 +484,7 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   else console.log(`  ${padLabel("公网 MCP URL:", 14)}（未开启隧道，仅本机可用）`);
   if (state.tunnelUrl && nodeHost.config.get<boolean>("auth.enabled", false) !== true) {
     console.log("  ⚠️  公网可达且未开启鉴权：拿到该 URL 的人都能读写本机文件、执行命令。");
-    console.log("  要收紧：控制台「令牌」页签发令牌并开启 Bearer 鉴权，或用「轮换端点」作废旧链接。");
+    console.log("  要收紧：去控制台「安全」页签发令牌并打开 Bearer 门禁，或用「轮换端点」作废旧链接。");
   }
   console.log(`  ${padLabel("日志:", 14)}${nodeHost.bridgeLog.path()}`);
   console.log("");
@@ -610,7 +610,7 @@ async function cmdStatus(parsed: ParsedArgs): Promise<void> {
   if (status.public_url) console.log(`${padLabel("公网 MCP:", 9)}${String(status.public_url)}`);
   else console.log(`${padLabel("公网 MCP:", 9)}（未开启隧道，仅本机可用）`);
   if (status.exposure === "public-open") {
-    console.log("⚠️  公网可达且未开启鉴权：拿到该 URL 的人都能读写本机文件、执行命令。可用「令牌」页开启 Bearer 鉴权。");
+    console.log("⚠️  公网可达且未开启鉴权：拿到该 URL 的人都能读写本机文件、执行命令。可用「安全」页打开 Bearer 门禁。");
   }
   console.log(`会话: ${String(status.active_sessions)}  命令: ${String(status.active_commands)}  工具: ${String(status.tool_count)}`);
 }
@@ -788,7 +788,7 @@ async function cmdHealth(parsed: ParsedArgs): Promise<void> {
   }
   const exposure = String(status.exposure ?? "local");
   check("exposure", exposure !== "public-open", exposure === "public-open"
-    ? "公网可达且未开启鉴权：拿到 URL 的人都能读写文件、执行命令（令牌页可开启 Bearer）"
+    ? "公网可达且未开启鉴权：拿到 URL 的人都能读写文件、执行命令（安全页可开 Bearer 门禁）"
     : exposure);
   // Only a compiled instance can answer this; under `npm run dev` the field is
   // absent and the line is skipped rather than guessed.

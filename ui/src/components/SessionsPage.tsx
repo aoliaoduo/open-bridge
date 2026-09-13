@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, type LockSnapshot, type SessionView } from "../api";
+import { api, type SessionView } from "../api";
 import { CardHead } from "./CardHead";
-import { Chip } from "./Chip";
 import { ConfirmButton } from "./ConfirmButton";
 import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
 import { Skeleton } from "./Skeleton";
 
 /** "空闲 2 分 13 秒" and friends — idleness is the whole point of this table. */
-function idleLabel(ms: number): string {
+// The 文件锁明细 card on 状态页 imports this: one formatter, two tables.
+export function idleLabel(ms: number): string {
   const seconds = Math.max(0, Math.round(ms / 1000));
   if (seconds < 5) return "刚刚";
   if (seconds < 60) return `${seconds} 秒`;
@@ -46,7 +46,6 @@ type View = "all" | "active" | "idle";
  */
 export function SessionsPage({ notify }: { notify?: (text: string, isError?: boolean) => void } = {}) {
   const [sessions, setSessions] = useState<SessionView[] | null>(null);
-  const [locks, setLocks] = useState<LockSnapshot>({ held: [], waiting: [] });
   const [note, setNote] = useState("");
   const [closingId, setClosingId] = useState("");
   const [query, setQuery] = useState("");
@@ -61,7 +60,6 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
       const snapshot = await api.sessions();
       if (pollSeq.current !== mine) return;
       setSessions(snapshot.sessions);
-      setLocks(snapshot.locks);
     } catch (error) {
       if (pollSeq.current === mine) setNote(error instanceof Error ? error.message : String(error));
     }
@@ -107,10 +105,6 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
     }
   };
 
-  const lockRows = [
-    ...locks.held.map(lock => ({ kind: "持有" as const, key: lock.key, mode: lock.mode ?? "", label: lock.label ?? "", ms: lock.held_ms ?? 0 })),
-    ...locks.waiting.map(lock => ({ kind: "等待" as const, key: (lock.keys ?? []).join(" , "), mode: lock.mode ?? "", label: lock.label ?? "", ms: lock.waited_ms ?? 0 })),
-  ];
 
   return (
     <>
@@ -216,50 +210,6 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
         </div>
       </div>
 
-      <div className="card">
-        <CardHead
-          title="文件锁"
-          desc={
-            <>
-              并发写同一个目录时，第二个调用者会等锁而不是覆盖对方。<span className="mono">持有</span> 是正在写文件的调用，
-              <span className="mono">等待</span> 是被挡住的调用；两者都会随时间自己消失。
-            </>
-          }
-        />
-        {lockRows.length === 0 ? (
-          <EmptyState title="当前没有加锁，也没有等待者。">
-            多客户端同时写同一个目录时，这里会出现资源路径、调用名与已经等了多少。
-          </EmptyState>
-        ) : (
-          <div className="table-wrap">
-            <table className="token-table">
-              <thead>
-                <tr>
-                  <th>状态</th>
-                  <th>资源</th>
-                  <th>模式</th>
-                  <th>调用</th>
-                  <th className="num">已持续</th>
-                </tr>
-              </thead>
-              <tbody>
-                {/* Key includes the index: two waiters can legally queue on the
-                    same resource (that is the whole point of the table), and a
-                    kind+key key collided between them. */}
-                {lockRows.map((row, index) => (
-                  <tr key={`${row.kind}-${row.key}-${index}`}>
-                    <td>{row.kind === "持有" ? <Chip tone="ok">持有</Chip> : <Chip tone="warn">等待</Chip>}</td>
-                    <td className="mono" title={row.key || undefined}>{row.key || "—"}</td>
-                    <td>{row.mode || "—"}</td>
-                    <td className="muted">{row.label || "—"}</td>
-                    <td className="num">{idleLabel(row.ms)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
 
       {note && <div className="card section-note" style={{ marginBottom: 0 }}>{note}</div>}
     </>

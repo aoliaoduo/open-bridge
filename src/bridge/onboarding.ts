@@ -25,7 +25,7 @@ export function buildWebAiPrompt(inputs: WebAiPromptInputs): string {
   // The prompt carries the credential, so it must mention the second one when
   // the bearer gate is on; otherwise the client gets a 401 with no explanation.
   const authNote = inputs.authEnabled
-    ? "\n\n注意：本 Bridge 已启用 Bearer 鉴权。除上面的 URL 外，请求还需带上请求头 "
+    ? "\n\n注意：本 Bridge 已启用 Bearer 门禁。除上面的 URL 外，请求还需带上请求头 "
       + "`Authorization: Bearer <token>`（令牌在 Open Bridge Web 控制台签发，"
       + "只在签发时显示一次）。若你的客户端只能填 URL、不能设置请求头，可改用 `?token=<token>` 形式。"
     : "";

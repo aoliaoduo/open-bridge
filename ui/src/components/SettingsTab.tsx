@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, type OAuthConsoleView, type SettingsActionResult, type SettingsState } from "../api";
+import { type SettingsActionResult, type SettingsState } from "../api";
 import { CardHead } from "./CardHead";
-import { Chip } from "./Chip";
 import { Field } from "./Field";
 import { SectionNav } from "./SectionNav";
 import { Skeleton } from "./Skeleton";
@@ -25,7 +24,6 @@ const SETTINGS_SECTIONS = [
   { id: "set-shell", label: "Shell" },
   { id: "set-locks", label: "并发" },
   { id: "set-logs", label: "日志轮转" },
-  { id: "set-oauth", label: "OAuth" },
 ];
 
 /** Bounds mirror the server's CONFIG_SPEC (src/bridge/settings-model.ts) so a
@@ -49,7 +47,7 @@ const NUMBER_BOUNDS = {
  * old behaviour left the input showing a value the config did not hold, and
  * the operator only found out on the next reload.
  */
-function DraftField({
+export function DraftField({
   value,
   onCommit,
   onInvalid,
@@ -385,128 +383,6 @@ export function SettingsTab({ settings, act, notify }: Props) {
         </div>
       </div>
 
-      <div className="card" id="set-oauth">
-        <CardHead
-          title="OAuth 2.1（可选）"
-          desc="给客户端发它自己的凭据，而不是让所有人共用地址里的路由令牌。"
-        />
-        <div className="field">
-          <label className="check">
-            <input
-              type="checkbox"
-              className="switch"
-              checked={cfg["oauth.enabled"]}
-              onChange={e => setConfig("oauth.enabled", e.target.checked)}
-            />
-            <span className="field-label">启用 OAuth 2.1 授权服务器</span>
-          </label>
-          {/* The consequence belongs next to the switch: turning this on is what
-              makes the URL stop being enough, and that is a decision, not a bug
-              report waiting in a client's logs. */}
-          <span className="field-hint">
-            {cfg["oauth.enabled"]
-              ? "已开启 — /mcp 需要 OAuth 凭据：能走标准流程的客户端会先收到 401（这不是故障，正是它开始授权的信号），"
-                + "注册后拿到属于它自己的、可单独吊销的凭据。已经持有令牌的客户端不受影响：Authorization: Bearer 或 ?token= 照常通过。"
-              : "默认关闭 — 客户端在地址里带路由令牌即可接入。打开后，只认 URL 的客户端会收到 401 并要求走 OAuth；"
-                + "带不了头的那类客户端可以改用 ?token=<令牌> 的地址，或者不改、继续关着。"}
-          </span>
-        </div>
-        {cfg["oauth.enabled"] && <OAuthPanel hosts={cfg["oauth.allowedRedirectHosts"]} setConfig={setConfig} />}
-      </div>
-    </>
-  );
-}
-
-/**
- * The live half of the OAuth card: who is registered and how many credentials
- * are out there (GET /api/oauth). Read-only on purpose — the server exposes no
- * digest or secret here, and revocation is the client's own `/oauth/revoke`.
- * Without it the operator could switch OAuth on and then see nothing at all:
- * the console was the one surface with no way to tell who holds a credential.
- */
-function OAuthPanel({ hosts, setConfig }: {
-  hosts: string[];
-  setConfig: (key: string, value: unknown) => void;
-}) {
-  const [view, setView] = useState<OAuthConsoleView | null>(null);
-  const [note, setNote] = useState("");
-
-  useEffect(() => {
-    let alive = true;
-    void api.oauth()
-      .then(value => { if (alive) setView(value); })
-      .catch(error => { if (alive) setNote(error instanceof Error ? error.message : String(error)); });
-    return () => { alive = false; };
-  }, []);
-
-  return (
-    <>
-      <div className="field">
-        <span className="field-label">允许的回调主机</span>
-        <span className="field-control">
-          <DraftField
-            multiline
-            value={hosts.join("\n")}
-            placeholder={"允许的回调主机，每行一个，如\nchatgpt.com"}
-            onCommit={raw => setConfig("oauth.allowedRedirectHosts", raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean))}
-          />
-        </span>
-        <span className="field-hint">
-          注册时按主机名精确匹配；localhost / 127.0.0.1 / [::1] 永远放行；留空 = 只用内置名单；失焦时保存
-        </span>
-      </div>
-
-      {view === null ? (
-        <Skeleton lines={2} />
-      ) : (
-        <>
-          <div className="props">
-            <div className="prop">
-              <span className="prop-label">在用凭据</span>
-              <span className="prop-value">
-                已注册客户端 {view.counts.clients} 个 · 在用访问令牌 {view.counts.activeAccessTokens} 个 · 刷新令牌 {view.counts.activeRefreshTokens} 个
-              </span>
-            </div>
-            <div className="prop">
-              <span className="prop-label">签发者</span>
-              <span className="prop-value mono">{view.issuer}</span>
-            </div>
-            <div className="prop">
-              <span className="prop-label">业主来源</span>
-              <span className="prop-value">
-                <Chip tone="idle">{view.ownerSource === "env" ? "环境变量" : "路由令牌"}</Chip>
-              </span>
-            </div>
-          </div>
-          {note ? <div className="section-note">{note}</div> : null}
-          {view.clients.length === 0 ? (
-            <div className="section-note" style={{ marginBottom: 0 }}>
-              还没有客户端注册；第一个走标准流程的客户端连上来时会自动注册。
-            </div>
-          ) : (
-            <div className="table-wrap">
-              <table className="token-table">
-                <thead>
-                  <tr>
-                    <th>客户端</th>
-                    <th>回调地址</th>
-                    <th className="num">注册时间</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {view.clients.map(client => (
-                    <tr key={client.client_id}>
-                      <td className="name">{client.client_name ?? client.client_id}</td>
-                      <td className="mono wrap">{client.redirect_uris.join("\n")}</td>
-                      <td className="num muted">{new Date(client.client_id_issued_at).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </>
-      )}
     </>
   );
 }
