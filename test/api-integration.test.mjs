@@ -300,7 +300,7 @@ test("cli status/url reach the running instance and exit cleanly", async () => {
   // fire when process.exit() raced undici's closing keep-alive sockets.
   const status = await runCli(["status"]);
   assert.equal(status.code, 0, `status exited ${status.code}: ${status.err}`);
-  assert.match(status.out, /状态: running/);
+  assert.match(status.out, /状态:\s+running/);
   assert.ok(!/Assertion failed/.test(status.err), `no libuv assertion: ${status.err}`);
 
   const url = await runCli(["url"]);

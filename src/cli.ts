@@ -72,6 +72,34 @@ const HELP = `open-bridge ${VERSION} — standalone MCP bridge for local workspa
   用 --root DIR 可以覆盖，用 open-bridge instances 看谁在跑。
 `;
 
+// --- console label alignment -------------------------------------------------
+//
+// Every padded label in this file goes through padLabel, never padEnd: CJK
+// and fullwidth characters occupy two terminal columns but count as one in
+// string length, so padding mixed labels by length drifts the value column.
+// Only the ranges this CLI actually prints count as wide (CJK, kana and
+// fullwidth forms); box-drawing, arrows and emoji in decorative positions are
+// intentionally left at one column each.
+
+const WIDE_CHAR = /[\u2E80-\u9FFF\uFF01-\uFF5E]/;
+
+/** Terminal columns a string occupies: CJK/fullwidth characters count as two. */
+export function displayWidth(text: string): number {
+  let width = 0;
+  for (const char of text) {
+    width += WIDE_CHAR.test(char) ? 2 : 1;
+  }
+  return width;
+}
+
+/**
+ * Pad a label with spaces so mixed-script labels share one value column.
+ * Never truncates: a label already wider than `width` is returned as-is.
+ */
+export function padLabel(label: string, width: number): string {
+  return label + " ".repeat(Math.max(0, width - displayWidth(label)));
+}
+
 type ParsedArgs = { command: string; rest: string[]; flags: Map<string, string | true> };
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -448,17 +476,17 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
 
   const consoleUrl = `http://127.0.0.1:${state.port}/console/`;
   console.log("");
-  console.log(`  Web 控制台:  ${consoleUrl}`);
-  console.log(`  本地 MCP URL: http://127.0.0.1:${state.port}/mcp/${state.routeToken}`);
+  console.log(`  ${padLabel("Web 控制台:", 14)}${consoleUrl}`);
+  console.log(`  ${padLabel("本地 MCP URL:", 14)}http://127.0.0.1:${state.port}/mcp/${state.routeToken}`);
   // state.tunnelUrl is set only while a tunnel is actually published, so its
   // presence alone decides whether a public URL exists at all.
-  if (state.tunnelUrl) console.log(`  公网 MCP URL: ${state.tunnelUrl}`);
-  else console.log("  公网 MCP URL: （未开启隧道，仅本机可用）");
+  if (state.tunnelUrl) console.log(`  ${padLabel("公网 MCP URL:", 14)}${state.tunnelUrl}`);
+  else console.log(`  ${padLabel("公网 MCP URL:", 14)}（未开启隧道，仅本机可用）`);
   if (state.tunnelUrl && nodeHost.config.get<boolean>("auth.enabled", false) !== true) {
     console.log("  ⚠️  公网可达且未开启鉴权：拿到该 URL 的人都能读写本机文件、执行命令。");
     console.log("      要收紧：控制台「令牌」页签发令牌并开启 Bearer 鉴权，或用「轮换端点」作废旧链接。");
   }
-  console.log(`  日志:        ${nodeHost.bridgeLog.path()}`);
+  console.log(`  ${padLabel("日志:", 14)}${nodeHost.bridgeLog.path()}`);
   console.log("");
   console.log("  接入 AI 客户端：open-bridge prompt  →  复制提示词并粘贴给客户端");
   console.log("");
@@ -576,11 +604,11 @@ async function cmdStatus(parsed: ParsedArgs): Promise<void> {
   const res = await httpJson(runtime.port, "/api/status", { token: await consoleTokenOrUndefined(home, runtime.root) });
   if (res.status !== 200) fail(`status 请求失败: HTTP ${res.status}`);
   const status = statusBodyOf(res);
-  console.log(`状态: ${String(status.state)} (pid ${runtime.pid})`);
-  console.log(`项目根: ${runtime.root}`);
-  if (status.local_url) console.log(`本地 MCP: ${String(status.local_url)}`);
-  if (status.public_url) console.log(`公网 MCP: ${String(status.public_url)}`);
-  else console.log("公网 MCP: （未开启隧道，仅本机可用）");
+  console.log(`${padLabel("状态:", 9)}${String(status.state)} (pid ${runtime.pid})`);
+  console.log(`${padLabel("项目根:", 9)}${runtime.root}`);
+  if (status.local_url) console.log(`${padLabel("本地 MCP:", 9)}${String(status.local_url)}`);
+  if (status.public_url) console.log(`${padLabel("公网 MCP:", 9)}${String(status.public_url)}`);
+  else console.log(`${padLabel("公网 MCP:", 9)}（未开启隧道，仅本机可用）`);
   if (status.exposure === "public-open") {
     console.log("⚠️  公网可达且未开启鉴权：拿到该 URL 的人都能读写本机文件、执行命令。可用「令牌」页开启 Bearer 鉴权。");
   }
@@ -656,7 +684,7 @@ async function cmdInstances(parsed: ParsedArgs): Promise<void> {
       extra = " · (状态不可读)";
     }
     const isHere = path.resolve(info.root) === here;
-    console.log(`  pid ${info.pid}  端口 ${info.port}  ${info.root}${extra}${isHere ? "  ← 当前目录" : ""}`);
+    console.log(`  pid ${String(info.pid).padEnd(7)}  端口 ${String(info.port).padEnd(5)}  ${info.root}${extra}${isHere ? "  ← 当前目录" : ""}`);
   }
 }
 
@@ -735,7 +763,9 @@ async function cmdHealth(parsed: ParsedArgs): Promise<void> {
   const status = (res.body as { status: Record<string, unknown> }).status;
   const lines: string[] = [];
   const check = (name: string, ok: boolean, detail: string): void => {
-    lines.push(`  [${ok ? "OK" : "!!"}] ${name}: ${detail}`);
+    // Longest name is "public reachability" (19 columns); a fixed width keeps the
+    // detail column still even when conditional rows are absent.
+    lines.push(`  [${ok ? "OK" : "!!"}] ${padLabel(name, 19)}: ${detail}`);
   };
   check("instance", true, `pid ${runtime.pid}, 端口 ${runtime.port}`);
   check("workspace", true, String(status.workspace_root ?? runtime.root));
@@ -801,9 +831,11 @@ async function cmdConfig(parsed: ParsedArgs): Promise<void> {
   const [sub = "list", key, value] = parsed.rest;
   switch (sub) {
     case "list": {
-      const rows = Object.entries(CONFIG_DEFAULTS).map(([k, fallback]) => {
+      const entries = Object.entries(CONFIG_DEFAULTS);
+      const keyWidth = entries.reduce((max, [k]) => Math.max(max, displayWidth(k)), 0);
+      const rows = entries.map(([k, fallback]) => {
         const effective = nodeHost.config.get(k, fallback);
-        return `  ${k} = ${JSON.stringify(effective)}`;
+        return `  ${padLabel(k, keyWidth)} = ${JSON.stringify(effective)}`;
       });
       console.log(rows.join("\n"));
       return;
@@ -851,9 +883,11 @@ async function cmdToken(parsed: ParsedArgs): Promise<void> {
     case "list": {
       const tokens = await listTokenViews();
       if (!tokens.length) { console.log("没有令牌。"); return; }
+      const idWidth = tokens.reduce((max, token) => Math.max(max, displayWidth(token.id)), 0);
+      const labelWidth = tokens.reduce((max, token) => Math.max(max, displayWidth(token.label)), 0);
       for (const token of tokens) {
         const state_ = token.revoked ? "已吊销" : token.expired ? "已过期" : "有效";
-        console.log(`  ${token.id}  ${token.label}  [${state_}]  使用 ${token.use_count} 次`);
+        console.log(`  ${padLabel(token.id, idWidth)}  ${padLabel(token.label, labelWidth)}  [${state_}]  使用 ${token.use_count} 次`);
       }
       return;
     }
@@ -888,7 +922,8 @@ async function cmdDoctor(parsed: ParsedArgs): Promise<void> {
   const { host: nodeHost } = installNodeHost({ homeDir: home, version: VERSION });
   const lines: string[] = [];
   const check = (name: string, ok: boolean, detail: string): void => {
-    lines.push(`  [${ok ? "OK" : "!!"}] ${name}: ${detail}`);
+    // Longest name is "tunnel provider" (15 columns).
+    lines.push(`  [${ok ? "OK" : "!!"}] ${padLabel(name, 15)}: ${detail}`);
   };
 
   const [major = 0] = process.versions.node.split(".").map(Number);

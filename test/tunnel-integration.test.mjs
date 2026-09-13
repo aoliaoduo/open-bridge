@@ -153,7 +153,7 @@ test("the listener is published to the CLI while the tunnel is still failing", a
     proc.on("exit", code => resolve({ code, out }));
   });
   assert.equal(status.code, 0);
-  assert.match(status.out, /状态: running/);
+  assert.match(status.out, /状态:\s+running/);
   assert.match(status.out, /未开启隧道/);
 });
 

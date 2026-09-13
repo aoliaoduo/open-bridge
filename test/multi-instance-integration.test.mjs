@@ -143,7 +143,7 @@ test("each instance gets a route token of its own, and both survive", async () =
 
 test("`open-bridge status` answers for the directory it is typed in", async () => {
   const fromA = await run(process.execPath, [CLI, "status", "--home", home], { cwd: dirA });
-  assert.match(fromA.stdout, /状态: running/);
+  assert.match(fromA.stdout, /状态:\s+running/);
   assert.ok(fromA.stdout.includes(path.resolve(dirA)), `status in A must name A:\n${fromA.stdout}`);
   assert.equal(fromA.stdout.includes(path.resolve(dirB)), false, "and must not name B");
 
