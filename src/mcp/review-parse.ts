@@ -1,6 +1,6 @@
 /**
  * Pure helpers for git numstat/name-status parsing and review summaries
- * (no vscode or bridge-state imports so they stay unit-testable in plain node).
+ * (no bridge-state imports so they stay unit-testable in plain node).
  *
  * Real `git diff --numstat -z` output shapes (verified against git on this
  * machine):

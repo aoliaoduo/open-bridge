@@ -44,8 +44,7 @@ export function ToolsPage({ notify }: { notify?: (text: string, isError?: boolea
         title="工具目录"
         desc={
           <>
-            这份清单就是 <span className="mono">tools/list</span> 实际返回的内容：先按工具配置档过滤，再剔除本机不支持的工具
-            （独立版没有编辑器，所以 <span className="mono">get_diagnostics</span> / <span className="mono">lsp</span> 不会出现）。
+            这份清单就是 <span className="mono">tools/list</span> 实际返回的内容，按工具配置档过滤。
           </>
         }
         actions={

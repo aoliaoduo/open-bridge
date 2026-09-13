@@ -1,11 +1,11 @@
 /**
  * Service log persistence helpers (P1-3).
  *
- * Logs live under the extension global storage — `service-logs/<wsHash8>/<name>.log` —
+ * Logs live under the Bridge data dir — `service-logs/<wsHash8>/<name>.log` —
  * so they survive Bridge restarts and never dirty the workspace. A saved
  * service may override the location with an explicit `log_file` (resolved by
- * the caller via workspacePath). This module stays free of vscode/state
- * imports so the pure helpers remain unit-testable outside the extension host.
+ * the caller via workspacePath). This module stays free of bridge-state
+ * imports so the pure helpers remain unit-testable in plain node.
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";

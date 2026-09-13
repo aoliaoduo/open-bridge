@@ -211,7 +211,7 @@ export interface HealthReport {
 /**
  * End-to-end health check: prove the instance is what it claims to be.
  *
- * This existed since the VS Code port but had no caller in the standalone app,
+ * This existed since the first port but had no caller in the standalone app,
  * so nothing inside the product could ever verify that the tunnel it advertises
  * answers, or that the bearer gate really refuses anonymous requests. A gate
  * that silently fails open is worse than no gate: the operator would believe

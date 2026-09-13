@@ -6,7 +6,20 @@
  * source of truth. New config read sites should read from here instead of
  * restating a literal default.
  */
-export const CONFIG_DEFAULTS: Record<string, unknown> = {
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object") {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+/**
+ * The table ships deeply frozen: `get` hands out copies, so nothing may
+ * mutate the canonical values in place — an accidental push() now throws a
+ * TypeError at the culprit instead of silently corrupting every default.
+ */
+export const CONFIG_DEFAULTS: Record<string, unknown> = deepFreeze({
   tunnelProvider: "ngrok",
   ngrokDomain: "",
   ngrokExecutable: "ngrok",
@@ -37,4 +50,4 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = {
   "concurrency.enabled": true,
   "concurrency.holdTimeoutMs": 300_000,
   "concurrency.waitTimeoutMs": 120_000,
-};
+});

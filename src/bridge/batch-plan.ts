@@ -1,7 +1,7 @@
 /**
  * Pure planning/aggregation core for the `batch` tool (P2).
  *
- * Kept free of vscode/state/dispatcher imports so the aggregation and
+ * Kept free of state/dispatcher imports so the aggregation and
  * fail-fast semantics stay unit-testable in plain node (test/batch.test.ts).
  * The dispatcher wiring lives in ./batch.js.
  */

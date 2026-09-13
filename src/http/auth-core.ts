@@ -10,7 +10,7 @@
  * expiring, attributable in the audit log. Tokens are never stored in plaintext
  * and the whole gate is off by default.
  *
- * This module deliberately imports nothing (no vscode, no fs) so the security
+ * This module deliberately imports nothing (no host, no fs) so the security
  * decisions stay unit-testable in plain node.
  */
 

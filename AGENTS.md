@@ -43,7 +43,7 @@ MCP 参数是模型生成的：字段可能整个缺失，也可能是 `"abc"`�
 
 ## 杂项
 
-- `core.autocrlf=true`：源码 `.ts` 在库里是 CRLF，测试 `.mjs` 是 LF。`git add` 时的 “LF will be replaced by CRLF” 警告是正常的，不用管。
+- `core.autocrlf=true` + `.gitattributes`：库里统一 LF，Windows 工作区检出为 CRLF。`git add` 时的 “LF will be replaced by CRLF” 警告是正常的，不用管。按字节锚定的编辑前先确认工作区实际换行（`read_files` 返回的就是工作区字节），不要假设。
 - 提交信息用英文，重点写**为什么**（这个仓库的历史提交都是这个风格：现场是什么、为什么错、为什么不那样修）；`CHANGELOG.md` 的 `[Unreleased]` 用中文，按 Keep a Changelog 的 Added → Changed → Fixed 分区。
 - **`npm audit` 要用 `npm run audit`。** 本机 registry 指向 `registry.npmmirror.com`（国内镜像），而它没实现 npm 的安全通告端点：`npm audit` 会 POST `/-/npm/v1/security/advisories/bulk`，镜像回 **404 `[NOT_IMPLEMENTED] /-/npm/v1/security/* not implemented yet`**。这既不是依赖有问题、也不是 npm 坏了。`npm run audit` 只给这一条命令换回官方源（`--registry=https://registry.npmjs.org`，走已配置的代理可达），装包仍然走镜像。
 - 开发过程本身通常就跑在这个 bridge 上（`run_script` / `edit_block` / `read_files`）。注意 `run_script` 沙箱里没有 fs 与网络，要用 `await tools.*`；`console.log` 不等于 `return`；`edit_block` 的 `old_text` 必须在文件里**恰好命中一次**。

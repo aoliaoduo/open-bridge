@@ -181,7 +181,7 @@ export function getUsageStats(): Record<string, unknown> {
 
 /**
  * One-call project orientation (DevSpace open_workspace bootstrap idea,
- * adapted to the VS Code-anchored model): everything an agent needs to stop
+ * adapted to the workspace-anchored model): everything an agent needs to stop
  * exploring blindly at the start of a session.
  */
 export function workspaceBrief(): Record<string, unknown> {
@@ -250,28 +250,6 @@ export function workspaceBrief(): Record<string, unknown> {
     brief.skills = { count: skills.skills.length, names: skills.skills.slice(0, 10).map(skill => skill.name) };
   }
   return brief;
-}
-
-/**
- * Editor-integration tools (get_diagnostics / lsp) only exist inside a host
- * with language-server access, such as the VS Code extension shell. The
- * standalone Node host reports capabilities.lsp = false, tools/list filters
- * these definitions out, and a direct call gets the clear error below
- * instead of a confusing unknown-tool failure.
- */
-function editorOnlyError(tool: string): Error {
-  return new Error(
-    tool + ' requires a language server, which this Open Bridge host does not provide. '
-    + 'Use search_files / read_files as portable alternatives.',
-  );
-}
-
-export function getDiagnostics(): unknown {
-  throw editorOnlyError('get_diagnostics');
-}
-
-export async function lsp(): Promise<unknown> {
-  throw editorOnlyError('lsp');
 }
 
 export function reportProgress(args: Args, session?: SessionState): Record<string, unknown> {
@@ -351,9 +329,9 @@ export async function searchActivityLogTool(args: Args): Promise<Record<string, 
 }
 
 export async function clearActivityLogTool(): Promise<Record<string, unknown>> {
-  // Mirror of the VS Code command openBridge.clearLog (clearLog in commands.ts):
-  // same three steps, keep the two in sync. Not routed through commands.ts to
-  // avoid its vscode clipboard/window surface in the MCP path.
+  // Three steps — memory entries, the live log file, the rotated generation —
+  // done inline, so the MCP path never touches a UI surface.
+  // Each step is best-effort; the result reports what actually landed.
   const cleared = state.activity.splice(0, state.activity.length).length;
   const logPath = auditLogPath();
   let liveTruncated = false;

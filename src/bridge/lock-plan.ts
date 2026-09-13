@@ -15,7 +15,7 @@
  * lock would make a stuck process unkillable.
  *
  * Pure by design: the workspace resolution and patch parsing are injected, so
- * the mapping is unit-testable without vscode.
+ * the mapping is unit-testable in plain node.
  */
 
 import type { LockMode } from "./resource-locks.js";

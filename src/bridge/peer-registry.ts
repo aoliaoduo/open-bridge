@@ -24,8 +24,8 @@ function peersFile(): string {
  * Every registry this instance advertises itself in.
  *
  * Its own comes first; the rest are the ones another Open Bridge build on this
- * machine already keeps (the VS Code extension uses the editor's globalStorage).
- * Without them the two products cannot see each other, so the app can neither
+ * machine already keeps (each build keeps its own registry file).
+ * Without them the two instances cannot see each other, so the app can neither
  * serve requests that arrive through an existing tunnel nor borrow it — see
  * peerRegistryCandidates. `sharedPeerRegistry` replaces the discovery with one
  * explicit path for setups the guess does not cover.

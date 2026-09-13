@@ -11,7 +11,7 @@ export function persistServices(): void {
   );
   const key = `${SERVICES_STATE_PREFIX}${state.activeWorkspaceRoot || "unbound"}`;
   servicePersistTail = servicePersistTail
-    .then(() => host().globalState.update(key, snapshot))
+    .then(() => host().state.update(key, snapshot))
     .catch(() => undefined);
 }
 
@@ -38,7 +38,7 @@ function storedKnob(raw: unknown, key: "max_restarts" | "restart_delay_ms", fall
 export function loadServices(): void {
   const key = `${SERVICES_STATE_PREFIX}${state.activeWorkspaceRoot || "unbound"}`;
   try {
-    const stored = host().globalState.get<unknown>(key, {});
+    const stored = host().state.get<unknown>(key, {});
     if (!stored || typeof stored !== "object" || Array.isArray(stored)) return;
     for (const [name, raw] of Object.entries(stored as Record<string, unknown>)) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;

@@ -9,6 +9,7 @@ import { mkdtempSync, readFileSync, existsSync, statSync, rmSync } from "node:fs
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { installNodeHost, nodeHost } from "../src/host/node-host.js";
+import { CONFIG_DEFAULTS } from "../src/bridge/config-defaults.js";
 
 let home: string;
 
@@ -40,11 +41,11 @@ test("config update persists to config.json and is re-readable", async () => {
   assert.equal(host.config.get("auth.enabled", false), true);
 });
 
-test("globalState sync-get reads from cache; update persists", async () => {
+test("state sync-get reads from cache; update persists", async () => {
   const { host } = installNodeHost({ homeDir: home, version: "0.0.0-test" });
-  assert.deepEqual(host.globalState.get("missing", { a: 1 }), { a: 1 });
-  await host.globalState.update("openBridge.todos.x", { todos: [1, 2] });
-  assert.deepEqual(host.globalState.get("openBridge.todos.x", null), { todos: [1, 2] });
+  assert.deepEqual(host.state.get("missing", { a: 1 }), { a: 1 });
+  await host.state.update("openBridge.todos.x", { todos: [1, 2] });
+  assert.deepEqual(host.state.get("openBridge.todos.x", null), { todos: [1, 2] });
   const stored = JSON.parse(readFileSync(path.join(home, "state.json"), "utf8"));
   assert.deepEqual(stored["openBridge.todos.x"], { todos: [1, 2] });
 });
@@ -68,15 +69,49 @@ test("project root defaults to cwd and can be switched", () => {
   assert.equal(host.projectRoot(), path.resolve(path.join(home, "sub")));
 });
 
-test("capabilities: the standalone host reports no LSP", () => {
-  const { host } = installNodeHost({ homeDir: home, version: "0.0.0-test" });
-  assert.equal(host.capabilities.lsp, false);
-});
-
 test("log writes land in logs/bridge.log", async () => {
   const { host } = installNodeHost({ homeDir: home, version: "0.0.0-test" });
   host.log("hello from test");
   await new Promise(resolve => setTimeout(resolve, 100));
   const content = readFileSync(nodeHost().bridgeLog.path(), "utf8");
   assert.ok(content.includes("hello from test"));
+});
+
+test("config get returns a copy: mutating it cannot corrupt the store or CONFIG_DEFAULTS", async () => {
+  const { host } = installNodeHost({ homeDir: home, version: "0.0.0-test" });
+  const dirs = host.config.get<string[]>("allowedDirectories", []);
+  dirs.push("/evil");
+  assert.deepEqual(host.config.get<string[]>("allowedDirectories", []), []);
+  await host.config.update("allowedDirectories", ["/a"]);
+  const stored = host.config.get<string[]>("allowedDirectories", []);
+  stored.push("/evil");
+  assert.deepEqual(host.config.get<string[]>("allowedDirectories", []), ["/a"]);
+});
+
+test("config update snapshots the value instead of aliasing the caller's object", async () => {
+  const { host } = installNodeHost({ homeDir: home, version: "0.0.0-test" });
+  const mine: string[] = ["/a"];
+  await host.config.update("allowedDirectories", mine);
+  mine.push("/evil");
+  assert.deepEqual(host.config.get<string[]>("allowedDirectories", []), ["/a"]);
+});
+
+test("state get returns a copy", async () => {
+  const { host } = installNodeHost({ homeDir: home, version: "0.0.0-test" });
+  await host.state.update("k", { list: [1] });
+  const snap = host.state.get<{ list: number[] }>("k", { list: [] });
+  snap.list.push(2);
+  assert.deepEqual(host.state.get<{ list: number[] }>("k", { list: [] }), { list: [1] });
+});
+
+test("CONFIG_DEFAULTS is deeply frozen", () => {
+  assert.ok(Object.isFrozen(CONFIG_DEFAULTS));
+  assert.ok(Object.isFrozen(CONFIG_DEFAULTS.allowedDirectories));
+  assert.ok(Object.isFrozen(CONFIG_DEFAULTS["oauth.allowedRedirectHosts"]));
+  assert.throws(() => {
+    (CONFIG_DEFAULTS.allowedDirectories as string[]).push("/evil");
+  });
+  assert.throws(() => {
+    (CONFIG_DEFAULTS as Record<string, unknown>).port = 1;
+  });
 });

@@ -2,7 +2,7 @@
  * Audit-log search for the search_activity_log tool.
  *
  * Pure module: the caller supplies the log path (resolved via auditLogPath()),
- * so this file never imports vscode or bridge state and stays unit-testable.
+ * so this file never imports bridge state and stays unit-testable.
  * Both audit.log and its single rotated generation (audit.log.1) are scanned;
  * malformed lines are skipped and missing files count as empty.
  */

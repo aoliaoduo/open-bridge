@@ -31,6 +31,13 @@ export default tseslint.config(
   {
     rules: {
       "@typescript-eslint/no-explicit-any": "warn",
+      // `_`-prefixed args/locals are the codebase's explicit "kept for shape"
+      // marker (callback signatures, destructured omissions): the rule stays
+      // loud for real mistakes without forcing zero-arg contortions.
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" },
+      ],
       "no-empty": ["error", { allowEmptyCatch: true }],
       // A local that shadows an import or an outer function reads like the outer
       // one. TypeScript would catch a real misuse at compile time, but it reads

@@ -3,7 +3,7 @@
  * change"). Not a minimal-edit diff engine: it trims the common prefix/suffix
  * and emits a single hunk, which is exact for the surgical edits AI clients
  * make and always renders correctly, just occasionally with extra context.
- * Pure module so it stays unit-testable without vscode.
+ * Pure module so it stays unit-testable in plain node.
  */
 
 export interface LineDiffStats {

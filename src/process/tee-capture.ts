@@ -4,7 +4,7 @@
  * The managed process keeps running under our hidden shell (full lifecycle
  * control: kill, stdin, exit code) while its merged output ALSO flows into a
  * per-service log file that `read_service_log` reads back. Pure module, no
- * vscode imports.
+ * host imports.
  *
  * This used to carry a second, dead half for a "visible terminal" mode: a
  * capture path plus `tailCommandForShell`, feeding a `tail -f` pane that only

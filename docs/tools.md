@@ -64,7 +64,7 @@
 
 **find_files** — 按 glob 找文件（`*`、`**`、`?`、`{a,b}`、`[abc]`）；纯名字/前缀仍按 basename 匹配，`src/**/*.ts` 这种按完整相对路径匹配。
 
-**search_files** — 在工作区文件里搜文本：有 ripgrep 就用（快、尊重 `.gitignore`），否则内置扫描。`regex: true` 把 `query` 当正则；`include` 限定文件（如 `["*.ts"]`）；`context`（0–20）在每处匹配前后带若干行；`offset` + `max_results` 翻页。**`path` 必须是目录**；只搜一个文件就直接传那个文件路径。
+**search_files** — 在工作区文件里搜文本：有 ripgrep 就用（快、尊重 `.gitignore`），否则内置扫描。`query` 默认按**正则**解析（`regex: false` 才按字面匹配；非法正则直接报错，不会静默给空）；`include` 限定文件（如 `["*.ts"]`）；`context`（0–20）在每处匹配前后带若干行；`offset` + `max_results` 翻页。`path` 可以是目录或单个文件。
 
 **read_files** — 读一个或多个文件；大文件用 `start_line` / `end_line`（1 基、含两端）读区间。返回的 `sha256` **始终覆盖整个文件**，可作 `expected_sha256` 做乐观写入。`encoding: "base64"` 读二进制。
 
@@ -101,11 +101,11 @@
 
 ### 命令与进程
 
-**run_command** — 前台等待最多 `timeout_ms`（默认 120000）。**超时不会杀掉进程**：它继续在监管下运行，返回 `status: "running"` 与 `command_id`，之后用 `read_process_output` / `wait` 继续读，或用 `process_control{action:"terminate"}` 停掉。`background: true` 立刻返回。退出码非零**不是**调用失败。
+**run_command** — 前台等待最多 `timeout_ms`（默认 120000）。**超时不会杀掉进程**：它继续在监管下运行，返回 `status: "running"` 与 `command_id`，之后用 `read_process_output` / `wait` 继续读，或用 `process_control{action:"terminate"}` 停掉。`background: true` 立刻返回。退出码非零**不是**调用失败。链式命令（`a; b`）的 `exit_code` 取最后一段，要前一段的退出码就以 `echo EXIT=$?` 结尾。
 
 **start_process** — 面向**长驻**进程（服务器、watcher、守护进程）：`ready_pattern` 等启动输出，返回 `command_id` 交给进程工具组。
 
-**read_process_output** — 分页读受监管命令的输出：`offset` / `max_bytes`，`stream` 只读一路，`wait_ms`（最大 60000）阻塞等待**新**输出。
+**read_process_output** — 分页读受监管命令的输出：`offset` / `max_bytes`，`stream` 只读一路，`wait_ms`（最大 60000）阻塞等待**新**输出。默认 128 KiB/次，大输出传更大的 `max_bytes`，用 `next_offset` 翻页，`truncated` 告诉你还有没有。
 
 **interact_with_process** — 给进程送输入并返回**这次输入之后**产生的输出（不传 `offset` 就不必自己记游标；`wait_ms` 上限 60000，与 `read_process_output` 一致）。面向普通非 PTY 管道；完整终端会话请用 `open_shell`。
 
@@ -162,7 +162,6 @@ return { files: [...new Set(hits.items.map(i => i.path))] };
 - 组合调用是**真实的 Bridge 调用**：资源锁、审计日志、脱敏、会话状态与错误语义全部生效。
 - 失败时结果带 `phase` / `error_type` / `line` / `code_preview` / `hint`。预算：`timeout_ms` 默认 30000、最大 300000；`max_calls` 默认 60、最大 200。
 
-**get_diagnostics** / **lsp** — 仅在宿主带语言服务器时才公布（独立版没有编辑器，`tools/list` 里看不到这两个）。`lsp` 的 `operation`：`workspace_symbols`（需 `query`）· `document_symbols` · `definition` · `references` · `implementation` · `hover`（后五者需 `path` 与 1 基的 `line` / `column`）。`provider_state` 为 `"unknown"` 表示"没有"**没有被证明**，此时退回 `search_files`；`references` 可用 `include_declaration:false` 去掉声明本身。
 
 ---
 

@@ -6,7 +6,7 @@
  * lives in ./script-sandbox.js (mechanism, injectable, unit-tested); everything
  * that decides *what a script may touch* is the Bridge's existing answers —
  * the advertised catalog of this instance (`listToolDefinitions()`, so the
- * operator's toolProfile and the host's capabilities apply exactly as they do to
+ * operator's toolProfile applies exactly as it does to
  * a direct `tools/list`) and the dispatcher (`invoke`), so locks, audit logging,
  * redaction and error semantics are not re-implemented here.
  *

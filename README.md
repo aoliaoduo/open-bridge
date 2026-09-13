@@ -295,11 +295,10 @@ npm run dev -- serve --no-tunnel   # tsx 免编译直接跑
 - 稳定性：重连链可取消（不再无限重试）、拆除时序有防 ECONNRESET 处理、域名认领绝不靠猜
 - 可运维：`instances` / `logs` / `health` / `doctor`，以及 HTTP API 与 9 个页面的控制台（每页一个路径）
 
-刻意**不做**的三件事：
+刻意**不做**的两件事：
 
 - **运行时切换工作区**（扩展的 `switchWorkspace`）：改成"第二个目录 = 第二个实例"，比在跑着的实例里换根更干净
 - **把进程输出镜像进真实终端**（扩展的 `visible=true`）：独立进程弹系统窗口太打扰；输出一律走 `read_process_output` 按需读
-- **编辑器专属工具**（`lsp`、`get_diagnostics`）：依赖语言服务器，独立版没有就不假装有，`tools/list` 会自动过滤，直接调用会得到明确的降级说明
 
 ## License
 

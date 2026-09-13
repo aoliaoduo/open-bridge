@@ -16,7 +16,7 @@ function memoryHost(backing: Map<string, unknown>): Host {
       get: async (): Promise<string | undefined> => undefined,
       store: async (): Promise<void> => undefined,
     },
-    globalState: {
+    state: {
       get: <T>(key: string, fallback: T): T => (backing.has(key) ? (backing.get(key) as T) : fallback),
       update: async (key: string, value: unknown): Promise<void> => {
         backing.set(key, value);
@@ -29,7 +29,6 @@ function memoryHost(backing: Map<string, unknown>): Host {
     notify: (): void => undefined,
     log: (): void => undefined,
     ui: { update: (): void => undefined, refresh: (): void => undefined },
-    capabilities: { lsp: false },
   };
 }
 

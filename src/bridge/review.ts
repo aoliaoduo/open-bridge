@@ -13,13 +13,13 @@
  *   ref anchors the last shown state and advances after each review.
  *
  * Checkpoints are namespaced PER WORKSPACE FOLDER (refs carry a hash of the
- * workspace root): two windows on different subfolders of one repository no
+ * workspace root): two instances on different subfolders of one repository no
  * longer advance each other's baseline, and `git add -A` runs with the
  * WORKSPACE as cwd so a subfolder workspace never reports changes to files
  * outside it.
  *
- * Pure parsing helpers live in mcp/review-parse.ts (unit-testable without
- * vscode; this module is excluded from plain-node unit tests).
+ * Pure parsing helpers live in mcp/review-parse.ts (unit-testable in
+ * plain node; this module shells out to git, so it has no unit tests).
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";

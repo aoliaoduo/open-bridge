@@ -145,13 +145,9 @@ const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotations>> = {
   // guarantee: not read-only, possibly destructive, not idempotent.
   batch: { readOnlyHint: false, idempotentHint: false, openWorldHint: false },
 
-  // ---- Editor-only tools (filtered out unless the host ships a language server) ----
-  // Both are pure queries against a language server.
-  lsp: READ,
-  get_diagnostics: READ,
 };
 
-/** Hints for one tool, or `undefined` when it carries none (e.g. lsp). */
+/** Hints for one tool, or `undefined` when it carries none. */
 export function annotationsFor(name: string): ToolAnnotations | undefined {
   return TOOL_ANNOTATIONS[name];
 }

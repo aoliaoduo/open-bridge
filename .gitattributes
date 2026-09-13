@@ -1,0 +1,3 @@
+# Repo is LF; Windows checkouts convert text files to CRLF (core.autocrlf).
+* text=auto
+*.exe binary

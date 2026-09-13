@@ -17,8 +17,8 @@
  * still holding ports nobody could see.
  *
  * Hiding stays right when there is no console of ours to attach to (stdout and
- * stderr both redirected, or a GUI parent such as the legacy VS Code extension
- * host): without CREATE_NO_WINDOW the console subsystem would flash a window up.
+ * stderr both redirected, or a GUI parent with no console of its own):
+ * without CREATE_NO_WINDOW the console subsystem would flash a window up.
  */
 export function windowsHideForChild(hasConsole: boolean = processHasConsole()): boolean {
   return !hasConsole;

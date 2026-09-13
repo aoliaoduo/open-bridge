@@ -4,8 +4,8 @@
  * A Bridge that is serving through *someone else's* tunnel (role "follower") is
  * one process death away from being unreachable from the internet: the holder
  * disappears, ngrok's edge goes offline, and nothing tells the follower until it
- * looks. The reference point is a real incident — the holder (the VS Code
- * extension) was closed, this instance did reclaim the domain on its own
+ * looks. The reference point is a real incident — the holder (another
+ * instance) was closed, and this instance did reclaim the domain on its own
  * (bridge.log: "Public domain is free again; this window will claim it." 2 min
  * later), and those two minutes were pure downtime for every remote client.
  *

@@ -22,7 +22,7 @@ import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
 import {
   host as active,
   setHost,
-  type Host, type HostCapabilities, type UiChannel,
+  type Host, type UiChannel,
 } from "./host.js";
 
 /**
@@ -90,6 +90,18 @@ function coerce<T>(raw: unknown, fallback: T): T {
 }
 
 /**
+ * Defensive copy for store reads and writes. Without it every `get` handed
+ * out a live reference — into this.data for stored objects, or into the
+ * caller's fallback (often CONFIG_DEFAULTS itself) — so one consumer's
+ * push() quietly rewrote the store or the process-global defaults for
+ * everyone else. Scalars pass through untouched.
+ */
+function cloneJson<T>(value: T): T {
+  if (value === null || typeof value !== "object") return value;
+  return structuredClone(value);
+}
+
+/**
  * A JSON object store shared by every Bridge instance on this machine.
  *
  * One data dir is common to all instances, so a snapshot taken in the
@@ -126,7 +138,11 @@ class SharedJsonStore {
 
   protected async write(key: string, value: unknown): Promise<void> {
     this.reload();
-    this.data[key] = value;
+    // Snapshot the caller's value: the persist below runs later (inside the
+    // file lock), and without the copy a mutation between the call and the
+    // write would change what reached the disk.
+    const snapshot = cloneJson(value);
+    this.data[key] = snapshot;
     // Serialize on the tail but keep THIS caller's promise rejectable: the tail
     // itself swallows errors (so one failed write cannot poison later ones),
     // while the individual caller still learns its update did not land. The
@@ -142,7 +158,7 @@ class SharedJsonStore {
       const merged = {
         ...(onDisk && typeof onDisk === "object" ? onDisk : {}),
         ...this.data,
-        [key]: value,
+        [key]: snapshot,
       };
       const temp = `${this.file}.${process.pid}.tmp`;
       await fsp.writeFile(temp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
@@ -226,7 +242,7 @@ class FileConfig extends SharedJsonStore {
     this.reload();
     const declared = (CONFIG_DEFAULTS as Record<string, unknown>)[key];
     const base = declared === undefined ? fallback : coerce(declared, fallback);
-    return coerce(this.data[key], base);
+    return cloneJson(coerce(this.data[key], base));
   }
 
   async update(key: string, value: unknown): Promise<void> {
@@ -255,7 +271,7 @@ class FileStateStore extends SharedJsonStore {
   get<T>(key: string, fallback: T): T {
     this.reload();
     const raw = this.data[key];
-    return raw === undefined || raw === null ? fallback : (raw as T);
+    return raw === undefined || raw === null ? cloneJson(fallback) : cloneJson(raw as T);
   }
 
   async update(key: string, value: unknown): Promise<void> {
@@ -387,8 +403,6 @@ export class FileLog {
   }
 }
 
-const NODE_CAPABILITIES: HostCapabilities = { lsp: false };
-
 export interface NodeHost extends Host {
   readonly config: FileConfig;
   /** Change the active project root at runtime (project switch). */
@@ -436,7 +450,7 @@ export function installNodeHost(options: NodeHostOptions = {}): { host: NodeHost
   const installed: NodeHost = {
     config,
     secrets,
-    globalState: state,
+    state,
     storageDir: () => home,
     version: () => version,
     bundledRipgrep: () => rg,
@@ -446,7 +460,6 @@ export function installNodeHost(options: NodeHostOptions = {}): { host: NodeHost
     },
     log: line => { log.write(line); },
     ui,
-    capabilities: NODE_CAPABILITIES,
     setProjectRoot: (root: string) => {
       const resolved = path.resolve(root);
       if (resolved === projectRoot) return;

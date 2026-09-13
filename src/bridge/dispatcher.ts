@@ -29,7 +29,7 @@ import { runScript } from "./script-tools.js";
 import { buildArgsSummary } from "./args-summary.js";
 import { reviewChanges } from "./review.js";
 import {
-  getConfig, setConfigValue, getUsageStats, getDiagnostics, lsp,
+  getConfig, setConfigValue, getUsageStats,
   reportProgress, getTodos, workspaceBrief,
 } from "./meta-tools.js";
 import { sendToShell, closeShell } from "./shell-sessions.js";
@@ -102,8 +102,6 @@ const HANDLERS: Record<string, Handler> = {
   set_config_value: setConfigValue,
   activity_log: activityLogFamily,
   get_usage_stats: getUsageStats,
-  get_diagnostics: getDiagnostics,
-  lsp: lsp,
 
   // ---- orchestration -----------------------------------------------------
   batch: batchTool,

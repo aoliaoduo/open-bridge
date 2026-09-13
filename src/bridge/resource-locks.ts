@@ -20,7 +20,7 @@
  *    audit entry, and lets the original holder's release become a no-op.
  *  - Every wait has a deadline: a caller gets a clear error instead of hanging.
  *
- * Pure module: no vscode, no fs, no state import — safe to unit test directly.
+ * Pure module: no fs, no state import — safe to unit test directly.
  */
 
 export type LockMode = "read" | "write";
@@ -148,7 +148,7 @@ function attachHoldTimer(holder: Holder, tuning: LockTuning): void {
     tuning.onReclaim?.({ keys: holder.keys, label: holder.label, heldMs });
     releaseHolder(holder);
   }, timeout);
-  // Never keep the extension host (or a test runner) alive for a lock timer.
+  // Never keep the Bridge process (or a test runner) alive for a lock timer.
   holder.holdTimer.unref?.();
 }
 

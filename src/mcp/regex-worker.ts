@@ -4,8 +4,8 @@
  *
  * A pathological pattern (catastrophic backtracking, e.g. `(a+)+$`) can burn
  * CPU forever. Evaluating patterns in a worker thread with a hard timeout
- * means the worst case is a terminated worker — the extension host (and VS
- * Code) never freezes.
+ * means the worst case is a terminated worker — the Bridge process
+ * never freezes.
  *
  * - `matchLinesInWorker`: batch line matching for the search_files fallback.
  * - `testReadyPattern` / `validateReadyPattern`: single-shot readiness-pattern
@@ -125,8 +125,8 @@ export async function matchLinesInWorker(
 
 /**
  * Compile and evaluate a caller-provided readiness regular expression outside
- * the extension host. A pathological expression can consume a worker, but it
- * cannot freeze VS Code's extension process.
+ * a worker thread. A pathological expression can consume a worker, but it
+ * cannot freeze the Bridge process.
  */
 export async function testReadyPattern(
   pattern: string,

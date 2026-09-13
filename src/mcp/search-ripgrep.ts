@@ -137,6 +137,7 @@ export async function runRipgrep(opts: RipgrepOptions): Promise<{ matches: Searc
   };
 
   let pending = "";
+  let stderrText = "";
   // rg exit code 2 means "error occurred while searching" (e.g. unreadable
   // files): results collected so far are real but INCOMPLETE — surfaced as
   // `partial` instead of being silently treated as the full answer.
@@ -162,7 +163,10 @@ export async function runRipgrep(opts: RipgrepOptions): Promise<{ matches: Searc
         pending = pending.slice(idx + 1);
       }
     });
-    child.stderr.on("data", () => { /* diagnostics only; failure surfaces via close/error */ });
+    child.stderr.on("data", (chunk: unknown) => {
+      // Kept for the fatal-error path below (bounded: rg diagnostics are short).
+      if (stderrText.length < 2000) stderrText += String(chunk).slice(0, 2000 - stderrText.length);
+    });
     child.on("error", error => finish(error instanceof Error ? error : new Error(String(error))));
     child.on("close", code => {
       exitCode = code;
@@ -195,5 +199,12 @@ export async function runRipgrep(opts: RipgrepOptions): Promise<{ matches: Searc
   }
   // An intentional early stop at the cap hides whether rg would have exited 2;
   // only report `partial` for full runs.
+  if (!cappedEarly && exitCode === 2 && results.length === 0) {
+    // Exit 2 with nothing collected is never "no matches" (that is exit 1):
+    // the search itself failed — an invalid pattern, an unreadable tree —
+    // and answering [] would send the caller away believing the text is
+    // absent. rg's own stderr says what went wrong; surface it loudly.
+    throw new Error(`ripgrep failed: ${stderrText.trim() || "unknown error (exit code 2)"}`);
+  }
   return { matches: results, partial: !cappedEarly && exitCode === 2 };
 }

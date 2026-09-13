@@ -71,3 +71,17 @@ test("runRipgrep stops early at maxResults instead of scanning everything", asyn
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("runRipgrep throws loudly on an invalid pattern instead of answering empty", async () => {
+  if (!(await ripgrepAvailable("rg"))) return;
+  const dir = await mkdtemp(path.join(tmpdir(), "ob-rgbad-"));
+  try {
+    await writeFile(path.join(dir, "a.txt"), "hello\n", "utf8");
+    await assert.rejects(
+      runRipgrep({ query: "([", cwd: dir, regex: true, executable: "rg" }),
+      /ripgrep failed/,
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

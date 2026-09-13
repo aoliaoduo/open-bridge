@@ -1,7 +1,7 @@
 /**
  * Compact, redacted argument summaries for the audit log (T-1).
  *
- * Pure module with no vscode/bridge-state imports (same pattern as batch-plan.ts),
+ * Pure module with no bridge-state imports (same pattern as batch-plan.ts),
  * so the formatting rules stay unit-testable in plain node. The redactor is
  * injected by the caller (dispatcher passes state.redactSensitiveText); tests
  * pass a fake. Design decisions, kept as documented boundaries:

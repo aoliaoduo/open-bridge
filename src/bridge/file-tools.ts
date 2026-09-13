@@ -127,7 +127,7 @@ const EDIT_DIFF_MAX_CHARS = 16_000;
 /**
  * Whole-file hash budget for get_file_info: hashing needs the file in memory
  * (or a full read), so files beyond this cap report sha256:null instead of
- * risking an extension-host memory blow-up on a multi-GB target. 128 MiB is
+ * risking a Bridge-process memory blow-up on a multi-GB target. 128 MiB is
  * far beyond any real source file an edit guard needs to cover.
  */
 const GET_FILE_INFO_HASH_MAX_BYTES = 128 * 1024 * 1024;
@@ -144,7 +144,7 @@ const LIST_SKIP_DIRS = new Set([".git", "node_modules", "dist"]);
 /**
  * Whole-file reads of auto-detected binary / base64 content stay below this
  * cap; larger targets are served as a max_bytes-bounded head so a stray stat
- * of a multi-GB file can never balloon extension-host memory.
+ * of a multi-GB file can never balloon Bridge-process memory.
  */
 const WHOLE_BINARY_READ_CAP = 64 * 1024 * 1024;
 
@@ -378,7 +378,7 @@ export async function searchFiles(args: Args): Promise<unknown[]> {
   const singleRel = baseStat?.isFile() ? path.relative(root(), base).replace(/\\/g, "/") : undefined;
   const limit = Number.isFinite(Number(args.max_results)) ? Number(args.max_results) : DEFAULT_MAX_SEARCH_RESULTS;
   const offset = Math.max(0, Math.floor(Number(args.offset) || 0));
-  const useRegex = args.regex === true;
+  const useRegex = args.regex !== false;
   const contextLines = Math.min(Math.max(Number(args.context ?? 0) || 0, 0), 20);
   const includes: string[] = Array.isArray(args.include) ? args.include.map(String) : [];
   // include globs match paths RELATIVE TO THE SEARCH ROOT (ripgrep semantics:
@@ -425,7 +425,7 @@ export async function searchFiles(args: Args): Promise<unknown[]> {
 
   // Built-in fallback walk (also regex/glob/context aware). User regexes are
   // evaluated batch-wise inside an isolated worker, so catastrophic
-  // backtracking burns a worker instead of freezing the extension host; files
+  // backtracking burns a worker instead of freezing the Bridge process; files
   // are scanned as line streams instead of being read whole into memory.
   const batchMatcher: BatchMatcher = useRegex
     ? (lines: string[]) => matchLinesInWorker(needle, lines, SAFE_REGEX_BATCH_TIMEOUT_MS)
@@ -896,7 +896,7 @@ export async function getFileInfo(args: Args): Promise<unknown> {
   const stat = await fs.stat(file);
   const isDirectory = stat.isDirectory();
   // Hashing needs the file in memory; beyond the cap we report null instead of
-  // buffering a multi-GB file into the extension host (the outputSchema already
+  // buffering a multi-GB file into the Bridge process (the outputSchema already
   // allows sha256: null).
   const hash = isDirectory || stat.size > GET_FILE_INFO_HASH_MAX_BYTES
     ? null

@@ -315,8 +315,8 @@ export async function startTunnelInternal(generation: number): Promise<void> {
   if ((await probePublicBridge(domain, state.routeToken)) !== "free") {
     state.tunnelRole = "blocked";
     startPublicWatch(domain);
-    // The domain is held by another instance — on this machine that is usually
-    // the VS Code extension. Advertise ourselves FIRST: the adopt probe below
+    // The domain is already held by another instance on this machine.
+    // Advertise ourselves FIRST: the adopt probe below
     // can only succeed once the holder has a row to look our token up in, and
     // without this publish it always timed out into local-only even though the
     // running tunnel could have routed us the whole time.

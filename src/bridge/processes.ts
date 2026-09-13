@@ -111,7 +111,7 @@ export function spawnManaged(
   });
   // A child that exits (or closes its stdin) mid-write makes stdin emit
   // 'error'; without a listener that surfaces as an uncaught exception in the
-  // extension host instead of a normal process-exit path.
+  // Bridge process instead of a normal process-exit path.
   child.stdin.on("error", () => { /* the child is gone; the close handler reports it */ });
   const commandState: CommandState = {
     id,

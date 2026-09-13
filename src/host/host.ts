@@ -2,12 +2,12 @@
  * Host abstraction — the single seam between the core Bridge and its host.
  *
  * The core (src/bridge, src/http, src/mcp, ...) must never import a host API
- * directly (no `vscode`, no `node:fs` config file paths). Everything the host
+ * directly (no host-module imports, no `node:fs` config file paths). Everything the host
  * provides — configuration, secret storage, persisted state, notifications,
  * the UI push channel — flows through this interface, injected once at
  * startup via `setHost`. The standalone app wires a file-backed NodeHost; a
- * future desktop shell (Tauri/Electron) or the VS Code extension shell can
- * wire their own implementation without touching core.
+ * future desktop shell (Tauri/Electron) can wire its own implementation
+ * without touching core.
  */
 
 export type NotifyLevel = "info" | "warn" | "error";
@@ -26,7 +26,7 @@ export interface SecretStore {
 }
 
 /**
- * Synchronous-read key/value state (the globalState replacement). Reads come
+ * Synchronous-read key/value state. Reads come
  * from an in-memory cache hydrated at startup; writes are serialized to disk.
  */
 export interface StateStore {
@@ -42,16 +42,10 @@ export interface UiChannel {
   refresh(): void;
 }
 
-/** Optional capabilities a host may or may not provide. */
-export interface HostCapabilities {
-  /** LSP queries & editor diagnostics only exist inside an editor host. */
-  readonly lsp: boolean;
-}
-
 export interface Host {
   readonly config: ConfigSource;
   readonly secrets: SecretStore;
-  readonly globalState: StateStore;
+  readonly state: StateStore;
   /** Persistent data directory (audit log, peers registry, service logs). */
   storageDir(): string;
   /** Server version reported in MCP handshake metadata. */
@@ -61,10 +55,9 @@ export interface Host {
   /** The active project root anchor for relative paths and command cwd. */
   projectRoot(): string;
   notify(level: NotifyLevel, message: string): void;
-  /** Append one line to the activity log surface (output channel equivalent). */
+  /** Append one line to the activity log surface. */
   log(line: string): void;
   readonly ui: UiChannel;
-  readonly capabilities: HostCapabilities;
 }
 
 let active: Host | undefined;

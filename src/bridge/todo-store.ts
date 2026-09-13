@@ -52,7 +52,7 @@ function currentSessionId(): string | undefined {
 /**
  * Serialized read-merge-write persistence. Both persistTodos and persistProgress
  * write the SAME per-workspace document; reading at call time and deferring the
- * globalState.update let two calls queued in the same tick (e.g. a parallel
+ * state.update let two calls queued in the same tick (e.g. a parallel
  * batch of set_todos + report_progress) clobber each other's fields with stale
  * values. Reading inside the serialized tail makes every write merge with the
  * latest persisted state instead.
@@ -62,7 +62,7 @@ function enqueueTodoWrite(build: (current: TodoStoreSnapshot) => TodoStoreSnapsh
   persistTail = persistTail
     .then(async () => {
       const current = loadRawStore(key);
-      await host().globalState.update(key, build(current));
+      await host().state.update(key, build(current));
     })
     .catch(() => undefined);
 }
@@ -109,7 +109,7 @@ function loadRawStore(key?: string): TodoStoreSnapshot {
     updatedAt: new Date().toISOString(),
   };
   try {
-    const stored = host().globalState.get<TodoStoreSnapshot | null>(k, null);
+    const stored = host().state.get<TodoStoreSnapshot | null>(k, null);
     if (!stored || typeof stored !== "object" || stored === null) return defaultSnapshot;
     return {
       todos: Array.isArray(stored.todos) ? stored.todos : [],
