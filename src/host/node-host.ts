@@ -16,6 +16,7 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
 import {
@@ -160,9 +161,19 @@ class SharedJsonStore {
    * own existence is the lock. A crashed writer must not wedge the data dir
    * forever, hence the staleness check; contention is a few milliseconds of
    * jittered backoff because writers here are short-lived.
+   *
+   * The lock file records WHO holds it, and only that holder may delete it.
+   * Without an owner, a reclaimer that took over a stale lock could have its
+   * own lock removed by the previous holder's `finally` — the one that stalled
+   * (laptop resume, antivirus scan, debugger), resumed, and unconditionally
+   * unlinked. A third writer was then free to hold the lock at the same time as
+   * the second, both read-merge-wrote, and the later rename silently dropped the
+   * other's key — which is the "a second instance ate the first's route token"
+   * failure this class exists to prevent.
    */
   private async withFileLock<T>(body: () => Promise<T>): Promise<T> {
     const lock = `${this.file}.lock`;
+    const owner = randomBytes(16).toString("hex");
     for (let attempt = 0; attempt < 60; attempt += 1) {
       let handle: Awaited<ReturnType<typeof fsp.open>>;
       try {
@@ -179,11 +190,20 @@ class SharedJsonStore {
         await new Promise(resolve => setTimeout(resolve, 15 + Math.random() * 35));
         continue;
       }
+      // Recorded while holding the lock, so a reclaimer that takes over from
+      // here sees a different token and the original holder leaves it alone.
+      await handle.writeFile(owner, "utf8").catch(() => undefined);
       try {
         return await body();
       } finally {
         await handle.close().catch(() => undefined);
-        await fsp.rm(lock, { force: true }).catch(() => undefined);
+        let currentOwner: string | undefined;
+        try {
+          currentOwner = await fsp.readFile(lock, "utf8");
+        } catch { /* already reclaimed, or unreadable: never delete on a guess */ }
+        if (currentOwner === owner) {
+          await fsp.rm(lock, { force: true }).catch(() => undefined);
+        }
       }
     }
     // Exhausting every attempt means the update did NOT land. Throwing (not

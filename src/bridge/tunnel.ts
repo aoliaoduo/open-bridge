@@ -149,11 +149,6 @@ async function waitForPublicHealth(url: string, abort?: AbortSignal): Promise<vo
   throw new Error(`Public health check failed after ${timeoutMs} ms: ${last}`);
 }
 
-/**
- * Reconnect the tunnel WITHOUT tearing down the local server: all MCP sessions,
- * todo state and managed processes survive a tunnel crash. A generation guard
- * invalidates timers left behind by a stop/restart that happened in between.
- */
 /** Cancels a pending reconnect: the last failure was not one retrying can heal. */
 function stopReconnectChain(): void {
   if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
@@ -161,6 +156,11 @@ function stopReconnectChain(): void {
   state.reconnectAttempt = 0;
 }
 
+/**
+ * Reconnect the tunnel WITHOUT tearing down the local server: all MCP sessions,
+ * todo state and managed processes survive a tunnel crash. A generation guard
+ * invalidates timers left behind by a stop/restart that happened in between.
+ */
 function scheduleReconnect(domain: string, generation: number): void {
   if (state.stopping || generation !== state.tunnelGeneration) return;
   if (!state.server) return; // local side is gone; a reconnect has nothing to attach to

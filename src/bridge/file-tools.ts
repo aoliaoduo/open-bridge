@@ -4,8 +4,8 @@ import * as fsSync from "node:fs";
 import * as path from "node:path";
 import { assertExpectedHash, sha256 } from "../workspace/file-version.js";
 import { createHash, randomBytes } from "node:crypto";
-import { detectEol, toLf } from "../workspace/eol.js";
-import { ensureWritableBufferTarget, persistText } from "../workspace/persist.js";
+import { applyEol, detectEol, toLf } from "../workspace/eol.js";
+import { persistText, writeFileAtomic } from "../workspace/persist.js";
 import { applyPatch as applyPatchFile, resolvePatchSource } from "../mcp/patch.js";
 import { streamReadLines, truncateToUtf8Bytes } from "../mcp/stream-read.js";
 import { findFuzzyMatch, formatFuzzyDiagnostics } from "../mcp/fuzzy-match.js";
@@ -253,22 +253,6 @@ function resolveRipgrepExecutable(): string {
     }
   }
   return resolvedRipgrep;
-}
-
-/**
- * Same-directory temp file + rename: an interrupted (or concurrent-reader)
- * in-place write used to leave a torn/truncated target behind, while the
- * rename is atomic on every supported platform and replaces the target.
- */
-async function writeAtomic(file: string, data: Buffer | string): Promise<void> {
-  const temp = `${file}.${process.pid}.tmp`;
-  try {
-    await fs.writeFile(temp, data);
-    await fs.rename(temp, file);
-  } catch (error) {
-    await fs.rm(temp, { force: true }).catch(() => undefined);
-    throw error;
-  }
 }
 
 /**
@@ -644,11 +628,8 @@ export async function writeFile(args: Args): Promise<unknown> {
     }
     await fs.mkdir(path.dirname(file), { recursive: true });
     await rejectSymlink(path.dirname(file));
-    // Binary payloads cannot round-trip through WorkspaceEdit (persistText would
-    // re-encode as UTF-8), so the dirty-editor rule is enforced directly.
-    await ensureWritableBufferTarget(file, args.allow_dirty === true);
     if (args.mode === "append" && previousBuf !== null) await fs.appendFile(file, buf);
-    else await writeAtomic(file, buf);
+    else await writeFileAtomic(file, buf);
     const finalBuf = args.mode === "append" && previousBuf !== null
       ? Buffer.concat([previousBuf, buf])
       : buf;
@@ -673,10 +654,7 @@ export async function writeFile(args: Args): Promise<unknown> {
       const previous = previousBuf === null ? "" : previousBuf.toString("utf8");
       assertExpectedHash(previous, args.expected_sha256, String(args.path));
     }
-    // Same dirty-buffer guard the base64 branch and persistText enforce: an
-    // append must not land on disk behind an editor buffer with unsaved human
-    // changes (the human's later save would silently drop the appended bytes).
-    await ensureWritableBufferTarget(file, args.allow_dirty === true);
+    // Same stale-write guard the base64 branch enforces before appending.
     await fs.appendFile(file, content);
     // Constant-memory hash of the appended file (streamed, so appending to a
     // large log never buffers the whole file just to report a sha256).
@@ -698,7 +676,7 @@ export async function writeFile(args: Args): Promise<unknown> {
     const previousBuf = await readFileOrAbsent(file);
     assertExpectedHash(previousBuf === null ? "" : previousBuf.toString("utf8"), args.expected_sha256, String(args.path));
   }
-  await persistText(file, content, { allowDirty: args.allow_dirty === true });
+  await persistText(file, content);
   return {
     path: String(args.path),
     bytes: Buffer.byteLength(content, "utf8"),
@@ -752,7 +730,6 @@ export async function editBlock(args: Args): Promise<unknown> {
     // All hunks apply in memory first and are persisted once, so a mismatched
     // hunk leaves the file untouched (atomic).
     const eol = detectEol(raw);
-    const toNative = (text: string): string => (eol === "\r\n" ? toLf(text).replace(/\n/g, "\r\n") : toLf(text));
     let content = raw;
     let replacements = 0;
     for (let i = 0; i < edits.length; i++) {
@@ -762,16 +739,16 @@ export async function editBlock(args: Args): Promise<unknown> {
         throw new Error(`edits[${i}].old_text must be a non-empty string. (expected 'edits[i].old_text': string)`);
       }
       const newText = String(item.new_text ?? "");
-      const needle = toNative(oldText);
+      const needle = applyEol(oldText, eol);
       const occurrences = content.split(needle).length - 1;
       if (occurrences !== 1) {
         if (occurrences === 0) throw zeroMatchError(toLf(content), toLf(oldText), String(args.path), `edits[${i}]`, 1);
         throw new Error(`edits[${i}]: expected 1 replacement, found ${occurrences}.`);
       }
-      content = content.replace(needle, () => toNative(newText));
+      content = content.replace(needle, () => applyEol(newText, eol));
       replacements += 1;
     }
-    await persistText(file, content, { allowDirty: args.allow_dirty === true });
+    await persistText(file, content);
     const diffRaw = unifiedDiff(raw, content);
     const diff = diffRaw ? boundedText(diffRaw, EDIT_DIFF_MAX_CHARS).text : undefined;
     return { path: String(args.path), replacements, sha256: sha256(content), applied_edits: edits.length, ...(diff ? { diff } : {}) };
@@ -785,9 +762,8 @@ export async function editBlock(args: Args): Promise<unknown> {
   // file's dominant EOL and replaced in place, so bytes outside the edited
   // spans (including mixed line endings elsewhere in the file) stay untouched.
   const eol = detectEol(raw);
-  const toNative = (text: string): string => (eol === "\r\n" ? toLf(text).replace(/\n/g, "\r\n") : toLf(text));
-  const needle = toNative(oldText);
-  const replacement = toNative(newText);
+  const needle = applyEol(oldText, eol);
+  const replacement = applyEol(newText, eol);
   const occurrences = raw.split(needle).length - 1;
   // replace_all means "every occurrence". It used to be read only inside the
   // error message below, so a multi-occurrence replace_all always failed with
@@ -821,7 +797,7 @@ export async function editBlock(args: Args): Promise<unknown> {
   // expected count in both single and replace_all mode.
   const next = occurrences === 0 ? raw : raw.split(needle).join(replacement);
   const count = occurrences;
-  await persistText(file, next, { allowDirty: args.allow_dirty === true });
+  await persistText(file, next);
   const diffRaw = unifiedDiff(raw, next);
   const diff = diffRaw ? boundedText(diffRaw, EDIT_DIFF_MAX_CHARS).text : undefined;
   return { path: String(args.path), replacements: count, sha256: sha256(next), ...(diff ? { diff } : {}) };
@@ -943,6 +919,6 @@ export async function applyPatchTool(args: Args): Promise<unknown> {
   const patchText =
     source.kind === "inline" ? source.content : await fs.readFile(await securePath(source.path), "utf8");
   const { changed, changes } = await applyPatchFile(patchText, workspaceContext, hashes,
-    (f, c) => persistText(f, c, { allowDirty: args.allow_dirty === true }));
+    (f, c) => persistText(f, c));
   return { applied: true, files: changed, changes };
 }

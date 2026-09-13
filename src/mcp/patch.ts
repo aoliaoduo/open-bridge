@@ -38,9 +38,29 @@ export function resolvePatchSource(patch: unknown, patchFile: unknown): PatchSou
   return patchText !== undefined ? { kind: "inline", content: patchText } : { kind: "file", path: filePath! };
 }
 
-/** Strip diff a//b/ prefixes and reject invalid target paths. */
-function patchFilePath(header: string): string {
-  const clean = header.trim().replace(/^a[\\/]/, "").replace(/^b[\\/]/, "");
+/**
+ * Resolve a file path out of a patch header.
+ *
+ * Two syntaxes reach this, and they mean different things by `a/` and `b/`:
+ *
+ *  - **Classic unified diff** (`--- a/<path>` / `+++ b/<path>`). Here the prefix
+ *    is diff metadata — it says which side of the hunk the path came from — so
+ *    exactly ONE must be stripped. Chaining two replaces stripped both, so
+ *    `--- a/b/index.ts` lost its real `b/` directory and the patch rewrote or
+ *    deleted the wrong file, which is not recoverable.
+ *  - **ShunCode block headers** (`*** Update File: <path>`, the form `docs/`
+ *    tells clients to send). Here the path is literal and no prefix is added, so
+ *    stripping one was itself the bug: in a repo with a top-level `b/`
+ *    directory, `*** Delete File: b/gone.txt` deleted `gone.txt`.
+ *
+ * Hence the mode. A block header naming a top-level `a/` or `b/` path now
+ * resolves to that file; the cost is that a block header spelling a diff-style
+ * `b/<path>` no longer reaches `<path>`, which is not a form the block grammar
+ * produces.
+ */
+function patchFilePath(header: string, mode: "block" | "diff"): string {
+  const trimmed = header.trim();
+  const clean = mode === "diff" ? trimmed.replace(/^[ab][\\/]/, "") : trimmed;
   if (!clean || clean === "/dev/null") throw new Error("Patch contains an invalid file path.");
   return clean;
 }
@@ -78,7 +98,7 @@ export async function patchTargetPaths(
   for (const header of headers) {
     let relative: string;
     try {
-      relative = patchFilePath(header);
+      relative = patchFilePath(header, "diff");
     } catch {
       continue;
     }
@@ -435,7 +455,7 @@ export async function applyPatch(
       // which is the one failure mode a patch applier must not have.
       const kind = block[1]! as "Update" | "Add" | "Delete";
       const relative = block[2]!.trim();
-      const file = await workspace.resolveSecure(patchFilePath(relative), kind !== "Update");
+      const file = await workspace.resolveSecure(patchFilePath(relative, "block"), kind !== "Update");
       // `nextBlock` is undefined exactly when this is the last block, which is
       // what the old `i + 1 < blocks.length` test spelled out longhand.
       const body = sliceBlockBody(normalized, block, nextBlock ? nextBlock.index! : normalized.length);
@@ -496,7 +516,7 @@ export async function applyPatch(
       // already makes — no path is ever defaulted to "".
       const plusPath = header[2]!.split(/\s+/)[0]!;
       const isDeletion = plusPath === "/dev/null";
-      const relative = patchFilePath(isDeletion ? header[1]!.split(/\s+/)[0]! : plusPath);
+      const relative = patchFilePath(isDeletion ? header[1]!.split(/\s+/)[0]! : plusPath, "diff");
       const file = await workspace.resolveSecure(relative, isDeletion);
       const body = normalized.slice(
         header.index! + header[0]!.length,
@@ -554,24 +574,39 @@ export async function applyPatch(
   }
   // Apply, rolling back on failure: a crash partway (locked file, disk full)
   // used to leave a half-applied patch with no record of what landed. Files
-  // this patch created are removed again; pre-existing files get their
-  // original content back (writeText is atomic per file, so restores are too).
+  // this patch created are removed again; pre-existing files get their original
+  // content back (writeText is atomic per file, so restores are too).
+  //
+  // "Existed before" is decided by the file's FIRST operation, never its last.
+  // The blocks allow a legal `*** Add File: x` followed by `*** Update File: x`,
+  // and collapsing to one final action per file made that chain look like an
+  // update — so the rollback wrote "" into a file the patch itself had created
+  // instead of removing it, leaving an empty file behind as the "restored" state.
   const filesExistedBefore = new Set<string>();
-  for (const operation of finalActions.values()) {
-    if (operation.kind !== "add") filesExistedBefore.add(operation.file);
+  {
+    const seen = new Set<string>();
+    for (const operation of operations) {
+      if (seen.has(operation.file)) continue;
+      seen.add(operation.file);
+      if (operation.kind !== "add") filesExistedBefore.add(operation.file);
+    }
   }
-  const written: string[] = [];
+  const applied: string[] = [];
   try {
     for (const operation of finalActions.values()) {
       if (operation.kind === "delete") {
         await fs.unlink(operation.file);
       } else {
         await writeText(operation.file, operation.content ?? "");
-        written.push(operation.file);
       }
+      // Recorded for BOTH kinds. A deletion is a content change like any other,
+      // and skipping it here is what made the rollback claim to have restored
+      // "the files it had already written" while the file it had already
+      // DELETED stayed gone — even though originalContent held its bytes.
+      applied.push(operation.file);
     }
   } catch (error) {
-    for (const file of written) {
+    for (const file of applied) {
       try {
         if (filesExistedBefore.has(file) && originalContent.has(file)) {
           await fs.writeFile(file, originalContent.get(file) ?? "", "utf8");
@@ -581,7 +616,8 @@ export async function applyPatch(
       } catch { /* best-effort rollback; the primary error is rethrown below */ }
     }
     throw new Error(
-      `Patch aborted partway; the files it had already written were restored. `
+      `Patch aborted partway; the files it had already changed were restored `
+      + `(deleted files recreated, created files removed). `
       + `Cause: ${error instanceof Error ? error.message : String(error)}`,
     );
   }

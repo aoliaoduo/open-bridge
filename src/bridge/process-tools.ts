@@ -26,6 +26,7 @@ import {
   outputRead,
   shellSpec,
   requireRestartKnob,
+  stringEnv,
 } from "./processes.js";
 import type { JsonArgs } from "./json-args.js";
 
@@ -99,12 +100,6 @@ export function clampMs(value: unknown, fallback: number): number {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
-function stringEnv(args: Args): Record<string, string> {
-  return args.env && typeof args.env === "object" && !Array.isArray(args.env)
-    ? (Object.fromEntries(Object.entries(args.env).filter(([, value]) => typeof value === "string")) as Record<string, string>)
-    : {};
-}
-
 export async function runOrStartProcess(args: Args, name: string): Promise<unknown> {
   const commandText = typeof args.command === "string" ? args.command.trim() : "";
   if (!commandText) throw new Error("command is required and must be a non-empty string. (expected 'command': string)");
@@ -114,7 +109,7 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
   const cwd = workspacePath(args.cwd);
   const id = randomBytes(8).toString("hex");
   const customEnv = stringEnv(args);
-  const commandState = spawnManaged(commandText, cwd, customEnv, id, 0, undefined, { visible: args.visible === true });
+  const commandState = spawnManaged(commandText, cwd, customEnv, id, 0, undefined);
   state.commands.set(id, commandState);
   // Give the spawn a beat to succeed or fail so a missing shell / bad cwd is
   // reported right away instead of as a phantom "running" process.
@@ -316,6 +311,15 @@ export async function restartProcess(args: Args): Promise<Record<string, unknown
   // Capture the policy BEFORE termination: terminateProcess flips autoRestart
   // off and marks requestedStop, neither of which may leak into the fresh spawn.
   const policy = { autoRestart: s.autoRestart, maxRestarts: s.maxRestarts, restartDelayMs: s.restartDelayMs };
+  // Capture the resource lease for the same reason. terminateProcess releases it
+  // (the process that owned it is gone), and `spawnManaged` returns a FRESH
+  // CommandState with no handle, so without this transfer a restart silently
+  // gives the reservation up: a second `start_process` declaring the same
+  // `resource_keys` was granted immediately and two servers could bind the same
+  // port — the exact double-claim the feature exists to prevent. The
+  // auto-restart path already carries the handle across (see processes.ts).
+  const carriedLocks = s.releaseResourceLocks;
+  s.releaseResourceLocks = undefined;
   // Always run the record through terminateProcess — even when it already
   // exited — because that is what cancels a pending auto-restart timer. A
   // crashed command with autoRestart waiting out restartDelayMs would
@@ -323,7 +327,8 @@ export async function restartProcess(args: Args): Promise<Record<string, unknown
   await terminateProcess(s, "stopped");
   const delay = clampMs(args.delay_ms, 0);
   if (delay) await new Promise(resolve => setTimeout(resolve, delay));
-  const replacement = spawnManaged(s.command, s.cwd, s.env, s.id, s.restartCount + 1, policy, { visible: s.visibleTerminal === true });
+  const replacement = spawnManaged(s.command, s.cwd, s.env, s.id, s.restartCount + 1, policy);
+  replacement.releaseResourceLocks = carriedLocks;
   state.commands.set(s.id, replacement);
   return {
     command_id: s.id, restarted: true,
@@ -428,8 +433,9 @@ export function setTodos(args: Args, session?: SessionState): unknown[] {
 
 /**
  * Strict todo validation for the set_todos write path: malformed input is
- * rejected with a message the caller can fix. Reads are deliberately lenient
- * instead — a malformed stored entry is dropped, not the whole list.
+ * rejected with a message the caller can fix. Reads are passed through instead —
+ * `loadTodoStore` replaces a non-array `todos` with `[]` and then hands every
+ * entry on untouched, so there is no entry-dropping reader to look for.
  */
 function validateTodos(value: unknown): Array<{ id: string; title: string; status: string }> {
   if (!Array.isArray(value)) throw new Error("todos must be an array. (expected 'todos': object[])");

@@ -53,7 +53,14 @@ export interface LockPlan {
 
 /** Tools that mutate a single named file. */
 const SINGLE_PATH_WRITE = new Set(["write_file"]);
-/** Tools that read a named file's contents. */
+/**
+ * Tools that read one named path's METADATA (mtime/size/sha256), not contents.
+ *
+ * It still takes a shared lock, and that is the point: hashing a large file is a
+ * long read, and a concurrent `write_file` on the same path must not land in the
+ * middle of it. Do not "fix" this entry to match the module doc's
+ * "neither mutate nor return file contents" wording by removing the lock.
+ */
 const SINGLE_PATH_READ = new Set(["get_file_info"]);
 /** Process lifecycle mutations, keyed by command id. */
 const COMMAND_LIFECYCLE = new Set(["set_process_policy"]);

@@ -142,6 +142,40 @@ test("a wait deadline turns a stuck holder into a clear error", async () => {
   held();
 });
 
+test("a timed-out writer's removal wakes the reader queued behind it", async () => {
+  // Writer priority keeps a reader queued behind an earlier conflicting writer,
+  // even when the reader's own key is free. So when that writer's deadline
+  // fires, its removal UNBLOCKS the reader — and the wait-timer path used to
+  // splice the writer out without pumping. The reader then stayed queued
+  // against a key nobody held and was rejected with "another tool call is still
+  // holding it" after its own full deadline, with the key demonstrably free.
+  const held = await acquireLocks({ keys: ["file:a"], mode: "write", label: "holder" }, FAST);
+
+  // The writer must be queued BEFORE the reader asks, otherwise the reader takes
+  // the conflict-free fast path and never waits behind it.
+  const writer = acquireLocks({ keys: ["file:a", "file:b"], mode: "write", label: "writer" }, { ...FAST, waitTimeoutMs: 60 });
+  const writerRejected = assert.rejects(writer, /Timed out/);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(lockSnapshot().waiting.map(entry => entry.label), ["writer"], "the writer is queued first");
+
+  // A reader on file:b only: grantable throughout, but blocked by that writer.
+  // Its deadline is comfortably later than the writer's, so a reader that is
+  // not woken by the timeout has time to be granted before this asserts.
+  let granted = false;
+  const reader = acquireLocks({ keys: ["file:b"], mode: "read", label: "reader" }, { ...FAST, waitTimeoutMs: 400 })
+    .then(release => { granted = true; return release; });
+
+  await whileLoopRuns(async () => {
+    await writerRejected;
+    for (let i = 0; i < 30 && !granted; i += 1) await new Promise(resolve => setTimeout(resolve, 10));
+  });
+
+  assert.equal(granted, true, "the reader was granted as soon as the writer left the queue");
+  assert.equal(lockSnapshot().waiting.some(entry => entry.label === "reader"), false);
+  (await reader)();
+  held();
+});
+
 test("the hold timeout reclaims an overrun lock and reports it", async () => {
   const reclaims: Array<{ keys: string[]; label: string }> = [];
   const release = await acquireLocks(

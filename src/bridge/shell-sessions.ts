@@ -283,7 +283,9 @@ async function sendToShellInner(args: Args): Promise<Record<string, unknown>> {
     throw new Error(`Shell "${name}" can no longer accept input (stdin closed). Reopen it with open_shell.`);
   }
   // Append the sentinel: bash prints the marker with the previous command's exit code.
-  // A trap-free, profile-safe approach using `;` so it runs even if the command backgrounds/fails.
+  // Newline-separated, NOT `;`-joined: a trailing `# comment` or a backgrounded
+  // `cmd &` would swallow or break a `;`-appended echo, so the sentinel would
+  // never print and the caller would burn the whole timeout.
   const wrapped = `${input}\necho "${marker}=$?"\n`;
   try {
     stdin.write(wrapped);

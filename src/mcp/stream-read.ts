@@ -17,6 +17,16 @@ import { createHash } from "node:crypto";
 /** Bytes past an end_line stop that are still streamed (small tail ⇒ whole-file hash). */
 const END_LINE_HASH_TAIL_BYTES = 8 * 1024 * 1024;
 
+/**
+ * How many bytes past the caller's budget a newline-less line may grow before it
+ * is decided. A line with no terminator has no natural bound, so without this
+ * the whole file was resident before the budget could truncate it.
+ *
+ * Sized like the ready-pattern window: far more than any returnable prefix needs,
+ * far less than a file that would be a problem to hold.
+ */
+const PENDING_OVERFLOW_BYTES = 64 * 1024;
+
 export interface StreamReadOptions {
   /** 1-based inclusive first line to return (default 1). */
   startLine?: number;
@@ -161,6 +171,12 @@ export function streamReadLines(
      * 2 GB log" read must not become a full-file scan just for a hash).
      */
     let stoppedByEndLine = false;
+    /**
+     * True while the tail of an over-long line the range does not want is being
+     * flushed. Its line NUMBER was counted when the prefix was dropped, so the
+     * newline that ends it must not count a second time.
+     */
+    let discardingLineTail = false;
     let consumedBytes = 0;
     let binary = false;
 
@@ -175,7 +191,19 @@ export function streamReadLines(
       rejectP(err);
     };
 
-    const handleLine = (lineBuf: Buffer): void => {
+    /**
+     * Account for one line.
+     *
+     * `overflow` means the line was longer than this reader was willing to
+     * buffer and has been cut to a returnable prefix: the bytes on the far side
+     * of that cut are deliberately never read, so parsing must stop here. It is
+     * an explicit parameter because the in-range budget branch below only infers
+     * "stop" from its own byte comparison, and a line already trimmed to fit no
+     * longer trips that comparison — that inference is exactly how an over-long
+     * single-line file ended up being scanned to EOF with every following line
+     * appended to the answer.
+     */
+    const handleLine = (lineBuf: Buffer, overflow = false): void => {
       if (lineBuf.includes(0)) { binary = true; throw new BinaryFileError(); }
       lineNo += 1;
       const inRange = lineNo >= start && (end === null || lineNo <= end);
@@ -218,6 +246,12 @@ export function streamReadLines(
           returnedCount += 1;
         }
       }
+      if (overflow) {
+        // The rest of this line was never read, so nothing after it can be
+        // reported: stop collecting and stop scanning.
+        stoppedEarly = true;
+        return;
+      }
       if (end !== null && lineNo >= end) {
         stoppedEarly = true;
         // Stream on to EOF only when the un-read tail is small: the common
@@ -238,11 +272,53 @@ export function streamReadLines(
         while ((nl = pending.indexOf(0x0a)) !== -1) {
           const lineBuf = pending.subarray(0, nl + 1);   // include the "\n" (and any preceding "\r")
           pending = pending.subarray(nl + 1);
+          if (discardingLineTail) {
+            // This newline ends the over-long line whose prefix was dropped. The
+            // line is counted HERE, because the prefix never reached handleLine.
+            // A single chunk can legitimately contain the run's tail AND several
+            // following lines, so only one line may be consumed — treating the
+            // whole buffer as that tail skipped the very lines the caller asked
+            // for, which is why this consumes up to the first newline and loops.
+            discardingLineTail = false;
+            lineNo += 1;
+            if (end !== null && lineNo >= end) {
+              stoppedEarly = true;
+              break;
+            }
+            continue;
+          }
           handleLine(lineBuf);
           if (binary) { stream.destroy(); return; }
           // A byte-budget stop needs no more bytes; a small-remainder end_line
           // stop keeps streaming so the whole-file hash can still be reported.
           if (stoppedEarly && !stoppedByEndLine) { stream.destroy(); return; }
+        }
+        // No newline in what we have, and more bytes than any answer could need.
+        //
+        // The budget and `utf8SafePrefix` only ever ran from inside handleLine,
+        // i.e. only once a WHOLE line had been buffered — so a file whose line
+        // has no newline at all was accumulated in full before being truncated.
+        // Measured: a 64 MiB single-line file read with max_bytes=1024 answered
+        // correctly but grew RSS by ~137 MiB. With the shipped 512 KiB default,
+        // a 500 MiB minified bundle or one giant JSONL record cost 500 MiB per
+        // path in `paths`, contradicting this module's promise of
+        // O(requested range) memory for a small range in a huge file.
+        //
+        // One line can be longer than any answer, so no newline is coming soon.
+        if (pending.length > maxBytes + PENDING_OVERFLOW_BYTES) {
+          if (lineNo + 1 < start) {
+            // Ahead of the range: keep only the stream position, so the line
+            // counts exactly once — when the newline bytes that follow are seen
+            // if they were already read, or when the next chunk supplies them.
+            pending = Buffer.alloc(0);
+            discardingLineTail = true;
+            return;
+          }
+          // Wanted, or the range is open-ended: keep the returnable prefix and
+          // stop. Bytes past it are never decoded.
+          stopOverlongLine();
+          stream.destroy();
+          return;
         }
       } catch (e) {
         if (e instanceof BinaryFileError) { binary = true; stream.destroy(); return; }
@@ -250,6 +326,19 @@ export function streamReadLines(
         fail(e);
       }
     });
+
+    /**
+     * Finish an over-long line that has no newline to delimit it.
+     *
+     * The bytes handed to handleLine stop at the last returnable character
+     * boundary, so a multibyte character is never split; the remaining bytes of
+     * that line are never decoded at all.
+     */
+    const stopOverlongLine = (): void => {
+      const keep = utf8SafePrefix(pending, Math.min(pending.length, maxBytes));
+      pending = keep;
+      handleLine(keep, true);
+    };
 
     const finalize = (): void => {
       if (binary) { fail(new BinaryFileError()); return; }

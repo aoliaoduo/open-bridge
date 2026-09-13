@@ -37,6 +37,11 @@
  *    type the route token into a browser on a machine with a screen recorder.
  *
  * Brute force is bounded by the same failure limiter the bearer gate uses.
+ *
+ * **The route token must never be published.** It is the consent credential, so
+ * anywhere it is disclosed is an authorization bypass, not just an information
+ * leak: the discovery document used to carry it inside `resource`, and that
+ * document is unauthenticated by RFC 9728. See `oauthResource()`.
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -51,7 +56,6 @@ import {
   consumeRefreshToken,
   findClient,
   generateOAuthSecret,
-  hashOAuthSecret,
   listClients,
   oauthStatus,
   registerClient,
@@ -71,7 +75,7 @@ import {
   resourceMatches,
   verifyPkceS256,
 } from "./oauth-protocol.js";
-import { AuthFailureLimiter, digestEquals } from "./auth-core.js";
+import { AuthFailureLimiter, digestEquals, hashSecret, remoteKeyOf } from "./auth-core.js";
 
 /** Path prefix for the endpoints this module owns. */
 const OAUTH_PREFIX = "/oauth/";
@@ -116,9 +120,39 @@ function oauthIssuer(): string {
   return state.port ? `http://127.0.0.1:${state.port}` : `http://127.0.0.1`;
 }
 
-/** The `resource` value this Bridge expects a token to be bound to. */
+/**
+ * The `resource` value this Bridge expects a token to be bound to.
+ *
+ * Deliberately NOT `${issuer}/mcp/${state.routeToken}` any more. That value is
+ * served by `/.well-known/oauth-protected-resource`, which is public by design
+ * (RFC 9728: a client must find the authorization server before it has a
+ * credential) — and the route token is the same secret this Bridge redacts out
+ * of every log line and that `ownerCredential()` accepts as the consent
+ * password. Publishing it handed any remote caller the token AND the approval
+ * credential in one unauthenticated GET, from which the full authorize → code →
+ * token → run_command chain followed.
+ *
+ * The token does not belong here anyway: the identifier RFC 8707 binds a token
+ * to is the protected resource, and the route token is a path segment of the
+ * endpoint, not the resource. Clients still reach `/mcp/<token>` because the
+ * operator pastes that URL into the client — the discovery documents are not
+ * where the endpoint is learned from.
+ */
 function oauthResource(): string {
-  return `${oauthIssuer()}/mcp/${state.routeToken}`;
+  return `${oauthIssuer()}/mcp`;
+}
+
+/**
+ * Every `resource` value this Bridge accepts as naming itself.
+ *
+ * The tokenized form is still ACCEPTED but no longer published: an OAuth client
+ * that registered against an earlier build echoed back the value the discovery
+ * document gave it, and there is no reason to break that flow — the token never
+ * had to be in the identifier for `resourceMatches` to bind the token to this
+ * Bridge. Refusing it would have converted a disclosure bug into an outage.
+ */
+function acceptedResources(): string[] {
+  return state.routeToken ? [oauthResource(), `${oauthResource()}/${state.routeToken}`] : [oauthResource()];
 }
 
 /** RFC 9728 says the well-known path has the resource's path appended. */
@@ -225,7 +259,7 @@ function ownerMatches(submitted: unknown): boolean {
   const expected = ownerCredential();
   if (!expected) return false;
   // Hash both sides so the comparison width is independent of the input length.
-  return digestEquals(hashOAuthSecret(submitted), hashOAuthSecret(expected));
+  return digestEquals(hashSecret(submitted), hashSecret(expected));
 }
 
 // ---------------------------------------------------------------------------
@@ -367,7 +401,7 @@ async function handleAuthorizeGet(url: URL, res: ServerResponse): Promise<boolea
   }
   // The resource must be this Bridge, so a token minted here cannot be replayed
   // against another service (RFC 8707).
-  if (!resourceMatches(params.resource, [oauthResource()])) {
+  if (!resourceMatches(params.resource, acceptedResources())) {
     redirectWithError(res, params.redirect_uri, params.state, "invalid_target", "Invalid or missing resource parameter.");
     return true;
   }
@@ -412,9 +446,18 @@ async function handleAuthorizePost(req: IncomingMessage, res: ServerResponse): P
     return true;
   }
 
-  // Rate-limit the credential itself, keyed by the caller, so a wrong password
-  // cannot be ground down. Reuses the bearer gate's limiter shape.
-  const key = typeof req.socket?.remoteAddress === "string" ? req.socket.remoteAddress : "unknown";
+  // Rate-limit the credential itself, keyed by the CALLER, so a wrong password
+  // cannot be ground down.
+  //
+  // Not the socket address: behind the ngrok agent every request arrives from
+  // 127.0.0.1, so a socket-keyed limiter let one anonymous attacker POST a few
+  // wrong owner_tokens and lock the OPERATOR out of their own consent page
+  // (429 on the correct password too, re-trippable every window). This is the
+  // same hazard, and the same fix, as the bearer gate's limiter — see
+  // auth.ts's authorizeRequest, which derives its key with remoteKeyOf.
+  // /oauth/authorize is public by design, so the attacker needs no credential
+  // to do it.
+  const key = remoteKeyOf(req.headers, req.socket?.remoteAddress);
   const now = Date.now();
   const lockedFor = ownerLimiter.lockoutRemaining(key, now);
   if (lockedFor > 0) {
@@ -441,7 +484,7 @@ async function handleAuthorizePost(req: IncomingMessage, res: ServerResponse): P
   // consent form re-carries the resource in a hidden field, so this only fires
   // when the original request was already wrong — but a wrong answer here would
   // send the operator chasing PKCE for a resource problem.
-  if (!resourceMatches(params.resource, [oauthResource()])) {
+  if (!resourceMatches(params.resource, acceptedResources())) {
     redirectWithError(res, params.redirect_uri, params.state, "invalid_target", "Invalid or missing resource parameter.");
     return true;
   }
@@ -516,7 +559,7 @@ async function handleAuthorizationCode(params: Record<string, string>, client: O
   if (entry.clientId !== client.client_id
     || entry.redirectUri !== (params.redirect_uri ?? "")
     || !resourceMatches(params.resource ?? entry.resource, [entry.resource])
-    || !resourceMatches(entry.resource, [oauthResource()])) {
+    || !resourceMatches(entry.resource, acceptedResources())) {
     oauthError(res, 400, "invalid_grant", "The authorization code does not match this client, redirect_uri or resource.");
     return true;
   }
@@ -540,7 +583,7 @@ async function handleRefreshGrant(params: Record<string, string>, client: OAuthC
   }
   // Consumption is the rotation: the presented token is deleted in the same
   // step that reads it, so a replay finds nothing and is refused.
-  const grant = await consumeRefreshToken(hashOAuthSecret(presented), now);
+  const grant = await consumeRefreshToken(hashSecret(presented), now);
   if (!grant) {
     oauthError(res, 400, "invalid_grant", "The refresh token is invalid, expired, or already used.");
     return true;
@@ -550,7 +593,7 @@ async function handleRefreshGrant(params: Record<string, string>, client: OAuthC
     return true;
   }
   if (!resourceMatches(params.resource ?? grant.resource, [grant.resource])
-    || !resourceMatches(grant.resource, [oauthResource()])) {
+    || !resourceMatches(grant.resource, acceptedResources())) {
     oauthError(res, 400, "invalid_grant", "The refresh token is bound to a different resource.");
     return true;
   }
@@ -569,14 +612,14 @@ async function issueTokens(
   const refreshToken = generateOAuthSecret("obr_");
   await saveTokenPair({
     access: {
-      hash: hashOAuthSecret(accessToken),
+      hash: hashSecret(accessToken),
       client_id: client.client_id,
       scopes,
       expiresAt: now + ACCESS_TOKEN_TTL_MS,
       resource,
     },
     refresh: {
-      hash: hashOAuthSecret(refreshToken),
+      hash: hashSecret(refreshToken),
       client_id: client.client_id,
       scopes,
       expiresAt: now + REFRESH_TOKEN_TTL_MS,
@@ -678,7 +721,7 @@ export async function verifyOAuthBearer(presented: unknown): Promise<{ ok: true;
   const grant = await verifyAccessToken(presented, Date.now());
   if (!grant) return { ok: false };
   // The token must have been issued for this resource, not merely be valid.
-  return resourceMatches(grant.resource, [oauthResource()])
+  return resourceMatches(grant.resource, acceptedResources())
     ? { ok: true, clientId: grant.client_id }
     : { ok: false };
 }

@@ -33,8 +33,6 @@ export type CommandState = {
   /** Per-stream capture for optional stdout/stderr split reads; merged `output` stays authoritative for offsets. */
   stdoutOutput: ProcessOutputBuffer;
   stderrOutput: ProcessOutputBuffer;
-  /** True when output is mirrored into a user-visible terminal (tee capture + tail -f). */
-  visibleTerminal?: boolean;
   /** Persisted service log file the child tees its merged output into (service spawns only). */
   teeLogPath?: string;
   done: boolean;

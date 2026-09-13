@@ -288,6 +288,13 @@ export function acquireLocks(request: LockRequest, tuning?: Partial<LockTuning>)
           + "Another tool call is still holding it; retry, or raise concurrency.waitTimeoutMs "
           + "(console settings page).",
         ));
+        // Removing a waiter can UNBLOCK whoever was queued behind it. A reader
+        // waits behind an earlier conflicting writer (writer priority), so a
+        // timed-out writer used to leave that reader queued against a key with
+        // no holder at all: it then sat out its own full wait deadline and was
+        // rejected with "another tool call is still holding it" while the key
+        // was demonstrably free. Every release path pumps; so must this one.
+        pump();
       }, waitTimeout);
       waiter.waitTimer.unref?.();
     }

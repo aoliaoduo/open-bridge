@@ -6,11 +6,9 @@ import type { ProcessOutputRead } from "../process/output-buffer.js";
 import { ProcessOutputBuffer } from "../process/output-buffer.js";
 import { resolveShell, type ShellSpec } from "../shell/shell-provider.js";
 import { maybeStripAnsi } from "../process/ansi.js";
-import { isBashLikeShell, visibleCapturePath, wrapWithTee, wrapWithTeeAppend } from "../process/tee-capture.js";
-import { showVisibleTerminal } from "./visible-terminal.js";
+import { isBashLikeShell, wrapWithTeeAppend } from "../process/tee-capture.js";
 import { windowsHideForChild } from "./child-console.js";
 import { reassertServeConsoleTitle } from "./console-title.js";
-import * as fsSync from "node:fs";
 import {
   MAX_CAPTURED_OUTPUT,
   MAX_INLINE_OUTPUT,
@@ -51,6 +49,19 @@ export function requireRestartKnob(value: unknown, key: "max_restarts" | "restar
   return parsed;
 }
 
+/**
+ * Collect an `env` argument as a string map, dropping non-string values.
+ *
+ * Shared by the process tools and save_service: both accept the same `env`
+ * shape and each used to carry its own copy of this filter. Lives here because
+ * both modules already import from this one.
+ */
+export function stringEnv(args: { env?: unknown }): Record<string, string> {
+  return args.env && typeof args.env === "object" && !Array.isArray(args.env)
+    ? (Object.fromEntries(Object.entries(args.env).filter(([, value]) => typeof value === "string")) as Record<string, string>)
+    : {};
+}
+
 /** Drop command records that finished more than the retention window ago. */
 export function pruneCommands(): void {
   const cutoff = Date.now() - COMMAND_RETENTION_MS;
@@ -59,7 +70,6 @@ export function pruneCommands(): void {
       // Safety net: a retained command must not keep its resource locks.
       command.releaseResourceLocks?.();
       state.commands.delete(id);
-      try { fsSync.unlinkSync(visibleCapturePath(id)); } catch { /* no capture file */ }
     }
   }
 }
@@ -71,18 +81,18 @@ export function spawnManaged(
   id: string,
   restartCount = 0,
   policy?: Partial<CommandState>,
-  options?: { visible?: boolean; teeLogPath?: string },
+  options?: { teeLogPath?: string },
 ): CommandState {
   const spec = shellSpec();
-  const visible = options?.visible === true;
-  // Visible mode: the hidden managed child tees merged output into a capture
-  // file that a user-visible `tail -f` terminal follows; lifecycle control
-  // (kill/stdin/exit code) stays with us. Service mode appends merged output
-  // to the persisted service log (tee -a) instead.
+  // Service mode appends merged output to a persisted service log (tee -a) that
+  // read_service_log reads back; lifecycle control (kill/stdin/exit code) stays
+  // with us. Tee wrapping needs bash syntax (pipe + PIPESTATUS), so on a
+  // non-bash shell (PowerShell/cmd) the mirror is skipped instead of spawning a
+  // broken command.
   // Tee wrapping needs bash syntax (pipe + PIPESTATUS). On a non-bash shell
   // (PowerShell/cmd) skip the mirror instead of spawning a broken command.
   const canTee = isBashLikeShell(spec.file);
-  if ((options?.teeLogPath || visible) && !canTee) {
+  if (options?.teeLogPath && !canTee) {
     record(
       "process",
       "progress",
@@ -91,9 +101,7 @@ export function spawnManaged(
   }
   const spawnText = options?.teeLogPath && canTee
     ? wrapWithTeeAppend(commandText, options.teeLogPath)
-    : visible && canTee
-      ? wrapWithTee(commandText, visibleCapturePath(id))
-      : commandText;
+    : commandText;
   const child = spawn(spec.file, [...spec.args, spawnText], {
     cwd,
     // A service that outlives the terminal that started it is an orphan
@@ -111,7 +119,6 @@ export function spawnManaged(
     output: new ProcessOutputBuffer(MAX_CAPTURED_OUTPUT),
     stdoutOutput: new ProcessOutputBuffer(MAX_CAPTURED_OUTPUT),
     stderrOutput: new ProcessOutputBuffer(MAX_CAPTURED_OUTPUT),
-    visibleTerminal: visible || undefined,
     teeLogPath: options?.teeLogPath,
     done: false,
     exitCode: null,
@@ -126,9 +133,6 @@ export function spawnManaged(
     lastEvent: "started",
   };
   record("process", "running", `Started ${id}: ${redactSensitiveText(commandText)} (cwd: ${cwd})`);
-  if (visible && canTee) {
-    try { showVisibleTerminal(id, cwd); } catch { /* terminal is a best-effort mirror */ }
-  }
   const append = (stream: "stdout" | "stderr") => (d: Buffer | string): void => {
     const chunk = Buffer.isBuffer(d) ? d : Buffer.from(d);
     commandState.output.append(chunk);
@@ -184,7 +188,7 @@ export function spawnManaged(
           commandState.id,
           commandState.restartCount + 1,
           commandState,
-          { visible: commandState.visibleTerminal === true, teeLogPath: commandState.teeLogPath },
+          { teeLogPath: commandState.teeLogPath },
         );
         // The resource stays claimed across a restart: hand the lock handle to
         // the replacement so its own exit still releases it.
@@ -246,14 +250,39 @@ function cancelPendingRestarts(commandText: string): void {
       command.restartTimer &&
       command.command === commandText
     ) {
-      clearTimeout(command.restartTimer);
-      command.restartTimer = undefined;
-      command.requestedStop = "stopped";
+      cancelPendingRestart(command);
       command.autoRestart = false;
       command.lastEvent = "restart_cancelled";
       record("process", "progress", `${command.id} pending auto-restart cancelled (fresh instance starting).`);
     }
   }
+}
+
+/**
+ * Cancel one pending auto-restart AND release the resource locks it was holding.
+ *
+ * The two must happen together. The close handler deliberately keeps a scheduled
+ * restart's `releaseResourceLocks` alive (the resource is still claimed by the
+ * process that is about to come back), and `dispatcher.handOffToProcess` has
+ * already disarmed the hold-timeout backstop — so once the restart is cancelled,
+ * nothing else ever calls that handle. The lock then outlives its process for
+ * good: every later call declaring the same `resource_keys` waits out the full
+ * `concurrency.waitTimeoutMs` and fails with "another tool call is still holding
+ * it", while the console keeps showing a dead command as the holder. When
+ * `restart_process` had already replaced the CommandState in `state.commands`,
+ * the only reference to the handle was gone and even `pruneCommands`' safety
+ * net could not free it.
+ *
+ * Idempotent via the release handle's own `released` flag, so a later close or
+ * `terminateProcess` calling it again is a no-op.
+ */
+export function cancelPendingRestart(command: CommandState): void {
+  if (command.restartTimer) {
+    clearTimeout(command.restartTimer);
+    command.restartTimer = undefined;
+    if (!command.requestedStop) command.requestedStop = "stopped";
+  }
+  command.releaseResourceLocks?.();
 }
 
 /**
@@ -266,10 +295,9 @@ function cancelPendingRestarts(commandText: string): void {
 export function cancelAllPendingRestarts(): void {
   for (const command of state.commands.values()) {
     if (!command.restartTimer) continue;
-    clearTimeout(command.restartTimer);
-    command.restartTimer = undefined;
-    if (!command.requestedStop) command.requestedStop = "stopped";
-    if (command.lastEvent === "restart_scheduled") {
+    const wasScheduled = command.lastEvent === "restart_scheduled";
+    cancelPendingRestart(command);
+    if (wasScheduled) {
       command.lastEvent = "restart_cancelled";
       record("process", "progress", `${command.id} pending auto-restart cancelled (bridge stopped).`);
     }
@@ -360,13 +388,12 @@ export async function terminateProcess(
 ): Promise<boolean> {
   // Mark first, even when the process already exited: a scheduled auto-restart
   // must never survive a stop/restart/delete request (it would resurrect the
-  // process after the early return below).
+  // process after the early return below). The helper also releases the resource
+  // locks the cancelled restart was holding — the early return below means a
+  // dead-with-pending-restart command would otherwise never let them go.
   commandState.autoRestart = false;
   commandState.requestedStop = reason;
-  if (commandState.restartTimer) {
-    clearTimeout(commandState.restartTimer);
-    commandState.restartTimer = undefined;
-  }
+  cancelPendingRestart(commandState);
   if (commandState.done) return true;
   const pid = commandState.child.pid;
   try {
@@ -405,7 +432,6 @@ export function processSnapshot(s: CommandState): Record<string, unknown> {
     ended_at: s.endedAt ? new Date(s.endedAt).toISOString() : undefined,
     uptime_ms: (s.endedAt ?? Date.now()) - s.startedAt,
     restart_count: s.restartCount,
-    visible_terminal: s.visibleTerminal === true ? true : undefined,
     auto_restart: s.autoRestart,
     max_restarts: s.maxRestarts,
     restart_delay_ms: s.restartDelayMs,

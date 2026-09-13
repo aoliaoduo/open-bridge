@@ -13,13 +13,15 @@
  * ## What is stored, and what is not
  *
  * Secrets are hashed the same way `auth-core.ts` hashes personal tokens: sha256,
- * never the plaintext, compared in constant time. That applies to access tokens,
- * refresh tokens, and authorization codes. A leaked `oauth.json` therefore does
- * not hand anyone a working credential.
+ * never the plaintext, compared in constant time. That applies to access tokens
+ * and refresh tokens. A leaked `oauth.json` therefore does not hand anyone a
+ * working credential.
  *
- * Authorization codes are deliberately **in-memory only**. They live five
- * minutes by spec, and persisting them would add a durable artifact whose only
- * use is a replay window — losing them on restart is the safer failure.
+ * Authorization codes are deliberately **in-memory only** and are NOT hashed —
+ * they are plaintext keys of an in-process Map (see oauth.ts), so they never
+ * reach this document. They live five minutes by spec, and persisting them
+ * would add a durable artifact whose only use is a replay window — losing them
+ * on restart is the safer failure.
  *
  * ## Refresh rotation
  *
@@ -34,8 +36,9 @@
  * (expiry, rotation bookkeeping) are kept separate and testable.
  */
 
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { host } from "../host/host.js";
+import { digestEquals, hashSecret } from "./auth-core.js";
 
 /** Secret store key holding the OAuth document. */
 const OAUTH_STORE_KEY = "openBridge.oauth";
@@ -88,26 +91,19 @@ export const AUTH_CODE_TTL_MS = 5 * 60_000;
 /** The single scope this Bridge exposes. All tools, or nothing. */
 export const OAUTH_SCOPE = "open-bridge";
 
-export function hashOAuthSecret(secret: string): string {
-  return createHash("sha256").update(secret, "utf8").digest("hex");
-}
-
-/** A 256-bit opaque secret, prefixed so a leaked value is recognisable. */
+/**
+ * A 256-bit opaque secret. The prefix is a parameter (not the `ob_` personal-token
+ * prefix) because this store mints three recognisably different kinds: `obc_`
+ * authorization codes, `oba_` access tokens, `obr_` refresh tokens.
+ *
+ * Hashing and digest comparison used to be hand-rolled here as well, as near-copies
+ * of auth-core's `hashSecret`/`digestEquals` — and they had already drifted:
+ * `digestEquals("", "")` answered TRUE (equal lengths, zero XOR) where
+ * `digestEquals` answers false, and the XOR loop is the weaker primitive. Both
+ * sides sit on the OAuth security path, so they now share auth-core's pair.
+ */
 export function generateOAuthSecret(prefix: string): string {
   return `${prefix}${randomBytes(32).toString("base64url")}`;
-}
-
-/**
- * Constant-time digest comparison.
- *
- * A length mismatch is a plain false: `timingSafeEqual` throws on differing
- * lengths, and the length of a sha256 hex digest is not a secret.
- */
-function oauthDigestEquals(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
 }
 
 function parseDocument(raw: unknown): OAuthDocument {
@@ -228,7 +224,7 @@ export async function consumeRefreshToken(
 ): Promise<OAuthRefreshToken | undefined> {
   return mutate(doc => {
     const pruned = pruneDocument(doc, now);
-    const match = pruned.refreshTokens.find(token => oauthDigestEquals(token.hash, presentedHash));
+    const match = pruned.refreshTokens.find(token => digestEquals(token.hash, presentedHash));
     if (!match) {
       return { doc: pruned, result: undefined };
     }
@@ -245,12 +241,12 @@ export async function verifyAccessToken(
   now: number,
 ): Promise<OAuthAccessToken | undefined> {
   const doc = await readDocument();
-  const digest = hashOAuthSecret(presentedSecret);
+  const digest = hashSecret(presentedSecret);
   // Every candidate with the same digest is examined (no early exit), matching
   // auth-core's rule. In practice a digest collision means the same secret.
   let matched: OAuthAccessToken | undefined;
   for (const token of doc.accessTokens) {
-    if (!oauthDigestEquals(token.hash, digest)) continue;
+    if (!digestEquals(token.hash, digest)) continue;
     if (token.revokedAt !== undefined) continue;
     if (token.expiresAt <= now) continue;
     matched ??= token;
@@ -260,16 +256,16 @@ export async function verifyAccessToken(
 
 /** Revoke whatever the presented token is: an access token or a refresh token. */
 export async function revokeToken(presentedSecret: string): Promise<boolean> {
-  const digest = hashOAuthSecret(presentedSecret);
+  const digest = hashSecret(presentedSecret);
   return mutate(doc => {
     let found = false;
     const accessTokens = doc.accessTokens.map(token => {
-      if (!oauthDigestEquals(token.hash, digest) || token.revokedAt !== undefined) return token;
+      if (!digestEquals(token.hash, digest) || token.revokedAt !== undefined) return token;
       found = true;
       return { ...token, revokedAt: Date.now() };
     });
     const remainingRefresh = doc.refreshTokens.filter(token => {
-      if (!oauthDigestEquals(token.hash, digest)) return true;
+      if (!digestEquals(token.hash, digest)) return true;
       found = true;
       return false;
     });

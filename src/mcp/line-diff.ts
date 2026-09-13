@@ -15,6 +15,15 @@ export function unifiedDiff(before: string, after: string, contextLines = 3): st
   if (before === after) return undefined;
   const a = before.split("\n");
   const b = after.split("\n");
+  // `split("\n")` appends an empty element for text that ends with a newline.
+  // That element is not a line of the file — it is the absence of one — and
+  // including it as a context line emitted a phantom `" "` body line for every
+  // newline-terminated file (the normal case). Dropping it changes nothing when
+  // both sides have one, and fixes the count when only one side does.
+  if (a.length > 1 && a[a.length - 1] === "" && b.length > 1 && b[b.length - 1] === "") {
+    a.pop();
+    b.pop();
+  }
   let prefix = 0;
   while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix += 1;
   let suffix = 0;
@@ -55,6 +64,12 @@ export function boundedText(text: string, maxChars: number): { text: string; tru
   if (text.length <= maxChars) return { text, truncated: false };
   const marker = "\n...[truncated]...\n";
   const budget = Math.max(0, maxChars - marker.length);
+  // A budget of zero (or one too small to hold the marker) has nothing to spend.
+  // `text.slice(-0)` is `text.slice(0)` — the WHOLE string — so the tail slice
+  // used to return everything: `review_changes{max_patch_bytes:0}`, documented as
+  // "include no patch text", served the full diff, and git output is buffered up
+  // to 50 MiB. The only size cap on that field was inverted at zero.
+  if (budget <= 0) return { text: "", truncated: true };
   const head = Math.floor(budget * 0.4);
   return { text: `${text.slice(0, head)}${marker}${text.slice(-(budget - head))}`, truncated: true };
 }

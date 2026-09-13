@@ -4,16 +4,30 @@ import * as https from "node:https";
 import { createConnection, isIP } from "node:net";
 
 /**
- * The network locations a health probe may reach.  The default keeps the two
+ * The network locations a health probe may reach. The default keeps the two
  * normal uses of these tools (a local development server and a public health
  * endpoint), while refusing LAN, cloud-metadata, and other special addresses.
  *
- * `any` is intentionally an explicit opt-in.  It permits RFC1918/ULA hosts,
- * but never link-local, multicast, unspecified, or reserved addresses.
+ * `any` is intentionally an explicit opt-in and it is LITERAL: it applies no
+ * address-class filtering at all, so RFC1918/ULA, link-local (the cloud-metadata
+ * range) and every other reachable address pass. It is not "the permissive
+ * default with the dangerous classes still blocked" — a caller that wants the
+ * LAN/metadata guard must ask for `loopback-and-public` or `loopback`.
  */
 export type ProbeNetworkScope = "loopback" | "public" | "loopback-and-public" | "any";
 
-const DEFAULT_PROBE_NETWORK_SCOPE: ProbeNetworkScope = "loopback-and-public";
+/**
+ * What a caller that did not name a scope gets: the two normal uses of a health
+ * probe (a local development server, a public health endpoint) with LAN, cloud
+ * metadata and special addresses refused.
+ *
+ * Exported so `connectivity` can fall back to it. It used to fall back to `any`
+ * — the most permissive scope — which silently disabled this classifier on the
+ * tool's ordinary path: `connectivity {target:"http", url:"http://169.254.169.254/…"}`
+ * reached the metadata address whenever `scope` was simply omitted, which is the
+ * default a model produces. A security default must fail closed.
+ */
+export const DEFAULT_PROBE_NETWORK_SCOPE: ProbeNetworkScope = "loopback-and-public";
 const DEFAULT_HTTP_PROBE_TIMEOUT_MS = 5_000;
 const DEFAULT_TCP_PROBE_TIMEOUT_MS = 2_000;
 /** Redirects are opt-in: a 3xx response is a useful health result on its own. */

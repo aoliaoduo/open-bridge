@@ -1,52 +1,28 @@
 import * as fs from "node:fs/promises";
 
-export interface PersistResult {
-  via: "editor" | "disk";
-}
-
-export interface PersistOptions {
-  /**
-   * Editor-host only, kept for API compatibility: the standalone host owns the
-   * whole filesystem view and has no editor buffers, so this flag has no effect
-   * and nothing here ever refuses a write for dirtiness.
-   */
-  allowDirty?: boolean;
-}
-
 /**
- * Dirty-buffer guard kept for interface parity with the editor host. The
- * standalone host owns the whole filesystem view, so it is always writable.
- */
-export async function ensureWritableBufferTarget(_fullPath: string, _allowDirty: boolean): Promise<void> {
-  void _fullPath;
-  void _allowDirty;
-  // No editor buffers exist outside an editor host.
-}
-
-/**
- * Persist text content for a file path.
+ * Write `data` by way of a same-directory temp file and a rename.
  *
- * Inside an editor host the write goes through the editor API (undo stack,
- * dirty-buffer guard). The standalone host writes to a same-directory temp
- * file and renames into place: a plain in-place write left a torn/truncated
- * file behind when the process died mid-write (or when a concurrent reader
- * walked in during the write), while the rename is atomic on every supported
- * platform and replaces the existing target.
+ * An interrupted (or concurrent-reader) in-place write used to leave a
+ * torn/truncated target behind, while the rename is atomic on every supported
+ * platform and replaces the target.
+ *
+ * Accepts a Buffer as well as a string because the binary write path needs it;
+ * `fs.writeFile` treats a missing encoding as utf8 for strings, so one function
+ * covers both callers instead of two copies of this rule.
  */
-export async function persistText(
-  fullPath: string,
-  content: string,
-  _opts: PersistOptions = {},
-): Promise<PersistResult> {
-  // Intentionally ignored outside an editor host; retain the parameter for API parity.
-  void _opts;
+export async function writeFileAtomic(fullPath: string, data: Buffer | string): Promise<void> {
   const temp = `${fullPath}.${process.pid}.tmp`;
   try {
-    await fs.writeFile(temp, content, "utf8");
+    await fs.writeFile(temp, data);
     await fs.rename(temp, fullPath);
   } catch (error) {
     await fs.rm(temp, { force: true }).catch(() => undefined);
     throw error;
   }
-  return { via: "disk" };
+}
+
+/** Persist text content for a file path. */
+export async function persistText(fullPath: string, content: string): Promise<void> {
+  await writeFileAtomic(fullPath, content);
 }

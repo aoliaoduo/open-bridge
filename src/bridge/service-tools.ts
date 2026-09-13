@@ -1,5 +1,5 @@
 import { host } from "../host/host.js";
-import { parseHttpProbeUrl, probeHttpHealth, probeTcpPort, type ProbeNetworkScope } from "../network/safe-probe.js";
+import { DEFAULT_PROBE_NETWORK_SCOPE, parseHttpProbeUrl, probeHttpHealth, probeTcpPort, type ProbeNetworkScope } from "../network/safe-probe.js";
 import {
   MAX_INLINE_OUTPUT,
   SERVICE_HEALTH_TIMEOUT_MS,
@@ -8,7 +8,7 @@ import {
   state,
   type ServiceDefinition,
 } from "./state.js";
-import { terminateProcess, processSnapshot, spawnServiceProcess, requireRestartKnob } from "./processes.js";
+import { terminateProcess, processSnapshot, spawnServiceProcess, requireRestartKnob, stringEnv } from "./processes.js";
 import { persistServices } from "./services.js";
 import { availableHint } from "./error-hints.js";
 import { workspacePath, workspaceStateSuffix } from "./paths.js";
@@ -17,9 +17,20 @@ import type { JsonArgs } from "./json-args.js";
 
 type Args = JsonArgs;
 
-function probeScope(value: unknown): ProbeNetworkScope {
+/**
+ * Read the `scope` argument, defaulting to the probe layer's own safe default.
+ *
+ * This used to fall back to `"any"` for a missing or unrecognised value, which
+ * is the most permissive scope there is — so the normal case (a caller that just
+ * omits `scope`, which is what the schema invites) turned the SSRF classifier
+ * off. `connectivity {target:"http", url:"http://169.254.169.254/latest/meta-data/"}`
+ * then connected to the cloud-metadata address. An unrecognised value is treated
+ * exactly like an absent one: both get the documented default, never `any`.
+ * `any` remains available, but only as the explicit opt-in it is documented to be.
+ */
+export function probeScope(value: unknown): ProbeNetworkScope {
   const allowed = new Set<string>(["any", "loopback", "public", "loopback-and-public"]);
-  return typeof value === "string" && allowed.has(value) ? (value as ProbeNetworkScope) : "any";
+  return typeof value === "string" && allowed.has(value) ? (value as ProbeNetworkScope) : DEFAULT_PROBE_NETWORK_SCOPE;
 }
 
 export async function checkPortTool(args: Args): Promise<unknown> {
@@ -140,9 +151,7 @@ async function saveServiceInner(args: Args): Promise<unknown> {
     }
     healthUrl = candidate;
   }
-  const env = args.env && typeof args.env === "object" && !Array.isArray(args.env)
-    ? (Object.fromEntries(Object.entries(args.env).filter(([, value]) => typeof value === "string")) as Record<string, string>)
-    : {};
+  const env = stringEnv(args);
   // Re-saving a running service replaces its definition and the new object has
   // no commandId: the old process kept running with no handle (unstoppable,
   // invisible to service_status) and a later start_service spawned a second

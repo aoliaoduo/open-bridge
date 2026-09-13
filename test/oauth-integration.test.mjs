@@ -103,7 +103,7 @@ async function registerClient(redirectUris = [REDIRECT], clientName = "oauth-tes
 }
 
 /** Run the consent form and return the redirect Location it produced. */
-async function authorize(clientId, overrides = {}) {
+async function authorize(clientId, overrides = {}, headers = {}) {
   const fields = {
     response_type: "code",
     client_id: clientId,
@@ -116,7 +116,7 @@ async function authorize(clientId, overrides = {}) {
     owner_token: ownerToken,
     ...overrides,
   };
-  const res = await rawRequest("POST", "/oauth/authorize", form(fields), formHeaders());
+  const res = await rawRequest("POST", "/oauth/authorize", form(fields), formHeaders(headers));
   return { status: res.status, location: res.headers.location, body: res.body };
 }
 
@@ -169,7 +169,18 @@ test("discovery advertises the authorization server without a token", async () =
   const prm = await rawRequest("GET", "/.well-known/oauth-protected-resource", null, {});
   assert.equal(prm.status, 200, "protected resource metadata is public");
   const metadata = JSON.parse(prm.body);
-  assert.match(metadata.resource, /\/mcp\//);
+  assert.match(metadata.resource, /\/mcp$/);
+  // The regression this pins: the discovery document is unauthenticated and
+  // public, so the route token must never appear in it. It used to be the LAST
+  // path segment of `resource`, and the same value is accepted as the consent
+  // password — one anonymous GET handed an attacker both the token and the
+  // approval credential, and the authorize -> code -> token -> run_command
+  // chain followed from there.
+  assert.equal(
+    prm.body.includes(routeToken),
+    false,
+    "the protected-resource metadata must not disclose the route token",
+  );
   assert.ok(Array.isArray(metadata.authorization_servers) && metadata.authorization_servers.length > 0);
   assert.deepEqual(metadata.bearer_methods_supported, ["header"]);
 
@@ -338,6 +349,36 @@ test("a wrong owner credential re-renders the form instead of authorizing", asyn
   assert.equal(consent.status, 401);
   assert.equal(consent.location, undefined);
   assert.match(consent.body, /口令不正确/);
+});
+
+test("failures from a forwarded client identity do not lock the operator out", async () => {
+  // Behind the ngrok agent every request arrives from 127.0.0.1, so keying the
+  // consent limiter on the SOCKET address let one anonymous attacker POST a few
+  // wrong owner_tokens and lock the operator out of their own consent page —
+  // the correct password then answered 429 too, and the attacker could re-trip
+  // it every window. /oauth/authorize is public by design, so no credential was
+  // needed. The limiter must key on the forwarded identity, exactly as the
+  // bearer gate's limiter does.
+  const clientId = (await registerClient()).body.client_id;
+  const attacker = { "x-forwarded-for": "203.0.113.9" };
+
+  // Five failures is the limiter's window; each is refused with the retry form.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const res = await authorize(clientId, { owner_token: `wrong-${attempt}` }, attacker);
+    assert.equal(res.status, 401, `attacker attempt ${attempt + 1} was refused, not granted`);
+  }
+  // The attacker is now locked out...
+  const blocked = await authorize(clientId, { owner_token: "wrong-again" }, attacker);
+  assert.equal(blocked.status, 429, "the attacker's own identity is rate-limited");
+
+  // ...while the operator, whose forwarded address is different, still gets in.
+  const operator = await authorize(clientId, {}, { "x-forwarded-for": "198.51.100.7" });
+  assert.equal(
+    operator.status,
+    302,
+    `the operator can still authorize from their own address: ${String(operator.body).slice(0, 200)}`,
+  );
+  assert.ok(operator.location, "and receives the authorization code redirect");
 });
 
 test("a refresh token rotates, and the old one stops working", async () => {

@@ -168,23 +168,39 @@ parentPort.on("message", (message) => {
   else entry.reject(toolError(message.tool, message.error));
 });
 
-// Names a well-behaved sandbox object must not answer to: a returned promise
-// checks "then", JSON.stringify checks "toJSON", the inspector checks "inspect".
+// Names the tool surface must not answer to: a returned promise checks "then",
+// JSON.stringify checks "toJSON", the inspector checks "inspect", and the
+// prototype names are how one realm is climbed from another.
 const RESERVED = ["then", "catch", "finally", "toJSON", "inspect", "constructor", "prototype", "__proto__"];
 
-const tools = new Proxy(Object.create(null), {
-  get(_target, property) {
-    if (typeof property !== "string" || RESERVED.indexOf(property) >= 0) return undefined;
-    return (args) => callTool(property, args);
-  },
-  has: (_target, property) => typeof property === "string" && toolNames.indexOf(property) >= 0,
-  ownKeys: () => toolNames.slice(),
-  getOwnPropertyDescriptor: (_target, property) =>
-    typeof property === "string" && toolNames.indexOf(property) >= 0
-      ? { value: undefined, enumerable: true, configurable: true, writable: false }
-      : undefined,
-  set: () => false,
-});
+// A null-prototype closure, never a method reached through an array: handed a
+// real array of strings, a script could call
+// toolNames.entries.constructor("return process")() and be back in this realm.
+// "entries" is an ordinary own property whose name is not in RESERVED, so no
+// name check can catch it.
+function makeToolsGate(names) {
+  return Object.assign(Object.create(null), {
+    has: (name) => names.indexOf(name) >= 0,
+  });
+}
+
+/**
+ * The one thing the sandbox must never be able to hold onto.
+ *
+ * apply/writeConsole/gate.has are functions defined in THIS realm, so their
+ * "constructor" property is this realm's Function. They are delivered as data
+ * fields and the bootstrap deletes them before the caller's script is compiled,
+ * which is why the deletion order matters more than it looks.
+ */
+function makeHarness(): Record<string, unknown> {
+  return Object.assign(Object.create(null), {
+    toolNames: toolNames.slice(),
+    gate: makeToolsGate(toolNames),
+    apply: (name: string, args: unknown) => callTool(name, args),
+    writeConsole: (level: string, text: string) => capture(level)(text),
+  });
+}
+
 
 function capture(level) {
   return function () {
@@ -206,17 +222,32 @@ function capture(level) {
   };
 }
 
-// The context is granted exactly two things. Everything else it can see is the
-// JavaScript language itself, taken from the sandbox realm rather than borrowed
-// from this process: no require, no process, no fetch, no timers, no module
-// loader, and (via codeGeneration) no eval / new Function.
-const sandbox = {
-  tools: tools,
-  console: { log: capture("log"), info: capture("info"), warn: capture("warn"), error: capture("error"), debug: capture("debug") },
-};
-
 async function main() {
-  const context = vm.createContext(sandbox, { codeGeneration: { strings: false, wasm: false } });
+  // codeGeneration: { strings: false } disables the CONTEXT's Function
+  // constructor. runInContext still compiles this trusted bootstrap — the
+  // option gates eval/Function at runtime, not the host's own compilation.
+  const context = vm.createContext(makeHarness(), { codeGeneration: { strings: false, wasm: false } });
+  try {
+    // compileFunction + parsingContext, not runInContext: the body must run in
+    // the CONTEXT realm so the functions it creates carry that realm's
+    // Function. An IIFE evaluated by runInContext would only be *created* there
+    // and never invoked unless the completion value were called explicitly.
+    vm.compileFunction(workerData.bootstrapSource, [], {
+      parsingContext: context,
+      filename: "open-bridge-sandbox-bootstrap.js",
+    })();
+  } catch (error) {
+    post({
+      type: "done",
+      ok: false,
+      phase: "worker",
+      error: { name: error && error.name, message: error && error.message, stack: error && error.stack },
+      calls: calls,
+      byTool: byTool,
+      console: consoleLines,
+    });
+    return;
+  }
   let script;
   try {
     script = new vm.Script(workerData.wrapped, { filename: workerData.filename, lineOffset: -1 });
@@ -256,6 +287,89 @@ async function main() {
 }
 
 main();
+`;
+
+/**
+ * The bootstrap's FUNCTION BODY, compiled with `vm.compileFunction` and
+ * `parsingContext: context`. Everything it creates therefore carries the
+ * context's own Function as "constructor" — the one thing
+ * codeGeneration: { strings: false } disables.
+ *
+ * It takes no parameters on purpose: it reads the harness off the context's
+ * global scope. A parameter would have to be supplied by the host, and the
+ * host's argument object lives in this realm.
+ *
+ * The escape this closes: the tool surface used to be a host-realm object whose
+ * values were host-realm arrow functions, so
+ * tools.read_files.constructor("return process")() returned the worker's
+ * process (and from there getBuiltinModule("node:child_process").execSync) —
+ * the whole CLI capability surface, bypassing the dispatcher, resource locks,
+ * the audit log and the workspace sandbox. The RESERVED name list could not
+ * help: it filters property NAMES on the proxy, while the leak was in the
+ * prototype of a value the proxy returned.
+ *
+ * NOTE for anyone editing this string: it is a String.raw template, so a
+ * backtick anywhere inside it — including in a comment — ends it early and
+ * produces a wall of unrelated syntax errors.
+ */
+const BOOTSTRAP_SOURCE = String.raw`
+  'use strict';
+  var harness = globalThis;
+  var RESERVED = ['then', 'catch', 'finally', 'toJSON', 'inspect', 'constructor', 'prototype', '__proto__'];
+  var apply = harness.apply;
+  var writeConsole = harness.writeConsole;
+  var gate = harness.gate;
+  var toolNames = harness.toolNames;
+  // Close first, delete second. Up to here these host-realm functions are
+  // reachable as globals, and any one of them would hand the script this realm.
+  delete harness.apply;
+  delete harness.writeConsole;
+  delete harness.gate;
+  delete harness.toolNames;
+  function wrap(name) {
+    var fn = function (args) { return apply(name, args); };
+    try { Object.defineProperty(fn, 'name', { value: name, configurable: true }); } catch (error) { /* cosmetic */ }
+    return fn;
+  }
+  var tools = new Proxy(Object.create(null), {
+    get: function (_target, property) {
+      if (typeof property !== 'string' || RESERVED.indexOf(property) >= 0) return undefined;
+      // Every other name is wrapped, advertised or not: an unknown name must
+      // still reach callTool, which answers with the dispatcher's own
+      // "Unknown tool" message and its did-you-mean suggestion. Returning
+      // undefined here turned a typo into "tools.read_fil is not a function".
+      return wrap(property);
+    },
+    has: function (_target, property) {
+      return typeof property === 'string' && gate.has(property);
+    },
+    ownKeys: function () { return toolNames.slice(); },
+    getOwnPropertyDescriptor: function (_target, property) {
+      if (typeof property !== 'string' || !gate.has(property)) return undefined;
+      return { value: undefined, enumerable: true, configurable: true, writable: false };
+    },
+    set: function () { return false; },
+  });
+  Object.defineProperty(globalThis, 'tools', { value: tools, writable: false, enumerable: false, configurable: false });
+  // console.* is defined here for the same reason as tools.*: the previous
+  // host-built capture() functions were a second door with the same shape.
+  function capture(level) {
+    return function () {
+      var parts = Array.prototype.slice.call(arguments);
+      var text = parts.map(function (part) {
+        if (typeof part === 'string') return part;
+        try { return JSON.stringify(part); } catch (error) { return String(part); }
+      }).join(' ');
+      return writeConsole(level, text);
+    };
+  }
+  Object.defineProperty(globalThis, 'console', {
+    value: Object.freeze({
+      log: capture('log'), info: capture('info'), warn: capture('warn'),
+      error: capture('error'), debug: capture('debug'),
+    }),
+    writable: false, enumerable: false, configurable: false,
+  });
 `;
 
 /**
@@ -427,6 +541,9 @@ export async function runScriptInSandbox(options: RunScriptOptions): Promise<Scr
         filename: SCRIPT_FILENAME,
         syncTimeoutMs: timeoutMs,
         toolNames: [...options.allowedTools],
+        // The bootstrap is compiled INSIDE the context, so its source has to
+        // travel with the worker; a module binding would not exist there.
+        bootstrapSource: BOOTSTRAP_SOURCE,
         limits: { maxCalls, maxConsoleBytes: limits.MAX_CONSOLE_BYTES },
       },
       resourceLimits: { maxOldGenerationSizeMb: 256 },

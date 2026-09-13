@@ -45,7 +45,6 @@ import type { JsonArgs } from "./json-args.js";
 type Args = JsonArgs;
 type Handler = (args: Args, session?: SessionState) => unknown | Promise<unknown>;
 
-/** Tool name -> handler. Mirrors TOOL_DEFINITIONS (validated by the contract test). */
 /**
  * Tool name -> handler. Mirrors TOOL_DEFINITIONS (validated by the contract test).
  *

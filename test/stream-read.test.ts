@@ -153,6 +153,52 @@ test("a line spanning an internal read chunk is split and reassembled correctly"
   assert.ok(!r.content.includes("\uFFFD"), "no replacement characters from a split multibyte char");
 });
 
+test("a huge line with no newline is bounded, not buffered whole", async () => {
+  // The budget and utf8SafePrefix only ran from inside handleLine, which only
+  // ran once a WHOLE line had been delimited — so a line with no terminator was
+  // accumulated in full before being truncated. Measured on the buggy code: a
+  // 64 MiB single-line file read with max_bytes=1024 returned the right 1024
+  // bytes but grew RSS by ~137 MiB and took 14.5 s. With the shipped 512 KiB
+  // default, a 500 MiB minified bundle or one giant JSONL record cost 500 MiB
+  // per path in `paths`.
+  const MIB = 1024 * 1024;
+  const total = 24 * MIB;
+  const f = tmpFile("one-giant-line.txt", Buffer.alloc(total, 0x41));
+  const budget = 2 * MIB;
+
+  global.gc?.();
+  const before = process.memoryUsage().heapUsed;
+  const started = Date.now();
+  const r = await streamReadLines(f, { maxBytes: budget }, total);
+  const elapsed = Date.now() - started;
+  const grew = process.memoryUsage().heapUsed - before;
+
+  assert.equal(r.content.length, budget, "the answer is still exactly the byte budget");
+  assert.equal(r.byte_truncated, true);
+  assert.ok(
+    grew < total / 2,
+    `heap grew ${(grew / MIB).toFixed(1)} MiB for a ${total / MIB} MiB single line — it is being buffered whole`,
+  );
+  assert.ok(elapsed < 2_000, `reading stopped early instead of scanning the file (${elapsed} ms)`);
+});
+
+test("an over-long line is skipped by line number when the range starts later", async () => {
+  // The range does not overlap the giant line, so no bytes from it may be
+  // returned — and it must not be decoded to find that out.
+  const MIB = 1024 * 1024;
+  const giant = Buffer.alloc(8 * MIB, 0x41);
+  const body = Buffer.concat([giant, Buffer.from("\nsecond line\nthird line\n", "utf8")]);
+  const f = tmpFile("giant-then-lines.txt", body);
+
+  global.gc?.();
+  const before = process.memoryUsage().heapUsed;
+  const r = await streamReadLines(f, { startLine: 3, endLine: 3, maxBytes: 1 << 20 }, body.length);
+  const grew = process.memoryUsage().heapUsed - before;
+
+  assert.equal(r.content, "third line\n", "only the requested line comes back");
+  assert.ok(grew < body.length / 2, `the skipped line was not buffered (${(grew / MIB).toFixed(1)} MiB)`);
+});
+
 test("a file without a trailing newline is read whole with correct totals", async () => {
   const body = "l1\nl2\nl3"; // unterminated final line
   const f = tmpFile("nonl.txt", body);

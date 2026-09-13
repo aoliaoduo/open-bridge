@@ -80,7 +80,7 @@
 
 ### 工作区写入
 
-**write_file** — 新建或覆盖。`content` 或 `content_base64`；`mode: "append"` 追加；`expected_sha256` 防止覆盖已变化的文件；`allow_dirty: true` 才会覆盖编辑器里未保存的改动（默认拒绝）。
+**write_file** — 新建或覆盖。`content` 或 `content_base64`；`mode: "append"` 追加；`expected_sha256` 防止覆盖已变化的文件。
 
 **edit_block** — 单文件精确替换：`old_text` 必须**恰好匹配一次**（除非用 `expected_replacements` 指定次数）；也可一次给 1–20 个 hunk（`edits`），**全部命中才写**。零匹配时错误里附**最接近的一段文本**与可能的漂移原因。带 `expected_sha256` 防陈旧编辑。
 
@@ -101,7 +101,7 @@
 
 ### 命令与进程
 
-**run_command** — 前台等待最多 `timeout_ms`（默认 120000）。**超时不会杀掉进程**：它继续在监管下运行，返回 `status: "running"` 与 `command_id`，之后用 `read_process_output` / `wait` 继续读，或用 `process_control{action:"terminate"}` 停掉。`background: true` 立刻返回；`visible: true` 在用户可见终端里跑。退出码非零**不是**调用失败。
+**run_command** — 前台等待最多 `timeout_ms`（默认 120000）。**超时不会杀掉进程**：它继续在监管下运行，返回 `status: "running"` 与 `command_id`，之后用 `read_process_output` / `wait` 继续读，或用 `process_control{action:"terminate"}` 停掉。`background: true` 立刻返回。退出码非零**不是**调用失败。
 
 **start_process** — 面向**长驻**进程（服务器、watcher、守护进程）：`ready_pattern` 等启动输出，返回 `command_id` 交给进程工具组。
 

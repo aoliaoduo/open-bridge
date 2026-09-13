@@ -226,6 +226,72 @@ test("the sandbox itself has no filesystem, network, process or timers", async (
   });
 });
 
+test("a host function is not reachable through the tool surface's prototype", async () => {
+  // The escape this pins: `tools.<name>` used to BE a host-realm arrow function,
+  // so `.constructor` was the worker's Function and
+  // tools.read_files.constructor("return process")() returned the real
+  // `process` — from there getBuiltinModule("node:child_process").execSync ran
+  // arbitrary commands, bypassing the dispatcher, the resource locks, the audit
+  // log and the workspace sandbox. The RESERVED name list could not stop it:
+  // that list filters property NAMES on the proxy, while the leak lived in the
+  // prototype of a value the proxy had already returned.
+  const h = harness();
+  const envelope = await h.run(
+    'const realm = {};\n'
+    + 'for (const name of ["read_files", "search_files", "write_file", "run_command"]) {\n'
+    + '  const fn = tools[name];\n'
+    + '  let viaConstructor = "unreached";\n'
+    + '  try { viaConstructor = typeof fn.constructor("return process"); }\n'
+    + '  catch (error) { viaConstructor = "blocked:" + error.name; }\n'
+    + '  realm[name] = { callable: typeof fn, viaConstructor };\n'
+    + '}\n'
+    + 'let viaConsole = "unreached";\n'
+    + 'try { viaConsole = typeof console.log.constructor("return process"); }\n'
+    + 'catch (error) { viaConsole = "blocked:" + error.name; }\n'
+    + 'let viaArrayIterator = "unreached";\n'
+    + 'try { viaArrayIterator = typeof Object.keys(tools).entries.constructor("return process"); }\n'
+    + 'catch (error) { viaArrayIterator = "blocked:" + error.name; }\n'
+    + 'return { realm, viaConsole, viaArrayIterator };',
+  );
+  assert.equal(envelope.ok, true, JSON.stringify(envelope));
+  const result = envelope.result as {
+    realm: Record<string, { callable: string; viaConstructor: string }>;
+    viaConsole: string;
+    viaArrayIterator: string;
+  };
+  for (const name of ["read_files", "search_files", "write_file", "run_command"]) {
+    assert.equal(result.realm[name]?.callable, "function", `${name} is still callable`);
+    assert.match(
+      String(result.realm[name]?.viaConstructor),
+      /^blocked:/,
+      `tools.${name}.constructor must not reach the host realm: ${result.realm[name]?.viaConstructor}`,
+    );
+  }
+  assert.match(String(result.viaConsole), /^blocked:/, `console.log.constructor leaked: ${result.viaConsole}`);
+  assert.match(String(result.viaArrayIterator), /^blocked:/, `an array iterator leaked: ${result.viaArrayIterator}`);
+});
+
+test("the tool surface still behaves like the catalogue it replaces", async () => {
+  // The hardening must not cost a capability: enumeration, `in`, and the
+  // unknown-name path (which reaches the dispatcher so a typo gets its
+  // did-you-mean suggestion) keep the shape callers already rely on.
+  const h = harness();
+  const envelope = await h.run(
+    'const seen = [];\n'
+    + 'for (const name of Object.keys(tools)) seen.push(name);\n'
+    + 'return {\n'
+    + '  keys: seen.sort(),\n'
+    + '  inOperator: "read_files" in tools,\n'
+    + '  reserved: [tools.then, tools.constructor, tools.__proto__, tools.toJSON].map(v => String(v)),\n'
+    + '};',
+  );
+  assert.equal(envelope.ok, true, JSON.stringify(envelope));
+  const result = envelope.result as { keys: string[]; inOperator: boolean; reserved: string[] };
+  assert.deepEqual(result.keys, ["read_files", "run_command", "search_files", "write_file"]);
+  assert.equal(result.inOperator, true);
+  assert.deepEqual(result.reserved, ["undefined", "undefined", "undefined", "undefined"]);
+});
+
 test("the returned payload is capped, and the cap is reported", async () => {
   const h = harness();
   const envelope = await h.run('return "x".repeat(20000);', { limits: { MAX_RESULT_BYTES: 1_024 } });

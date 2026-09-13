@@ -206,6 +206,3 @@ export async function reviewChanges(args: JsonArgs): Promise<unknown> {
     ...(markReviewed ? { baseline_advanced: true } : {}),
   };
 }
-
-// summarizeFiles is re-exported from review-parse for callers that aggregate.
-export { summarizeFiles } from "../mcp/review-parse.js";

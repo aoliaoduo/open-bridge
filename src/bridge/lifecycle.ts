@@ -277,8 +277,20 @@ export async function runHealthCheck(): Promise<HealthReport> {
  * up means restarting the whole instance onto it, which is this module's
  * business, not the tunnel's. Injected here so the import runs one way only
  * (lifecycle -> tunnel) with no cycle to reason about.
+ *
+ * Queued like every other transition: this is a stop+start on the SAME instance
+ * state, and the domain watch fires it on its own schedule. Running it outside
+ * the queue let it interleave with an operator's Start or Stop from the console —
+ * e.g. the queued startInternal lands while this stopInternal is between killing
+ * processes and closing the listener, takes the "already running" retry branch,
+ * and is then torn down by the stopInternal that resumes behind it; or a queued
+ * stop is skipped by `isStopped()` while this path brings the Bridge back up
+ * after the operator asked for it to stay down. Two stopInternal runs would also
+ * race on the peer registry's read-merge-write.
  */
 setInstanceRestart(async () => {
-  await stopInternal(false);
-  await startInternal();
+  await enqueueLifecycle(async () => {
+    await stopInternal(false);
+    await startInternal();
+  });
 });
