@@ -10,15 +10,11 @@
 
 源自 VS Code 扩展 Open Bridge（0.5.17 终版）的独立化演进：核心服务器、工具集、并发锁与鉴权模型原样继承，宿主从 VS Code 换成本机 CLI + 浏览器控制台。
 
-```text
-ChatGPT 网页对话 / Claude / Cursor / 任意 MCP 客户端
-        |  （经你掌控的 ngrok 隧道，或只在局域网/本机）
-        v
-  open-bridge serve（三个出口见下表）
-        |
-        v
-  你所在目录的那个工作区（文件、命令、进程、服务编排）
-```
+| 数据流向（从上往下） | 说明 |
+| --- | --- |
+| AI 客户端 | ChatGPT 网页对话 / Claude / Cursor / 任意 MCP 客户端（经你掌控的 ngrok 隧道，或只在局域网/本机） |
+| `open-bridge serve` | 三个出口见下表 |
+| 你所在目录的那个工作区 | 文件、命令、进程、服务编排 |
 
 | 出口 | 地址 | 说明 |
 | --- | --- | --- |
@@ -104,11 +100,11 @@ SKILL.md 并照做。技能是**中途新增**的也不用重连——`list_skil
 终端会打印三个地址，浏览器会自动打开控制台：
 
 ```
-  Web 控制台:   http://127.0.0.1:18080/console/
-  本地 MCP URL: http://127.0.0.1:18080/mcp/<路由令牌>
-  公网 MCP URL: https://<你的域名>/mcp/<路由令牌>      ← 配了 ngrok 才有
+Web 控制台:   http://127.0.0.1:18080/console/
+本地 MCP URL: http://127.0.0.1:18080/mcp/<路由令牌>
+公网 MCP URL: https://<你的域名>/mcp/<路由令牌>      ← 配了 ngrok 才有
 
-  接入 AI 客户端：open-bridge prompt  →  复制提示词，粘贴给客户端即可
+接入 AI 客户端：open-bridge prompt  →  复制提示词，粘贴给客户端即可
 ```
 
 把 **MCP URL** 填进客户端（或在客户端支持时直接把 `open-bridge prompt` 的输出粘过去），就通了。Ctrl+C 停止。
