@@ -158,6 +158,7 @@ export const api = {
   bridgeStart: () => postJson<{ status: BridgeStatus }>("/api/bridge/start").then(r => r.status),
   bridgeStop: () => postJson<{ status: BridgeStatus }>("/api/bridge/stop").then(r => r.status),
   bridgeRotate: () => postJson<{ status: BridgeStatus }>("/api/bridge/rotate").then(r => r.status),
+  shutdown: () => postJson<{ message: string }>("/api/shutdown"),
   settingsAction: (action: Record<string, unknown>) =>
     postJson<SettingsActionResult>("/api/settings/action", action),
   services: () => getJson<{ services: ServiceView[] }>("/api/services").then(r => r.services),

@@ -5,6 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- **控制台补上「退出进程」，网页上就能把整套停干净。** 此前「停止」只停掉监听与隧道，Node 进程还活着——而网页本身已经打不开，剩下唯一的办法是回去找那个终端窗口。现在运行控制里多一个两步确认的「退出进程」（复用既有的 `ConfirmButton`：第一下只是待命，第二下才真的退出），走的是 CLI 一直在用的 `POST /api/shutdown`。响应先发出、进程后退出（`jsonAndClose` + `afterResponse`），所以客户端可能输掉这场竞速——那不代表请求没到，页面因此把「没收到确认」也当作已退出处理，并明确写出之后怎么再启动。
+- **`/api` 路由不再有没人调用的死面（新测试钉住）。** `test/api-surface.test.ts` 把 `src/server/api-router.ts` 的路由表读出来，去控制台（`ui/src`）、CLI 与集成测试里找调用方：**一个都没有**就直接失败，逼着做决定——要么接上 UI，要么删掉。跑真的一次就抓到 `/api/shutdown`（CLI 在用，控制台和测试都没有），正是上面那条的由来。设置动作面也查过：19 个命令里控制台接了 16 个，剩下 3 个是 VS Code 时代的剪贴板命令（`copyUrl`/`copySecret`/`dismissSecret`，浏览器自带复制按钮），属于有意为之。
 
 ## [1.0.0-alpha.5] — 2026-09-13
 ### Added

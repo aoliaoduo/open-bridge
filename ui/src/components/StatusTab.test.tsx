@@ -3,19 +3,21 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { StatusTab } from "./StatusTab";
 import type { BridgeStatus } from "../api";
 
-const { statusMock, copyTextMock } = vi.hoisted(() => ({
+const { statusMock, shutdownMock, copyTextMock } = vi.hoisted(() => ({
   statusMock: vi.fn(),
+  shutdownMock: vi.fn(async () => ({ message: "Shutting down." })),
   copyTextMock: vi.fn(async () => undefined),
 }));
 
 vi.mock("../api", () => ({
-  api: { status: statusMock },
+  api: { status: statusMock, shutdown: shutdownMock },
   copyText: copyTextMock,
 }));
 
 afterEach(() => {
   cleanup();
   statusMock.mockReset();
+  shutdownMock.mockClear();
   copyTextMock.mockClear();
 });
 
@@ -45,6 +47,31 @@ function renderTab() {
 
 const button = (label: string): HTMLButtonElement =>
   screen.getByRole("button", { name: label }) as HTMLButtonElement;
+
+describe("StatusTab run controls", () => {
+  test("exiting the process takes two clicks and says what happened", async () => {
+    statusMock.mockResolvedValue(bridgeStatus());
+
+    renderTab();
+
+    fireEvent.click(await screen.findByRole("button", { name: "退出进程" }));
+    // First click only arms: an operator reaching for 健康检查 must not end the
+    // process with one stray press.
+    expect(shutdownMock).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "确认？" }));
+
+    await waitFor(() => expect(shutdownMock).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/已请求退出/)).toBeTruthy();
+  });
+
+  test("the exit button is unavailable while the instance is not running", async () => {
+    statusMock.mockResolvedValue(bridgeStatus({ state: "stopped" }));
+
+    renderTab();
+
+    await waitFor(() => expect(button("退出进程").disabled).toBe(true));
+  });
+});
 
 describe("StatusTab endpoint card", () => {
   test("shows the resolved mcp_url from the server", async () => {

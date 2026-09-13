@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type BridgeStatus, type SettingsActionResult } from "../api";
 import { CardHead } from "./CardHead";
+import { ConfirmButton } from "./ConfirmButton";
 import { Chip } from "./Chip";
 import { CopyButton } from "./CopyButton";
 import { Props as PropList } from "./Props";
@@ -37,6 +38,7 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
   const [status, setStatus] = useState<BridgeStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [health, setHealth] = useState<{ ok: boolean; info: string; lines: string[] } | null>(null);
+  const [exiting, setExiting] = useState(false);
   // Expired-response guard: a poll that started before an action and finished
   // after it used to overwrite the fresher state with stale data.
   const pollSeq = useRef(0);
@@ -73,6 +75,20 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
       setStatus(await api.status());
     } catch { /* the settings action already toasted */ }
     setBusy(false);
+  };
+
+  const shutdown = async () => {
+    setBusy(true);
+    try {
+      await api.shutdown();
+    } catch {
+      // The server answers first and exits second, over the very socket the
+      // exit closes — losing that race means the request DID land, so "no
+      // answer" is not "nothing happened" and must not be shown as an error.
+    } finally {
+      setExiting(true);
+      setBusy(false);
+    }
   };
 
   const checkHealth = async () => {
@@ -183,7 +199,7 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
           <div className="card">
             <CardHead
               title="运行控制"
-              desc="启停、轮换端点与健康检查都会立刻作用于本实例；轮换后旧链接立即失效。"
+              desc="启停、轮换端点、退出进程与健康检查都会立刻作用于本实例；轮换后旧链接立即失效。"
               actions={
                 <div className="btn-group">
                   <button
@@ -234,7 +250,14 @@ export function StatusTab({ act, onRefresh, notify }: Props) {
                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 健康检查
               </button>
+              <ConfirmButton label="退出进程" disabled={busy || !running} onConfirm={() => void shutdown()} />
             </div>
+            {exiting && (
+              <div className="section-note note-warn">
+                已请求退出：监听、隧道与 Node 进程都会结束，本页面随后断开。
+                再次启动可以双击一键启动脚本，或在终端运行 <code>open-bridge serve</code>。
+              </div>
+            )}
             <div className="section-note" style={{ marginBottom: 0 }}>
               健康检查会真的去请求：本机端点、公网隧道（若已开启），并在鉴权开启时确认匿名请求确实被拒。
             </div>
