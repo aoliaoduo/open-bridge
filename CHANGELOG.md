@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- **清理：两处死代码删掉，两对重复 helper 各自并成一份。** 按上一轮「过度设计 / 防御式编程」审计逐条核对后只动有证据的部分：
+  - `DirtyBufferError`（`src/workspace/persist.ts`）**全仓库从未被 `new`/`throw` 过**，删掉；独立宿主没有「编辑器脏缓冲」这回事，`PersistOptions.allowDirty` 的说明同步改成「仅编辑器宿主、为兼容保留」。`describeCanonicalCall()`（`src/bridge/tool-call-shape.ts`）则是**只被本模块的 `normalizeToolCall` 用到**（别名提示里的 `call` 字段），所以只去掉 `export`、实现留着 —— 审计里「单次使用的导出」说的正是它。
+  - `json()`（`src/http/oauth.ts` ↔ `src/server/api-router.ts`）两份实现并成 `src/http/json-response.ts` 的 `sendJson()`。这两份**已经漂移**（api-router 那份多 `charset=utf-8`、多 `headersSent` 守卫；oauth 那份多两个跨域头），信封从此只有一份，OAuth 只在自己那层加 `referrer-policy` 与 `access-control-allow-origin`；`api-router.ts` 31 个、`oauth.ts` 6 个调用点行为不变。
+  - `pick()`（`tool-call-shape.ts` ↔ `tool-families.ts`）只留 `tool-call-shape.ts` 一份，`tool-families.ts` 改为导入。
+  - 审计里点的另一对 `readBody` / `readJsonBody` **没有合并**：两者除了名字几乎什么都不一样（MCP 那条 8 MiB、`aborted`/`close` 也要结算 promise、文案带 `MCP`；控制台 API 那条 64 KiB、超限直接抛错、没有断连监听）。硬合并要么加一个开关参数、要么偷偷改掉其中一边的契约，比留着重复更差。
 - **控制台的实例启停按钮全部撤掉：实例归终端管。** 规则本来就一条，也是用户的原话 —— **终端开着 = 实例在跑，终端关掉 = 全停**（一键启动脚本就是这个语义）。控制台再放一套「启动 / 停止」不但多余，而且会误导：停止会关掉承载页面的那个监听器，页面随之失效，「再启动」根本点不到。前两个提交（`6f88dd4` 的「退出进程」、`053d099` 的「重启」）方向错了 —— 为了让一个**不该存在的按钮**能用，把生命周期从终端手里夺走：重启后实例变成后台进程，关窗口不再停止它，复杂度却成倍上升。现在：
   - 控制台去掉「启动 / 停止 / 重启 / 退出进程」四个按钮，卡片改为说明这条边界，只保留「轮换端点」（进程内换令牌，不碰进程）与「健康检查」（只读探测）；
   - 服务端撤掉 `restart` 动作、`setRestartHook` 与 `src/bridge/restart.ts`（及其两个测试文件）；

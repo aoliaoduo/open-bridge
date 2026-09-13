@@ -30,16 +30,9 @@ import {
   getRecentActivity, searchActivityLogTool,
 } from "./meta-tools.js";
 import { listShells, openShell } from "./shell-sessions.js";
-import { FAMILY_ACTIONS, FAMILY_PARAMS } from "./tool-call-shape.js";
+import { FAMILY_ACTIONS, FAMILY_PARAMS, pick } from "./tool-call-shape.js";
 
 type Args = Record<string, unknown>;
-
-/** Copy the named arguments that are present, so nothing else reaches the handler. */
-function pick(args: Args, keys: readonly string[]): Args {
-  const out: Args = {};
-  for (const key of keys) if (args[key] !== undefined) out[key] = args[key];
-  return out;
-}
 
 /** The discriminator value a family call cannot run without. */
 function required(args: Args, family: keyof typeof FAMILY_ACTIONS): string {

@@ -33,22 +33,12 @@ import { lockSnapshot } from "../bridge/resource-locks.js";
 import { listToolDefinitions } from "../bridge/tool-catalog.js";
 import { CORE_TOOLS } from "../mcp/tool-definitions.js";
 import { handleOAuthRequest, oauthConsoleView } from "../http/oauth.js";
+import { sendJson } from "../http/json-response.js";
 
 const CONSOLE_HEADER = "x-open-bridge-console";
 
 /** dist/server/api-router.js -> <root>/dist/ui (vite output). */
 const UI_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../ui");
-
-function json(res: ServerResponse, status: number, body: unknown): void {
-  if (!res.headersSent) {
-    res.writeHead(status, {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-      "x-content-type-options": "nosniff",
-    });
-  }
-  res.end(JSON.stringify(body));
-}
 
 /**
  * Reply to the caller with a connection that will not be reused.
@@ -62,7 +52,7 @@ function json(res: ServerResponse, status: number, body: unknown): void {
  */
 function jsonAndClose(res: ServerResponse, status: number, body: unknown): void {
   if (!res.headersSent) res.setHeader("connection", "close");
-  json(res, status, body);
+  sendJson(res, status, body);
 }
 
 /** Host must name this machine; the ngrok public host is refused. */
@@ -180,7 +170,7 @@ async function serveConsole(res: ServerResponse, url: URL): Promise<void> {
   try {
     requested = decodeURIComponent(url.pathname).replace(/^\/console\/?/, "");
   } catch {
-    json(res, 400, { error: "Bad request path." });
+    sendJson(res, 400, { error: "Bad request path." });
     return;
   }
   try {
@@ -196,12 +186,12 @@ async function serveConsole(res: ServerResponse, url: URL): Promise<void> {
   const full = path.normalize(path.join(UI_DIR, rel));
   const within = path.relative(UI_DIR, full);
   if (within.startsWith("..") || path.isAbsolute(within)) {
-    json(res, 403, { error: "Forbidden." });
+    sendJson(res, 403, { error: "Forbidden." });
     return;
   }
   const found = existsSync(full) && statSync(full).isFile();
   if (!found && fileLike) {
-    json(res, 404, { error: "Not found." });
+    sendJson(res, 404, { error: "Not found." });
     return;
   }
   const file = found ? full : path.join(UI_DIR, "console.html");
@@ -224,14 +214,14 @@ async function serveConsole(res: ServerResponse, url: URL): Promise<void> {
     });
     res.end(body);
   } catch {
-    json(res, 503, {
+    sendJson(res, 503, {
       error: "Console UI is not built. Run `npm run build` (or `open-bridge doctor` for details).",
     });
   }
   } catch (error) {
     // The stat/read race (file vanishing between existsSync and readFile) must
     // not escape: serveConsole runs outside the router's own try/catch.
-    json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+    sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -257,7 +247,7 @@ export async function apiRouteHandler(
   if (!isApi && !isConsole) return false;
 
   if (!isLoopbackHost(req.headers.host, state.port)) {
-    json(res, 403, { error: "The console and API are loopback-only." });
+    sendJson(res, 403, { error: "The console and API are loopback-only." });
     return true;
   }
 
@@ -278,14 +268,14 @@ export async function apiRouteHandler(
   // never answer, so the mutation gate stays CSRF-proof on its own.
   const mutating = req.method !== "GET" && req.method !== "HEAD";
   if (mutating && !hasConsoleToken(req)) {
-    json(res, 403, { error: "Missing or invalid console token." });
+    sendJson(res, 403, { error: "Missing or invalid console token." });
     return true;
   }
 
   try {
     if (req.method === "POST") {
       switch (route) {
-        case "/bridge/start": { await start(); json(res, 200, { ok: true, status: getBridgeStatus() }); return true; }
+        case "/bridge/start": { await start(); sendJson(res, 200, { ok: true, status: getBridgeStatus() }); return true; }
         case "/bridge/stop": {
           // Answer first, tear down second: this response travels over the very
           // listener stop() closes, so awaiting it here handed the caller a
@@ -318,23 +308,23 @@ export async function apiRouteHandler(
           // first in insertion order — not necessarily the intended one.
           const body = await readBody(req) as { id?: unknown } | undefined;
           const wanted = String(body?.id ?? "");
-          if (!wanted) { json(res, 400, { ok: false, error: "id is required." }); return true; }
+          if (!wanted) { sendJson(res, 400, { ok: false, error: "id is required." }); return true; }
           const matches = [...state.sessions.entries()].filter(([id]) => id === wanted || id.startsWith(wanted));
-          if (matches.length === 0) { json(res, 404, { ok: false, error: "会话不存在（可能已经自己断开）。" }); return true; }
+          if (matches.length === 0) { sendJson(res, 404, { ok: false, error: "会话不存在（可能已经自己断开）。" }); return true; }
           if (matches.length > 1) {
-            json(res, 400, { ok: false, error: `id 前缀不唯一（匹配到 ${matches.length} 个会话），请使用更长的前缀。` });
+            sendJson(res, 400, { ok: false, error: `id 前缀不唯一（匹配到 ${matches.length} 个会话），请使用更长的前缀。` });
             return true;
           }
           const [closedId, session] = matches[0]!;
           state.sessions.delete(closedId);
           void session.transport.close();
-          json(res, 200, { ok: true, closed: closedId, sessions: sessionViews() });
+          sendJson(res, 200, { ok: true, closed: closedId, sessions: sessionViews() });
           return true;
         }
         case "/settings/action": {
           const result = await handleSettingsAction(await readBody(req));
           const closing = result.ok && result.deferStop;
-          (closing ? jsonAndClose : json)(res, result.ok ? 200 : 400, result);
+          (closing ? jsonAndClose : sendJson)(res, result.ok ? 200 : 400, result);
           // Stop tears down the socket this response is on, so it waits for the
           // reply to be fully flushed. Doing it first is what turned a
           // successful stop into an ECONNRESET with no response body — and doing
@@ -358,27 +348,27 @@ export async function apiRouteHandler(
           const action = String(body?.action ?? "");
           const name = String(body?.name ?? "");
           if (action !== "start" && action !== "stop" && action !== "restart") {
-            json(res, 400, { ok: false, error: "action must be start, stop or restart." });
+            sendJson(res, 400, { ok: false, error: "action must be start, stop or restart." });
             return true;
           }
           if (!name) {
-            json(res, 400, { ok: false, error: "name is required." });
+            sendJson(res, 400, { ok: false, error: "name is required." });
             return true;
           }
           try {
             const result = await controlService(action, name);
-            json(res, 200, { ok: true, result, services: listServiceViews() });
+            sendJson(res, 200, { ok: true, result, services: listServiceViews() });
           } catch (error) {
-            json(res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) });
+            sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) });
           }
           return true;
         }
-        default: json(res, 404, { error: "Unknown API route." }); return true;
+        default: sendJson(res, 404, { error: "Unknown API route." }); return true;
       }
     }
     switch (route) {
-      case "/status": json(res, 200, { ok: true, status: getBridgeStatus() }); return true;
-      case "/sessions": json(res, 200, { ok: true, sessions: sessionViews(), locks: lockSnapshot() }); return true;
+      case "/status": sendJson(res, 200, { ok: true, status: getBridgeStatus() }); return true;
+      case "/sessions": sendJson(res, 200, { ok: true, sessions: sessionViews(), locks: lockSnapshot() }); return true;
       case "/tools": {
         const profile = String((getBridgeStatus() as Record<string, unknown>).tool_profile ?? "full");
         const tools = listToolDefinitions().map(tool => ({
@@ -386,7 +376,7 @@ export async function apiRouteHandler(
           description: firstLine(tool.description),
           core: CORE_TOOLS.has(tool.name),
         }));
-        json(res, 200, { ok: true, profile, count: tools.length, tools });
+        sendJson(res, 200, { ok: true, profile, count: tools.length, tools });
         return true;
       }
       case "/health": {
@@ -436,18 +426,18 @@ export async function apiRouteHandler(
         check("exposure", exposure === "public-open" ? "warn" : "ok", exposure === "public-open"
           ? "公网可达且未开启鉴权：拿到 URL 的人都能读写文件、执行命令"
           : exposure);
-        json(res, 200, { ok: true, health: { checks, exposure } });
+        sendJson(res, 200, { ok: true, health: { checks, exposure } });
         return true;
       }
-      case "/services": json(res, 200, { ok: true, services: listServiceViews() }); return true;
-      case "/activity": json(res, 200, { ok: true, activity: state.activity }); return true;
-      case "/usage": json(res, 200, { ok: true, usage: getUsageStats() }); return true;
+      case "/services": sendJson(res, 200, { ok: true, services: listServiceViews() }); return true;
+      case "/activity": sendJson(res, 200, { ok: true, activity: state.activity }); return true;
+      case "/usage": sendJson(res, 200, { ok: true, usage: getUsageStats() }); return true;
       // Which OAuth clients are registered and how many credentials are live.
       // Loopback-gated like every other /api read; the client list carries no
       // secrets (tokens are stored hashed and never leave the store).
-      case "/oauth": json(res, 200, { ok: true, oauth: await oauthConsoleView() }); return true;
-      case "/settings": json(res, 200, { ok: true, state: await buildSettingsState() }); return true;
-      case "/prompt": json(res, 200, { ok: true, prompt: webAiPrompt() }); return true;
+      case "/oauth": sendJson(res, 200, { ok: true, oauth: await oauthConsoleView() }); return true;
+      case "/settings": sendJson(res, 200, { ok: true, state: await buildSettingsState() }); return true;
+      case "/prompt": sendJson(res, 200, { ok: true, prompt: webAiPrompt() }); return true;
       case "/logs/stream": {
         ensureLogStreamWired();
         res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", connection: "keep-alive" });
@@ -457,10 +447,10 @@ export async function apiRouteHandler(
         const client: SseClient = { res }; sseClients.add(client);
         req.on("close", () => { sseClients.delete(client); }); return true;
       }
-      default: json(res, 404, { error: "Unknown API route." }); return true;
+      default: sendJson(res, 404, { error: "Unknown API route." }); return true;
     }
   } catch (error) {
-    json(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
+    sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
     return true;
   }
 }

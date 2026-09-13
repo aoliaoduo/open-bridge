@@ -123,7 +123,7 @@ function normalizeBooleanArgs(tool: string, args: Args): Args {
 const DISCRIMINATORS: readonly string[] = [...new Set(Object.values(FAMILY_PARAMS))];
 
 /** How a canonical call is written in a hint: `service{action:"start"}`. */
-export function describeCanonicalCall(tool: string, args: Args): string {
+function describeCanonicalCall(tool: string, args: Args): string {
   for (const key of DISCRIMINATORS) {
     const value = args[key];
     if (typeof value === "string" && value) return `${tool}{${key}:"${value}"}`;
@@ -132,7 +132,7 @@ export function describeCanonicalCall(tool: string, args: Args): string {
 }
 
 /** Copy the named arguments that are actually present (`undefined` is absence). */
-function pick(args: Args, keys: readonly string[]): Args {
+export function pick(args: Args, keys: readonly string[]): Args {
   const out: Args = {};
   for (const key of keys) if (args[key] !== undefined) out[key] = args[key];
   return out;

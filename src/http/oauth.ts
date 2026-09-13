@@ -40,6 +40,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { sendJson } from "./json-response.js";
 import { host } from "../host/host.js";
 import { record, state } from "../bridge/state.js";
 import {
@@ -157,18 +158,17 @@ const ownerLimiter = new AuthFailureLimiter();
 // Small HTTP helpers (kept local: nothing here belongs in the app-shell path)
 // ---------------------------------------------------------------------------
 
+/**
+ * The OAuth additions to the shared envelope: discovery and token requests are
+ * made cross-origin by the client's redirect handler, so these endpoints must
+ * be reachable from a browser.
+ */
 function json(res: ServerResponse, status: number, payload: unknown, extraHeaders: Record<string, string> = {}): void {
-  res.writeHead(status, {
-    "content-type": "application/json",
-    "cache-control": "no-store",
+  sendJson(res, status, payload, {
     "referrer-policy": "no-referrer",
-    "x-content-type-options": "nosniff",
-    // Discovery and token requests are made cross-origin by the client's
-    // redirect handler, so these endpoints must be reachable from a browser.
     "access-control-allow-origin": "*",
     ...extraHeaders,
   });
-  res.end(JSON.stringify(payload));
 }
 
 /** An OAuth error response, per RFC 6749 §5.2. */

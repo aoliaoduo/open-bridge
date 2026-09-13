@@ -6,22 +6,11 @@ export interface PersistResult {
 
 export interface PersistOptions {
   /**
-   * Editor-host only: when false, writing to a file open in an editor with
-   * unsaved changes throws. The standalone host has no editor buffers, so the
-   * flag is accepted for API compatibility and has no effect here.
+   * Editor-host only, kept for API compatibility: the standalone host owns the
+   * whole filesystem view and has no editor buffers, so this flag has no effect
+   * and nothing here ever refuses a write for dirtiness.
    */
   allowDirty?: boolean;
-}
-
-/** Thrown when a write targets an editor buffer that has unsaved manual changes. */
-export class DirtyBufferError extends Error {
-  constructor(public readonly file: string) {
-    super(
-      `Refusing to write "${file}": it is open in an editor with unsaved changes. ` +
-      "Save or discard those changes first, or re-run with allow_dirty=true.",
-    );
-    this.name = "DirtyBufferError";
-  }
 }
 
 /**
