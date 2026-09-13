@@ -12,11 +12,11 @@
 
 ```text
 ChatGPT 网页对话 / Claude / Cursor / 任意 MCP 客户端
-        │  （经你掌控的 ngrok 隧道，或只在局域网/本机）
-        ▼
+        |  （经你掌控的 ngrok 隧道，或只在局域网/本机）
+        v
   open-bridge serve（三个出口见下表）
-        │
-        ▼
+        |
+        v
   你所在目录的那个工作区（文件、命令、进程、服务编排）
 ```
 

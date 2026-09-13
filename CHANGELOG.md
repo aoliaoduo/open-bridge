@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- **终端输出对齐：手工垫空格改按显示列宽对齐。**中文/全角字符占两列、按字数只算一个，手工垫空格必然错位（`serve` 横幅里「本地/公网 MCP URL」的值就比别的行后退了一列）。`src/cli.ts` 新增 `displayWidth`/`padLabel`，横幅、`status`、`health`/`doctor`、`config list`、`token list`、`instances` 的标签列统一走它（纯 ASCII 标签输出不变）；`test/display-width.test.ts` 钉住列宽语义。README 架构图的三个出口改成 Markdown 表格（渲染器自动对列，不再依赖字体里 CJK/制表符的宽度），并把三处「宿主能力过滤 / 40 个定义」的过期说法改成 v6 之后的现实（38 个定义、只剩配置档过滤）。纯显示层改动，不碰任何行为。
+- **终端输出对齐：手工垫空格改按显示列宽对齐。**中文/全角字符占两列、按字数只算一个，手工垫空格必然错位（`serve` 横幅里「本地/公网 MCP URL」的值就比别的行后退了一列）。`src/cli.ts` 新增 `displayWidth`/`padLabel`，横幅、`status`、`health`/`doctor`、`config list`、`token list`、`instances` 的标签列统一走它（纯 ASCII 标签输出不变）；告警块第二行改为与首行同级缩进（不再假设 ⚠️ 占两列）；`test/display-width.test.ts` 钉住列宽语义。README 架构图的三个出口改成 Markdown 表格（渲染器自动对列；流程线只用 ASCII 的 |/v，不再依赖字体里任何宽字符的宽度），并把三处「宿主能力过滤 / 40 个定义」的过期说法改成 v6 之后的现实（38 个定义、只剩配置档过滤）。纯显示层改动，不碰任何行为。
 
 ## [1.0.0-alpha.6] — 2026-09-14
 ### Added

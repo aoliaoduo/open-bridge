@@ -484,7 +484,7 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   else console.log(`  ${padLabel("公网 MCP URL:", 14)}（未开启隧道，仅本机可用）`);
   if (state.tunnelUrl && nodeHost.config.get<boolean>("auth.enabled", false) !== true) {
     console.log("  ⚠️  公网可达且未开启鉴权：拿到该 URL 的人都能读写本机文件、执行命令。");
-    console.log("      要收紧：控制台「令牌」页签发令牌并开启 Bearer 鉴权，或用「轮换端点」作废旧链接。");
+    console.log("  要收紧：控制台「令牌」页签发令牌并开启 Bearer 鉴权，或用「轮换端点」作废旧链接。");
   }
   console.log(`  ${padLabel("日志:", 14)}${nodeHost.bridgeLog.path()}`);
   console.log("");
