@@ -8,7 +8,7 @@
 import { host } from "../host/host.js";
 import { MAX_SESSIONS, state } from "./state.js";
 import { pruneCommands } from "./processes.js";
-import { idleNoticeTick } from "./notify.js";
+import { finishNoticeTick, idleNoticeTick } from "./notify.js";
 
 /** Idle MCP sessions are reclaimed after this long without activity. */
 const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
@@ -65,6 +65,9 @@ export function startSessionPruneLoop(): void {
     // second timer: one 60 s heartbeat for "time passed on an idle Bridge",
     // started and stopped as one unit. Its own decisions are guarded inside.
     try { idleNoticeTick(); } catch { /* best-effort sweep */ }
+    // Same sweep, opposite case: idle warns about work that stalled, this one
+    // announces work that finished without the AI saying so.
+    try { finishNoticeTick(); } catch { /* best-effort sweep */ }
   }, SESSION_PRUNE_INTERVAL_MS);
 }
 

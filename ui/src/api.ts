@@ -97,6 +97,37 @@ export interface LockWaiter { keys?: string[]; mode?: string; label?: string; wa
 /** Same shape the 状态 card summarises, in full (src/bridge/resource-locks.ts). */
 export interface LockSnapshot { held: LockRow[]; waiting: LockWaiter[] }
 
+/** One entry of the AI's plan, exactly as `set_todos` persisted it. */
+export interface TodoItem {
+  id: string;
+  title: string;
+  status: "pending" | "in_progress" | "completed" | string;
+}
+
+/** The last `report_progress` line, when the agent sent one. */
+export interface TodoProgress {
+  message: string;
+  phase?: string;
+  category?: string;
+  percent?: number;
+  level?: string;
+  at?: string;
+}
+
+export interface TodoBoard {
+  todos: TodoItem[];
+  counts: { total: number; pending: number; in_progress: number; completed: number };
+  /**
+   * True when no live MCP session is driving this list — it is the last plan
+   * left behind by a disconnected agent, not work in flight.
+   */
+  stale: boolean;
+  updated_at: string;
+  last_progress: TodoProgress | null;
+  /** Milliseconds since the driving session's last call; null when stale. */
+  idle_ms: number | null;
+}
+
 export interface ToolView { name: string; description: string; core: boolean }
 export interface ToolCatalog { profile: string; count: number; tools: ToolView[] }
 
@@ -162,6 +193,7 @@ export const api = {
   sessions: () => getJson<{ sessions: SessionView[]; locks: LockSnapshot }>("/api/sessions"),
   closeSession: (id: string) =>
     postJson<{ closed: string; sessions: SessionView[] }>("/api/sessions/close", { id }),
+  todos: () => getJson<TodoBoard>("/api/todos"),
   tools: () => getJson<ToolCatalog>("/api/tools"),
   health: () => getJson<{ health: HealthReport }>("/api/health").then(r => r.health),
   oauth: () => getJson<{ oauth: OAuthConsoleView }>("/api/oauth").then(r => r.oauth),

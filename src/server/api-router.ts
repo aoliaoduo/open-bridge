@@ -38,6 +38,7 @@ import { buildStaleness } from "../bridge/build-staleness.js";
 import { nodeHost } from "../host/node-host.js";
 import { redactSensitiveText } from "../bridge/state.js";
 import { lockSnapshot } from "../bridge/resource-locks.js";
+import { loadTodoStore } from "../bridge/todo-store.js";
 import { listToolDefinitions } from "../bridge/tool-catalog.js";
 import { CORE_TOOLS } from "../mcp/tool-definitions.js";
 import { handleOAuthRequest, oauthConsoleView } from "../http/oauth.js";
@@ -377,6 +378,11 @@ export async function apiRouteHandler(
     switch (route) {
       case "/status": sendJson(res, 200, { ok: true, status: getBridgeStatus() }); return true;
       case "/sessions": sendJson(res, 200, { ok: true, sessions: sessionViews(), locks: lockSnapshot() }); return true;
+      // The todo list an AI is working through, as a list rather than a count.
+      // `/sessions` has carried `todos: <number>` since todos existed, which
+      // tells an operator that work is in flight but never what the work IS —
+      // the one question the console could not answer while an agent ran.
+      case "/todos": sendJson(res, 200, { ok: true, ...todoView() }); return true;
       case "/tools": {
         const profile = String((getBridgeStatus() as Record<string, unknown>).tool_profile ?? "full");
         const tools = listToolDefinitions().map(tool => ({
@@ -478,6 +484,64 @@ function sessionViews(): Array<Record<string, unknown>> {
       active_requests: session.activeRequests,
       todos: Array.isArray(session.todos) ? session.todos.length : 0,
     }));
+}
+
+/** A todo as `set_todos` validates it: id, title, and one of three states. */
+interface TodoView {
+  id: string;
+  title: string;
+  status: string;
+}
+
+/** Accept only what set_todos would have written; skip anything else. */
+function asTodo(value: unknown): TodoView | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const id = typeof raw.id === "string" ? raw.id : "";
+  const title = typeof raw.title === "string" ? raw.title : "";
+  const status = typeof raw.status === "string" ? raw.status : "";
+  if (!id || !title) return undefined;
+  return { id, title, status: ["pending", "in_progress", "completed"].includes(status) ? status : "pending" };
+}
+
+/**
+ * The todo list for the console's 任务 page.
+ *
+ * Two sources, deliberately not merged: the live MCP session holds what the
+ * connected AI is working on right now, while the persisted per-workspace
+ * store survives a disconnect. Preferring the live session keeps the page
+ * honest while an agent runs; falling back to the store means closing the tab
+ * (or a crashed agent — the case that motivated the idle watchdog) leaves the
+ * last known plan on screen instead of an empty list.
+ *
+ * `stale` is that distinction made explicit rather than left for the reader to
+ * infer from a timestamp: a list nobody is currently driving is still useful,
+ * but it must not look like live progress.
+ */
+function todoView(): Record<string, unknown> {
+  const stored = loadTodoStore();
+  const session = state.latestSession;
+  const live = Array.isArray(session?.todos) ? session.todos : undefined;
+  // An empty live list is still an answer ("the agent cleared its plan"), so
+  // the fallback tests for a session, not for a non-empty array.
+  const source = live !== undefined ? live : stored.todos;
+  const todos = (Array.isArray(source) ? source : [])
+    .map(asTodo)
+    .filter((todo): todo is TodoView => todo !== undefined);
+  const counts = { total: todos.length, pending: 0, in_progress: 0, completed: 0 };
+  for (const todo of todos) {
+    if (todo.status === "completed") counts.completed += 1;
+    else if (todo.status === "in_progress") counts.in_progress += 1;
+    else counts.pending += 1;
+  }
+  return {
+    todos,
+    counts,
+    stale: live === undefined,
+    updated_at: stored.updatedAt,
+    last_progress: stored.lastProgress,
+    idle_ms: session ? Math.max(0, Date.now() - session.lastUsed) : null,
+  };
 }
 
 /** Tool descriptions are long; the catalog page wants one line per tool. */

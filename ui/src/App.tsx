@@ -13,6 +13,7 @@ import { LogsTab } from "./components/LogsTab";
 import { StatsTab } from "./components/StatsTab";
 import { ServicesTab } from "./components/ServicesTab";
 import { SessionsPage } from "./components/SessionsPage";
+import { TodosPage } from "./components/TodosPage";
 import { ToolsPage } from "./components/ToolsPage";
 import { HealthPage } from "./components/HealthPage";
 
@@ -229,6 +230,7 @@ export function App() {
             <div className="page" key={`${route}-${reloadKey}`}>
               {route === "status" && <StatusTab act={act} onRefresh={refreshSettings} notify={showToast} onOpen={open} />}
               {route === "sessions" && <SessionsPage notify={showToast} />}
+              {route === "todos" && <TodosPage />}
               {route === "tools" && <ToolsPage notify={showToast} />}
               {route === "health" && <HealthPage onOpen={open} />}
               {route === "services" && <ServicesTab notify={showToast} />}

@@ -278,7 +278,15 @@ export async function pushNotification(
     // (and the redactor has no way to know this particular path segment is it).
     record("notify", "progress", `push ${event}: ${clippedTitle.slice(0, 60)}`);
     const probe = await probeHttpHealth(url, { timeoutMs: BARK_TIMEOUT_MS });
-    if (probe.ok) return outcome(true, "", probe.status);
+    if (probe.ok) {
+      // Any push that actually landed disarms the finish watchdog. This is the
+      // hinge that makes the fallback mode-aware for free: in frequent mode the
+      // completion bell has already rung by the time a list is fully ticked, so
+      // the watchdog stays quiet; in quiet mode that bell is suppressed, the
+      // mark is never set, and the watchdog is the only thing that speaks.
+      markSelfNotified(nowMs);
+      return outcome(true, "", probe.status);
+    }
     const detail = probe.error || `Bark responded with HTTP ${probe.status}`;
     record("notify", "warning", `push failed (${event}): ${detail}`.slice(0, 500));
     return outcome(false, "send_failed", probe.status, detail);
@@ -458,6 +466,130 @@ export function idleNoticeTick(nowMs: number = Date.now()): boolean {
     // Time-sensitive on purpose: the whole point of this push is to pierce
     // iOS Focus modes when a web-AI tab died mid-task.
     { bark: { level: "timeSensitive" } },
+  ).catch(() => undefined);
+  return true;
+}
+
+/**
+ * Should the server announce a finished work list the AI never announced?
+ *
+ * The idle watchdog above deliberately requires an OPEN todo — "silence with
+ * work outstanding" is its whole subject. That leaves the opposite case
+ * uncovered, and it is the common one: the model ticks the last item, writes
+ * its summary in the chat, and simply never calls `notify("finished")`. The
+ * operator, who is not watching the tab, learns nothing. Relying on the model
+ * to remember is what already failed — repeatedly — so the server states the
+ * fact it can see for itself.
+ *
+ * Conditions are deliberately tight, because a wrong "done" is worse than a
+ * missing one:
+ *  - a list that exists and is entirely completed (nothing in flight),
+ *  - no request currently running (the run is really over, not mid-call),
+ *  - a short settle delay after the last call, so the natural
+ *    `set_todos` → summary → `notify` ending fires the model's own push first
+ *    and this never races it,
+ *  - and the AI must not have pushed anything itself since that completion —
+ *    `notifiedSinceMs` is how a well-behaved model switches this off.
+ *
+ * The latch is the completion clock, so one announcement per finished list:
+ * new work advances it and re-arms the watchdog.
+ */
+export function finishNoticeVerdict(input: {
+  usable: boolean;
+  idleMinutes: number;
+  nowMs: number;
+  lastUsedMs: number;
+  activeRequests: number;
+  hasTodos: boolean;
+  allCompleted: boolean;
+  completedAtMs: number;
+  notifiedSinceMs: number;
+  announcedForMs: number;
+}): boolean {
+  // idleMinutes === 0 is the operator switching the watchdogs off entirely;
+  // this one honours that same switch rather than inventing a second knob.
+  if (!input.usable || input.idleMinutes <= 0) return false;
+  if (!input.hasTodos || !input.allCompleted) return false;
+  if (input.activeRequests > 0) return false;
+  if (!Number.isFinite(input.completedAtMs) || input.completedAtMs <= 0) return false;
+  // The model already said it — that is the outcome we wanted, stay quiet.
+  if (input.notifiedSinceMs >= input.completedAtMs) return false;
+  const settleMs = Math.min(FINISH_SETTLE_MS, input.idleMinutes * 60_000);
+  if (input.nowMs - input.lastUsedMs < settleMs) return false;
+  return input.announcedForMs !== input.completedAtMs;
+}
+
+/**
+ * How long after the last tool call a finished list is considered final.
+ *
+ * Long enough that a model ending with `set_todos` → a sentence → `notify`
+ * wins the race and this stays silent; short enough that an operator who
+ * walked away hears within the minute. Capped by idleMinutes above so a very
+ * small idle setting cannot be outlived by this delay.
+ */
+const FINISH_SETTLE_MS = 45_000;
+
+/** Latch: the completion clock we have already announced. */
+let finishAnnouncedForMs = 0;
+
+/** Set whenever the AI pushes anything itself; silences the finish watchdog. */
+let lastSelfNotifyMs = 0;
+
+/** Called on every successful push so a model's own notify disarms the fallback. */
+export function markSelfNotified(atMs: number = Date.now()): void {
+  if (atMs > lastSelfNotifyMs) lastSelfNotifyMs = atMs;
+}
+
+/**
+ * When the current list became fully completed, and whether it is.
+ *
+ * `completedAtMs` uses the newest session clock rather than a stored
+ * timestamp: the moment of completion IS the `set_todos` call that finished
+ * it, and that call is the session's `lastUsed`. Reading it here keeps this
+ * free of extra bookkeeping in the write path.
+ */
+function completionSnapshot(): { hasTodos: boolean; allCompleted: boolean; completedAtMs: number } {
+  let hasTodos = false;
+  let allCompleted = true;
+  let completedAtMs = 0;
+  for (const session of state.sessions.values()) {
+    const todos = Array.isArray(session.todos) ? session.todos : [];
+    if (todos.length === 0) continue;
+    hasTodos = true;
+    for (const entry of todos) {
+      const todo = asTodo(entry);
+      if (todo && todo.status !== "completed") allCompleted = false;
+    }
+    if (session.lastUsed > completedAtMs) completedAtMs = session.lastUsed;
+  }
+  return { hasTodos, allCompleted, completedAtMs };
+}
+
+/**
+ * One pass of the finish watchdog, called from the same sweep as
+ * `idleNoticeTick` — no new timer, same 60s cadence.
+ */
+export function finishNoticeTick(nowMs: number = Date.now()): boolean {
+  const settings = resolveNotifySettings();
+  const activity = latestSessionActivity();
+  const completion = completionSnapshot();
+  const fire = finishNoticeVerdict({
+    ...settings,
+    nowMs,
+    lastUsedMs: activity.lastUsedMs,
+    activeRequests: activity.activeRequests,
+    ...completion,
+    notifiedSinceMs: lastSelfNotifyMs,
+    announcedForMs: finishAnnouncedForMs,
+  });
+  if (!fire) return false;
+  finishAnnouncedForMs = completion.completedAtMs;
+  void pushNotification(
+    settings,
+    "finished",
+    NOTIFY_DEFAULT_TITLE,
+    "任务清单已全部完成，但 AI 没有自己发通知 —— 由服务端代为告知。",
+    Date.now(),
   ).catch(() => undefined);
   return true;
 }

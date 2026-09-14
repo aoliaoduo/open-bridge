@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  buildBarkUrl, clampIdleMinutes, idleWatchVerdict, modeSuppresses,
+  buildBarkUrl, clampIdleMinutes, finishNoticeVerdict, idleWatchVerdict, modeSuppresses,
   newlyCompletedTodos, notifyUsageInstructions, parseBarkExtras,
 } from "../src/bridge/notify.js";
 
@@ -183,4 +183,71 @@ test("parseBarkExtras: every knob refuses junk by name (the model fixes the call
     assert.equal(result.ok, false, `expected refusal for ${JSON.stringify(args)}`);
     if (!result.ok) assert.match(result.error, pattern);
   }
+});
+
+// --- the finish watchdog -----------------------------------------------------
+
+/**
+ * The complaint this exists for: "网页 AI 经常忘掉" — the model finishes the
+ * work, writes its summary, and never calls notify. The idle watchdog cannot
+ * cover it (that one requires an OPEN todo, this is the opposite case), so
+ * these pin the conditions under which the server speaks for a silent AI.
+ */
+
+const DONE = {
+  usable: true,
+  idleMinutes: 10,
+  nowMs: 1_000_000,
+  lastUsedMs: 1_000_000 - 60_000, // a minute of quiet: past the settle delay
+  activeRequests: 0,
+  hasTodos: true,
+  allCompleted: true,
+  completedAtMs: 1_000_000 - 60_000,
+  notifiedSinceMs: 0,
+  announcedForMs: 0,
+} as const;
+
+test("finish watchdog: a fully completed list nobody announced does get announced", () => {
+  assert.equal(finishNoticeVerdict(DONE), true);
+});
+
+test("finish watchdog: the AI's own push silences it", () => {
+  // A well-behaved model that called notify() after finishing must not cause a
+  // second, redundant bell — its push is newer than the completion.
+  assert.equal(finishNoticeVerdict({ ...DONE, notifiedSinceMs: DONE.completedAtMs + 1 }), false);
+  // But a push from BEFORE the work finished says nothing about this list.
+  assert.equal(finishNoticeVerdict({ ...DONE, notifiedSinceMs: DONE.completedAtMs - 1 }), true);
+});
+
+test("finish watchdog: unfinished work is the idle watchdog's job, not this one", () => {
+  assert.equal(finishNoticeVerdict({ ...DONE, allCompleted: false }), false);
+  assert.equal(finishNoticeVerdict({ ...DONE, hasTodos: false }), false);
+});
+
+test("finish watchdog: it waits for the run to actually be over", () => {
+  // Still working: a call in flight means the ticked list may not be the end.
+  assert.equal(finishNoticeVerdict({ ...DONE, activeRequests: 1 }), false);
+  // Just ticked the last box — the model's own notify may be the very next
+  // call, so the settle delay must keep this quiet and let the AI win.
+  assert.equal(finishNoticeVerdict({ ...DONE, lastUsedMs: DONE.nowMs - 1_000 }), false);
+});
+
+test("finish watchdog: one announcement per finished list", () => {
+  // The latch is the completion clock, so the same completion never repeats...
+  assert.equal(finishNoticeVerdict({ ...DONE, announcedForMs: DONE.completedAtMs }), false);
+  // ...while a later completion (new work, finished again) re-arms it.
+  assert.equal(finishNoticeVerdict({ ...DONE, announcedForMs: DONE.completedAtMs - 5_000 }), true);
+});
+
+test("finish watchdog: idleMinutes 0 switches off both watchdogs, not just one", () => {
+  assert.equal(finishNoticeVerdict({ ...DONE, idleMinutes: 0 }), false);
+  assert.equal(finishNoticeVerdict({ ...DONE, usable: false }), false);
+});
+
+test("finish watchdog: a tiny idleMinutes shortens the settle delay instead of outliving it", () => {
+  // idleMinutes=1 caps the 45 s settle at 60 s; 30 s of quiet is not yet enough
+  // at the default, but the cap must never make the delay LONGER than the knob.
+  const tiny = { ...DONE, idleMinutes: 1, lastUsedMs: DONE.nowMs - 50_000 };
+  assert.equal(finishNoticeVerdict(tiny), true, "50 s of quiet clears the 45 s settle");
+  assert.equal(finishNoticeVerdict({ ...tiny, lastUsedMs: DONE.nowMs - 10_000 }), false);
 });

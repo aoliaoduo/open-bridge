@@ -16,6 +16,7 @@
 export type RouteId =
   | "status"
   | "sessions"
+  | "todos"
   | "tools"
   | "health"
   | "services"
@@ -70,6 +71,14 @@ export const ROUTES: RouteSpec[] = [
     hint: "谁连着这个实例",
     group: "instance",
     icon: ["M8.5 11a3 3 0 100-6 3 3 0 000 6z", "M3 19.5a5.5 5.5 0 0111 0", "M16 5.6a3 3 0 010 5.8", "M17.2 14.4a5.5 5.5 0 014.3 5.1"],
+  },
+  {
+    id: "todos",
+    label: "任务",
+    hint: "AI 正在做什么：任务清单与最新进展",
+    group: "instance",
+    // A checklist: a box, a tick inside it, and two list lines beside it.
+    icon: ["M3.5 5.5h5v5h-5z", "M4.8 8l1.3 1.3 2.2-2.4", "M11.5 6.5h9", "M11.5 10h6", "M3.5 15.5h5v5h-5z", "M11.5 16.5h9", "M11.5 20h6"],
   },
   {
     id: "tools",

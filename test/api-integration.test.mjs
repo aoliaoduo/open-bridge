@@ -227,6 +227,20 @@ test("the panel endpoints answer for the console pages", async () => {
   assert.ok(toolBody.tools.some(tool => tool.name === "read_files" && tool.core === true), "core tools are flagged");
   assert.ok(!toolBody.tools.some(tool => tool.name === "get_diagnostics"), "editor-only tools stay hidden");
 
+  // 任务 reads this one. It existed as `todos: <number>` on /api/sessions long
+  // before it was a page; the list itself is what the console was missing.
+  const todos = await fetch(`${base()}/api/todos`);
+  assert.equal(todos.status, 200);
+  const todoBody = await todos.json();
+  assert.ok(Array.isArray(todoBody.todos), "todos is a list, not a count");
+  assert.deepEqual(Object.keys(todoBody.counts).sort(),
+    ["completed", "in_progress", "pending", "total"]);
+  assert.equal(todoBody.counts.total, todoBody.todos.length, "the counts describe the list returned");
+  // No MCP session in this suite, so the board must say so rather than look live.
+  assert.equal(todoBody.stale, true, "a list with nobody driving it is flagged");
+  assert.equal(todoBody.idle_ms, null, "and has no idle clock to report");
+  assert.equal(typeof todoBody.updated_at, "string");
+
   const health = await fetch(`${base()}/api/health`);
   assert.equal(health.status, 200);
   const healthBody = await health.json();
