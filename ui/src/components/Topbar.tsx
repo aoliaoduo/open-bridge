@@ -1,17 +1,11 @@
 import { routeGroupLabel, routePath, routeSpec, type RouteId } from "../routes";
 import { t } from "../i18n";
-import { themePrefLabel, type ThemePref } from "../theme";
 import type { SettingsState } from "../api";
 import { Chip } from "./Chip";
 
 interface Props {
   route: RouteId;
   settings: SettingsState | null;
-  themePref: ThemePref;
-  onCycleTheme: () => void;
-  onOpen: (id: RouteId) => void;
-  onCopyMcp: () => void;
-  onRefresh: () => void;
   onToggleDrawer: () => void;
 }
 
@@ -20,15 +14,22 @@ interface Props {
  * page is open.
  *
  * What moved here: the running chip and version (so the answer to "is it up,
- * and which build is this page from" is visible from every page), the theme
- * switch, and the console path — which used to sit in a row of buttons below
- * the tabs, where it read as an action rather than as an address.
+ * and which build is this page from" is visible from every page) and the
+ * console path — which used to sit in a row of buttons below the tabs, where
+ * it read as an address rendered as an action.
  *
  * What left: the flat tab strip (now the sidebar) and the page title (now the
  * page header, where it can be a heading instead of a tab).
+ *
+ * What was removed rather than moved: 复制 MCP 地址, 一键体检, 刷新本页 and a
+ * second theme toggle. Each already had a home — the endpoint card copies the
+ * URL, 体检 runs its own checks and is one nav click away, the browser's own
+ * reload is more reliable than a button that only re-fetches, and the sidebar
+ * foot owns the theme. A global action row that duplicates page controls
+ * makes every page look like it has four things to do.
  */
 export function Topbar({
-  route, settings, themePref, onCycleTheme, onOpen, onCopyMcp, onRefresh, onToggleDrawer,
+  route, settings, onToggleDrawer,
 }: Props) {
   const spec = routeSpec(route);
   const running = Boolean(settings?.running);
@@ -65,23 +66,6 @@ export function Topbar({
             v{settings.version}
           </span>
         ) : null}
-        <button
-          type="button"
-          className="ghost small"
-          onClick={onCycleTheme}
-          title={t("在 跟随系统 / 浅色 / 深色 之间切换", "Switch between System / Light / Dark")}
-        >
-          {t("主题：", "Theme: ")}{themePrefLabel(themePref)}
-        </button>
-        <button type="button" className="small" disabled={!settings?.mcpUrl} onClick={onCopyMcp}>
-          {t("复制 MCP 地址", "Copy MCP URL")}
-        </button>
-        <button type="button" className="small" onClick={() => onOpen("health")}>
-          {t("一键体检", "Run health check")}
-        </button>
-        <button type="button" className="small" onClick={onRefresh}>
-          {t("刷新本页", "Refresh page")}
-        </button>
       </div>
     </header>
   );

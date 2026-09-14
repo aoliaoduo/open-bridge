@@ -62,7 +62,7 @@ export function App() {
   const [toast, setToast] = useState<ToastMsg | null>(null);
   const [secret, setSecret] = useState<SecretPayload | null>(null);
   // Bumped by 刷新本页 so the open page remounts and re-reads its data.
-  const [reloadKey, setReloadKey] = useState(0);
+
   const [collapsed, setCollapsed] = useState<boolean>(() => readCollapsed());
   // Overlay drawer, narrow windows only; harmless (and invisible) on desktop.
   const [drawer, setDrawer] = useState(false);
@@ -224,24 +224,12 @@ export function App() {
           <Topbar
             route={route}
             settings={settings}
-            themePref={themePref}
-            onCycleTheme={cycleTheme}
-            onOpen={open}
-            onCopyMcp={() => {
-              void copyText(settings?.mcpUrl ?? "");
-              showToast(t("MCP 地址已复制。", "MCP URL copied."));
-            }}
-            onRefresh={() => {
-              setReloadKey(key => key + 1);
-              void refreshSettings();
-              showToast(t("已刷新。", "Refreshed."));
-            }}
             onToggleDrawer={() => setDrawer(value => !value)}
           />
 
           <main className="content">
             <PageHeader title={header.title} hint={header.hint} />
-            <div className="page" key={`${route}-${reloadKey}`}>
+            <div className="page" key={route}>
               {route === "status" && <StatusTab act={act} onRefresh={refreshSettings} notify={showToast} onOpen={open} />}
               {route === "sessions" && <SessionsPage notify={showToast} />}
               {route === "todos" && <TodosPage />}

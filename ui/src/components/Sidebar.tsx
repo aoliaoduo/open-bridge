@@ -41,8 +41,10 @@ export function Sidebar({ route, collapsed, drawerOpen, themePref, onToggleColla
           <path d="M8 17v-2.5M12 17v-4.5M16 17v-2.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
         </svg>
         <span className="brand-text">
+          {/* No "控制台" subtitle: the breadcrumb already opens with 控制台 on
+              every page, and a product name does not need a label saying it is
+              a console. */}
           <span className="brand-name">Open Bridge</span>
-          <span className="brand-sub">{t("控制台", "Console")}</span>
         </span>
         <button
           type="button"
@@ -108,7 +110,7 @@ export function Sidebar({ route, collapsed, drawerOpen, themePref, onToggleColla
         >
           {t("主题：", "Theme: ")}{themePrefLabel(themePref)}
         </button>
-        <span className="sidebar-foot-note">{t("独立版 · 本地面板", "Standalone · local panel")}</span>
+
       </div>
     </aside>
   );

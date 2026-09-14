@@ -146,7 +146,6 @@ body {
 .logo { width: 24px; height: 24px; flex: none; color: var(--accent); }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
 .brand-name { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
-.brand-sub { font-size: 11px; color: var(--muted); }
 .brand .collapse-btn { margin-left: auto; }
 
 /* The rail must stay scrollable -- on a short window the nine links do not all
@@ -219,14 +218,26 @@ body {
   font-size: 12px;
   padding: 4px 8px;
 }
-.sidebar-foot-note { display: block; }
+
 
 /* Collapsed rail: labels stay in the DOM (only visually clipped) so the links
    keep their accessible names, and the group headings become hairlines. */
 .sidebar.collapsed .brand-text,
 .sidebar.collapsed .sidebar-foot { display: none; }
-.sidebar.collapsed .brand { justify-content: center; padding: 0 8px; }
-.sidebar.collapsed .collapse-btn { margin-left: 0; }
+/* Collapsed, the brand row holds two items -- the logo and the collapse
+   button -- and centring the row centred the PAIR, which pushed the logo off
+   the vertical line every nav icon below it sits on. Take the button out of
+   the flow so the logo is the only thing being centred, and it lines up. */
+.sidebar.collapsed .brand { justify-content: center; padding: 0 8px; position: relative; }
+.sidebar.collapsed .collapse-btn {
+  position: absolute;
+  right: 4px;
+  margin-left: 0;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.sidebar.collapsed .brand:hover .collapse-btn,
+.sidebar.collapsed .collapse-btn:focus-visible { opacity: 1; }
 .sidebar.collapsed .nav { padding: 12px 8px; }
 .sidebar.collapsed .nav-group + .nav-group { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 .sidebar.collapsed .nav-group-label {

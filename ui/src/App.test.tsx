@@ -333,7 +333,9 @@ describe("App shell", () => {
     render(<App />);
     await screen.findByText("MCP 端点");
 
-    fireEvent.click(screen.getByRole("button", { name: "一键体检" }));
+    // The topbar shortcut is gone; 体检 is reached from the nav like any other
+    // page, and the page runs its own checks on open.
+    fireEvent.click(screen.getByRole("link", { name: "体检" }));
 
     expect(await screen.findByText("体检结果")).toBeTruthy();
     // public-open is 提醒, not 异常: the summary must say so instead of crying
@@ -686,7 +688,7 @@ describe("App shell: in-page filtering and rails", () => {
     // same getters rather than holding strings captured at module load.
     expect(await screen.findByRole("link", { name: "Status" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Settings" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Run health check" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Health" })).toBeTruthy();
     expect(document.documentElement.lang).toBe("en");
     // The tab name is not React-rendered, so it needs its own dependency.
     expect(document.title).toBe("Status · Open Bridge Console");
