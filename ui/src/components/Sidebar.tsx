@@ -1,6 +1,5 @@
 import { ROUTES, ROUTE_GROUPS, routePath, type RouteId } from "../routes";
 import { t } from "../i18n";
-import { themePrefLabel, type ThemePref } from "../theme";
 
 interface Props {
   route: RouteId;
@@ -8,12 +7,9 @@ interface Props {
   collapsed: boolean;
   /** Overlay drawer on narrow windows; always false on desktop. */
   drawerOpen: boolean;
-  /** Current theme preference; the foot button surfaces it on every screen. */
-  themePref: ThemePref;
   onToggleCollapsed: () => void;
   onOpen: (id: RouteId) => void;
   onCloseDrawer: () => void;
-  onCycleTheme: () => void;
 }
 
 /**
@@ -31,7 +27,7 @@ interface Props {
  * them from each link's accessible name, so a collapsed rail would be announced
  * as a list of unlabelled links.
  */
-export function Sidebar({ route, collapsed, drawerOpen, themePref, onToggleCollapsed, onOpen, onCloseDrawer, onCycleTheme }: Props) {
+export function Sidebar({ route, collapsed, drawerOpen, onToggleCollapsed, onOpen, onCloseDrawer }: Props) {
   return (
     <aside className={`sidebar${collapsed ? " collapsed" : ""}${drawerOpen ? " drawer-open" : ""}`}>
       <div className="brand">
@@ -98,20 +94,6 @@ export function Sidebar({ route, collapsed, drawerOpen, themePref, onToggleColla
         ))}
       </nav>
 
-      <div className="sidebar-foot">
-        {/* The topbar hides its theme toggle on narrow screens to keep the
-            action row from wrapping; the sidebar foot gives the same control
-            a permanent home so 跟随系统 / 浅色 / 深色 is reachable on mobile. */}
-        <button
-          type="button"
-          className="ghost theme-foot"
-          onClick={onCycleTheme}
-          title={t("在 跟随系统 / 浅色 / 深色 之间切换", "Switch between System / Light / Dark")}
-        >
-          {t("主题：", "Theme: ")}{themePrefLabel(themePref)}
-        </button>
-
-      </div>
     </aside>
   );
 }

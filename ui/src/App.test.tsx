@@ -625,23 +625,26 @@ describe("App shell: grouped navigation", () => {
     render(<App />);
     await screen.findByText("MCP 端点");
 
-    // The topbar hides its theme toggle under 720px; the sidebar's foot button
-    // is the always-visible copy. Either clicks the same handler.
-    const themeButtons = () => screen.getAllByRole("button", { name: /主题：/ });
+    // One toggle now, in the topbar, and it is an icon — so the current mode
+    // lives in the accessible name rather than in text content. That is also
+    // the property worth asserting: an icon-only control that does not
+    // announce which mode it is in would be a regression of its own.
+    const themeButton = () => screen.getByRole("button", { name: /主题：/ });
     // jsdom ships no matchMedia, so 跟随系统 resolves to the light palette.
     expect(document.documentElement.dataset.theme).toBe("light");
+    expect(themeButton().getAttribute("aria-label")).toBe("主题：跟随系统");
 
-    fireEvent.click(themeButtons()[0]!);
-    expect(themeButtons().some(b => b.textContent === "主题：浅色")).toBe(true);
+    fireEvent.click(themeButton());
+    expect(themeButton().getAttribute("aria-label")).toBe("主题：浅色");
     expect(document.documentElement.dataset.theme).toBe("light");
 
-    fireEvent.click(themeButtons().find(b => b.textContent === "主题：浅色")!);
-    expect(themeButtons().some(b => b.textContent === "主题：深色")).toBe(true);
+    fireEvent.click(themeButton());
+    expect(themeButton().getAttribute("aria-label")).toBe("主题：深色");
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(window.localStorage.getItem("openBridge.console.theme")).toBe("dark");
 
-    fireEvent.click(themeButtons().find(b => b.textContent === "主题：深色")!);
-    expect(themeButtons().some(b => b.textContent === "主题：跟随系统")).toBe(true);
+    fireEvent.click(themeButton());
+    expect(themeButton().getAttribute("aria-label")).toBe("主题：跟随系统");
   });
 });
 

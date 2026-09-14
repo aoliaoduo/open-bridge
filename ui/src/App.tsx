@@ -212,11 +212,9 @@ export function App() {
           route={route}
           collapsed={collapsed}
           drawerOpen={drawer}
-          themePref={themePref}
           onToggleCollapsed={toggleCollapsed}
           onOpen={open}
           onCloseDrawer={() => setDrawer(false)}
-          onCycleTheme={cycleTheme}
         />
         {drawer ? <div className="scrim" onClick={() => setDrawer(false)} /> : null}
 
@@ -224,6 +222,8 @@ export function App() {
           <Topbar
             route={route}
             settings={settings}
+            themePref={themePref}
+            onCycleTheme={cycleTheme}
             onToggleDrawer={() => setDrawer(value => !value)}
           />
 

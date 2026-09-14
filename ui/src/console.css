@@ -203,27 +203,10 @@ body {
 .nav-icon { width: 17px; height: 17px; flex: none; }
 .nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.sidebar-foot {
-  flex: none;
-  padding: 10px 16px;
-  border-top: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 11.5px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.sidebar-foot .theme-foot {
-  align-self: flex-start;
-  font-size: 12px;
-  padding: 4px 8px;
-}
-
 
 /* Collapsed rail: labels stay in the DOM (only visually clipped) so the links
    keep their accessible names, and the group headings become hairlines. */
-.sidebar.collapsed .brand-text,
-.sidebar.collapsed .sidebar-foot { display: none; }
+.sidebar.collapsed .brand-text { display: none; }
 /* Collapsed, the brand row holds two items -- the logo and the collapse
    button -- and centring the row centred the PAIR, which pushed the logo off
    the vertical line every nav icon below it sits on. Take the button out of
@@ -553,6 +536,18 @@ button.icon-btn {
   color: var(--muted);
 }
 button.icon-btn:hover { background: var(--hover); color: var(--text); border-color: transparent; }
+/* The theme toggle sits between two readouts, so it needs to look like a
+   control without shouting: a hairline that only appears on hover, and an
+   icon that rotates a few degrees on the way in so the click feels answered.
+   Its three icons differ in silhouette, which is what makes the current mode
+   readable at a glance. */
+.theme-btn { color: var(--muted); transition: color .12s, background-color .12s; }
+.theme-btn:hover { color: var(--accent); background: var(--hover); }
+.theme-btn svg { transition: transform .18s ease; }
+.theme-btn:hover svg { transform: rotate(-15deg); }
+@media (prefers-reduced-motion: reduce) {
+  .theme-btn svg, .theme-btn:hover svg { transition: none; transform: none; }
+}
 button.icon-btn svg { width: 17px; height: 17px; }
 
 :where(a, button, [tabindex]):focus-visible {
@@ -747,7 +742,7 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
     box-shadow: var(--shadow-md);
   }
   .sidebar.drawer-open { transform: none; }
-  .sidebar.collapsed .brand-text, .sidebar.collapsed .sidebar-foot { display: flex; }
+  .sidebar.collapsed .brand-text { display: flex; }
   .sidebar.collapsed .nav-item { justify-content: flex-start; padding: 7px 10px; }
   .sidebar.collapsed .nav-group-label { height: auto; color: var(--muted); }
   .sidebar.collapsed .nav-label { position: static; width: auto; height: auto; clip-path: none; margin: 0; }

@@ -1,8 +1,51 @@
 import { useEffect, useState } from "react";
 import { routeGroupLabel, routePath, routeSpec, type RouteId } from "../routes";
 import { t } from "../i18n";
+import { themePrefLabel, type ThemePref } from "../theme";
 import type { SettingsState } from "../api";
 import { Chip } from "./Chip";
+
+/**
+ * Sun, moon, or half-and-half for "follow the system".
+ *
+ * Three distinct silhouettes rather than one icon with a badge: the point of
+ * moving this into the bar was to read the current mode without reading a
+ * word, and a shared outline with a small marker would not survive a glance.
+ */
+function ThemeIcon({ pref }: { pref: ThemePref }) {
+  if (pref === "light") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2" stroke="currentColor" strokeWidth="1.8" />
+        <path
+          d="M12 3.4v2M12 18.6v2M3.4 12h2M18.6 12h2M6.1 6.1l1.4 1.4M16.5 16.5l1.4 1.4M17.9 6.1l-1.4 1.4M7.5 16.5l-1.4 1.4"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  if (pref === "dark") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d="M20 13.4A8.2 8.2 0 0 1 10.6 4a8.2 8.2 0 1 0 9.4 9.4Z"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  // system: a circle split down the middle, filled on one side.
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor" />
+    </svg>
+  );
+}
 
 /**
  * Must stay in step with the 900px breakpoint in console.css that turns the
@@ -32,6 +75,8 @@ function useNarrowViewport(): boolean {
 interface Props {
   route: RouteId;
   settings: SettingsState | null;
+  themePref: ThemePref;
+  onCycleTheme: () => void;
   onToggleDrawer: () => void;
 }
 
@@ -55,7 +100,7 @@ interface Props {
  * makes every page look like it has four things to do.
  */
 export function Topbar({
-  route, settings, onToggleDrawer,
+  route, settings, themePref, onCycleTheme, onToggleDrawer,
 }: Props) {
   const narrow = useNarrowViewport();
   const spec = routeSpec(route);
@@ -102,6 +147,20 @@ export function Topbar({
             v{settings.version}
           </span>
         ) : null}
+        {/* An icon, not the old "主题：跟随系统" line. The label spelled out a
+            state that the icon shows at a glance, and it was the widest thing
+            in a bar that otherwise holds two short readouts. The current mode
+            stays reachable in words through the tooltip and the accessible
+            name, so nothing is lost for anyone who needs it spoken. */}
+        <button
+          type="button"
+          className="icon-btn theme-btn"
+          onClick={onCycleTheme}
+          title={`${t("主题：", "Theme: ")}${themePrefLabel(themePref)}${t("（点击切换）", " — click to cycle")}`}
+          aria-label={`${t("主题：", "Theme: ")}${themePrefLabel(themePref)}`}
+        >
+          <ThemeIcon pref={themePref} />
+        </button>
       </div>
     </header>
   );
