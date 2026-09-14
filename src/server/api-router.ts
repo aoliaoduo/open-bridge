@@ -574,6 +574,14 @@ function asTodo(value: unknown): TodoView | undefined {
  * `stale` is that distinction made explicit rather than left for the reader to
  * infer from a timestamp: a list nobody is currently driving is still useful,
  * but it must not look like live progress.
+ *
+ * The progress line gets the SAME treatment, separately, because the two halves
+ * of the stored document age independently. A real report of this: a fresh
+ * 任务 list sat under a 23-hour-old 最新进展 from a previous agent, the list
+ * badged 实时 and the progress line reading like it had just been sent. The
+ * merge that carries lastProgress across a set_todos write is deliberate (it
+ * stops concurrent writers clobbering each other's fields), so the fix is to
+ * label what was carried over, not to stop carrying it.
  */
 function todoView(): Record<string, unknown> {
   const stored = loadTodoStore();
@@ -591,12 +599,21 @@ function todoView(): Record<string, unknown> {
     else if (todo.status === "in_progress") counts.in_progress += 1;
     else counts.pending += 1;
   }
+  // Whose progress line this is. An entry with no sessionId predates the field
+  // and therefore cannot belong to the session connected right now.
+  const liveSessionId = session
+    ? [...state.sessions.entries()].find(([, candidate]) => candidate === session)?.[0]
+    : undefined;
+  const progressStale = stored.lastProgress
+    ? !liveSessionId || stored.lastProgress.sessionId !== liveSessionId
+    : false;
   return {
     todos,
     counts,
     stale: live === undefined,
     updated_at: stored.updatedAt,
     last_progress: stored.lastProgress,
+    progress_stale: progressStale,
     idle_ms: session ? Math.max(0, Date.now() - session.lastUsed) : null,
   };
 }

@@ -184,10 +184,32 @@ export function TodosPage() {
 
       {board.last_progress && (
         <Card
-          title={t("最新进展", "Latest progress")}
-          desc={t("AI 通过 report_progress 报的一行", "The one-liner the AI sent with report_progress")}
+          title={board.progress_stale ? t("上次进展", "Last progress") : t("最新进展", "Latest progress")}
+          desc={board.progress_stale
+            ? t(
+              "上一个 AI 断开前报的最后一行，不是现在正在发生的事",
+              "The last line the previous AI sent before disconnecting — not what is happening now",
+            )
+            : t("AI 通过 report_progress 报的一行", "The one-liner the AI sent with report_progress")}
+          actions={board.progress_stale
+            ? (
+              <Chip
+                tone="warn"
+                title={t(
+                  "写这条进展的会话已经断开；当前 AI 还没报过进展",
+                  "The session that wrote this has disconnected; the current AI has not reported yet",
+                )}
+              >
+                {t("已离线", "Stale")}
+              </Chip>
+            )
+            : undefined}
         >
-          <p className="todo-progress-msg">{board.last_progress.message}</p>
+          {/* Dimmed as well as badged: a chip is easy to miss when the sentence
+              underneath it reads like a live status line. */}
+          <p className={`todo-progress-msg${board.progress_stale ? " muted" : ""}`}>
+            {board.last_progress.message}
+          </p>
           <p className="muted">
             {board.last_progress.phase && <>{t("阶段 ", "Phase ")}{board.last_progress.phase} · </>}
             {typeof board.last_progress.percent === "number" && <>{board.last_progress.percent}% · </>}

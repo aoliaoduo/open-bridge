@@ -128,6 +128,13 @@ export interface TodoBoard {
   stale: boolean;
   updated_at: string;
   last_progress: TodoProgress | null;
+  /**
+   * True when the progress line came from a session that is no longer here.
+   * Tracked separately from `stale` because the list and the progress line are
+   * written by different tools and age independently: a brand-new list can sit
+   * above a report left behind by the agent before this one.
+   */
+  progress_stale?: boolean;
   /** Milliseconds since the driving session's last call; null when stale. */
   idle_ms: number | null;
 }

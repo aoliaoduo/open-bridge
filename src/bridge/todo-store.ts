@@ -23,6 +23,17 @@ export interface TodoProgressEntry {
   percent?: number;
   level: ProgressLevel;
   at: string;
+  /**
+   * Which session said this. The document-level `sessionId` cannot answer that
+   * question — it belongs to whoever last wrote the TODOS, and the two halves
+   * of this document are written by different tools at different times. A
+   * report kept from a previous agent would otherwise sit under a fresh list
+   * looking like live progress, which is exactly what it is not.
+   *
+   * Absent on entries written before this field existed; the console treats
+   * that as "not from the current session", which is definitionally true.
+   */
+  sessionId?: string;
 }
 
 export interface TodoStoreSnapshot {
@@ -95,6 +106,9 @@ export function persistProgress(entry: {
       percent: typeof entry.percent === "number" ? entry.percent : undefined,
       level: normalizeLevel(entry.level),
       at: new Date().toISOString(),
+      // Stamped from the session that is reporting, not from the document:
+      // this is the claim "an agent that is still connected said this".
+      ...(currentSessionId() ? { sessionId: currentSessionId() } : {}),
     },
     updatedAt: new Date().toISOString(),
     sessionId: current.sessionId,

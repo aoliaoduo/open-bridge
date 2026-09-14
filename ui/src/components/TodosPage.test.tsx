@@ -74,6 +74,43 @@ describe("TodosPage", () => {
     expect(await screen.findByText("已离线")).toBeTruthy();
   });
 
+  test("a progress line from a departed agent is labelled and dimmed, not passed off as now", async () => {
+    // The bug this pins: a fresh 任务 list (badged 实时) sat above a 23-hour-old
+    // 最新进展 left by the PREVIOUS agent. The list and the progress line are
+    // written by different tools and age independently, so one badge cannot
+    // cover both — the timestamp alone read as "the AI is doing this".
+    todosMock.mockResolvedValue(board({
+      stale: false,
+      progress_stale: true,
+      last_progress: {
+        message: "高危子集已提交；开始小合并候选逐条验证",
+        phase: "running",
+        at: new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString(),
+      },
+    }));
+    const { container } = render(<TodosPage />);
+
+    expect(await screen.findByText("上次进展")).toBeTruthy();
+    // 最新 would be a lie about a line nobody has sent since yesterday.
+    expect(screen.queryByText("最新进展")).toBeNull();
+    expect(screen.getAllByText("已离线").length).toBe(1);
+    // Dimmed as well as badged: the chip is easy to miss above a sentence that
+    // reads like a live status line.
+    expect(container.querySelector(".todo-progress-msg")?.className).toContain("muted");
+  });
+
+  test("a progress line from the session that is still here stays 最新", async () => {
+    todosMock.mockResolvedValue(board({
+      progress_stale: false,
+      last_progress: { message: "正在跑 verify", at: new Date().toISOString() },
+    }));
+    const { container } = render(<TodosPage />);
+
+    expect(await screen.findByText("最新进展")).toBeTruthy();
+    expect(screen.queryByText("已离线")).toBeNull();
+    expect(container.querySelector(".todo-progress-msg")?.className).not.toContain("muted");
+  });
+
   test("an empty list explains how something would get here", async () => {
     todosMock.mockResolvedValue(board({
       todos: [],

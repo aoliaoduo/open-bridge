@@ -281,6 +281,12 @@ test("the panel endpoints answer for the console pages", async () => {
   assert.equal(todoBody.stale, true, "a list with nobody driving it is flagged");
   assert.equal(todoBody.idle_ms, null, "and has no idle clock to report");
   assert.equal(typeof todoBody.updated_at, "string");
+  // The list and the progress line age independently — they are written by
+  // different tools — so the board reports on them separately. With no session
+  // at all, any stored progress is by definition not from the current one.
+  assert.ok("progress_stale" in todoBody, "the progress line gets its own freshness verdict");
+  assert.equal(todoBody.progress_stale, todoBody.last_progress !== null,
+    "a progress line with no live session is stale; no line at all is not");
 
   const health = await fetch(`${base()}/api/health`);
   assert.equal(health.status, 200);
