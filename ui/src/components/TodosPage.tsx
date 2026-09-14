@@ -118,7 +118,7 @@ export function TodosPage() {
       <Card
         title={t("任务清单", "Task list")}
         desc={t(
-          "AI 通过 set_todos 写入的计划；本页只读，勾选由 AI 那边推进",
+          "本页只读：条目由 AI 用 set_todos 写入，勾选也由它推进。",
           "The plan the AI wrote with set_todos. Read-only here — the AI ticks the boxes.",
         )}
         actions={

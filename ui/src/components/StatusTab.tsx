@@ -133,8 +133,8 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
           <Card
             title={t("MCP 端点", "MCP endpoint")}
             desc={t(
-              "把这个 URL 填进 MCP 客户端（ChatGPT 连接器、Claude、Cursor 等）。它是地址。公网状态下请配合安全页的门禁使用。",
-              "Paste this URL into an MCP client (ChatGPT connectors, Claude, Cursor…). It is the address. When public, pair it with the gate on the Security page.",
+              "把这个 URL 填进 MCP 客户端（ChatGPT 连接器、Claude、Cursor 等）就能连上。公网可达时，拿到它的人就能读写文件、执行命令 —— 请配合安全页的门禁。",
+              "Paste this URL into an MCP client (ChatGPT connectors, Claude, Cursor…) and it connects. While it is publicly reachable, whoever has it can read your files and run commands — pair it with the gate on the Security page.",
             )}
             actions={
               <button
@@ -209,11 +209,18 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
             </div>
           </Card>
 
+          {/* This card used to spend two of its three paragraphs explaining
+              that it has no start/stop/restart buttons — a card whose main
+              content was a description of its own absence. The reason is real
+              (stopping would close the page that holds the button) but it
+              belongs in the docs, not in permanent screen space on the page
+              every operator opens first. What survives is what acts: the
+              stale-build warning, and the way to the checks. */}
           <Card
-            title={t("实例生命周期", "Instance lifecycle")}
+            title={t("运行中的这份构建", "The build that is running")}
             desc={t(
-              "实例由终端窗口掌握：打开终端即启动，关闭终端即停止（一键启动脚本就是这个语义）。",
-              "The terminal window owns the instance: opening it starts the bridge, closing it stops the bridge (that is what the one-click script does).",
+              "实例由启动它的终端窗口掌握：关掉窗口就停，再运行一次启动脚本就起来。",
+              "The terminal window that started this instance owns it: close the window to stop, run the start script again to bring it back.",
             )}
           >
             {status?.build_stale && (
@@ -226,19 +233,6 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
                 {t("）。", ").")}
               </div>
             )}
-            <div className="section-note">
-              {t(
-                "因此本页没有「启动 / 停止 / 重启」按钮：停止会一并关掉这个页面，按钮既点不到也不可靠。体检只做探测，不影响进程本身。",
-                "That is why this page has no start/stop/restart buttons: stopping would also close this page, so the button could neither be clicked nor trusted. 体检 only probes; it never touches the process.",
-              )}
-            </div>
-            {/* This used to be a 健康检查 button running a second, separate
-                implementation: this page called the healthCheck settings action
-                (runHealthCheck) while 体检 calls /api/health, which computes its
-                own checks. Two code paths answering the same question, one of
-                them reporting a flat pass/fail where the other grades each
-                check and really sends a request through the tunnel. Kept the
-                thorough one and made this a link to it. */}
             <div className="btn-group">
               <button type="button" className="small" disabled={!running} onClick={() => onOpen?.("health")}>
                 {t("去体检页", "Open 体检")}
@@ -246,8 +240,8 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
             </div>
             <div className="section-note" style={{ marginBottom: 0 }}>
               {t(
-                "体检会真的去请求：本机端点、公网隧道（若已开启），并在鉴权开启时确认匿名请求确实被拒；每项单独给出结论。",
-                "体检 makes real requests: the local endpoint, the public tunnel if one is up, and — when auth is on — a check that an anonymous request is actually refused. Each check is graded on its own.",
+                "体检会真的发请求验证本机端点、公网隧道与鉴权门禁，不影响进程本身。",
+                "体检 sends real requests to verify the local endpoint, the public tunnel and the auth gate. It never touches the process.",
               )}
             </div>
           </Card>

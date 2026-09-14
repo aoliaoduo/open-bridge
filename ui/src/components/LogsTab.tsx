@@ -109,7 +109,7 @@ export function LogsTab({ settings, act, notify }: {
     <Card
       title={t("日志", "Logs")}
       desc={t(
-        "实时日志流（最近 800 行）。断线期间的行会缺失；完整审计在数据目录的 audit.log。",
+        "实时日志流，最近 800 行。页面没开着的时候写的行不会补回来 —— 要查完整记录，看数据目录里的 audit.log。",
         "Live log stream (last 800 lines). Lines written while disconnected are lost; the full audit is in audit.log in the data directory.",
       )}
       actions={

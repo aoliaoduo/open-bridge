@@ -27,22 +27,30 @@ import { host } from "../host/host.js";
 import { record } from "./state.js";
 
 /**
- * How long a player is allowed to live. Long enough for any reasonable alert
- * chime, short enough that a wrong file cannot hold the speaker hostage.
+ * A backstop, not a cap.
+ *
+ * The window is the stop button, so nothing here limits how long a sound may
+ * play -- a two-minute track plays for two minutes. This only bounds a host
+ * that has wedged without ever showing its window, which would otherwise hold
+ * a handle forever. Half an hour is longer than any alert sound and short
+ * enough that a stuck process is eventually cleaned up.
  */
-const PLAY_TIMEOUT_MS = 15_000;
+const WEDGED_HOST_MS = 30 * 60_000;
 
 /**
- * A preview is a few seconds, not a song.
+ * Playback runs in a VISIBLE window, and that window is the stop button.
  *
- * The first version played the file to its natural end, so pressing 试听 on a
- * four-minute track meant four minutes of music with no way to stop it -- and
- * pressing it again while wondering why nothing seemed to happen started a
- * SECOND copy over the first. Both halves of that were design mistakes: an
- * audition should be short by construction, and a player that can be started
- * must be stoppable.
+ * The first version hid the player and capped it at a few seconds, which
+ * solved "I cannot stop this" by making it too short to need stopping. That
+ * is not the same thing. An alert that announces a stalled conversation
+ * should keep sounding until someone deals with it, and the honest way to
+ * make it stoppable is to give it something the operator can close.
+ *
+ * So: a console window appears, says what it is, and plays the file to its
+ * natural end. Closing it kills the host process and the audio with it --
+ * no timer, no cap, no separate stop protocol to get wrong. The window IS
+ * the affordance.
  */
-const PREVIEW_MS = 6_000;
 
 /**
  * The one live player, if any.
@@ -71,6 +79,20 @@ export function stopAlertSound(): boolean {
 /** Extensions the Windows player handles. Checked at save time, not here. */
 export const SOUND_EXTENSIONS = [".wav", ".mp3", ".m4a", ".aac", ".wma", ".flac"] as const;
 
+/**
+ * Quote one argv entry for a cmd command line.
+ *
+ * Going through `shell: true` means the whole thing is re-parsed by cmd, so
+ * the careful argv array has to survive being flattened back into a string.
+ * The PowerShell script contains spaces, quotes and semicolons; without this
+ * cmd would split it and hand PowerShell fragments.
+ */
+function quoteForCmd(value: string): string {
+  // Inner double quotes are escaped for cmd by doubling them; the script
+  // itself only ever uses single quotes, so this is belt and braces.
+  return `"${value.replace(/"/g, "\"\"")}"`;
+}
+
 export interface SoundAlertResult {
   played: boolean;
   /** "" when played; otherwise why not, in words the settings page can show. */
@@ -90,27 +112,48 @@ export interface SoundAlertResult {
  * project is developed on Windows -- so they are attempted rather than
  * promised, and a missing binary reports itself like any other failure.
  */
-function playerCommand(file: string, maxMs: number): { command: string; args: string[] } | undefined {
+function playerCommand(file: string): { command: string; args: string[] } | undefined {
   if (process.platform === "win32") {
-    // -WindowStyle Hidden keeps a console from flashing on every alert.
+    // Launched through cmd's `start`, which is the part that actually creates
+    // a window. Measured, because the obvious approaches do not work: a plain
+    // spawn of powershell with stdio "ignore" has no console to attach to and
+    // exits immediately (code 0, no window, no sound), and `start` without
+    // shell:true is not a program -- it is a cmd builtin. Both were tried
+    // here before this shape was settled on.
     return {
       command: "powershell",
       args: [
-        "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
-        // The player is asynchronous: Open() returns before the audio is
-        // ready, so a naive Play() plays nothing. Waiting on NaturalDuration
-        // is the documented way to know it has loaded.
-        "Add-Type -AssemblyName presentationCore;"
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+        "$Host.UI.RawUI.WindowTitle = 'Open Bridge 提示音 — 关闭此窗口即停止';"
+        + "Add-Type -AssemblyName presentationCore;"
         + "$p = New-Object System.Windows.Media.MediaPlayer;"
+        // Single quotes inside a PowerShell single-quoted string are escaped by
+        // doubling. Paths cannot otherwise break out: the value came from the
+        // validator, which requires an absolute path with an audio extension.
         + `$p.Open([uri]'${file.replace(/'/g, "''")}');`
+        // Open() is asynchronous -- a naive Play() plays nothing. Waiting on
+        // NaturalDuration is the documented way to know the file has loaded.
         + "$n = 0; while (-not $p.NaturalDuration.HasTimeSpan -and $n -lt 50) { Start-Sleep -Milliseconds 100; $n++ };"
         + "$p.Play();"
-        + `if ($p.NaturalDuration.HasTimeSpan) { Start-Sleep -Milliseconds ([Math]::Min($p.NaturalDuration.TimeSpan.TotalMilliseconds, ${maxMs})) }`
-        + `else { Start-Sleep -Milliseconds ([Math]::Min(2000, ${maxMs})) };`
+        + "Write-Host '';"
+        + `Write-Host '  ${file.replace(/'/g, "''").replace(/\r?\n/g, " ")}';`
+        + "Write-Host '';"
+        + "Write-Host '  关闭这个窗口即可停止播放（或按 Ctrl+C）。';"
+        + "Write-Host '  Close this window to stop the sound (or press Ctrl+C).';"
+        // Poll instead of sleeping the whole duration: a Start-Sleep that long
+        // ignores Ctrl+C until it returns, so the second documented way out
+        // would not actually work.
+        + "if ($p.NaturalDuration.HasTimeSpan) {"
+        + "  $end = (Get-Date).AddMilliseconds($p.NaturalDuration.TimeSpan.TotalMilliseconds);"
+        + "  while ((Get-Date) -lt $end) { Start-Sleep -Milliseconds 200 }"
+        + "} else { Start-Sleep -Seconds 3 };"
         + "$p.Stop(); $p.Close()",
       ],
     };
   }
+  // afplay and paplay run in the foreground of whatever launched them, so the
+  // terminal they open in is the equivalent affordance. Untested here: this
+  // project is developed on Windows, so they are attempted, not promised.
   if (process.platform === "darwin") return { command: "afplay", args: [file] };
   return { command: "paplay", args: [file] };
 }
@@ -122,7 +165,7 @@ function playerCommand(file: string, maxMs: number): { command: string; args: st
  * the notify channel uses ("disabled", "no_file", …) so the two channels can
  * be reported side by side without a translation layer.
  */
-export function playAlertSound(file: string, options: { preview?: boolean } = {}): SoundAlertResult {
+export function playAlertSound(file: string): SoundAlertResult {
   const path = file.trim();
   if (!path) return { played: false, reason: "no_file" };
 
@@ -134,8 +177,7 @@ export function playAlertSound(file: string, options: { preview?: boolean } = {}
     return { played: false, reason: "missing_file" };
   }
 
-  const limitMs = options.preview ? PREVIEW_MS : PLAY_TIMEOUT_MS;
-  const player = playerCommand(path, limitMs);
+  const player = playerCommand(path);
   if (!player) return { played: false, reason: "unsupported_platform" };
 
   // Replace, never stack. Clicking 试听 twice used to start a second copy on
@@ -144,21 +186,21 @@ export function playAlertSound(file: string, options: { preview?: boolean } = {}
   stopAlertSound();
 
   try {
-    const child = spawn(player.command, player.args, {
-      stdio: "ignore",
-      windowsHide: true,
-      // Detached so a bridge shutdown mid-chime does not kill the sound, and
-      // unref'd so a playing sound cannot hold the process open.
-      detached: false,
-    });
-    // The backstop is a second past the player's own limit: normally the
-    // script ends on its own, and this only fires when PowerShell itself is
-    // wedged. Without it, a hung host holds the speaker until the bridge
-    // stops -- which is the shape of the bug being fixed here.
+    const child = process.platform === "win32"
+      // shell:true so cmd expands `start`, which is a builtin rather than an
+      // executable. The window it opens is the stop button.
+      ? spawn(
+        `start "" ${player.command} ${player.args.map(quoteForCmd).join(" ")}`,
+        { stdio: "ignore", shell: true, detached: true, windowsHide: false },
+      )
+      : spawn(player.command, player.args, { stdio: "ignore", detached: true });
+    // Not a duration cap. The sound plays as long as the file lasts, and the
+    // window is how it gets stopped early. This only reclaims a host that
+    // wedged without ever showing a window, which would otherwise leak.
     const timer = setTimeout(() => {
       try { child.kill(); } catch { /* already gone */ }
       if (current?.child === child) current = undefined;
-    }, limitMs + 1_000);
+    }, WEDGED_HOST_MS);
     timer.unref?.();
     child.once("exit", () => {
       clearTimeout(timer);

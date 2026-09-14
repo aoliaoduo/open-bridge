@@ -405,11 +405,9 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       if (!existsSync(file)) {
         return { ok: false, state: await buildSettingsState(), error: `文件不存在：${file}` };
       }
-      // preview: a few seconds, not the whole track. Auditioning a four-minute
-      // song should not commit the room to four minutes of it.
-      const result = playAlertSound(file, { preview: true });
+      const result = playAlertSound(file);
       return result.played
-        ? done({ info: "正在试听（约 6 秒）。可以随时按「停止」。没听到就检查系统音量和默认输出设备。" })
+        ? done({ info: "已弹出播放窗口，关闭它即停止。没听到就检查系统音量和默认输出设备。" })
         : { ok: false, state: await buildSettingsState(), error: `播放失败：${result.reason}` };
     }
 

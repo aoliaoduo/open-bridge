@@ -101,7 +101,7 @@ export function StatsTab() {
       <Card
         title={t("调用统计", "Call statistics")}
         desc={t(
-          "自实例启动起累计；清空只清零计数，不影响正在进行的调用。",
+          "本实例启动以来的累计；清空只归零这里的数字，不影响任何正在跑的调用。",
           "Accumulated since the instance started; clearing zeroes the counters and does not touch calls in flight.",
         )}
         actions={
