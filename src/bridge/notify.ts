@@ -153,12 +153,22 @@ export function clampIdleMinutes(value: unknown): number {
 export function buildBarkUrl(serverUrl: string, key: string, title: string, body: string, extras?: BarkPushExtras): string {
   const origin = serverUrl.replace(/\/+$/u, "");
   const segments = [title, body].filter(part => part.length > 0).map(part => `/${encodeURIComponent(part)}`);
-  const query = new URLSearchParams({ group: "open-bridge" });
+  // `group` defaults to the project name so several bridges on one phone
+  // collapse into separate stacks instead of one undifferentiated pile; an
+  // explicit group wins.
+  const query = new URLSearchParams({ group: extras?.group || "open-bridge" });
   if (extras?.sound) query.set("sound", extras.sound);
   if (extras?.level) query.set("level", extras.level);
+  // Bark only reads `volume` for level=critical; sending it otherwise is noise
+  // in the URL and in the audit line.
+  if (extras?.level === "critical" && extras.volume !== undefined) query.set("volume", String(extras.volume));
   if (extras?.call !== undefined) query.set("call", String(extras.call));
   if (extras?.badge !== undefined) query.set("badge", String(extras.badge));
   if (extras?.url) query.set("url", extras.url);
+  if (extras?.icon) query.set("icon", extras.icon);
+  if (extras?.isArchive !== undefined) query.set("isArchive", String(extras.isArchive));
+  if (extras?.copy) query.set("copy", extras.copy);
+  if (extras?.autoCopy !== undefined) query.set("autoCopy", String(extras.autoCopy));
   return `${origin}/${encodeURIComponent(key)}${segments.join("")}?${query.toString()}`;
 }
 
@@ -166,14 +176,37 @@ export function buildBarkUrl(serverUrl: string, key: string, title: string, body
 export interface BarkPushExtras {
   /** Ringtone name from the Bark app's sound list (alphanumeric/underscore). */
   sound?: string;
-  /** iOS delivery style: active (default) | timeSensitive (pierces Focus) | passive (silent list entry). */
-  level?: "active" | "timeSensitive" | "passive";
+  /**
+   * iOS delivery style. `critical` breaks through silent mode and Focus
+   * outright, which is why it is the one level the server never picks on the
+   * model's behalf without being asked.
+   */
+  level?: "active" | "timeSensitive" | "passive" | "critical";
+  /** Critical-alert volume 0-10. Bark ignores it unless level is critical. */
+  volume?: number;
   /** 1 = ring until opened; bounded low — it is a fire alarm, not music. */
   call?: number;
   /** App badge number; 0 clears it. */
   badge?: number;
   /** Where tapping the notification goes (http/https). */
   url?: string;
+  /**
+   * Notification stack on the phone. Defaults to "open-bridge"; set it per
+   * project so two bridges do not interleave into one unreadable pile.
+   */
+  group?: string;
+  /** Icon shown on the notification (iOS 15+). Must be http(s). */
+  icon?: string;
+  /**
+   * 1 = keep the push in Bark's history, 0 = do not. Worth setting explicitly
+   * on anything you may want to read after the banner is gone: the default is
+   * the app's setting, not ours.
+   */
+  isArchive?: number;
+  /** Text the notification's copy action puts on the clipboard. */
+  copy?: string;
+  /** 1 = copy without asking. Pair with `copy`, or it copies the body. */
+  autoCopy?: number;
 }
 
 /**
@@ -195,10 +228,24 @@ export function parseBarkExtras(args: JsonArgs): { ok: true; extras: BarkPushExt
 
   const rawLevel = typeof args.level === "string" ? args.level.trim() : "";
   if (rawLevel) {
-    if (rawLevel !== "active" && rawLevel !== "timeSensitive" && rawLevel !== "passive") {
-      return { ok: false, error: "level must be one of: active, timeSensitive, passive. (expected 'level': string)" };
+    if (rawLevel !== "active" && rawLevel !== "timeSensitive" && rawLevel !== "passive" && rawLevel !== "critical") {
+      return { ok: false, error: "level must be one of: active, timeSensitive, passive, critical. (expected 'level': string)" };
     }
     extras.level = rawLevel;
+  }
+
+  if (args.volume !== undefined && args.volume !== null && args.volume !== "") {
+    const volume = typeof args.volume === "number" ? args.volume : Number(args.volume);
+    if (!Number.isInteger(volume) || volume < 0 || volume > 10) {
+      return { ok: false, error: "volume must be an integer between 0 and 10 (critical alerts only). (expected 'volume': number)" };
+    }
+    // Say so rather than dropping it: a caller who set volume believed it
+    // would be loud, and silently ignoring that is how a "critical" alert
+    // turns out to have been a normal one.
+    if (extras.level !== "critical") {
+      return { ok: false, error: "volume only applies to level \"critical\"; set level to critical or drop volume. (expected 'volume': number)" };
+    }
+    extras.volume = volume;
   }
 
   if (args.call !== undefined && args.call !== null && args.call !== "") {
@@ -223,6 +270,46 @@ export function parseBarkExtras(args: JsonArgs): { ok: true; extras: BarkPushExt
       return { ok: false, error: "url must be an http(s) link of at most 500 chars — where tapping the notification goes. (expected 'url': string)" };
     }
     extras.url = rawUrl;
+  }
+
+  const rawGroup = typeof args.group === "string" ? args.group.trim() : "";
+  if (rawGroup) {
+    if (rawGroup.length > 64) {
+      return { ok: false, error: "group must be at most 64 chars — the notification stack this push joins. (expected 'group': string)" };
+    }
+    extras.group = rawGroup;
+  }
+
+  const rawIcon = typeof args.icon === "string" ? args.icon.trim() : "";
+  if (rawIcon) {
+    if (!/^https?:\/\//i.test(rawIcon) || rawIcon.length > 500) {
+      return { ok: false, error: "icon must be an http(s) image link of at most 500 chars (iOS 15+). (expected 'icon': string)" };
+    }
+    extras.icon = rawIcon;
+  }
+
+  if (args.isArchive !== undefined && args.isArchive !== null && args.isArchive !== "") {
+    const flag = typeof args.isArchive === "number" ? args.isArchive : Number(args.isArchive);
+    if (flag !== 0 && flag !== 1) {
+      return { ok: false, error: "isArchive must be 0 or 1 (1 = keep this push in Bark's history). (expected 'isArchive': number)" };
+    }
+    extras.isArchive = flag;
+  }
+
+  const rawCopy = typeof args.copy === "string" ? args.copy.trim() : "";
+  if (rawCopy) {
+    if (rawCopy.length > 500) {
+      return { ok: false, error: "copy must be at most 500 chars — the text the copy action puts on the clipboard. (expected 'copy': string)" };
+    }
+    extras.copy = rawCopy;
+  }
+
+  if (args.autoCopy !== undefined && args.autoCopy !== null && args.autoCopy !== "") {
+    const flag = typeof args.autoCopy === "number" ? args.autoCopy : Number(args.autoCopy);
+    if (flag !== 0 && flag !== 1) {
+      return { ok: false, error: "autoCopy must be 0 or 1 (1 = copy without asking). (expected 'autoCopy': number)" };
+    }
+    extras.autoCopy = flag;
   }
 
   return { ok: true, extras };
@@ -460,11 +547,23 @@ export function pushTodoCompletions(previous: readonly unknown[], next: readonly
 
 /**
  * The idle watchdog — notifications on the one thing MCP calls cannot report:
- * a web-AI session that stopped moving while work is still open (stalled on a
- * question nobody answered, dropped by the browser, rate-limited into
- * silence). Every input comes from observable state; nothing "AI-shaped" is
- * inferred. The latch is keyed on `lastUsed`: as soon as any call advances it,
- * the episode is over and a fresh threshold of silence can bell again.
+ * a session that stopped moving (stalled on a question nobody answered,
+ * dropped by the browser, rate-limited into silence).
+ *
+ * It used to require an OPEN todo list, and that requirement quietly disabled
+ * it for most of this project's own history. Measured on this workspace's
+ * audit log: 2026-09-13 logged 1274 tool calls, 4 of them `set_todos`, and 0
+ * notifications — a full day in which no watchdog could have fired, because
+ * the AI never wrote a list to have open items on. Tying a safety net to a
+ * tool the model is free to forget makes it fail precisely when the model is
+ * being forgetful, which is the same failure it exists to cover.
+ *
+ * So silence alone is now enough. What the todo list still changes is the
+ * WORDING: with open items the server can say what stalled, without them it
+ * can only report the silence. Both are true statements about observable
+ * state; nothing "AI-shaped" is inferred either way. The latch is keyed on
+ * `lastUsed`: as soon as any call advances it, the episode is over and a fresh
+ * threshold of silence can bell again.
  */
 export function idleWatchVerdict(input: {
   usable: boolean;
@@ -479,10 +578,8 @@ export function idleWatchVerdict(input: {
   // A request still in flight is the Bridge being slow, not the human being
   // away — do not page anyone over our own processing.
   if (input.activeRequests > 0) return false;
-  // "No tool calls for N minutes" is also the normal shape of a conversation
-  // that ended healthy. A push is warranted only with an OPEN work list:
-  // someone planned work and it stopped moving.
-  if (!input.hasOpenTodos) return false;
+  // A session that never called a tool has nothing to have gone quiet from.
+  if (input.lastUsedMs <= 0) return false;
   const idleMs = input.nowMs - input.lastUsedMs;
   if (!Number.isFinite(idleMs) || idleMs < input.idleMinutes * 60_000) return false;
   return input.notifiedForMs !== input.lastUsedMs;
@@ -519,11 +616,16 @@ export function idleNoticeTick(nowMs: number = Date.now()): boolean {
   if (!fire) return false;
   idleNotifiedForMs = activity.lastUsedMs;
   const minutes = settings.idleMinutes;
+  // Two different facts, two different sentences. Claiming "work is still in
+  // progress" when no list exists would be inventing a state we cannot see.
+  const body = activity.hasOpenTodos
+    ? `任务还在进行，但 ${minutes} 分钟没有任何动作 — 可能需要你回到电脑前继续。`
+    : `连接安静了 ${minutes} 分钟 — AI 可能在等你回复，也可能已经停下。去看一眼。`;
   void pushNotification(
     settings,
     "attention",
     NOTIFY_DEFAULT_TITLE,
-    `任务还在进行，但 ${minutes} 分钟没有任何动作 — 可能需要你回到电脑前继续。`,
+    body,
     Date.now(),
     // Time-sensitive on purpose: the whole point of this push is to pierce
     // iOS Focus modes when a web-AI tab died mid-task.

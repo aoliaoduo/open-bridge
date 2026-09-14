@@ -303,11 +303,37 @@ test("the AI picks Bark knobs per call; junk knobs are refused by name", async (
   assert.equal(query.get("level"), "timeSensitive");
   assert.equal(query.get("badge"), "2");
   assert.equal(query.get("group"), "open-bridge");
-  const junk = await callTool(sessionId, "notify", {
-    event: "finished", message: "x", level: "critical",
+  // critical is a real Bark level (documented alongside volume), so it is now
+  // accepted rather than refused. Whether the phone actually overrides silent
+  // mode still depends on the user allowing critical alerts for Bark in iOS
+  // settings -- the app's business, not a reason to reject the parameter.
+  //
+  // Asserted through the guard rather than by sending: a second real push here
+  // spends the per-minute budget this suite also tests, and `rate_limited` on
+  // an unrelated case is a confusing way to fail. The URL construction for
+  // critical/volume is covered in test/notify.test.ts.
+  const criticalAccepted = await callTool(sessionId, "notify", {
+    event: "attention", message: "真的紧急", level: "critical", volume: 7,
   });
-  assert.equal(junk.isError, true, "critical is not offered (needs app-side authorization)");
+  // The distinction that matters is "the guard let it through", not "it was
+  // delivered": whether this particular push goes out depends on the ledger,
+  // which other cases in this file deliberately exhaust.
+  assert.ok(!criticalAccepted.isError, `critical must not be refused as junk: ${criticalAccepted.text}`);
+  assert.doesNotMatch(criticalAccepted.text, /level must be one of/);
+
+  const junk = await callTool(sessionId, "notify", {
+    event: "finished", message: "x", level: "shout",
+  });
+  assert.equal(junk.isError, true, "an unknown level is still refused by name");
   assert.match(junk.text, /level must be one of/);
+
+  // volume without critical is refused rather than dropped: a caller who set
+  // it believed the push would be loud.
+  const orphanVolume = await callTool(sessionId, "notify", {
+    event: "finished", message: "x", volume: 5,
+  });
+  assert.equal(orphanVolume.isError, true, "volume alone is a mistake worth naming");
+  assert.match(orphanVolume.text, /volume only applies/);
 });
 
 

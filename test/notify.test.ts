@@ -117,17 +117,29 @@ test("diff reads untrusted lists without tripping (persisted data, hand-edited)"
 
 // --- the idle-watch verdict -------------------------------------------------------
 
-test("the watchdog needs all of: channel, threshold, silence, an open list, no in-flight work", () => {
-  // lastUsedMs 7 = "a session exists and went quiet"; the empty table cannot
-  // carry open todos anyway, so real episodes always have a clock > 0.
+test("the watchdog needs all of: channel, threshold, silence, no in-flight work", () => {
+  // lastUsedMs 7 = "a session exists and went quiet".
   const ok = { usable: true, idleMinutes: 10, nowMs: 660_007, lastUsedMs: 7,
     activeRequests: 0, hasOpenTodos: true, notifiedForMs: 0 };
   assert.equal(idleWatchVerdict(ok), true);
   assert.equal(idleWatchVerdict({ ...ok, usable: false }), false);
   assert.equal(idleWatchVerdict({ ...ok, idleMinutes: 0 }), false, "0 is off, not always");
   assert.equal(idleWatchVerdict({ ...ok, activeRequests: 1 }), false, "our own slowness does not page anyone");
-  assert.equal(idleWatchVerdict({ ...ok, hasOpenTodos: false }), false, "a quiet done list is not an emergency");
   assert.equal(idleWatchVerdict({ ...ok, nowMs: 300_007 }), false, "five minutes is not ten");
+});
+
+test("silence alone is enough: the watchdog no longer depends on a todo list", () => {
+  // This requirement used to be in the verdict, and it quietly disabled the
+  // watchdog for whole days of real use: 2026-09-13 on this workspace logged
+  // 1274 tool calls, 4 of them set_todos, 0 notifications. A safety net tied
+  // to a tool the model may forget fails exactly when the model is forgetful.
+  const noList = { usable: true, idleMinutes: 10, nowMs: 660_007, lastUsedMs: 7,
+    activeRequests: 0, hasOpenTodos: false, notifiedForMs: 0 };
+  assert.equal(idleWatchVerdict(noList), true, "a silent session with no list still pages");
+
+  // What a session that never called anything cannot do is go quiet: there is
+  // no clock to measure silence from, so lastUsedMs 0 stays false.
+  assert.equal(idleWatchVerdict({ ...noList, lastUsedMs: 0 }), false, "never used is not idle");
 });
 
 test("the watchdog latches one notice per episode and re-arms when activity moves the clock", () => {
@@ -210,7 +222,16 @@ test("parseBarkExtras: every knob refuses junk by name (the model fixes the call
   const cases: Array<[Record<string, unknown>, RegExp]> = [
     [{ sound: "bad name!" }, /sound/],
     [{ sound: "x".repeat(65) }, /sound/],
-    [{ level: "critical" }, /level must be one of/],
+    [{ level: "shout" }, /level must be one of/],
+    [{ volume: 5 }, /volume only applies/],
+    [{ level: "critical", volume: 11 }, /volume/],
+    [{ level: "critical", volume: -1 }, /volume/],
+    [{ group: "g".repeat(65) }, /group/],
+    [{ icon: "javascript:alert(1)" }, /icon/],
+    [{ icon: "ftp://x/i.png" }, /icon/],
+    [{ isArchive: 2 }, /isArchive/],
+    [{ autoCopy: "yes" }, /autoCopy/],
+    [{ copy: "c".repeat(501) }, /copy/],
     [{ call: 0 }, /call/],
     [{ call: 11 }, /call/],
     [{ call: "loud" }, /call/],
@@ -226,6 +247,41 @@ test("parseBarkExtras: every knob refuses junk by name (the model fixes the call
     assert.equal(result.ok, false, `expected refusal for ${JSON.stringify(args)}`);
     if (!result.ok) assert.match(result.error, pattern);
   }
+});
+
+test("parseBarkExtras: the new knobs are accepted and reach the URL", () => {
+  const parsed = parseBarkExtras({
+    level: "critical", volume: 7, group: "my-project", icon: "https://e.com/i.png",
+    isArchive: 1, copy: "npm run verify", autoCopy: 1,
+  } as never);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+
+  const url = buildBarkUrl("https://api.day.app", KEY, "t", "b", parsed.extras);
+  assert.match(url, /level=critical/);
+  assert.match(url, /volume=7/);
+  assert.match(url, /group=my-project/, "an explicit group beats the default");
+  assert.match(url, /isArchive=1/);
+  assert.match(url, /autoCopy=1/);
+  assert.match(url, /copy=npm\+run\+verify/);
+  assert.match(url, /icon=https%3A%2F%2Fe.com%2Fi.png/);
+});
+
+test("volume is only sent for critical, and only after level says so", () => {
+  // Bark ignores volume unless the level is critical, so sending it otherwise
+  // is noise in the URL and in the audit line. parseBarkExtras refuses that
+  // combination outright rather than dropping the value, because a caller who
+  // set volume believed it would be loud.
+  const quiet = parseBarkExtras({ level: "timeSensitive" } as never);
+  assert.equal(quiet.ok, true);
+  if (quiet.ok) {
+    assert.equal(buildBarkUrl("https://api.day.app", KEY, "t", "b", quiet.extras).includes("volume="), false);
+  }
+});
+
+test("group defaults to open-bridge so pushes stack predictably", () => {
+  const url = buildBarkUrl("https://api.day.app", KEY, "t", "b");
+  assert.match(url, /group=open-bridge/);
 });
 
 // --- the finish watchdog -----------------------------------------------------
