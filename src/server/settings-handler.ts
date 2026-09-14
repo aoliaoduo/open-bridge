@@ -462,7 +462,10 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
         Date.now(),
         // 人手动作绕过账本（重新按一次是因为没听见），并用时效性等级让
         // 测试推送在专注模式下也可见——收不到测试是排查的第一现场。
-        { bypassLedger: true, bark: { level: "timeSensitive" } },
+        // silentLocally: this button tests the phone. Letting it also play the
+        // desktop sound would mean a operator pressing it gets a music player
+        // they did not ask for, and cannot tell which channel actually worked.
+        { bypassLedger: true, silentLocally: true, bark: { level: "timeSensitive" } },
       );
       return notifyActionVerdict(result, await buildSettingsState());
     }

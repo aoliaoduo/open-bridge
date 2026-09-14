@@ -9,6 +9,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { validateConfigValue } from "../src/bridge/config-values.js";
 import { normalizeSettingsMessage } from "../src/bridge/settings-model.js";
 
@@ -113,4 +115,37 @@ test("the console can stop a sound that is already playing", () => {
     normalizeSettingsMessage({ command: "stopSound" }),
     { command: "stopSound" },
   );
+});
+
+/**
+ * Pressing 发送测试 under 手机（Bark） opened a music player on the desktop.
+ *
+ * The test push travels as an `attention` event, and every attention event
+ * makes a local noise — so a button whose entire purpose is "does the phone
+ * channel work" was exercising the other channel too. Worse than noisy: the
+ * operator cannot tell which channel the result belongs to.
+ *
+ * Asserted on the wiring rather than by spawning a player: the guard is that
+ * the handler passes silentLocally, and that pushNotification honours it.
+ */
+test("the Bark test button asks for a silent-locally push", () => {
+  const handler = readFileSync(
+    path.join(process.cwd(), "src/server/settings-handler.ts"),
+    "utf8",
+  );
+  const testNotify = handler.slice(handler.indexOf('case "testNotify"'));
+  const body = testNotify.slice(0, testNotify.indexOf("\n    }"));
+  assert.match(
+    body,
+    /silentLocally:\s*true/,
+    "the phone test must not also play the desktop sound",
+  );
+});
+
+test("pushNotification honours silentLocally before anything else", () => {
+  const notify = readFileSync(path.join(process.cwd(), "src/bridge/notify.ts"), "utf8");
+  // The sound is deliberately ahead of every Bark gate so a key-less machine
+  // still chimes; the opt-out therefore has to wrap it there, not later.
+  const guard = /if \(!options\.silentLocally\) \{[^}]*playAlertSound/s;
+  assert.match(notify, guard, "the local sound must sit behind the silentLocally check");
 });

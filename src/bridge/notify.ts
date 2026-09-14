@@ -387,7 +387,7 @@ export async function pushNotification(
   title: string,
   body: string,
   nowMs: number = Date.now(),
-  options: { bypassLedger?: boolean; bark?: BarkPushExtras } = {},
+  options: { bypassLedger?: boolean; silentLocally?: boolean; bark?: BarkPushExtras } = {},
 ): Promise<NotifyOutcome> {
   const outcome = (delivered: boolean, reason: string, status = 0, error = ""): NotifyOutcome =>
     ({ delivered, event, reason, status, error });
@@ -404,8 +404,16 @@ export async function pushNotification(
   // event, means "" and nothing happens. Dedupe and rate limits below are
   // Bark's; a sound is cheap and local, and suppressing the second of two
   // identical chimes would hide a real repeat.
-  const soundFile = soundFileForEvent(event);
-  if (soundFile) playAlertSound(soundFile);
+  // `silentLocally` is how a caller says "this push is about ONE channel".
+  // The Bark test button is the case that made it necessary: pressing 发送测试
+  // under 手机（Bark） opened a music player on the desktop, because the test
+  // travels as an `attention` event and every attention event makes a noise.
+  // A button that tests one channel must not exercise the other — the whole
+  // point of pressing it is to find out whether THAT channel works.
+  if (!options.silentLocally) {
+    const soundFile = soundFileForEvent(event);
+    if (soundFile) playAlertSound(soundFile);
+  }
 
   if (!settings.usable) return logged(outcome(false, settings.blocker || "disabled"), title);
   // "switch_off" rather than the old "mode": the reason names a thing the
