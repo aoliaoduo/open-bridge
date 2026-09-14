@@ -7,7 +7,7 @@ import tseslint from "typescript-eslint";
 // empty catch blocks are an intentional best-effort pattern; build output,
 // bundled assets and dependencies are not linted.
 export default tseslint.config(
-  { ignores: ["dist/**", "build/**", "ui/dist/**", "node_modules/**"] },
+  { ignores: ["dist/**", "build/**", "ui/dist/**", "node_modules/**", ".cluster/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

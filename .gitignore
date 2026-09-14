@@ -4,3 +4,8 @@ build/
 *.log
 start-open-bridge.last-dir
 .DS_Store
+
+# agent 工作区工具的本地状态（不属于项目本体）
+.claude/
+.openclaw/
+.cluster/
