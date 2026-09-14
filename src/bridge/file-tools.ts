@@ -572,8 +572,11 @@ export async function readFiles(args: Args): Promise<unknown> {
     // (stream reached EOF, started at line 1 AND ran to the last line — the
     // end_line stop with a small tail now reports the whole-file hash, but it
     // still omitted the lines after end_line); byte-budget hits always truncate.
+    // `lines_total` is only null when we never saw EOF; `fullyRead` already
+    // proves we did, so a missing value here is a programmer error, not a
+    // user input, and we treat it as truncated to stay safe.
     const rangeTruncated = lineRange
-      ? !(fullyRead && r.start_line <= 1 && r.end_line >= (r.lines_total ?? Number.POSITIVE_INFINITY))
+      ? !(fullyRead && r.start_line <= 1 && r.lines_total !== null && r.end_line >= r.lines_total)
       : false;
     return {
       path: String(p),

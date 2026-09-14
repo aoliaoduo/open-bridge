@@ -760,7 +760,11 @@ async function cmdHealth(parsed: ParsedArgs): Promise<void> {
   const token = await consoleTokenOrUndefined(home, runtime.root);
   const res = await httpJson(runtime.port, "/api/status", { token });
   if (res.status !== 200) fail(`status 请求失败: HTTP ${res.status}`);
-  const status = (res.body as { status: Record<string, unknown> }).status;
+  // statusBodyOf refuses non-object / missing status (the instance's port
+  // may have been taken by an unrelated process). cmdStatus / cmdUrl both
+  // use it; cmdHealth used to bypass it and emit literal "undefined" for
+  // every field — fail with the same clear message instead.
+  const status = statusBodyOf(res);
   const lines: string[] = [];
   const check = (name: string, ok: boolean, detail: string): void => {
     // Longest name is "public reachability" (19 columns); a fixed width keeps the

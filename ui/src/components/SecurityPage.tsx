@@ -13,7 +13,7 @@ import {
 // never restate.
 import { TTL_CHOICES } from "../../../src/bridge/settings-model.js";
 import { EXPOSURE_META } from "../exposure";
-import { CardHead } from "./CardHead";
+import { Card } from "./Card";
 import { Chip } from "./Chip";
 import { ConfirmButton } from "./ConfirmButton";
 import { CopyButton } from "./CopyButton";
@@ -122,11 +122,10 @@ export function SecurityPage({ settings, act, notify }: Props) {
 
   return (
     <>
-      <div className="card">
-        <CardHead
-          title="总览"
-          desc="这个实例现在能被谁访问：地址、暴露等级，以及两道门的开关。"
-        />
+      <Card
+        title="总览"
+        desc="这个实例现在能被谁访问：地址、暴露等级，以及两道门的开关。"
+      >
         {report === null ? (
           <Skeleton lines={3} />
         ) : (
@@ -176,13 +175,12 @@ export function SecurityPage({ settings, act, notify }: Props) {
             ]}
           />
         )}
-      </div>
+      </Card>
 
-      <div className="card">
-        <CardHead
-          title="Bearer 门禁"
-          desc="打开后，/mcp 的每个请求都必须带 Bearer 令牌；只填 URL 连不上。"
-        />
+      <Card
+        title="Bearer 门禁"
+        desc="打开后，/mcp 的每个请求都必须带 Bearer 令牌；只填 URL 连不上。"
+      >
         <div className="form-grid">
           <div className="field">
             <span className="field-label">Bearer 门禁</span>
@@ -216,22 +214,21 @@ export function SecurityPage({ settings, act, notify }: Props) {
             <span className="field-hint">已有可用令牌时会复用，不多发；明文只显示一次。</span>
           </div>
         </div>
-      </div>
+      </Card>
 
-      <div className="card">
-        <CardHead
-          title="个人令牌"
-          desc="发给客户端的钥匙：可设有效期，可单独吊销/轮换。明文只在创建那一刻显示一次；轮换会立即作废旧值，吊销则直接作废。"
-          actions={
-            <div className="btn-group">
-              <Chip tone={settings.usableCount > 0 ? "ok" : "idle"}>{settings.usableCount} 有效</Chip>
-              <Chip tone={settings.deadCount > 0 ? "warn" : "idle"}>{settings.deadCount} 失效</Chip>
-              <button type="button" className="small primary" onClick={() => setShowForm(v => !v)}>
-                {showForm ? "收起" : "新建令牌"}
-              </button>
-            </div>
-          }
-        />
+      <Card
+        title="个人令牌"
+        desc="发给客户端的钥匙：可设有效期，可单独吊销/轮换。明文只在创建那一刻显示一次；轮换会立即作废旧值，吊销则直接作废。"
+        actions={
+          <div className="btn-group">
+            <Chip tone={settings.usableCount > 0 ? "ok" : "idle"}>{settings.usableCount} 有效</Chip>
+            <Chip tone={settings.deadCount > 0 ? "warn" : "idle"}>{settings.deadCount} 失效</Chip>
+            <button type="button" className="small primary" onClick={() => setShowForm(v => !v)}>
+              {showForm ? "收起" : "新建令牌"}
+            </button>
+          </div>
+        }
+      >
         <div className="field">
           <span className="field-label">新令牌默认有效期</span>
           <span className="field-control">
@@ -249,7 +246,7 @@ export function SecurityPage({ settings, act, notify }: Props) {
         </div>
 
         {showForm && (
-          <div className="toolbar" style={{ border: "1px dashed var(--border-strong)", borderRadius: 8, padding: 12 }}>
+          <div className="form-inline">
             <input type="text" placeholder="标签（如 chatgpt-web）" value={label} onChange={e => setLabel(e.target.value)} aria-label="令牌标签" />
             <select value={ttl} onChange={e => setTtl(Number(e.target.value))} aria-label="令牌有效期">
               {TTL_CHOICES.map(choice => (
@@ -327,13 +324,12 @@ export function SecurityPage({ settings, act, notify }: Props) {
           <span className="spacer" />
           <span className="section-note" style={{ margin: 0 }}>共 {settings.tokens.length} 条</span>
         </div>
-      </div>
+      </Card>
 
-      <div className="card">
-        <CardHead
-          title="OAuth 2.1（可选）"
-          desc="给客户端发它自己的凭据，而不是让所有人共用地址里的路由令牌。"
-        />
+      <Card
+        title="OAuth 2.1（可选）"
+        desc="给客户端发它自己的凭据，而不是让所有人共用地址里的路由令牌。"
+      >
         <div className="field">
           <label className="check">
             <input
@@ -356,7 +352,7 @@ export function SecurityPage({ settings, act, notify }: Props) {
           </span>
         </div>
         {cfg["oauth.enabled"] && <OAuthPanel hosts={cfg["oauth.allowedRedirectHosts"]} setConfig={setConfig} />}
-      </div>
+      </Card>
 
       {note && <div className="card section-note">{note}</div>}
     </>

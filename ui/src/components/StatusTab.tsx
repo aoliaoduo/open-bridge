@@ -3,7 +3,7 @@ import { api, type BridgeStatus, type SettingsActionResult } from "../api";
 import type { LockSnapshot } from "../api";
 import { EXPOSURE_META } from "../exposure";
 import type { RouteId } from "../routes";
-import { CardHead } from "./CardHead";
+import { Card } from "./Card";
 import { EmptyState } from "./EmptyState";
 import { idleLabel } from "./SessionsPage";
 import { Chip } from "./Chip";
@@ -139,25 +139,24 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
 
       <div className="split">
         <div>
-          <div className="card">
-            <CardHead
-              title="MCP 端点"
-              desc="把这个 URL 填进 MCP 客户端（ChatGPT 连接器、Claude、Cursor 等）。它是地址。公网状态下请配合安全页的门禁使用。"
-              actions={
-                <button
-                  type="button"
-                  className="small icon-text"
-                  disabled={busy || !running}
-                  onClick={() => void run(() => act({ command: "copyPrompt" }))}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="1.6" />
-                    <path d="M15 5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                  </svg>
-                  复制接入提示词
-                </button>
-              }
-            />
+          <Card
+            title="MCP 端点"
+            desc="把这个 URL 填进 MCP 客户端（ChatGPT 连接器、Claude、Cursor 等）。它是地址。公网状态下请配合安全页的门禁使用。"
+            actions={
+              <button
+                type="button"
+                className="small icon-text"
+                disabled={busy || !running}
+                onClick={() => void run(() => act({ command: "copyPrompt" }))}
+              >
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="1.6" />
+                  <path d="M15 5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                </svg>
+                复制接入提示词
+              </button>
+            }
+          >
             <div className="row" style={{ paddingTop: 0 }}>
               <span className="code-chip">
                 <span className="value">{url ?? "（未运行）"}</span>
@@ -202,13 +201,12 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
                 </div>
               )}
             </div>
-          </div>
+          </Card>
 
-          <div className="card">
-            <CardHead
-              title="实例生命周期"
-              desc="实例由终端窗口掌握：打开终端即启动，关闭终端即停止（一键启动脚本就是这个语义）。"
-            />
+          <Card
+            title="实例生命周期"
+            desc="实例由终端窗口掌握：打开终端即启动，关闭终端即停止（一键启动脚本就是这个语义）。"
+          >
             {status?.build_stale && (
               <div className="section-note note-warn">
                 ⚠️ 磁盘上的构建比本实例新：现在跑的仍是启动时加载的代码。要换成新构建，请**关掉承载本实例的终端窗口**，
@@ -239,18 +237,17 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
                 {health.lines.map((line, index) => <div key={index}>· {line}</div>)}
               </div>
             )}
-          </div>
+          </Card>
 
-          <div className="card">
-            <CardHead
-              title="文件锁明细"
-              desc={
-                <>
-                  并发写同一个目录时，第二个调用者会等锁而不是覆盖对方。<span className="mono">持有</span> 是正在写文件的调用，
-                  <span className="mono">等待</span> 是被挡住的调用；两者都会随时间自己消失。
-                </>
-              }
-            />
+          <Card
+            title="文件锁明细"
+            desc={
+              <>
+                并发写同一个目录时，第二个调用者会等锁而不是覆盖对方。<span className="mono">持有</span> 是正在写文件的调用，
+                <span className="mono">等待</span> 是被挡住的调用；两者都会随时间自己消失。
+              </>
+            }
+          >
             {lockRows.length === 0 ? (
               <EmptyState title="当前没有加锁，也没有等待者。">
                 多客户端同时写同一个目录时，这里会出现资源路径、调用名与已经等了多少。
@@ -287,11 +284,10 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
             <div className="card-foot">
               <span className="section-note" style={{ margin: 0 }}>每 5 秒自动刷新。</span>
             </div>
-          </div>
+          </Card>
         </div>
 
-        <div className="card">
-          <CardHead title="实时状态" desc="每 2 秒刷新一次。" />
+        <Card title="实时状态" desc="每 2 秒刷新一次。">
           <PropList
             items={[
               { label: "状态", value: STATE_LABEL[status?.state ?? ""] ?? status?.state ?? "…" },
@@ -301,7 +297,7 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
               { label: "工作区数", value: status?.allowed_directories?.length ?? 0 },
             ]}
           />
-        </div>
+        </Card>
       </div>
     </>
   );

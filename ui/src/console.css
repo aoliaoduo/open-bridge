@@ -26,15 +26,18 @@
   --text: #191c21;
   --muted: #667085;
 
-  /* accent + semantics (all >= 4.5:1 on their own backgrounds) */
+  /* accent + semantics. The semantic text colors are chosen to clear
+     WCAG AA (>= 4.5:1) on their soft-tinted backgrounds (chip / meter-fill
+     text), not just on the bare surface. #157f5f (old --ok) hit 4.0:1 on
+     --ok-soft; #0d5d44 reaches ~6.1:1. */
   --accent: #1a5fb4;
   --accent-text: #ffffff;
   --accent-soft: #eaf1fc;
-  --ok: #157f5f;
+  --ok: #0d5d44;
   --ok-soft: #e4f5ee;
-  --warn: #9a6206;
+  --warn: #7a4d04;
   --warn-soft: #fdf1dc;
-  --err: #b42318;
+  --err: #8c1b13;
   --err-soft: #fdeceb;
 
   --hover: rgba(25, 28, 33, 0.05);
@@ -96,11 +99,16 @@ body {
 /* --- app frame ------------------------------------------------------------- */
 
 .shell {
+  position: relative; /* positioning context for .mask (one-time-secret dialog) */
   display: grid;
   grid-template-columns: var(--nav-w) minmax(0, 1fr);
   min-height: 100vh;
 }
 .shell.nav-collapsed { --nav-w: 72px; }
+/* The inert wrapper around the page subtree (sidebar + main). It inherits
+   the parent's grid placement so the layout does not change when the
+   secret dialog opens and this subtree is marked inert. */
+.shell-page { display: contents; }
 
 .main { min-width: 0; display: flex; flex-direction: column; }
 
@@ -187,7 +195,16 @@ body {
   border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: 11.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
+.sidebar-foot .theme-foot {
+  align-self: flex-start;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.sidebar-foot-note { display: block; }
 
 /* Collapsed rail: labels stay in the DOM (only visually clipped) so the links
    keep their accessible names, and the group headings become hairlines. */
@@ -225,9 +242,9 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  height: var(--bar-h);
+  min-height: var(--bar-h); /* allow wrap to a second line instead of clipping buttons */
   flex: none;
-  padding: 0 18px;
+  padding: 8px 18px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
@@ -311,9 +328,6 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-.card-actions { display: flex; align-items: center; gap: 8px; justify-content: flex-end; margin: 0 0 10px; flex-wrap: wrap; }
-.card-actions .spacer { flex: 1; margin: 0; }
-
 /* --- chips ----------------------------------------------------------------- */
 
 .chip {
@@ -343,8 +357,6 @@ body {
 .row.tight { padding: 3px 0; }
 
 .mono { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
-
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 32px; }
 
 .section-note { color: var(--muted); font-size: 12.5px; margin: 4px 0 10px; }
 
@@ -410,6 +422,19 @@ body {
 .toolbar .search input { padding-left: 30px; width: 260px; }
 .toolbar .grow { flex: 1; }
 .toolbar .count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* Inline form group: label and control on one line, used for the
+   "new token" composer on the 安全 page so it does not have to borrow
+   .toolbar's search/count styles. */
+.form-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+}
 
 /* --- empty state ----------------------------------------------------------- */
 
@@ -655,11 +680,21 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
 }
 
 @media (max-width: 720px) {
-  .grid2 { grid-template-columns: 1fr; }
   .stats, .stats.three { grid-template-columns: 1fr; }
   .crumb-path, .crumb:not(.current), .crumb-sep { display: none; }
-  .topbar { gap: 8px; padding: 0 12px; }
+  .topbar { gap: 8px; padding: 8px 12px; }
+  /* The .ghost theme toggle gets a more menu elsewhere; the remaining
+     action buttons (复制 MCP / 一键体检 / 刷新本页) plus the chip still fit
+     on a single 720px row thanks to the tightened gap and padding. */
   .topbar-actions .ghost { display: none; }
+  /* Once the topbar can wrap to two lines, the section rail cannot keep
+     its `top: var(--bar-h)` sticky offset — it would slide under the
+     second row. Drop sticky on small screens; the section nav is short
+     and sits naturally above the content. */
+  .secnav { position: static; }
+  /* Form grids are also a two-column pattern; stack them on mobile so
+     each input keeps a usable width. */
+  .form-grid { grid-template-columns: 1fr; }
 }
 
 /* ==========================================================================
@@ -690,6 +725,7 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
 
 /* --- property rows (label left, value right) ------------------------------- */
 
+.props { display: flex; flex-direction: column; }
 .prop { display: flex; align-items: baseline; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .prop:last-child { border-bottom: none; }
 .prop:first-child { padding-top: 2px; }

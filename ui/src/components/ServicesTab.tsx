@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type ServiceView } from "../api";
-import { CardHead } from "./CardHead";
+import { Card } from "./Card";
 import { Chip } from "./Chip";
 import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
@@ -58,22 +58,20 @@ export function ServicesTab({ notify }: { notify?: (text: string, isError?: bool
   const running = (services ?? []).filter(service => service.running).length;
 
   return (
-    <div className="card">
-      <CardHead
-        title="服务"
-        desc={
-          <>
-            由 MCP 工具 <span className="mono">save_service</span> 定义过的命名进程（例如一个开发服务器）。
-            这里只负责启停；健康检查与按组批量启停仍在 MCP 工具侧。
-          </>
-        }
-        actions={
-          <div className="btn-group">
-            {services ? <Chip tone={running > 0 ? "ok" : "idle"}>{running} / {services.length} 运行中</Chip> : null}
-          </div>
-        }
-      />
-
+    <Card
+      title="服务"
+      desc={
+        <>
+          由 MCP 工具 <span className="mono">save_service</span> 定义过的命名进程（例如一个开发服务器）。
+          这里只负责启停；健康检查与按组批量启停仍在 MCP 工具侧。
+        </>
+      }
+      actions={
+        <div className="btn-group">
+          {services ? <Chip tone={running > 0 ? "ok" : "idle"}>{running} / {services.length} 运行中</Chip> : null}
+        </div>
+      }
+    >
       {services === null ? (
         <Skeleton lines={3} />
       ) : services.length === 0 ? (
@@ -157,6 +155,6 @@ export function ServicesTab({ notify }: { notify?: (text: string, isError?: bool
         <span className="spacer" />
         <span className="section-note" style={{ margin: 0 }}>状态每 5 秒自动刷新。</span>
       </div>
-    </div>
+    </Card>
   );
 }

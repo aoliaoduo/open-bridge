@@ -282,7 +282,14 @@ export async function interactWithProcess(args: Args): Promise<Record<string, un
       + "Use read_process_output to read a process without writing to it.",
     );
   }
+  // Validate stream BEFORE writing to stdin: a typo'd `stream` would otherwise
+  // let the input reach the process while the caller gets a "stream must be
+  // one of..." error, so the agent sees a refused call whose side effect
+  // already landed.
   const stream = args.stream === undefined ? "merged" : String(args.stream);
+  if (!["merged", "stdout", "stderr"].includes(stream)) {
+    throw new Error('stream must be one of: merged, stdout, stderr.');
+  }
   try {
     s.child.stdin.write(String(args.input) + (args.append_newline === false ? "" : "\n"));
   } catch (error) {
@@ -293,7 +300,7 @@ export async function interactWithProcess(args: Args): Promise<Record<string, un
   // uncapped value parks the caller for days instead of a minute.
   const waitMs = clampMs(args.wait_ms, 250, 60_000);
   if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs));
-  const effectiveOffset = args.offset !== undefined ? Number(args.offset) : preOffsets[stream] ?? preOffsets.merged;
+  const effectiveOffset = args.offset !== undefined ? Number(args.offset) : preOffsets[stream];
   return outputRead(s, effectiveOffset, args.max_bytes, args.stream, args.strip_ansi);
 }
 

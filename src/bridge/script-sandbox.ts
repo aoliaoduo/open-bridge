@@ -709,20 +709,29 @@ export async function runScriptInSandbox(options: RunScriptOptions): Promise<Scr
 
     /** A tool result that cannot cross the port is a tool failure, not a hung script. */
     function safePost(message: Record<string, unknown>): void {
+      // Cheap early exit: a settled run cannot observe the message anyway, and
+      // any postMessage attempt on a terminated worker is guaranteed to throw.
+      if (settled) return;
       try {
         worker.postMessage(message);
       } catch (error) {
-        if (settled) return;
+        const reason = error instanceof Error ? error.message : String(error);
         try {
           worker.postMessage({
             type: "tool-result",
             id: message.id,
             ok: false,
             tool: message.tool,
-            error: `The result of that tool call cannot cross the sandbox boundary: ${error instanceof Error ? error.message : String(error)}`,
+            error: `The result of that tool call cannot cross the sandbox boundary: ${reason}`,
           });
         } catch {
-          // Both shapes refused by the port: the run will end on its own timeout.
+          // Both shapes refused by the port. Without surfacing this, the script
+          // side just hangs and the only signal is the next sandbox timeout —
+          // which makes diagnosis painful. Emit a warning so the service log
+          // shows the orphan tool call and its id.
+          console.warn(
+            `[script-sandbox] orphaned tool-result (id=${String(message.id)}, tool=${String(message.tool)}): postMessage refused and run is not yet settled.`,
+          );
         }
       }
     }

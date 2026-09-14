@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type ToolCatalog } from "../api";
-import { CardHead } from "./CardHead";
+import { Card } from "./Card";
 import { Chip } from "./Chip";
 import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
@@ -39,26 +39,24 @@ export function ToolsPage({ notify }: { notify?: (text: string, isError?: boolea
   const coreCount = (catalog?.tools ?? []).filter(tool => tool.core).length;
 
   return (
-    <div className="card">
-      <CardHead
-        title="工具目录"
-        desc={
-          <>
-            这份清单就是 <span className="mono">tools/list</span> 实际返回的内容，按工具配置档过滤。
-          </>
-        }
-        actions={
-          catalog ? (
-            <div className="btn-group">
-              <Chip tone="accent">配置档 {catalog.profile}</Chip>
-              <span className="section-note" style={{ margin: 0 }}>
-                共 {catalog.count} 个工具（核心 {coreCount} 个）
-              </span>
-            </div>
-          ) : null
-        }
-      />
-
+    <Card
+      title="工具目录"
+      desc={
+        <>
+          这份清单就是 <span className="mono">tools/list</span> 实际返回的内容，按工具配置档过滤。
+        </>
+      }
+      actions={
+        catalog ? (
+          <div className="btn-group">
+            <Chip tone="accent">配置档 {catalog.profile}</Chip>
+            <span className="section-note" style={{ margin: 0 }}>
+              共 {catalog.count} 个工具（核心 {coreCount} 个）
+            </span>
+          </div>
+        ) : null
+      }
+    >
       {catalog === null ? (
         <Skeleton lines={5} />
       ) : (
@@ -127,6 +125,6 @@ export function ToolsPage({ notify }: { notify?: (text: string, isError?: boolea
         </>
       )}
       {note && <div className="section-note">{note}</div>}
-    </div>
+    </Card>
   );
 }

@@ -48,6 +48,19 @@ const LAST_USED_FLUSH_MS = 30_000;
 
 const limiter = new AuthFailureLimiter();
 let lastFlushAt = 0;
+/**
+ * In-memory record of `lastUsedAt` / `useCount` bumps that have not yet been
+ * persisted. The throttle only applies to the disk flush; every successful
+ * call must update the visible counters immediately, otherwise the
+ * "when was this token last used" answer the audit log and `token list`
+ * depend on is 30 s stale even on a quiet session.
+ *
+ * Kept as `id -> { lastUsedAt, delta }` rather than `Map<id, AuthTokenRecord>`
+ * because the on-disk record is the source of truth for everything else
+ * (label / scopes / hash / revocation) and we only need to add the two
+ * bookkeeping fields on top.
+ */
+const pendingBumps = new Map<string, { lastUsedAt: number; delta: number }>();
 
 export function authEnabled(): boolean {
   return host().config.get<boolean>("auth.enabled", false) === true;
@@ -190,7 +203,14 @@ export async function mintToken(options: { label?: string; ttlSeconds?: number |
 
 export async function listTokenViews(): Promise<ReturnType<typeof publicTokenView>[]> {
   const now = Date.now();
-  return (await readRecords()).map(item => publicTokenView(item, now));
+  // Apply in-memory bumps so callers (UI, audit) see fresh `last_used_at` /
+  // `use_count` even within the throttle window, before the next disk flush.
+  return (await readRecords()).map(item => {
+    const pending = pendingBumps.get(item.id);
+    if (!pending) return publicTokenView(item, now);
+    const merged = { ...item, lastUsedAt: pending.lastUsedAt, useCount: item.useCount + pending.delta };
+    return publicTokenView(merged, now);
+  });
 }
 
 /**
@@ -413,18 +433,45 @@ function warnNoActiveToken(): void {
 
 /** Bump lastUsed/useCount, persisting at most every LAST_USED_FLUSH_MS. */
 async function touchToken(id: string, now: number): Promise<void> {
+  // In-memory bump is unconditional so `token list` and the audit log see
+  // every successful call. The throttle only gates the disk write.
+  const pending = pendingBumps.get(id);
+  if (pending) {
+    pending.lastUsedAt = now;
+    pending.delta += 1;
+  } else {
+    pendingBumps.set(id, { lastUsedAt: now, delta: 1 });
+  }
   if (now - lastFlushAt < LAST_USED_FLUSH_MS) return;
   lastFlushAt = now;
-  // The flush writes through the merged, serialized path: a stale whole-array
-  // store used to delete tokens another instance had minted in the meantime.
+  // Drain pending bumps through the merged, serialized path: a stale
+  // whole-array store used to delete tokens another instance had minted in
+  // the meantime. Failures are swallowed because the in-memory bump already
+  // succeeded and the next call will retry the flush.
+  const toFlush = Array.from(pendingBumps.entries());
+  pendingBumps.clear();
   await mutateRecords(records => {
-    const target = records.find(item => item.id === id);
-    if (target) {
-      target.lastUsedAt = now;
-      target.useCount += 1;
+    for (const [tokenId, { lastUsedAt, delta }] of toFlush) {
+      const target = records.find(item => item.id === tokenId);
+      if (!target) continue;
+      // Use the latest lastUsedAt and the total delta; multiple flushes
+      // in flight are guarded against by the throttle above.
+      if (lastUsedAt > (target.lastUsedAt ?? 0)) target.lastUsedAt = lastUsedAt;
+      target.useCount += delta;
     }
     return { records, result: undefined as void };
-  }).catch(() => undefined);
+  }).catch(() => {
+    // Re-queue bumps on failure so they are not silently lost.
+    for (const [tokenId, bump] of toFlush) {
+      const existing = pendingBumps.get(tokenId);
+      if (existing) {
+        existing.lastUsedAt = Math.max(existing.lastUsedAt, bump.lastUsedAt);
+        existing.delta += bump.delta;
+      } else {
+        pendingBumps.set(tokenId, bump);
+      }
+    }
+  });
 }
 
 /** Auth state for the panel / get_config / the auth status tool. */

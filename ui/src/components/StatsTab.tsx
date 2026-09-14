@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type ActivityEntry, type UsageStats } from "../api";
-import { CardHead } from "./CardHead";
+import { Card } from "./Card";
 import { ConfirmButton } from "./ConfirmButton";
 import { EmptyState } from "./EmptyState";
 import { Skeleton } from "./Skeleton";
@@ -92,17 +92,16 @@ export function StatsTab() {
         />
       </div>
 
-      <div className="card">
-        <CardHead
-          title="调用统计"
-          desc="自实例启动起累计；清空只清零计数，不影响正在进行的调用。"
-          actions={
-            <div className="btn-group">
-              {note ? <span className="section-note" style={{ margin: 0 }}>{note}</span> : null}
-              <ConfirmButton label="清空统计" onConfirm={() => void clearStats()} />
-            </div>
-          }
-        />
+      <Card
+        title="调用统计"
+        desc="自实例启动起累计；清空只清零计数，不影响正在进行的调用。"
+        actions={
+          <div className="btn-group">
+            {note ? <span className="section-note" style={{ margin: 0 }}>{note}</span> : null}
+            <ConfirmButton label="清空统计" onConfirm={() => void clearStats()} />
+          </div>
+        }
+      >
         {usage === null ? (
           <Skeleton lines={2} />
         ) : (
@@ -117,10 +116,9 @@ export function StatsTab() {
             </div>
           </div>
         )}
-      </div>
+      </Card>
 
-      <div className="card">
-        <CardHead title="按工具" desc="调用次数排行（前 12 名）。" />
+      <Card title="按工具" desc="调用次数排行（前 12 名）。">
         {topTools.length === 0 ? (
           <EmptyState title="还没有工具调用。">客户端每调用一次工具，这里就会多一条计数与排行。</EmptyState>
         ) : topTools.map(([name, count]) => (
@@ -130,22 +128,21 @@ export function StatsTab() {
             <span className="n">{count}</span>
           </div>
         ))}
-      </div>
+      </Card>
 
-      <div className="card">
-        <CardHead
-          title="最近活动"
-          desc="工具调用、服务启停与配置修改都会记在这里。"
-          actions={
-            <div className="segmented" role="group" aria-label="活动过滤">
-              <button type="button" className={view === "all" ? "active" : ""} onClick={() => setView("all")}>全部</button>
-              <button type="button" className={view === "error" ? "active" : ""} onClick={() => setView("error")}>
-                失败/警告 {failures}
-              </button>
-              <button type="button" className={view === "success" ? "active" : ""} onClick={() => setView("success")}>完成</button>
-            </div>
-          }
-        />
+      <Card
+        title="最近活动"
+        desc="工具调用、服务启停与配置修改都会记在这里。"
+        actions={
+          <div className="segmented" role="group" aria-label="活动过滤">
+            <button type="button" className={view === "all" ? "active" : ""} onClick={() => setView("all")}>全部</button>
+            <button type="button" className={view === "error" ? "active" : ""} onClick={() => setView("error")}>
+              失败/警告 {failures}
+            </button>
+            <button type="button" className={view === "success" ? "active" : ""} onClick={() => setView("success")}>完成</button>
+          </div>
+        }
+      >
         {shown.length === 0 ? (
           <EmptyState title={activity.length === 0 ? "暂无活动。" : "这个筛选下没有记录。"}>
             {activity.length === 0 ? "工具调用、服务启停与配置修改都会出现在这里。" : "换一个筛选看看。"}
@@ -160,7 +157,7 @@ export function StatsTab() {
             <span className="act-time">{entry.at}</span>
           </div>
         ))}
-      </div>
+      </Card>
     </>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { copyText } from "../api";
-import { CardHead } from "./CardHead";
+import { Card } from "./Card";
 import { Chip } from "./Chip";
 
 type Level = "error" | "warn" | "info" | "";
@@ -33,6 +33,11 @@ export function LogsTab() {
   const boxRef = useRef<HTMLDivElement>(null);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
+  // True when the user is parked at the bottom; only then does new output
+  // auto-scroll. Scrolling up to read history freezes the pane so the next
+  // line does not yank them away from what they were reading. Resume on
+  // scroll-back-to-bottom is automatic.
+  const stickToBottomRef = useRef(true);
 
   useEffect(() => {
     const source = new EventSource("/api/logs/stream");
@@ -60,7 +65,7 @@ export function LogsTab() {
 
   useEffect(() => {
     const box = boxRef.current;
-    if (box) box.scrollTop = box.scrollHeight;
+    if (box && stickToBottomRef.current) box.scrollTop = box.scrollHeight;
   }, [lines]);
 
   const parsed = useMemo(() => lines.map(parseLine), [lines]);
@@ -69,20 +74,18 @@ export function LogsTab() {
   const dotState = !connected ? "offline" : paused ? "paused" : "";
 
   return (
-    <div className="card">
-      <CardHead
-        title="日志"
-        desc="实时日志流（最近 800 行）。断线期间的行会缺失；完整审计在数据目录的 audit.log。"
-        actions={
-          <div className="btn-group">
-            {errorCount > 0 ? <Chip tone="err">{errorCount} 条错误</Chip> : null}
-            <span className={`live-dot ${dotState}`}>
-              {!connected ? "已断开，重连中" : paused ? "已暂停" : "实时"}
-            </span>
-          </div>
-        }
-      />
-
+    <Card
+      title="日志"
+      desc="实时日志流（最近 800 行）。断线期间的行会缺失；完整审计在数据目录的 audit.log。"
+      actions={
+        <div className="btn-group">
+          {errorCount > 0 ? <Chip tone="err">{errorCount} 条错误</Chip> : null}
+          <span className={`live-dot ${dotState}`}>
+            {!connected ? "已断开，重连中" : paused ? "已暂停" : "实时"}
+          </span>
+        </div>
+      }
+    >
       <div className="logbar">
         <button className="small" onClick={() => setPaused(v => !v)}>{paused ? "继续" : "暂停"}</button>
         <button className="small" onClick={() => setLines([])}>清空视图</button>
@@ -101,7 +104,17 @@ export function LogsTab() {
 
       {note && <div className="section-note">{note}</div>}
 
-      <div className="log-stream" ref={boxRef}>
+      <div
+        className="log-stream"
+        ref={boxRef}
+        onScroll={event => {
+          // 16px slop so a half-pixel of anti-aliasing does not flip the
+          // sticky state every render.
+          const target = event.currentTarget;
+          const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+          stickToBottomRef.current = distanceFromBottom < 16;
+        }}
+      >
         {parsed.length === 0 ? (
           <span className="t">等待日志…</span>
         ) : parsed.map((line, index) => (
@@ -111,6 +124,6 @@ export function LogsTab() {
           </div>
         ))}
       </div>
-    </div>
+    </Card>
   );
 }

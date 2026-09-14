@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { type SettingsActionResult, type SettingsState } from "../api";
-import { CardHead } from "./CardHead";
+import { Card } from "./Card";
 import { Field } from "./Field";
 import { SectionNav } from "./SectionNav";
 import { Skeleton } from "./Skeleton";
@@ -163,11 +163,7 @@ export function SettingsTab({ settings, act, notify }: Props) {
     <>
       <SectionNav items={SETTINGS_SECTIONS} />
 
-      <div className="card" id="set-tunnel">
-        <CardHead
-          title="隧道（ngrok）"
-          desc="隧道让公网上的客户端连到这台机器；不开隧道时只有本机能访问。"
-        />
+      <Card id="set-tunnel" title="隧道（ngrok）" desc="隧道让公网上的客户端连到这台机器；不开隧道时只有本机能访问。">
         <div className="form-grid">
           <Field label="提供商" hint="none 表示只用本机回环地址，适合纯本机客户端。">
             <select value={cfg.tunnelProvider} onChange={e => setConfig("tunnelProvider", e.target.value)}>
@@ -224,10 +220,9 @@ export function SettingsTab({ settings, act, notify }: Props) {
             onChange={next => setConfig("ngrokUseHttpProxy", next)}
           />
         </div>
-      </div>
+      </Card>
 
-      <div className="card" id="set-network">
-        <CardHead title="网络" desc="本机监听端口与公网健康检查的超时。" />
+      <Card id="set-network" title="网络" desc="本机监听端口与公网健康检查的超时。">
         <div className="form-grid">
           <Field label="本地端口" hint="0 = 自动选择空闲端口（重启 Bridge 生效）；失焦时保存。">
             <DraftField
@@ -251,13 +246,9 @@ export function SettingsTab({ settings, act, notify }: Props) {
             />
           </Field>
         </div>
-      </div>
+      </Card>
 
-      <div className="card" id="set-files">
-        <CardHead
-          title="文件访问"
-          desc="默认允许访问项目根之外的路径（个人本机推荐）；关掉之后只有下面列出的目录可读写。"
-        />
+      <Card id="set-files" title="文件访问" desc="默认允许访问项目根之外的路径（个人本机推荐）；关掉之后只有下面列出的目录可读写。">
         <SwitchField
           label="允许访问项目根之外的路径"
           checked={cfg.unrestrictedFileAccess}
@@ -280,10 +271,9 @@ export function SettingsTab({ settings, act, notify }: Props) {
             <span className="field-hint">每行一个绝对目录；失焦时保存</span>
           </div>
         )}
-      </div>
+      </Card>
 
-      <div className="card" id="set-shell">
-        <CardHead title="Shell 与工具" desc="命令通过哪个 shell 执行，以及这台实例对外公布哪些工具。" />
+      <Card id="set-shell" title="Shell 与工具" desc="命令通过哪个 shell 执行，以及这台实例对外公布哪些工具。">
         <div className="form-grid">
           <Field label="Shell 路径" hint="留空自动探测（Git Bash → pwsh → powershell）。">
             <DraftField
@@ -306,13 +296,9 @@ export function SettingsTab({ settings, act, notify }: Props) {
             </select>
           </Field>
         </div>
-      </div>
+      </Card>
 
-      <div className="card" id="set-locks">
-        <CardHead
-          title="并发锁"
-          desc="并发写同一个目录时让第二个调用者等待，而不是互相覆盖。"
-        />
+      <Card id="set-locks" title="并发锁" desc="并发写同一个目录时让第二个调用者等待，而不是互相覆盖。">
         <SwitchField
           label="串行化可能产生竞争的工具调用"
           checked={settings.concurrency.enabled}
@@ -357,18 +343,18 @@ export function SettingsTab({ settings, act, notify }: Props) {
             </Field>
           </div>
         )}
-      </div>
+      </Card>
 
-      <div className="card" id="set-logs">
-        <CardHead
-          title="日志"
-          desc={
-            <>
-              <span className="mono">bridge.log</span> 长到一个上限就轮转成 <span className="mono">bridge.log.1</span>
-              （只留上一代，和审计日志、服务日志同一套做法），旧的覆盖旧的，磁盘不再只涨不落。0 = 不轮转。重启 Bridge 生效。
-            </>
-          }
-        />
+      <Card
+        id="set-logs"
+        title="日志"
+        desc={
+          <>
+            <span className="mono">bridge.log</span> 长到一个上限就轮转成 <span className="mono">bridge.log.1</span>
+            （只留上一代，和审计日志、服务日志同一套做法），旧的覆盖旧的，磁盘不再只涨不落。0 = 不轮转。重启 Bridge 生效。
+          </>
+        }
+      >
         <div className="form-grid">
           <Field label="单文件上限" hint="字节（默认 10485760 = 10 MiB，0 = 不轮转）；失焦时保存。">
             <DraftField
@@ -381,7 +367,7 @@ export function SettingsTab({ settings, act, notify }: Props) {
             />
           </Field>
         </div>
-      </div>
+      </Card>
 
     </>
   );

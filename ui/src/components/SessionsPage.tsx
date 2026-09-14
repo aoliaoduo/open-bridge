@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type SessionView } from "../api";
-import { CardHead } from "./CardHead";
+import { Card } from "./Card";
 import { ConfirmButton } from "./ConfirmButton";
 import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
@@ -108,30 +108,28 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
 
   return (
     <>
-      <div className="card">
-        <CardHead
-          title="已连接的客户端"
-          desc={
-            <>
-              一行是一个活着的 MCP 会话：客户端在 <span className="mono">initialize</span> 之后出现，
-              空闲超过 60 分钟或被容量挤出时自动消失。<span className="mono">断开</span> 只关掉这一个会话。
-            </>
-          }
-          actions={
-            <div className="segmented" role="group" aria-label="会话视图">
-              <button type="button" className={view === "all" ? "active" : ""} onClick={() => setView("all")}>
-                全部 {sessions ? sessions.length : ""}
-              </button>
-              <button type="button" className={view === "active" ? "active" : ""} onClick={() => setView("active")}>
-                活跃 {activeCount}
-              </button>
-              <button type="button" className={view === "idle" ? "active" : ""} onClick={() => setView("idle")}>
-                空闲 ≥5 分 {staleCount}
-              </button>
-            </div>
-          }
-        />
-
+      <Card
+        title="已连接的客户端"
+        desc={
+          <>
+            一行是一个活着的 MCP 会话：客户端在 <span className="mono">initialize</span> 之后出现，
+            空闲超过 60 分钟或被容量挤出时自动消失。<span className="mono">断开</span> 只关掉这一个会话。
+          </>
+        }
+        actions={
+          <div className="segmented" role="group" aria-label="会话视图">
+            <button type="button" className={view === "all" ? "active" : ""} onClick={() => setView("all")}>
+              全部 {sessions ? sessions.length : ""}
+            </button>
+            <button type="button" className={view === "active" ? "active" : ""} onClick={() => setView("active")}>
+              活跃 {activeCount}
+            </button>
+            <button type="button" className={view === "idle" ? "active" : ""} onClick={() => setView("idle")}>
+              空闲 ≥5 分 {staleCount}
+            </button>
+          </div>
+        }
+      >
         {sessions !== null && sessions.length > 0 && (
           <div className="toolbar">
             <label className="search">
@@ -208,7 +206,7 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
         <div className="card-foot">
           <span className="section-note" style={{ margin: 0 }}>每 5 秒自动刷新。</span>
         </div>
-      </div>
+      </Card>
 
 
       {note && <div className="card section-note" style={{ marginBottom: 0 }}>{note}</div>}

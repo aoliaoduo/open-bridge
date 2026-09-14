@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type HealthCheck, type HealthReport } from "../api";
 import type { RouteId } from "../routes";
-import { CardHead } from "./CardHead";
+import { Card } from "./Card";
 import { Chip } from "./Chip";
 import { Skeleton } from "./Skeleton";
 import { Stat } from "./Stat";
@@ -76,28 +76,24 @@ export function HealthPage(
         </div>
       ) : null}
 
-      <div className="card">
-        <CardHead
-          title="体检结果"
-          desc={
-            <>
-              「公网连通」会用真实请求穿过隧道访问 <span className="mono">/healthz</span>（6 秒超时），
-              所以它比别的项慢；隧道没开时会跳过并标注为仅本机。
-            </>
-          }
-          actions={
-            <div className="btn-group">
-              {report && <span className="section-note" style={{ margin: 0 }}>{summary}</span>}
-              <button type="button" className="primary small" disabled={busy} onClick={() => void run()}>
-                {busy ? "体检中…" : "重新体检"}
-              </button>
-            </div>
-          }
-        />
-
-        {report === null ? (
-          busy ? <Skeleton lines={4} /> : <Skeleton lines={4} />
-        ) : (
+      <Card
+        title="体检结果"
+        desc={
+          <>
+            「公网连通」会用真实请求穿过隧道访问 <span className="mono">/healthz</span>（6 秒超时），
+            所以它比别的项慢；隧道没开时会跳过并标注为仅本机。
+          </>
+        }
+        actions={
+          <div className="btn-group">
+            {report && <span className="section-note" style={{ margin: 0 }}>{summary}</span>}
+            <button type="button" className="primary small" disabled={busy} onClick={() => void run()}>
+              {busy ? "体检中…" : "重新体检"}
+            </button>
+          </div>
+        }
+      >
+        {report === null ? <Skeleton lines={4} /> : (
           <>
             <div className="meter">
               <div className="meter-track">
@@ -134,7 +130,7 @@ export function HealthPage(
             </div>
           </>
         )}
-      </div>
+      </Card>
 
       <div className="card section-note">暴露面详情与加固去「安全」页。{onOpen ? (
         <button type="button" className="small" onClick={() => onOpen("security")}>去安全页</button>

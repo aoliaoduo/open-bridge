@@ -588,21 +588,23 @@ describe("App shell: grouped navigation", () => {
     render(<App />);
     await screen.findByText("MCP 端点");
 
-    const themeButton = screen.getByRole("button", { name: /主题：/ });
+    // The topbar hides its theme toggle under 720px; the sidebar's foot button
+    // is the always-visible copy. Either clicks the same handler.
+    const themeButtons = () => screen.getAllByRole("button", { name: /主题：/ });
     // jsdom ships no matchMedia, so 跟随系统 resolves to the light palette.
     expect(document.documentElement.dataset.theme).toBe("light");
 
-    fireEvent.click(themeButton);
-    expect(screen.getByRole("button", { name: "主题：浅色" })).toBeTruthy();
+    fireEvent.click(themeButtons()[0]!);
+    expect(themeButtons().some(b => b.textContent === "主题：浅色")).toBe(true);
     expect(document.documentElement.dataset.theme).toBe("light");
 
-    fireEvent.click(screen.getByRole("button", { name: "主题：浅色" }));
-    expect(screen.getByRole("button", { name: "主题：深色" })).toBeTruthy();
+    fireEvent.click(themeButtons().find(b => b.textContent === "主题：浅色")!);
+    expect(themeButtons().some(b => b.textContent === "主题：深色")).toBe(true);
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(window.localStorage.getItem("openBridge.console.theme")).toBe("dark");
 
-    fireEvent.click(screen.getByRole("button", { name: "主题：深色" }));
-    expect(screen.getByRole("button", { name: "主题：跟随系统" })).toBeTruthy();
+    fireEvent.click(themeButtons().find(b => b.textContent === "主题：深色")!);
+    expect(themeButtons().some(b => b.textContent === "主题：跟随系统")).toBe(true);
   });
 });
 

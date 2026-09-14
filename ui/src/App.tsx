@@ -5,6 +5,7 @@ import { applyTheme, initTheme, nextThemePref, storeThemePref, watchSystemTheme,
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { PageHeader } from "./components/PageHeader";
+import { Skeleton } from "./components/Skeleton";
 import { StatusTab } from "./components/StatusTab";
 import { SettingsTab } from "./components/SettingsTab";
 import { SecurityPage } from "./components/SecurityPage";
@@ -98,13 +99,21 @@ export function App() {
 
   // The one-time secret is a modal, so it has to behave like one: Escape closes
   // it (there was no keyboard way out at all) and focus moves into it, otherwise
-  // the plaintext sat behind a keyboard-invisible wall.
+  // the plaintext sat behind a keyboard-invisible wall. The shell below is
+  // also marked inert so Tab cannot escape the dialog back into the page.
   useEffect(() => {
     if (!secret) return;
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setSecret(null); };
     window.addEventListener("keydown", onKey);
+    // Lock the page scroll while the dialog is up so a long secret does not
+    // bring a scrollbar back and shift the layout behind the mask.
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     secretBox.current?.focus();
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previousOverflow;
+    };
   }, [secret]);
 
   // The drawer is an overlay, so it needs the overlay's keyboard exit.
@@ -162,54 +171,66 @@ export function App() {
   const spec = routeSpec(route);
 
   return (
+    // The shell root carries the layout class but stays interactive; inert is
+    // applied to the page subtree so the dialog (rendered as a sibling) keeps
+    // focus and the rest of the UI falls out of the tab order. The toast also
+    // stays live so the operator can still see the "密钥已复制" feedback.
     <div className={`shell${collapsed ? " nav-collapsed" : ""}`}>
-      <Sidebar
-        route={route}
-        collapsed={collapsed}
-        drawerOpen={drawer}
-        onToggleCollapsed={toggleCollapsed}
-        onOpen={open}
-        onCloseDrawer={() => setDrawer(false)}
-      />
-      {drawer ? <div className="scrim" onClick={() => setDrawer(false)} /> : null}
-
-      <div className="main">
-        <Topbar
+      <div className="shell-page" inert={secret ? true : undefined}>
+        <Sidebar
           route={route}
-          settings={settings}
+          collapsed={collapsed}
+          drawerOpen={drawer}
           themePref={themePref}
-          onCycleTheme={cycleTheme}
+          onToggleCollapsed={toggleCollapsed}
           onOpen={open}
-          onCopyMcp={() => { void copyText(settings?.mcpUrl ?? ""); showToast("MCP 地址已复制。"); }}
-          onRefresh={() => { setReloadKey(key => key + 1); void refreshSettings(); showToast("已刷新。"); }}
-          onToggleDrawer={() => setDrawer(value => !value)}
+          onCloseDrawer={() => setDrawer(false)}
+          onCycleTheme={cycleTheme}
         />
+        {drawer ? <div className="scrim" onClick={() => setDrawer(false)} /> : null}
 
-        <main className="content">
-          <PageHeader title={spec.label} hint={spec.hint} />
-          <div className="page" key={`${route}-${reloadKey}`}>
-            {route === "status" && <StatusTab act={act} onRefresh={refreshSettings} notify={showToast} onOpen={open} />}
-            {route === "sessions" && <SessionsPage notify={showToast} />}
-            {route === "tools" && <ToolsPage notify={showToast} />}
-            {route === "health" && <HealthPage onOpen={open} />}
-            {route === "services" && <ServicesTab notify={showToast} />}
-            {route === "logs" && <LogsTab />}
-            {route === "stats" && <StatsTab />}
-            {route === "security" && (settings ? (
-              <SecurityPage settings={settings} act={act} notify={showToast} />
-            ) : (
-              <div className="card">加载中…</div>
-            ))}
-            {route === "settings" && <SettingsTab settings={settings} act={act} notify={showToast} />}
-          </div>
-        </main>
+        <div className="main">
+          <Topbar
+            route={route}
+            settings={settings}
+            themePref={themePref}
+            onCycleTheme={cycleTheme}
+            onOpen={open}
+            onCopyMcp={() => { void copyText(settings?.mcpUrl ?? ""); showToast("MCP 地址已复制。"); }}
+            onRefresh={() => { setReloadKey(key => key + 1); void refreshSettings(); showToast("已刷新。"); }}
+            onToggleDrawer={() => setDrawer(value => !value)}
+          />
+
+          <main className="content">
+            <PageHeader title={spec.label} hint={spec.hint} />
+            <div className="page" key={`${route}-${reloadKey}`}>
+              {route === "status" && <StatusTab act={act} onRefresh={refreshSettings} notify={showToast} onOpen={open} />}
+              {route === "sessions" && <SessionsPage notify={showToast} />}
+              {route === "tools" && <ToolsPage notify={showToast} />}
+              {route === "health" && <HealthPage onOpen={open} />}
+              {route === "services" && <ServicesTab notify={showToast} />}
+              {route === "logs" && <LogsTab />}
+              {route === "stats" && <StatsTab />}
+              {route === "security" && (settings ? (
+                <SecurityPage settings={settings} act={act} notify={showToast} />
+              ) : (
+                <Skeleton lines={4} />
+              ))}
+              {route === "settings" && <SettingsTab settings={settings} act={act} notify={showToast} />}
+            </div>
+          </main>
+        </div>
       </div>
 
       {/* Persistent node on purpose: toggling .show on the same element is
-          what lets the fade in/out transitions actually run. */}
+          what lets the fade in/out transitions actually run. Kept outside the
+          inert subtree so the "密钥已复制" feedback still appears while the
+          dialog is open. role/aria-live only attach when there is something
+          to announce, otherwise the empty live region is a no-op for AT. */}
       <div
         className={`toast ${toast ? "show" : ""} ${toast?.isError ? "error" : ""}`}
-        role={toast?.isError ? "alert" : "status"}
+        role={toast ? (toast.isError ? "alert" : "status") : undefined}
+        aria-live="polite"
       >
         {toast?.text}
       </div>
