@@ -312,10 +312,23 @@ test("finish watchdog: a fully completed list nobody announced does get announce
 
 test("finish watchdog: the AI's own push silences it", () => {
   // A well-behaved model that called notify() after finishing must not cause a
-  // second, redundant bell — its push is newer than the completion.
+  // second, redundant bell.
   assert.equal(finishNoticeVerdict({ ...DONE, notifiedSinceMs: DONE.completedAtMs + 1 }), false);
-  // But a push from BEFORE the work finished says nothing about this list.
-  assert.equal(finishNoticeVerdict({ ...DONE, notifiedSinceMs: DONE.completedAtMs - 1 }), true);
+
+  // This line used to assert `true`, and that assertion was the bug in test
+  // form. "One millisecond before the completion" is not an older ending — it
+  // is the overwhelmingly common shape of the CURRENT one: notify() stamps
+  // itself when the push lands, and the session's lastUsed is stamped when
+  // that same call returns a moment later. Believing the old assertion meant
+  // every well-announced ending was announced a second time 45s afterwards,
+  // which is exactly what the audit log showed.
+  assert.equal(finishNoticeVerdict({ ...DONE, notifiedSinceMs: DONE.completedAtMs - 1 }), false);
+
+  // A push from genuinely earlier still says nothing about this ending.
+  assert.equal(
+    finishNoticeVerdict({ ...DONE, notifiedSinceMs: DONE.completedAtMs - 5 * 60_000 }),
+    true,
+  );
 });
 
 test("finish watchdog: unfinished work is the idle watchdog's job, not this one", () => {
@@ -375,4 +388,44 @@ test("finish watchdog: a tiny idleMinutes shortens the settle delay instead of o
   const tiny = { ...DONE, idleMinutes: 1, lastUsedMs: DONE.nowMs - 50_000 };
   assert.equal(finishNoticeVerdict(tiny), true, "50 s of quiet clears the 45 s settle");
   assert.equal(finishNoticeVerdict({ ...tiny, lastUsedMs: DONE.nowMs - 10_000 }), false);
+});
+
+/**
+ * The duplicate that prompted this: the AI pushed 'finished', and 45 seconds
+ * later the watchdog pushed a second one.
+ *
+ * Real timestamps from this repo's audit log. A notify call marks itself when
+ * the push lands (…46.674) but the session's lastUsed is stamped when that
+ * same call finishes (…46.676), so an exact `notifiedSinceMs >= completedAtMs`
+ * can never see a model's own announcement — it is always two milliseconds
+ * early. Every well-behaved ending was being announced twice.
+ */
+test("a push moments before the call that carried it still silences the watchdog", () => {
+  const completedAtMs = 1_757_889_586_676;
+  const base = {
+    usable: true,
+    idleMinutes: 60,
+    lastUsedMs: completedAtMs,
+    activeRequests: 0,
+    hasTodos: false,
+    allCompleted: true,
+    completedAtMs,
+    announcedForMs: 0,
+    nowMs: completedAtMs + 46_000,
+  };
+
+  assert.equal(
+    finishNoticeVerdict({ ...base, notifiedSinceMs: completedAtMs - 2 }),
+    false,
+    "the AI announced this ending two milliseconds before the call closed",
+  );
+  // And the tolerance must not swallow a genuinely older push: yesterday's
+  // announcement says nothing about this ending.
+  assert.equal(
+    finishNoticeVerdict({ ...base, notifiedSinceMs: completedAtMs - 10 * 60_000 }),
+    true,
+    "a push from ten minutes ago belongs to an earlier ending",
+  );
+  // A session that never pushed at all is exactly what the watchdog is for.
+  assert.equal(finishNoticeVerdict({ ...base, notifiedSinceMs: 0 }), true);
 });

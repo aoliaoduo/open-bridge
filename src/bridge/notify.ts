@@ -747,7 +747,21 @@ export function finishNoticeVerdict(input: {
   if (input.activeRequests > 0) return false;
   if (!Number.isFinite(input.completedAtMs) || input.completedAtMs <= 0) return false;
   // The model already said it — that is the outcome we wanted, stay quiet.
-  if (input.notifiedSinceMs >= input.completedAtMs) return false;
+  //
+  // The tolerance is not slack, it is a correction. A notify call marks itself
+  // at the moment the push lands, but `completedAtMs` is the session's
+  // lastUsed, which the SAME call updates when it finishes a moment later. So
+  // a model that ends a turn with notify() always records its push two or
+  // three milliseconds BEFORE the completion it was announcing, the comparison
+  // reads "nothing said since", and the watchdog pages a second time 45s
+  // later. Measured in this repo's audit log: push at 22:39:46.674, request
+  // completed at 22:39:46.676, duplicate at 22:40:32.
+  //
+  // Any window that spans one request would do; a minute is chosen because it
+  // also covers the ordinary shape of "notify, then a last tool call or two,
+  // then stop" — pushing and then tidying up is still the model announcing
+  // this ending, not a new one.
+  if (input.notifiedSinceMs >= input.completedAtMs - SELF_NOTIFY_TOLERANCE_MS) return false;
   // One settle delay for both endings, by explicit operator choice: getting
   // told promptly is the whole point of the channel, and a listless
   // conversation should not have to wait out the idle threshold to be
@@ -768,6 +782,15 @@ export function finishNoticeVerdict(input: {
  * small idle setting cannot be outlived by this delay.
  */
 const FINISH_SETTLE_MS = 45_000;
+
+/**
+ * How far before a "completion" a self-push still counts as announcing it.
+ *
+ * See finishNoticeVerdict: a push is always recorded slightly before the call
+ * that carried it finishes, so an exact comparison can never see the model's
+ * own announcement.
+ */
+const SELF_NOTIFY_TOLERANCE_MS = 60_000;
 
 /** Latch: the completion clock we have already announced. */
 let finishAnnouncedForMs = 0;
