@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.1] — 2026-09-15
+
 ### Added
 - **`notify` 新增 `waiting` 事件：AI 提问后必须推送，否则对话会卡死。** 起因是一个真实的失败模式：AI 在对话里请用户做选择，用户不在电脑前，没人回答 —— 对话就永远停在那里。从服务端看，「AI 答完了」和「AI 在等你选」**是同一个观测结果**：调用停了。服务端分不出来，也不该猜，所以让模型自己说：问完问题立刻发 `waiting`。它和 `attention` 一样**不受任何开关影响**，永远送达 —— 没人回答的问题会无限期阻塞对话，那不是设置该吞掉的东西。工具描述、连接指令与 `docs/tools.md` 都把这条写成硬要求。
 
