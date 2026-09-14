@@ -188,7 +188,7 @@ async function readAsBase64(
   fullPath: string,
   size: number,
   maxBytesArg: unknown,
-): Promise<{ content: string; bytes: number; truncated: boolean; sha?: string }> {
+): Promise<{ content: string; bytes: number; truncated: boolean; sha: string | null }> {
   const requested = Number.isFinite(Number(maxBytesArg)) && Number(maxBytesArg) >= 0
     ? Math.floor(Number(maxBytesArg))
     : undefined;
@@ -206,7 +206,9 @@ async function readAsBase64(
   // instead of OOM-ing the host; sha256 is only meaningful over the whole file.
   const budget = requested ?? DEFAULT_MAX_READ_BYTES;
   const { buf, truncated } = await readHeadBytes(fullPath, size, budget);
-  return { content: buf.toString("base64"), bytes: buf.length, truncated, ...(truncated ? {} : { sha: createHash("sha256").update(buf).digest("hex") }) };
+  // A bounded head read cannot speak for the whole file: report null, never a
+  // hash of the prefix (it would silently fail every expected_sha256 write).
+  return { content: buf.toString("base64"), bytes: buf.length, truncated, sha: truncated ? null : createHash("sha256").update(buf).digest("hex") };
 }
 
 /**
@@ -538,7 +540,7 @@ export async function readFiles(args: Args): Promise<unknown> {
         path: String(p),
         content,
         encoding: "base64" as const,
-        ...(sha ? { sha256: sha } : {}),
+        sha256: sha ?? null,
         bytes_total: stat.size,
         bytes_returned: bytes,
         truncated,
@@ -570,7 +572,7 @@ export async function readFiles(args: Args): Promise<unknown> {
         content,
         encoding: "base64" as const,
         binary: true,
-        ...(sha ? { sha256: sha } : {}),
+        sha256: sha ?? null,
         bytes_total: stat.size,
         bytes_returned: bytes,
         truncated,
@@ -581,9 +583,12 @@ export async function readFiles(args: Args): Promise<unknown> {
     // Enforce the byte budget UTF-8-safely (never split a multibyte char).
     const content = truncateToUtf8Bytes(r.content, maxBytes);
     const byteTruncated = r.byte_truncated || Buffer.byteLength(content, "utf8") < r.bytes_returned;
-    // sha256 is only available when the stream reached EOF (full read). On an
-    // early stop (line range / byte budget) we deliberately omit it rather than
-    // re-reading the whole file, keeping the operation O(requested range).
+    // sha256 covers the whole file, so it exists only when the stream reached
+    // EOF. On an early stop (line range / byte budget) we report `null` rather
+    // than re-reading the file, keeping the operation O(requested range).
+    // It stays a PRESENT key: the tool contract is "absent facts are explicit
+    // nulls", and a dropped key makes `'sha256' in result` flip with file size,
+    // which is exactly the silent drift that contract exists to prevent.
     const fullyRead = r.reached_eof;
     // truncated: a ranged read is "truncated" unless it covered the whole file
     // (stream reached EOF, started at line 1 AND ran to the last line — the
@@ -597,7 +602,7 @@ export async function readFiles(args: Args): Promise<unknown> {
       : false;
     return {
       path: String(p),
-      ...(fullyRead ? { sha256: r.sha256 } : {}),
+      sha256: fullyRead ? r.sha256 : null,
       content,
       truncated: lineRange ? rangeTruncated || byteTruncated : byteTruncated,
       bytes_returned: Buffer.byteLength(content, "utf8"),
@@ -607,7 +612,7 @@ export async function readFiles(args: Args): Promise<unknown> {
             lines_returned: r.lines_returned,
             start_line: r.start_line,
             end_line: r.end_line,
-            ...(r.lines_total !== null ? { lines_total: r.lines_total } : {}),
+            lines_total: r.lines_total,
           }
         : {}),
     };

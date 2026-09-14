@@ -22,6 +22,7 @@ import { test, before, after } from "node:test";
 import { spawn } from "node:child_process";
 import http from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { routeTokenFor, waitForRuntime } from "./lib/bridge-runtime.mjs";
@@ -267,4 +268,42 @@ async function callTool(name, args) {
   const result = payload.result;
   const text = result.content?.[0]?.text ?? JSON.stringify(result);
   return { isError: result.isError === true, text };
+}
+
+/**
+ * `read_files` promises a sha256 that is either the whole-file digest or null,
+ * and the tool contract is that absent facts are explicit nulls — a client must
+ * be able to parse by field name. A truncated read used to DROP the key, so
+ * `'sha256' in result` silently flipped with file size and the optimistic-write
+ * chain (read -> expected_sha256) broke with no error anywhere.
+ *
+ * This lives at the tool boundary on purpose: the unit tests over
+ * `streamReadLines` always saw the internal `sha256: null` and so could never
+ * have caught the handler spreading the key away.
+ */
+test("read_files always carries sha256: a full read digests, a truncated read is null", async () => {
+  const body = "line one\nline two\nline three\n";
+  writeFileSync(path.join(workspace, "hash.txt"), body, "utf8");
+  const whole = createHash("sha256").update(Buffer.from(body, "utf8")).digest("hex");
+
+  const full = await readFilesEntry({ paths: ["hash.txt"] });
+  assert.equal(full.sha256, whole, "a full read reports the whole-file digest");
+  assert.equal(full.truncated, false);
+
+  const cut = await readFilesEntry({ paths: ["hash.txt"], max_bytes: 4 });
+  assert.ok("sha256" in cut, "the key must exist even when the read stopped early");
+  assert.equal(cut.sha256, null, "a truncated read cannot speak for the whole file");
+  assert.equal(cut.truncated, true);
+
+  // A digest is still reachable after a truncated read - the documented way out.
+  const info = await callToolPayload("get_file_info", { path: "hash.txt" });
+  const meta = JSON.parse(info.result.content?.[0]?.text ?? "{}");
+  assert.equal(meta.sha256, whole, "get_file_info still answers with the whole-file digest");
+});
+
+/** The first entry of a read_files call, parsed from the tool's text payload. */
+async function readFilesEntry(args) {
+  const payload = await callToolPayload("read_files", args);
+  const parsed = JSON.parse(payload.result.content?.[0]?.text ?? "[]");
+  return Array.isArray(parsed) ? parsed[0] : parsed;
 }
