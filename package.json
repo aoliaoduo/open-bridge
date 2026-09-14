@@ -35,6 +35,9 @@
     "vendor",
     "README.md",
     "README.zh-CN.md",
+    "SECURITY.md",
+    "docs/configuration.md",
+    "docs/tools.md",
     "CHANGELOG.md",
     "LICENSE"
   ],
