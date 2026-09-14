@@ -292,7 +292,11 @@ body {
 
 .topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
 .version { font-size: 12px; color: var(--muted); }
-.menu-btn { display: none; }
+/* Matches `button.icon-btn { display: inline-flex }` on specificity (0-1-1).
+   As a bare `.menu-btn` this lost to it, so the hamburger stayed visible on
+   every width -- and on a wide screen the drawer it toggles is not rendered,
+   so clicking it did nothing at all. */
+button.menu-btn { display: none; }
 
 /* --- page header ----------------------------------------------------------- */
 
@@ -709,7 +713,7 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
   .sidebar.collapsed .nav-group-label { height: auto; color: var(--muted); }
   .sidebar.collapsed .nav-label { position: static; width: auto; height: auto; clip-path: none; margin: 0; }
   .scrim { display: block; }
-  .menu-btn { display: inline-flex; }
+  button.menu-btn { display: inline-flex; }
   .content { padding: 18px 16px 64px; }
   .act-row { grid-template-columns: 88px minmax(0, 1fr) auto; }
   .act-tool { grid-column: 1 / -1; }
