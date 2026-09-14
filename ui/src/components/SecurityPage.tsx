@@ -12,6 +12,7 @@ import {
 // server's whitelist rejects, so both selects answered 400 forever. Import,
 // never restate.
 import { TTL_CHOICES } from "../../../src/bridge/settings-model.js";
+import { EXPOSURE_META } from "../exposure";
 import { CardHead } from "./CardHead";
 import { Chip } from "./Chip";
 import { ConfirmButton } from "./ConfirmButton";
@@ -23,15 +24,6 @@ import { Skeleton } from "./Skeleton";
 function fmtDate(iso: string | null): string {
   return iso ? iso.slice(0, 16).replace("T", " ") : "—";
 }
-
-const EXPOSURE_TEXT: Record<string, { text: string; tone: "ok" | "warn" }> = {
-  local: { text: "只有这台机器自己能访问，外网连不进来。", tone: "ok" },
-  "public-open": {
-    text: "公网可达且未开启鉴权：任何拿到地址的人都能直接调用。用下面的 Bearer 门禁卡一键启用（会自动先签发令牌），或先去个人令牌卡手动签发。",
-    tone: "warn",
-  },
-  "public-authed": { text: "公网可达，但必须带 Bearer 令牌才能调用。", tone: "ok" },
-};
 
 interface Props {
   settings: SettingsState;
@@ -57,7 +49,7 @@ export function SecurityPage({ settings, act, notify }: Props) {
   const [ttl, setTtl] = useState(settings.defaultTtlSeconds);
   const [creating, setCreating] = useState(false);
 
-  const exposure = EXPOSURE_TEXT[report?.exposure ?? ""];
+  const exposure = EXPOSURE_META[report?.exposure ?? ""];
 
   useEffect(() => {
     let alive = true;
@@ -452,7 +444,10 @@ function OAuthPanel({ hosts, setConfig }: {
                     <tr key={client.client_id}>
                       <td className="name">{client.client_name ?? client.client_id}</td>
                       <td className="mono wrap">{client.redirect_uris.join("\n")}</td>
-                      <td className="num muted">{new Date(client.client_id_issued_at).toLocaleString()}</td>
+                      {/* Server stores the registration time in SECONDS (RFC 7591);
+                          the Date constructor wants milliseconds — without the
+                          * 1000 every row read as January 1970. */}
+                      <td className="num muted">{new Date(client.client_id_issued_at * 1000).toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>

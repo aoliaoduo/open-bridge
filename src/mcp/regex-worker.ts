@@ -14,25 +14,19 @@
  */
 import { Worker } from "node:worker_threads";
 
-const LINE_BATCH_WORKER_SOURCE = `
+const WORKER_SOURCE = `
   const { parentPort, workerData } = require("node:worker_threads");
   try {
     const expression = new RegExp(workerData.pattern);
-    const indices = [];
-    for (let i = 0; i < workerData.lines.length; i += 1) {
-      if (expression.test(workerData.lines[i])) indices.push(i);
+    if (workerData.lines) {
+      const indices = [];
+      for (let i = 0; i < workerData.lines.length; i += 1) {
+        if (expression.test(workerData.lines[i])) indices.push(i);
+      }
+      parentPort.postMessage({ indices });
+    } else {
+      parentPort.postMessage({ matched: expression.test(workerData.text) });
     }
-    parentPort.postMessage({ indices });
-  } catch (error) {
-    parentPort.postMessage({ error: error instanceof Error ? error.message : String(error) });
-  }
-`;
-
-const SINGLE_TEST_WORKER_SOURCE = `
-  const { parentPort, workerData } = require("node:worker_threads");
-  try {
-    const expression = new RegExp(workerData.pattern);
-    parentPort.postMessage({ matched: expression.test(workerData.text) });
   } catch (error) {
     parentPort.postMessage({ error: error instanceof Error ? error.message : String(error) });
   }
@@ -78,7 +72,7 @@ export async function matchLinesInWorker(
   }
 
   return new Promise<number[]>((resolve, reject) => {
-    const worker = new Worker(LINE_BATCH_WORKER_SOURCE, {
+    const worker = new Worker(WORKER_SOURCE, {
       eval: true,
       workerData: { pattern, lines },
     });
@@ -141,7 +135,7 @@ export async function testReadyPattern(
   }
 
   return new Promise<boolean>((resolve, reject) => {
-    const worker = new Worker(SINGLE_TEST_WORKER_SOURCE, {
+    const worker = new Worker(WORKER_SOURCE, {
       eval: true,
       workerData: { pattern, text },
     });

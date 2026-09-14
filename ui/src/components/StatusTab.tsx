@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type BridgeStatus, type SettingsActionResult } from "../api";
 import type { LockSnapshot } from "../api";
+import { EXPOSURE_META } from "../exposure";
 import type { RouteId } from "../routes";
 import { CardHead } from "./CardHead";
 import { EmptyState } from "./EmptyState";
@@ -24,12 +25,6 @@ const STATE_LABEL: Record<string, string> = {
   stopped: "已停止",
   starting: "启动中",
   stopping: "停止中",
-};
-
-const EXPOSURE: Record<string, { label: string; tone: "ok" | "warn"; note: string }> = {
-  local: { label: "仅本机", tone: "ok", note: "只有这台机器上的客户端能访问。" },
-  "public-open": { label: "公网可达 · 无鉴权", tone: "warn", note: "任何拿到 URL 的人都能访问。" },
-  "public-authed": { label: "公网可达 · 需令牌", tone: "ok", note: "客户端必须带 Bearer 令牌。" },
 };
 
 function TunnelRole({ role }: { role?: string }) {
@@ -64,7 +59,7 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
   // has to guess which of the two fields is populated.
   const url = status?.mcp_url || status?.local_url;
   const isPublic = Boolean(status?.public_url);
-  const exposure = EXPOSURE[status?.exposure ?? ""];
+  const exposure = EXPOSURE_META[status?.exposure ?? ""];
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);

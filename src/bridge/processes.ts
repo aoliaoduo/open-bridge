@@ -89,8 +89,6 @@ export function spawnManaged(
   // with us. Tee wrapping needs bash syntax (pipe + PIPESTATUS), so on a
   // non-bash shell (PowerShell/cmd) the mirror is skipped instead of spawning a
   // broken command.
-  // Tee wrapping needs bash syntax (pipe + PIPESTATUS). On a non-bash shell
-  // (PowerShell/cmd) skip the mirror instead of spawning a broken command.
   const canTee = isBashLikeShell(spec.file);
   if (options?.teeLogPath && !canTee) {
     record(

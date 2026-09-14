@@ -195,9 +195,11 @@ export function App() {
             {route === "services" && <ServicesTab notify={showToast} />}
             {route === "logs" && <LogsTab />}
             {route === "stats" && <StatsTab />}
-            {route === "security" && (
-              <SettingsStateGuard settings={settings}><SecurityPage settings={settings!} act={act} notify={showToast} /></SettingsStateGuard>
-            )}
+            {route === "security" && (settings ? (
+              <SecurityPage settings={settings} act={act} notify={showToast} />
+            ) : (
+              <div className="card">加载中…</div>
+            ))}
             {route === "settings" && <SettingsTab settings={settings} act={act} notify={showToast} />}
           </div>
         </main>
@@ -237,9 +239,4 @@ export function App() {
       )}
     </div>
   );
-}
-
-function SettingsStateGuard({ settings, children }: { settings: SettingsState | null; children: React.ReactNode }) {
-  if (!settings) return <div className="card">加载中…</div>;
-  return <>{children}</>;
 }

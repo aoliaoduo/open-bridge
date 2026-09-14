@@ -15,6 +15,17 @@ const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 /** How often the idle-session reclamation sweep runs. */
 const SESSION_PRUNE_INTERVAL_MS = 60_000;
 
+/** Evict and close the least-recently-used idle session. False when every session is mid-request. */
+function evictOldestIdleSession(): boolean {
+  const evictable = [...state.sessions.entries()]
+    .filter(([, session]) => session.activeRequests === 0)
+    .sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
+  if (!evictable) return false;
+  state.sessions.delete(evictable[0]);
+  void evictable[1].transport.close();
+  return true;
+}
+
 export function pruneSessions(): void {
   // Idle reclamation: a client that walked away keeps its transport (and todo
   // state) alive forever otherwise. Busy sessions are never reclaimed.
@@ -29,12 +40,7 @@ export function pruneSessions(): void {
   }
   // Capacity: evict the least-recently-used idle sessions beyond MAX_SESSIONS.
   while (state.sessions.size > MAX_SESSIONS) {
-    const evictable = [...state.sessions.entries()]
-      .filter(([, session]) => session.activeRequests === 0)
-      .sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
-    if (!evictable) break; // every session is mid-request; leave them alone
-    state.sessions.delete(evictable[0]);
-    void evictable[1].transport.close();
+    if (!evictOldestIdleSession()) break; // every session is mid-request; leave them alone
     prunedAny = true;
   }
   if (prunedAny) host().ui.update();
@@ -42,13 +48,7 @@ export function pruneSessions(): void {
 
 export function makeRoomForSession(): boolean {
   if (state.sessions.size < MAX_SESSIONS) return true;
-  const evictable = [...state.sessions.entries()]
-    .filter(([, session]) => session.activeRequests === 0)
-    .sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
-  if (!evictable) return false;
-  state.sessions.delete(evictable[0]);
-  void evictable[1].transport.close();
-  return true;
+  return evictOldestIdleSession();
 }
 
 export function startSessionPruneLoop(): void {

@@ -178,7 +178,9 @@ function oauthConsoleView(): OAuthConsoleView {
       client_id: "ob-0123456789abcdef",
       client_name: "ChatGPT 连接器",
       redirect_uris: ["https://chatgpt.com/connector_platform_oauth_redirect"],
-      client_id_issued_at: Date.parse("2026-09-11T00:00:00Z"),
+      // Server stores this in SECONDS (RFC 7591). A milliseconds fixture would
+      // silently mask the seconds-vs-milliseconds rendering bug.
+      client_id_issued_at: Math.floor(Date.parse("2026-09-11T00:00:00Z") / 1000),
     }],
     counts: { clients: 1, activeAccessTokens: 2, activeRefreshTokens: 1 },
     ownerSource: "route_token",
@@ -526,6 +528,13 @@ test("security page can turn OAuth on, and the card shows who holds a credential
   // switch OAuth on from the console and still see nothing at all.
   expect(await screen.findByText("ChatGPT 连接器")).toBeTruthy();
   expect(screen.getByText(/已注册客户端 1 个/)).toBeTruthy();
+
+  // The 注册时间 column must render the SECONDS value as a real date: the
+  // pre-fix UI fed seconds straight into Date (milliseconds), so every row
+  // read as January 1970.
+  const oauthRow = screen.getByText("ChatGPT 连接器").closest("tr");
+  expect(oauthRow?.textContent).toContain("2026");
+  expect(oauthRow?.textContent).not.toContain("1970");
 
   // And the switch writes the same config key the CLI does. Before this card
   // there was no way to turn OAuth on from the console at all — README said

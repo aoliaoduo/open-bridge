@@ -20,7 +20,6 @@ export const workspaceSuffixFor = (rootPath: string): string =>
 
 export const workspaceStateSuffix = (): string => workspaceSuffixFor(state.activeWorkspaceRoot);
 
-export const unrestricted = (): boolean => workspaceContext.unrestricted();
 export const allowedRoots = (): string[] => workspaceContext.allowedRoots();
 export const workspacePath = (input = "."): string => workspaceContext.resolve(input);
 export const securePath = (input = ".", allowMissing = false): Promise<string> =>
@@ -28,6 +27,6 @@ export const securePath = (input = ".", allowMissing = false): Promise<string> =
 
 /** Reject symlinks on the path chain when file access is restricted. */
 export async function rejectSymlink(full: string, allowMissing = false): Promise<void> {
-  if (unrestricted()) return;
+  if (workspaceContext.unrestricted()) return;
   await rejectSymlinkChain(full, { workspaceRoot: root(), allowedRoots: allowedRoots(), allowMissing });
 }

@@ -192,12 +192,16 @@ function makeToolsGate(names) {
  * fields and the bootstrap deletes them before the caller's script is compiled,
  * which is why the deletion order matters more than it looks.
  */
-function makeHarness(): Record<string, unknown> {
+// Plain JavaScript ONLY in this string: the Worker evaluates it with eval:true,
+// and Node 22 parses it as JS with no type stripping (Node 24 strips eval'd type
+// annotations by default, which once masked this). A stray annotation here is a
+// SyntaxError on the declared engine floor and kills every run_script call.
+function makeHarness() {
   return Object.assign(Object.create(null), {
     toolNames: toolNames.slice(),
     gate: makeToolsGate(toolNames),
-    apply: (name: string, args: unknown) => callTool(name, args),
-    writeConsole: (level: string, text: string) => capture(level)(text),
+    apply: (name, args) => callTool(name, args),
+    writeConsole: (level, text) => capture(level)(text),
   });
 }
 

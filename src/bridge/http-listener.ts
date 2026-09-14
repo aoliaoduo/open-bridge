@@ -324,7 +324,13 @@ export async function startHttpInternal(): Promise<void> {
           keepAliveMs: 15_000,
           retryInterval: 2_000,
           onsessioninitialized: id => {
-            state.sessions.set(id, newSession);
+            // The SDK only invokes this while handling a request — i.e. after
+            // `session = newSession` below — so the reference is always
+            // assigned here. The `!` is deliberate: if the SDK ever fired it
+            // during construction, the resulting TypeError is the honest
+            // failure, where a silent skip would drop the session from the
+            // table and leak its transport.
+            state.sessions.set(id, session!);
             pruneSessions();
             // Keep the panel's session count live instead of ≤30 s stale.
             host().ui.update();

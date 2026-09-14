@@ -43,7 +43,7 @@ set "WORKSPACE=%~1"
 if defined WORKSPACE goto :have_dir
 
 echo  Workspace directory the AI may work in - for example:
-echo    "C:\Users\aolia\Desktop\aoliaoduo"     or     C:\Users\aolia\Desktop\aoliaoduo
+echo    "D:\work\my-project"     (quotes only needed for paths with spaces)
 if defined PREVIOUS (echo  Press Enter to reuse: %PREVIOUS%) else (echo  Press Enter to use this launcher's own folder.)
 echo.
 set /p "WORKSPACE= > "

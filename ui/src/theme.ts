@@ -19,7 +19,7 @@ export type ResolvedTheme = "light" | "dark";
 const STORAGE_KEY = "openBridge.console.theme";
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
-export function readThemePref(): ThemePref {
+function readThemePref(): ThemePref {
   try {
     const stored = window.localStorage?.getItem(STORAGE_KEY);
     if (stored === "light" || stored === "dark" || stored === "system") return stored;
@@ -30,11 +30,11 @@ export function readThemePref(): ThemePref {
 }
 
 /** jsdom and other scripted environments ship no matchMedia; absence = light. */
-export function systemPrefersDark(): boolean {
+function systemPrefersDark(): boolean {
   return typeof window.matchMedia === "function" && window.matchMedia(DARK_QUERY).matches;
 }
 
-export function resolveTheme(pref: ThemePref): ResolvedTheme {
+function resolveTheme(pref: ThemePref): ResolvedTheme {
   if (pref === "light" || pref === "dark") return pref;
   return systemPrefersDark() ? "dark" : "light";
 }

@@ -352,17 +352,20 @@ function classifyIpv4(address: string): NetworkAddressKind {
   if (a === 169 && b === 254) return "link-local";
   if (a === 0) return "unspecified";
   // RFC 1918 is not exhaustive: these special-purpose ranges are likewise
-  // unsuitable probe targets.  In particular 100.100.100.200 is Alibaba
-  // Cloud's metadata address, and 100.64.0.0/10 is shared address space.
-  if ((a === 100 && b >= 64 && b <= 127) || (a === 100 && b === 100 && octets[2] === 100 && octets[3] === 200)) return "reserved";
+  // unsuitable probe targets. 100.64.0.0/10 is shared address space; its
+  // coverage already includes Alibaba Cloud's metadata address 100.100.100.200.
+  if (a === 100 && b >= 64 && b <= 127) return "reserved";
+  // 192.0.0.0/16 covers IETF protocol assignments (192.0.0.0/24) and
+  // TEST-NET-1 (192.0.2.0/24); 192.88.0.0/16 includes the deprecated
+  // 192.88.99.0/24 relay anycast. The narrower sub-clauses used to restate
+  // both and could never fire.
   if (a === 192 && b === 0) return "reserved";
   if (a === 192 && b === 88) return "reserved";
   if (a === 192 && b === 31 && octets[2] === 196) return "reserved";
   if (a === 192 && b === 52 && octets[2] === 193) return "reserved";
-  if (a === 192 && b === 88 && octets[2] === 99) return "reserved";
   if (a === 192 && b === 175 && octets[2] === 48) return "reserved";
   if (a === 198 && (b === 18 || b === 19)) return "reserved";
-  if ((a === 192 && b === 0 && octets[2] === 2) || (a === 198 && b === 51 && octets[2] === 100) || (a === 203 && b === 0 && octets[2] === 113)) return "reserved";
+  if ((a === 198 && b === 51 && octets[2] === 100) || (a === 203 && b === 0 && octets[2] === 113)) return "reserved";
   if (a >= 224 && a <= 239) return "multicast";
   if (a >= 240) return "reserved";
   return "public";

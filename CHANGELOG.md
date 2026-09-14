@@ -8,8 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - 控制台导航重组：新增「安全」页收敛暴露面、Bearer 门禁、个人令牌与 OAuth 2.1（原「令牌」页、体检页暴露面卡、设置页 OAuth 卡迁入），「第二道锁」退役统一叫 Bearer 门禁，路由令牌不再称为凭证（只是地址）；体检回归只读诊断，状态页警告改为跳转；文件锁表以「文件锁明细」搬到状态页；/console/tokens 跳转新页，书签不断。纯前端重组，后端 API 零改动。
+- **行为不变的重复合并与清理：**UI 里「暴露面 → 文案/语气」原本在状态页与安全页各养一份且措辞已漂移，合并为 `ui/src/exposure.ts` 一张表；`regex-worker` 两个仅差一行输入形状的 worker 源（行批量匹配 / 单次测试）合并为一个；`theme.ts` 只被测试引用的三个函数收回私有；`App.tsx` 拆掉只有一个实现的 `SettingsStateGuard` 中转层；`paths.ts` 删掉无人用的 `unrestricted()` 转发；`processes.ts` 删掉一段重复注释；`session-table` 把 `pruneSessions` 与 `makeRoomForSession` 逐字重复的 LRU 驱逐块提取成 `evictOldestIdleSession()`；`safe-probe.classifyIpv4` 删掉三条永远走不到的保留段子句（`100.100.100.200` 已被 100.64.0.0/10 覆盖，`192.0.2.0/24`、`192.88.99.0/24` 已分别被更宽的 192.0.0.0/16、192.88.0.0/16 判断覆盖），分类行为逐 IP 不变；一键启动脚本的示例路径从作者本机桌面换成通用示例。
 
 ### Fixed
+- **`run_script` 沙箱 worker 源码混入 TypeScript 注解，Node 22 上整个工具瘫痪。**`SCRIPT_WORKER_SOURCE`（`String.raw` 模板）里的 `makeHarness()` 在上一次重构时带上了 `: Record<string, unknown>` 等注解——worker 用 `eval: true` 以纯 JS 解析这段字符串，而 Node 22.x（`package.json` engines 下限、CI 矩阵最低档）对 eval 源码不做类型剥离，解析即 SyntaxError，每次 `run_script` 都以 worker 错误收场；本机 Node 24 恰好默认剥离 eval 的类型注解才一直没暴露。字符串内容本就逃过 tsc 与 eslint，这次把注解还原为纯 JS，并在原位注明「这串只能是 JS」的原因。
+- **控制台 OAuth 客户端「注册时间」显示成 1970 年。**服务器按 RFC 7591 存秒（`client_id_issued_at: Math.floor(Date.now()/1000)`），安全页却把秒直接喂给要毫秒的 `new Date()`，每行都渲染成 1970 年；现在乘 1000 再渲染，测试夹具改为真实的秒值并断言不再出现 1970。
 - **终端输出对齐：手工垫空格改按显示列宽对齐。**中文/全角字符占两列、按字数只算一个，手工垫空格必然错位（`serve` 横幅里「本地/公网 MCP URL」的值就比别的行后退了一列）。`src/cli.ts` 新增 `displayWidth`/`padLabel`，横幅、`status`、`health`/`doctor`、`config list`、`token list`、`instances` 的标签列统一走它（纯 ASCII 标签输出不变）；告警块第二行改为与首行同级缩进（不再假设 ⚠️ 占两列）；`test/display-width.test.ts` 钉住列宽语义。README 架构图的改成两个 Markdown 表格（流程 + 出口：渲染器自动对列，不依赖等宽字体、前导空格和任何宽字符的宽度），serve 示例输出去掉行首缩进，并把三处「宿主能力过滤 / 40 个定义」的过期说法改成 v6 之后的现实（38 个定义、只剩配置档过滤）。纯显示层改动，不碰任何行为。
 
 ## [1.0.0-alpha.6] — 2026-09-14
