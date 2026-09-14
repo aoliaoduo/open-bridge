@@ -834,6 +834,41 @@ describe("App shell: card detail layer", () => {
     fireEvent.click(autoReconnect!);
     expect(mocks.settingsAction).toHaveBeenCalledWith({ command: "setConfig", key: "autoReconnect", value: false });
   });
+
+  /**
+   * Every switch used to sit inside a <label> wrapping its own caption, so
+   * clicking the text toggled the setting. On a page that is mostly labelled
+   * rows that turns a stray click near a setting into a silent config change
+   * — the kind you discover later, by its consequences.
+   *
+   * The switch keeps an accessible name through aria-label, so this is a
+   * smaller pointer target, not a less usable control.
+   */
+  test("a switch is toggled by the control, not by its caption", async () => {
+    window.history.pushState({}, "", "/console/settings");
+
+    const { container } = render(<App />);
+    await screen.findByText(/隧道让公网上的客户端连到这台机器/);
+
+    const input = container.querySelector("input.switch") as HTMLInputElement;
+    expect(input).toBeTruthy();
+    // The accessible name has to survive: a bare checkbox announced as
+    // "checkbox" would be a regression of its own.
+    expect(input.getAttribute("aria-label")).toBeTruthy();
+
+    // No ancestor <label> — that is what made the caption clickable.
+    expect(input.closest("label")).toBeNull();
+
+    const before = mocks.settingsAction.mock.calls.length;
+    const caption = container.querySelector(".check-row .field-label") as HTMLElement;
+    expect(caption).toBeTruthy();
+    fireEvent.click(caption);
+    expect(mocks.settingsAction.mock.calls.length).toBe(before);
+
+    // The control itself still works.
+    fireEvent.click(input);
+    expect(mocks.settingsAction.mock.calls.length).toBe(before + 1);
+  });
 });
 
 test("redirects the retired /console/tokens bookmark to 安全", async () => {

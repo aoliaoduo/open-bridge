@@ -122,15 +122,16 @@ export function ToolsPage({ notify, settings, act }: {
                 aria-label={t("过滤工具", "Filter tools")}
               />
             </label>
-            <label className="check">
+            <span className="check-row">
               <input
                 type="checkbox"
                 className="switch"
                 checked={onlyCore}
                 onChange={event => setOnlyCore(event.target.checked)}
+                aria-label={t("只看核心", "Core only")}
               />
               {t("只看核心", "Core only")}
-            </label>
+            </span>
             <span className="grow" />
             <span className="count">{t(`显示 ${visible.length} 个`, `${visible.length} shown`)}</span>
           </div>

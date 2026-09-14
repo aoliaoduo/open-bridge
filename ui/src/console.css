@@ -582,6 +582,10 @@ input[type="number"] { width: 110px; }
 textarea { width: 100%; min-height: 64px; font-family: var(--mono); font-size: 12px; resize: vertical; }
 
 label.check { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: 13px; }
+/* Same layout as label.check, but a plain span: the text beside a switch is
+   read-only, so the pointer target is the switch and nothing else. */
+.check-row { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
+.check-row .field-label { cursor: default; }
 
 /* --- settings section rail ------------------------------------------------- */
 

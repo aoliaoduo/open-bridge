@@ -208,15 +208,16 @@ export function SecurityPage({ settings, act, notify }: Props) {
           <div className="field">
             <span className="field-label">{t("Bearer 门禁", "Bearer gate")}</span>
             <span className="field-control">
-              <label className="check">
+              <span className="check-row">
                 <input
                   type="checkbox"
                   className="switch"
                   checked={settings.authEnabled}
                   onChange={e => void act({ command: "setAuthEnabled", enabled: e.target.checked })}
+                  aria-label={t("Bearer 门禁", "Bearer gate")}
                 />
                 <span>{settings.authEnabled ? t("已开启（Bearer）", "On (Bearer)") : t("已关闭", "Off")}</span>
-              </label>
+              </span>
             </span>
             <span className="field-hint">
               {settings.authEnabled
@@ -387,15 +388,16 @@ export function SecurityPage({ settings, act, notify }: Props) {
         )}
       >
         <div className="field">
-          <label className="check">
+          <span className="check-row">
             <input
               type="checkbox"
               className="switch"
               checked={cfg["oauth.enabled"]}
               onChange={e => setConfig("oauth.enabled", e.target.checked)}
+              aria-label={t("启用 OAuth 2.1 授权服务器", "Enable the OAuth 2.1 authorization server")}
             />
             <span className="field-label">{t("启用 OAuth 2.1 授权服务器", "Enable the OAuth 2.1 authorization server")}</span>
-          </label>
+          </span>
           {/* The consequence belongs next to the switch: turning this on is what
               makes the URL stop being enough, and that is a decision, not a bug
               report waiting in a client's logs. */}
