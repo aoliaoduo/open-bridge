@@ -190,6 +190,7 @@ export type SettingsAction =
   | { command: "saveNotifyKey"; key: string }
   | { command: "saveNgrokAuthtoken"; token: string }
   | { command: "testSound"; which: "waiting" | "finished" }
+  | { command: "stopSound" }
   | { command: "testNotify" }
   | { command: "setAuthEnabled"; enabled: boolean }
   | { command: "setDefaultTtl"; seconds: number }
@@ -273,7 +274,7 @@ export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
     "revokeToken", "deleteToken", "purgeTokens", "revokeAll",
     "setConcurrency", "setConfig", "copyText",
     "clearStats", "saveNotifyKey", "testNotify",
-    "saveNgrokAuthtoken", "testSound",
+    "saveNgrokAuthtoken", "testSound", "stopSound",
   ]);
   if (!allowed.has(command)) return null;
 

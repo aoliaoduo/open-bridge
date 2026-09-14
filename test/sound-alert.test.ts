@@ -81,3 +81,36 @@ test("the test-play action names a slot, never a path", () => {
   const junk = normalizeSettingsMessage({ command: "testSound", which: "C:\\music\\anything.mp3" });
   assert.deepEqual(junk, { command: "testSound", which: "waiting" });
 });
+
+/**
+ * Explorer's "Copy as path" wraps the result in double quotes, and that is
+ * the single most likely way this field gets filled in. Refusing the
+ * clipboard's own format for "not being absolute" would be a baffling
+ * rejection, so the quotes come off.
+ */
+test("a quoted path is accepted and unwrapped", () => {
+  for (const key of KEYS) {
+    assert.equal(
+      ok(key, '"C:\\Users\\me\\Music\\track.flac"'),
+      "C:\\Users\\me\\Music\\track.flac",
+      "Explorer's copied form must work",
+    );
+    // Unquoted stays exactly as it was.
+    assert.equal(ok(key, "C:\\Users\\me\\Music\\track.flac"), "C:\\Users\\me\\Music\\track.flac");
+    // Spaces in the name are normal for music files and must survive both ways.
+    assert.equal(ok(key, '"C:\\Music\\晚巧 - 踏浪.flac"'), "C:\\Music\\晚巧 - 踏浪.flac");
+    assert.equal(ok(key, "C:\\Music\\晚巧 - 踏浪.flac"), "C:\\Music\\晚巧 - 踏浪.flac");
+    // A lone quote is part of the filename, not a wrapper, and is left alone.
+    assert.match(err(key, '"C:\\Music\\track.flac'), /absolute path/);
+  }
+});
+
+test("the console can stop a sound that is already playing", () => {
+  // The bug this exists for: a four-minute track auditioned with no way to
+  // cut it short, and a second press stacking another copy on top. A start
+  // button without a stop button is only half a control.
+  assert.deepEqual(
+    normalizeSettingsMessage({ command: "stopSound" }),
+    { command: "stopSound" },
+  );
+});

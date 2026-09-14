@@ -711,8 +711,8 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
           <div className="field span2">
             <span className="field-hint" style={{ margin: "0 0 4px" }}>
               {t(
-                "只有「AI 停下来等你」的两种情况会响：等你回答/需要你回来，以及对话结束。任务进度不会响 —— 每勾掉一条就叮一声，是让人关掉整个功能的最快方式。",
-                "Only the two situations where the AI has stopped for you make a noise: waiting on your answer, and the end of an exchange. Task progress does not — a chime per ticked item is the fastest way to make someone switch the whole thing off.",
+                "只有「AI 停下来等你」的两种情况会响：等你回答/需要你回来，以及对话结束。任务进度不会响 —— 每勾掉一条就叮一声，是让人关掉整个功能的最快方式。路径直接粘贴即可，资源管理器「复制文件地址」带的引号会自动去掉。试听只放约 6 秒，随时可以按「停止」。",
+                "Only the two situations where the AI has stopped for you make a noise: waiting on your answer, and the end of an exchange. Task progress does not — a chime per ticked item is the fastest way to make someone switch the whole thing off. Paste the path as-is: the quotes Explorer's \"Copy as path\" adds are stripped for you. A preview plays about 6 seconds and 停止 cuts it short.",
               )}
             </span>
           </div>
@@ -735,6 +735,18 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
                   onClick={() => { void act({ command: "testSound", which: row.which }); }}
                 >
                   {t("试听", "Play it")}
+                </button>
+                {/* Never disabled. The whole point is to be reachable when a
+                    sound is playing and the operator wants it to stop — and
+                    the page cannot know whether one is, since playback lives
+                    in a child process. Pressing it on silence is harmless and
+                    says so. */}
+                <button
+                  className="small ghost"
+                  onClick={() => { void act({ command: "stopSound" }); }}
+                  title={t("立刻停止正在播放的提示音", "Stop whatever is playing right now")}
+                >
+                  {t("停止", "Stop")}
                 </button>
               </span>
               <span className="field-hint">{row.hint()}</span>

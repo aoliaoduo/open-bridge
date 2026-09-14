@@ -32,6 +32,42 @@ import { record } from "./state.js";
  */
 const PLAY_TIMEOUT_MS = 15_000;
 
+/**
+ * A preview is a few seconds, not a song.
+ *
+ * The first version played the file to its natural end, so pressing 试听 on a
+ * four-minute track meant four minutes of music with no way to stop it -- and
+ * pressing it again while wondering why nothing seemed to happen started a
+ * SECOND copy over the first. Both halves of that were design mistakes: an
+ * audition should be short by construction, and a player that can be started
+ * must be stoppable.
+ */
+const PREVIEW_MS = 6_000;
+
+/**
+ * The one live player, if any.
+ *
+ * Single-slot on purpose. Alerts overlapping each other is already unpleasant;
+ * previews overlapping each other because the operator clicked twice is worse,
+ * because the natural reaction to "I heard nothing" is to click again. Starting
+ * a sound now stops whatever was playing first.
+ */
+let current: { child: ReturnType<typeof spawn>; timer: NodeJS.Timeout } | undefined;
+
+/** Stop whatever is playing. Safe to call when nothing is. */
+export function stopAlertSound(): boolean {
+  if (!current) return false;
+  const { child, timer } = current;
+  current = undefined;
+  clearTimeout(timer);
+  try {
+    // The PowerShell host owns the audio; killing it is what silences the
+    // speaker. tree-kill is not needed -- MediaPlayer runs in-process.
+    child.kill();
+  } catch { /* already exited */ }
+  return true;
+}
+
 /** Extensions the Windows player handles. Checked at save time, not here. */
 export const SOUND_EXTENSIONS = [".wav", ".mp3", ".m4a", ".aac", ".wma", ".flac"] as const;
 
@@ -54,7 +90,7 @@ export interface SoundAlertResult {
  * project is developed on Windows -- so they are attempted rather than
  * promised, and a missing binary reports itself like any other failure.
  */
-function playerCommand(file: string): { command: string; args: string[] } | undefined {
+function playerCommand(file: string, maxMs: number): { command: string; args: string[] } | undefined {
   if (process.platform === "win32") {
     // -WindowStyle Hidden keeps a console from flashing on every alert.
     return {
@@ -69,8 +105,8 @@ function playerCommand(file: string): { command: string; args: string[] } | unde
         + `$p.Open([uri]'${file.replace(/'/g, "''")}');`
         + "$n = 0; while (-not $p.NaturalDuration.HasTimeSpan -and $n -lt 50) { Start-Sleep -Milliseconds 100; $n++ };"
         + "$p.Play();"
-        + "if ($p.NaturalDuration.HasTimeSpan) { Start-Sleep -Milliseconds ([Math]::Min($p.NaturalDuration.TimeSpan.TotalMilliseconds, 12000)) }"
-        + "else { Start-Sleep -Milliseconds 2000 };"
+        + `if ($p.NaturalDuration.HasTimeSpan) { Start-Sleep -Milliseconds ([Math]::Min($p.NaturalDuration.TimeSpan.TotalMilliseconds, ${maxMs})) }`
+        + `else { Start-Sleep -Milliseconds ([Math]::Min(2000, ${maxMs})) };`
         + "$p.Stop(); $p.Close()",
       ],
     };
@@ -86,7 +122,7 @@ function playerCommand(file: string): { command: string; args: string[] } | unde
  * the notify channel uses ("disabled", "no_file", …) so the two channels can
  * be reported side by side without a translation layer.
  */
-export function playAlertSound(file: string): SoundAlertResult {
+export function playAlertSound(file: string, options: { preview?: boolean } = {}): SoundAlertResult {
   const path = file.trim();
   if (!path) return { played: false, reason: "no_file" };
 
@@ -98,8 +134,14 @@ export function playAlertSound(file: string): SoundAlertResult {
     return { played: false, reason: "missing_file" };
   }
 
-  const player = playerCommand(path);
+  const limitMs = options.preview ? PREVIEW_MS : PLAY_TIMEOUT_MS;
+  const player = playerCommand(path, limitMs);
   if (!player) return { played: false, reason: "unsupported_platform" };
+
+  // Replace, never stack. Clicking 试听 twice used to start a second copy on
+  // top of the first, which is precisely what an impatient click does when
+  // the first press seemed to do nothing.
+  stopAlertSound();
 
   try {
     const child = spawn(player.command, player.args, {
@@ -109,15 +151,25 @@ export function playAlertSound(file: string): SoundAlertResult {
       // unref'd so a playing sound cannot hold the process open.
       detached: false,
     });
+    // The backstop is a second past the player's own limit: normally the
+    // script ends on its own, and this only fires when PowerShell itself is
+    // wedged. Without it, a hung host holds the speaker until the bridge
+    // stops -- which is the shape of the bug being fixed here.
     const timer = setTimeout(() => {
       try { child.kill(); } catch { /* already gone */ }
-    }, PLAY_TIMEOUT_MS);
+      if (current?.child === child) current = undefined;
+    }, limitMs + 1_000);
     timer.unref?.();
-    child.once("exit", () => clearTimeout(timer));
+    child.once("exit", () => {
+      clearTimeout(timer);
+      if (current?.child === child) current = undefined;
+    });
     child.once("error", error => {
       clearTimeout(timer);
+      if (current?.child === child) current = undefined;
       record("notify", "error", `本机提示音播放失败：${error.message}`);
     });
+    current = { child, timer };
     child.unref();
     return { played: true, reason: "" };
   } catch (error) {

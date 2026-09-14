@@ -39,7 +39,7 @@ import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
 import { detectShells } from "../shell/shell-provider.js";
 import { detectNgrok } from "../bridge/ngrok-locate.js";
 import { NGROK_AUTHTOKEN_KEY, setCachedAuthtoken } from "../bridge/tunnel.js";
-import { playAlertSound } from "../bridge/sound-alert.js";
+import { playAlertSound, stopAlertSound } from "../bridge/sound-alert.js";
 import { existsSync } from "node:fs";
 import { maskBarkKey, validateConfigValue } from "../bridge/config-values.js";
 import { NOTIFY_DEFAULT_TITLE, pushNotification, resolveNotifySettings, type NotifyOutcome } from "../bridge/notify.js";
@@ -405,10 +405,19 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       if (!existsSync(file)) {
         return { ok: false, state: await buildSettingsState(), error: `文件不存在：${file}` };
       }
-      const result = playAlertSound(file);
+      // preview: a few seconds, not the whole track. Auditioning a four-minute
+      // song should not commit the room to four minutes of it.
+      const result = playAlertSound(file, { preview: true });
       return result.played
-        ? done({ info: "已播放。没听到就检查系统音量和默认输出设备。" })
+        ? done({ info: "正在试听（约 6 秒）。可以随时按「停止」。没听到就检查系统音量和默认输出设备。" })
         : { ok: false, state: await buildSettingsState(), error: `播放失败：${result.reason}` };
+    }
+
+    case "stopSound": {
+      // Always reports success: "stop" on silence is not an error, it is the
+      // state the operator was asking for.
+      const stopped = stopAlertSound();
+      return done({ info: stopped ? "已停止。" : "当前没有在播放。" });
     }
 
     case "saveNgrokAuthtoken": {

@@ -281,7 +281,17 @@ export function validateConfigValue(key: string, value: unknown): ConfigValidati
     if (typeof value !== "string") {
       return { ok: false, error: `${key} must be a path string, or "" for no sound. (expected '${key}': string)` };
     }
-    const path = value.trim();
+    // Windows Explorer's "Copy as path" wraps the result in double quotes,
+    // and that is the single most likely way this field gets filled in. A
+    // pasted "C:\Music\track.flac" that is then refused for not being
+    // absolute would be a baffling rejection of the clipboard's own format,
+    // so the quotes are stripped rather than complained about. Only a
+    // matching pair, and only at the ends: a quote anywhere else is part of
+    // a filename and left alone.
+    let path = value.trim();
+    if (path.length >= 2 && path.startsWith("\"") && path.endsWith("\"")) {
+      path = path.slice(1, -1).trim();
+    }
     if (!path) return { ok: true, value: "" };
     if (!isAbsoluteConfigPath(path)) {
       return {
