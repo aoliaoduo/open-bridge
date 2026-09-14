@@ -209,6 +209,47 @@ test("console assets resolve from every page path, and a missing asset 404s", as
   assert.match(missing.headers.get("content-type") ?? "", /application\/json/);
 });
 
+test("a reloaded console is given the log it missed, not an empty pane", async () => {
+  // The bug: /logs/stream only ever emitted lines written after the moment of
+  // connection, so every refresh of /console/logs showed 等待日志… while the
+  // log file on disk already held thousands of lines. On a quiet instance the
+  // pane stayed blank indefinitely and looked broken.
+  //
+  // Reading the stream is deliberate rather than asserting on a helper: the
+  // backfill has to arrive through the same SSE frames the browser parses.
+  const res = await fetch(`${base()}/api/logs/stream`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") ?? "", /text\/event-stream/);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const deadline = Date.now() + 10_000;
+  // Read until the connected marker: everything before it is replayed history.
+  while (!buffer.includes("--- log stream connected ---") && Date.now() < deadline) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+  }
+  await reader.cancel();
+
+  const lines = buffer.split("\n")
+    .filter(line => line.startsWith("data: "))
+    .map(line => JSON.parse(line.slice(6)).line);
+  assert.ok(lines.includes("--- log stream connected ---"), "the marker still terminates the backfill");
+
+  const history = lines.slice(0, lines.indexOf("--- log stream connected ---"));
+  // This suite has driven the bridge through several requests already, so the
+  // log cannot be empty — an empty history here is the bug regressing.
+  assert.ok(history.length > 0, "the tail of bridge.log is replayed before going live");
+  assert.ok(history.length <= 800, `backfill is bounded, got ${history.length}`);
+  assert.ok(history.every(line => typeof line === "string" && line.length > 0),
+    "no blank or partial frames");
+  // Lines are stamped, and the stamp is local time with an offset (not ISO Z).
+  assert.ok(history.some(line => /^\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}[+-]\d\d:\d\d\]/.test(line)),
+    "replayed lines keep the stamp the file has");
+});
+
 test("the panel endpoints answer for the console pages", async () => {
   // 会话 / 工具 / 体检 read these three routes. The shapes asserted here are the
   // ones ui/src/api.ts parses, so a rename on the server shows up as a failure

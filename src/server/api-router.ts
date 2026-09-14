@@ -138,6 +138,53 @@ interface SseClient { res: ServerResponse }
 
 const sseClients = new Set<SseClient>();
 
+/**
+ * How many trailing log lines a newly connected console is given.
+ *
+ * Matches the pane's own 800-line cap: sending more would be discarded by the
+ * client on arrival, sending fewer would leave a reload showing less history
+ * than the session it replaced.
+ */
+const LOG_BACKFILL_LINES = 800;
+
+/** Bytes of the log's tail to read for that backfill. */
+const LOG_BACKFILL_BYTES = 512 * 1024;
+
+/**
+ * The tail of bridge.log, oldest first.
+ *
+ * Reads a bounded window from the END of the file rather than the whole thing:
+ * the log rotates at 10 MB and slurping that into memory to show the last 800
+ * lines would be a self-inflicted stall on every console reload.
+ */
+async function recentLogLines(): Promise<string[]> {
+  try {
+    const file = nodeHost().bridgeLog.path();
+    const handle = await fs.open(file, "r");
+    try {
+      const { size } = await handle.stat();
+      const windowStart = Math.max(0, size - LOG_BACKFILL_BYTES);
+      const length = size - windowStart;
+      if (length <= 0) return [];
+      const buffer = Buffer.alloc(Number(length));
+      await handle.read(buffer, 0, Number(length), windowStart);
+      const text = buffer.toString("utf8");
+      // A non-zero offset almost certainly lands mid-line; drop that fragment
+      // rather than emit a half line that reads like a truncated log entry.
+      const lines = (windowStart > 0 ? text.slice(text.indexOf("\n") + 1) : text)
+        .split(/\r?\n/)
+        .filter(line => line.length > 0);
+      return lines.slice(-LOG_BACKFILL_LINES);
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    // No log file yet (first run), or it vanished under a rotation: an empty
+    // backfill is the honest answer and the live stream still works.
+    return [];
+  }
+}
+
 function ssePush(line: string): void {
   const payload = `data: ${JSON.stringify({ line: redactSensitiveText(line) })}\n\n`;
   for (const client of sseClients) {
@@ -455,6 +502,16 @@ export async function apiRouteHandler(
       case "/logs/stream": {
         ensureLogStreamWired();
         res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", connection: "keep-alive" });
+        // Replay the tail before going live. The stream only ever carried lines
+        // written from this moment on, so every console reload showed an empty
+        // pane — on a quiet instance it stayed empty indefinitely, and a log
+        // file with 21k lines in it looked like a broken page. This backfill is
+        // what makes 日志 answer "what just happened", not only "what happens
+        // next". Same redaction as the live path: these lines take the same
+        // route to the same browser.
+        for (const line of await recentLogLines()) {
+          res.write(`data: ${JSON.stringify({ line: redactSensitiveText(line) })}\n\n`);
+        }
         res.write(`data: ${JSON.stringify({ line: "--- log stream connected ---" })}
 
 `);

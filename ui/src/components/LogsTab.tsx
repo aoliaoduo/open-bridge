@@ -116,6 +116,8 @@ export function LogsTab() {
         }}
       >
         {parsed.length === 0 ? (
+          // Reached only before the stream answers: the server now replays the
+          // tail on connect, so an empty pane means a genuinely empty log.
           <span className="t">等待日志…</span>
         ) : parsed.map((line, index) => (
           <div className={`log-line${line.level ? ` level-${line.level}` : ""}`} key={index}>
