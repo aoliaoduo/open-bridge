@@ -35,6 +35,8 @@ import { buildSettingsState, handleSettingsAction } from "./settings-handler.js"
 import { controlService, listServiceViews } from "../bridge/service-tools.js";
 import { start, stop, webAiPrompt } from "../bridge/lifecycle.js";
 import { buildStaleness } from "../bridge/build-staleness.js";
+import { selfProbe } from "../bridge/self-probe.js";
+import { authEnabled } from "../http/auth.js";
 import { nodeHost } from "../host/node-host.js";
 import { redactSensitiveText } from "../bridge/state.js";
 import { lockSnapshot } from "../bridge/resource-locks.js";
@@ -487,6 +489,33 @@ export async function apiRouteHandler(
         check("exposure", exposure === "public-open" ? "warn" : "ok", exposure === "public-open"
           ? "公网可达且未开启鉴权：拿到 URL 的人都能读写文件、执行命令"
           : exposure);
+        // Carried over from the 状态 page's own health action, which this
+        // endpoint replaced: a bearer gate that silently fails open is worse
+        // than no gate, because the operator believes they are covered. The
+        // only way to know is to send an anonymous request and require a 401.
+        //
+        // selfProbe, never fetch: a fetch to our own port parks the connection
+        // in undici's keep-alive pool inside this process, and shutdown then
+        // destroys a socket whose client handle is still live — on Windows and
+        // Node 24 that aborts in libuv and turns a clean stop into a fastfail
+        // exit. AGENTS.md records the incident.
+        if (authEnabled()) {
+          const anonymous = await selfProbe(state.port, `/mcp/${state.routeToken}`, {
+            method: "POST",
+            headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+            body: JSON.stringify({
+              jsonrpc: "2.0", id: 1, method: "initialize",
+              params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "health", version: "1" } },
+            }),
+          });
+          check(
+            "auth_gate",
+            anonymous.status === 401 ? "ok" : "fail",
+            anonymous.status === 401
+              ? "已生效：匿名请求被拒（401）"
+              : `异常：匿名请求返回 ${anonymous.status || anonymous.body}，预期 401`,
+          );
+        }
         sendJson(res, 200, { ok: true, health: { checks, exposure } });
         return true;
       }

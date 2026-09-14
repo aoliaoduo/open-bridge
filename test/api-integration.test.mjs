@@ -584,25 +584,33 @@ test("services are listed and driven through the console API", async () => {
 });
 
 test("the counters can be cleared and the instance can be health-checked", async () => {
-  // Both implementations existed (usage-store.resetUsageStats, lifecycle.runHealthCheck)
-  // with no way to reach them from the product.
+  // resetUsageStats existed with no way to reach it from the product; the
+  // health half of this test used to drive a second, separate implementation
+  // (the healthCheck settings action over lifecycle.runHealthCheck). That one
+  // is gone -- 体检 answers the same question through /api/health, grading each
+  // check instead of returning one flat verdict -- so the assertion follows the
+  // surviving path.
   const cleared = await postAction({ command: "clearStats" });
   assert.equal(cleared.status, 200);
   const clearedBody = await cleared.json();
   assert.equal(clearedBody.ok, true);
   assert.match(clearedBody.info, /清零/);
 
-  const health = await postAction({ command: "healthCheck" });
+  const health = await fetch(`${base()}/api/health`, {
+    headers: { "x-open-bridge-console": routeToken },
+  });
   assert.equal(health.status, 200);
   const healthBody = await health.json();
   assert.equal(healthBody.ok, true);
-  assert.match(healthBody.info, /健康检查/);
-  assert.equal(healthBody.healthOk, true, "a healthy instance reports ok");
-  assert.ok(Array.isArray(healthBody.healthLines) && healthBody.healthLines.length >= 2);
-  const lines = healthBody.healthLines.join(" | ");
-  assert.match(lines, /本地端点 正常/);
-  assert.match(lines, /公网隧道 未开启/);
-  assert.match(lines, /Bearer 门禁 未启用/);
+  const checks = healthBody.health?.checks ?? [];
+  assert.ok(Array.isArray(checks) && checks.length >= 5, "every leg is reported separately");
+  const byName = Object.fromEntries(checks.map(check => [check.name, check]));
+  assert.equal(byName.instance?.level, "ok", "a running instance passes");
+  assert.ok(byName.tunnel, "the tunnel leg is always reported, even when off");
+  assert.ok(byName.exposure, "exposure is always reported");
+  // The gate check only runs when the gate is on: with auth off there is
+  // nothing to verify, and inventing a row would imply a check happened.
+  assert.equal(byName.auth_gate, undefined, "no gate row while auth is off");
 });
 
 test("shutdown endpoint stops the process", async () => {

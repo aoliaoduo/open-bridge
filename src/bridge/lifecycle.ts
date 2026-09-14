@@ -20,7 +20,6 @@ import { enqueueLifecycle } from "./lifecycle-queue.js";
 import { killTunnelTree, loadNgrokAuthtoken, setInstanceRestart, startTunnelInternal, stopPublicWatch } from "./tunnel.js";
 import { publishSelf, stopRepublishLoop, withdrawSelf } from "./peer-registry.js";
 import { startHttpInternal, stopLocalServer } from "./http-listener.js";
-import { selfProbe } from "./self-probe.js";
 import { stopSessionPruneLoop } from "./session-table.js";
 import { clearNotifyLedger } from "./notify.js";
 
@@ -204,84 +203,6 @@ export function webAiPrompt(): string {
   const url = clientMcpUrl();
   if (!url) throw new Error("Start Bridge before copying the web AI prompt.");
   return buildWebAiPrompt({ url, isPublic: Boolean(state.tunnelUrl), authEnabled: authEnabled() });
-}
-
-export interface HealthReport {
-  ok: boolean;
-  /** One line, for the console toast and the activity log. */
-  summary: string;
-  /** One line per probe, in the order they ran. */
-  details: string[];
-}
-
-/**
- * End-to-end health check: prove the instance is what it claims to be.
- *
- * This existed since the first port but had no caller in the standalone app,
- * so nothing inside the product could ever verify that the tunnel it advertises
- * answers, or that the bearer gate really refuses anonymous requests. A gate
- * that silently fails open is worse than no gate: the operator would believe
- * they are protected. It now returns a structured report (so the console can
- * show it) and still records + notifies, keeping the activity-log trail.
- */
-export async function runHealthCheck(): Promise<HealthReport> {
-  const probe = async (url: string, init?: RequestInit): Promise<{ ok: boolean; status: number; body: string }> =>
-    fetch(url, init)
-      .then(async response => ({ ok: response.ok, status: response.status, body: await response.text() }))
-      .catch(error => ({ ok: false, status: 0, body: error instanceof Error ? error.message : String(error) }));
-  if (!state.server) {
-    const summary = "Bridge 未运行，无法体检。";
-    record("health", "error", summary);
-    host().notify("warn", summary);
-    return { ok: false, summary, details: ["实例未运行"] };
-  }
-  // Local probes go through selfProbe, not `probe`: a fetch to our own port
-  // leaves the connection in undici's keep-alive pool *inside this process*, and
-  // shutdown then destroys a socket whose client handle is still live — on
-  // Windows/Node 24 that aborts in libuv and the instance exits with a fastfail
-  // code instead of 0. The tunnel probe below stays on fetch on purpose: it
-  // targets another host, and its 8 s budget belongs to that path.
-  const local = await selfProbe(state.port, `/healthz/${state.routeToken}`);
-  const details = [`本地端点 ${local.ok ? "正常" : "失败"}（${local.status || local.body}）`];
-  const publicCheck = state.tunnelUrl
-    ? await probe(state.tunnelUrl.replace(`/mcp/${state.routeToken}`, `/healthz/${state.routeToken}`), {
-        headers: { "ngrok-skip-browser-warning": "true" },
-        // Bounded: a tunnel edge that accepts but never answers must not hang
-        // the health check (and with it the console's 体检 action) forever.
-        signal: AbortSignal.timeout(8_000),
-      })
-    : undefined;
-  details.push(publicCheck
-    ? `公网隧道 ${publicCheck.ok ? "正常" : "失败"}（${publicCheck.status || publicCheck.body}）`
-    : "公网隧道 未开启（仅本机可用）");
-  // Verify the bearer gate is actually closed. A gate that silently fails open
-  // is worse than no gate: the operator would believe they are protected. An
-  // anonymous initialize must come back 401 while auth is enabled.
-  const gateStatus = authEnabled()
-    ? (await selfProbe(state.port, `/mcp/${state.routeToken}`, {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
-        body: JSON.stringify({
-          jsonrpc: "2.0", id: 1, method: "initialize",
-          params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "health", version: "1" } },
-        }),
-      })).status
-    : undefined;
-  const gateOk = gateStatus === undefined || gateStatus === 401;
-  details.push(gateStatus === undefined
-    ? "Bearer 门禁 未启用"
-    : (gateOk ? "Bearer 门禁 已生效（匿名请求 401）" : `Bearer 门禁 异常（匿名请求返回 ${gateStatus}，预期 401）`));
-  const ok = local.ok && publicCheck?.ok !== false && gateOk;
-  const summary = `健康检查：本地 ${local.ok ? "正常" : "失败"}`
-    + (publicCheck ? ` · 公网 ${publicCheck.ok ? "正常" : "失败"}` : " · 公网未开启")
-    + (gateStatus === undefined ? " · 鉴权未启用" : ` · 鉴权${gateOk ? "已生效" : "异常"}`);
-  record(
-    "health",
-    ok ? "completed" : "error",
-    `local=${local.status} public=${publicCheck?.status ?? "n/a"}${gateStatus === undefined ? "" : ` anonymous-mcp=${gateStatus}`}`,
-  );
-  await host().notify("info", summary);
-  return { ok, summary, details };
 }
 
 /**

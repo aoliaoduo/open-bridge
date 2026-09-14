@@ -17,6 +17,7 @@ const LABELS: Record<string, () => string> = {
   tunnel: () => t("隧道", "Tunnel"),
   public: () => t("公网连通", "Public reachability"),
   exposure: () => t("暴露面", "Exposure"),
+  auth_gate: () => t("鉴权门禁", "Auth gate"),
 };
 
 

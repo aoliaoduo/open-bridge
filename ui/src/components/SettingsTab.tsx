@@ -455,12 +455,53 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
             checked={settings.notify.onFinish}
             onChange={next => setConfig("notify.onFinish", next)}
           />
-          <p className="field-hint" style={{ margin: "-4px 0 4px" }}>
-            {t(
-              "两个开关互不影响，可以都开、都关。AI 提问等你选择、或明确需要你回来时，无论开关如何都会推送 —— 没人回答的问题会让对话一直卡着。",
-              "The two switches are independent: both on, both off, either. When the AI asks a question and waits, or explicitly needs you back, it pushes regardless — an unanswered question stalls the exchange indefinitely.",
-            )}
-          </p>
+          {/* The gating rules lived only in code and in docs/tools.md, so the
+              page showed two switches without saying what the other two event
+              types do. An operator could reasonably conclude that turning both
+              off means silence -- it does not, and finding that out from a
+              buzzing phone is the wrong way to learn it. */}
+          <div className="field" style={{ margin: "-4px 0 4px" }}>
+            <span className="field-label">{t("四类通知分别由谁决定", "What controls each kind")}</span>
+            <div className="table-wrap">
+              <table className="token-table">
+                <thead>
+                  <tr>
+                    <th>{t("通知", "Push")}</th>
+                    <th>{t("什么时候发", "When")}</th>
+                    <th>{t("受哪个开关控制", "Controlled by")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>{t("需要你回来", "Attention")}</td>
+                    <td>{t("AI 明确需要你回到电脑前", "The AI explicitly needs you back at the machine")}</td>
+                    <td><strong>{t("不受控，总是发", "Always sent")}</strong></td>
+                  </tr>
+                  <tr>
+                    <td>{t("等你回答", "Waiting")}</td>
+                    <td>{t("AI 提了问题，在等你选择", "The AI asked something and is blocked on your answer")}</td>
+                    <td><strong>{t("不受控，总是发", "Always sent")}</strong></td>
+                  </tr>
+                  <tr>
+                    <td>{t("对话结束", "Finished")}</td>
+                    <td>{t("这一轮收尾；AI 忘了发则服务端代发", "The round wraps up; the server sends it if the AI forgets")}</td>
+                    <td>{t("对话结束时通知", "Notify when the exchange ends")}</td>
+                  </tr>
+                  <tr>
+                    <td>{t("进展", "Progress")}</td>
+                    <td>{t("任务清单勾掉一项，或 AI 主动汇报一行进展", "An item is ticked off, or the AI reports a line of progress")}</td>
+                    <td>{t("每项任务完成时通知", "Notify on each finished task")}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <span className="field-hint">
+              {t(
+                "两个开关互不影响，可以都开、都关。但前两类无论开关如何都会送达 —— 没人回答的问题会让对话无限期卡住，那不是设置该吞掉的东西。另有一条兜底：连接静默超过下面的分钟数，服务端会自己推一条。",
+                "The two switches are independent: both on, both off, either. The first two kinds arrive regardless — an unanswered question stalls the exchange indefinitely, which is not something a setting should swallow. One more safety net: after the silence threshold below, the server pushes by itself.",
+              )}
+            </span>
+          </div>
           <div className="field">
             <span className="field-label">{t("Bark 设备密钥", "Bark device key")}</span>
             <span className="field-control">

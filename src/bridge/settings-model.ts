@@ -173,7 +173,7 @@ export interface SettingsState {
 
 export type SettingsAction =
   | { command: "copyPrompt" | "start" | "stop" | "rotateEndpoint" | "purgeTokens" | "revokeAll" }
-  | { command: "clearStats" | "healthCheck" }
+  | { command: "clearStats" }
   | { command: "saveDomain"; domain: string }
   /** Device key as pasted (bare or full URL — the host parses and validates). */
   | { command: "saveNotifyKey"; key: string }
@@ -249,7 +249,7 @@ export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
     "setAuthEnabled", "setDefaultTtl", "createToken", "armPublicLock", "rotateToken",
     "revokeToken", "deleteToken", "purgeTokens", "revokeAll",
     "setConcurrency", "setConfig", "copyText",
-    "clearStats", "healthCheck", "saveNotifyKey", "testNotify",
+    "clearStats", "saveNotifyKey", "testNotify",
     "saveNgrokAuthtoken",
   ]);
   if (!allowed.has(command)) return null;

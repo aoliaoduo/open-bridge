@@ -45,7 +45,7 @@ import * as path from "node:path";
 import { resetUsageStats } from "../bridge/usage-store.js";
 import { host } from "../host/host.js";
 import {
-  start, rotateRouteToken, webAiPrompt, runHealthCheck, republishAfterRotate,
+  start, rotateRouteToken, webAiPrompt, republishAfterRotate,
 } from "../bridge/lifecycle.js";
 import { enqueueLifecycle } from "../bridge/lifecycle-queue.js";
 
@@ -180,13 +180,6 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       // Operator-only, exactly like the extension's.
       resetUsageStats();
       return done({ info: "调用统计已清零（累计调用数与按工具明细）。" });
-    }
-    case "healthCheck": {
-      // End-to-end proof that the instance is what it claims: the loopback
-      // endpoint answers, the advertised tunnel answers, and - with the bearer
-      // gate on - an anonymous request is really refused.
-      const report = await runHealthCheck();
-      return done({ info: report.summary, healthLines: report.details, healthOk: report.ok });
     }
     case "copyPrompt": {
       // Onboarding: hand the client a ready-made opening message carrying the

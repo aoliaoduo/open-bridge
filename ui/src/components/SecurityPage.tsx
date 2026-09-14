@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import {
   api,
-  type HealthReport,
   type OAuthConsoleView,
   type SettingsActionResult,
   type SettingsState,
@@ -41,7 +40,12 @@ interface Props {
  */
 export function SecurityPage({ settings, act, notify }: Props) {
   const cfg = settings.config;
-  const [report, setReport] = useState<HealthReport | null>(null);
+  // Only `exposure` is read from this, and /api/status carries it for ~40ms
+  // while /api/health costs ~480ms without a tunnel and a full public round
+  // trip with one. The overview was waiting on a health check to render one
+  // word. Kept as a HealthReport-shaped value so the render below is
+  // unchanged; the extra checks it used to carry were never displayed here.
+  const [report, setReport] = useState<{ exposure: string } | null>(null);
   const [note, setNote] = useState("");
   const [arming, setArming] = useState(false);
   const [rotating, setRotating] = useState(false);
@@ -56,8 +60,8 @@ export function SecurityPage({ settings, act, notify }: Props) {
     let alive = true;
     const load = async () => {
       try {
-        const next = await api.health();
-        if (alive) setReport(next);
+        const status = await api.status();
+        if (alive) setReport({ exposure: String(status.exposure ?? "local") });
       } catch (error) {
         if (alive) setNote(error instanceof Error ? error.message : String(error));
       }
@@ -75,7 +79,8 @@ export function SecurityPage({ settings, act, notify }: Props) {
       // the overview above stops describing the state we just left.
       if (result?.ok) {
         try {
-          setReport(await api.health());
+          const status = await api.status();
+          setReport({ exposure: String(status.exposure ?? "local") });
         } catch (error) {
           setNote(error instanceof Error ? error.message : String(error));
         }

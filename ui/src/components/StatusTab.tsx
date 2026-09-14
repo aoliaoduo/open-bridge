@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type BridgeStatus, type SettingsActionResult } from "../api";
+import { api, type BridgeStatus } from "../api";
 import type { LockSnapshot } from "../api";
 import { EXPOSURE_META } from "../exposure";
 import { t } from "../i18n";
@@ -37,7 +37,6 @@ function TunnelRole({ role }: { role?: string }) {
 export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
   const [status, setStatus] = useState<BridgeStatus | null>(null);
   const [busy, setBusy] = useState(false);
-  const [health, setHealth] = useState<{ ok: boolean; info: string; lines: string[] } | null>(null);
   // Expired-response guard: a poll that started before an action and finished
   // after it used to overwrite the fresher state with stale data.
   const pollSeq = useRef(0);
@@ -72,15 +71,6 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
       const mine = pollSeq.current + 1;
       pollSeq.current = mine;
       setStatus(await api.status());
-    } catch { /* the settings action already toasted */ }
-    setBusy(false);
-  };
-
-  const checkHealth = async () => {
-    setBusy(true);
-    try {
-      const result = await act({ command: "healthCheck" }) as SettingsActionResult | null;
-      if (result) setHealth({ ok: result.healthOk !== false, info: result.info ?? "", lines: result.healthLines ?? [] });
     } catch { /* the settings action already toasted */ }
     setBusy(false);
   };
@@ -238,33 +228,28 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
             )}
             <div className="section-note">
               {t(
-                "因此本页没有「启动 / 停止 / 重启」按钮：停止会一并关掉这个页面，按钮既点不到也不可靠。下面的健康检查只做探测，不影响进程本身。",
-                "That is why this page has no start/stop/restart buttons: stopping would also close this page, so the button could neither be clicked nor trusted. The health check below only probes; it never touches the process.",
+                "因此本页没有「启动 / 停止 / 重启」按钮：停止会一并关掉这个页面，按钮既点不到也不可靠。体检只做探测，不影响进程本身。",
+                "That is why this page has no start/stop/restart buttons: stopping would also close this page, so the button could neither be clicked nor trusted. 体检 only probes; it never touches the process.",
               )}
             </div>
+            {/* This used to be a 健康检查 button running a second, separate
+                implementation: this page called the healthCheck settings action
+                (runHealthCheck) while 体检 calls /api/health, which computes its
+                own checks. Two code paths answering the same question, one of
+                them reporting a flat pass/fail where the other grades each
+                check and really sends a request through the tunnel. Kept the
+                thorough one and made this a link to it. */}
             <div className="btn-group">
-              <button
-                type="button"
-                className="small icon-text"
-                disabled={busy || !running}
-                onClick={() => void checkHealth()}
-              >
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                {t("健康检查", "Health check")}
+              <button type="button" className="small" disabled={!running} onClick={() => onOpen?.("health")}>
+                {t("去体检页", "Open 体检")}
               </button>
             </div>
             <div className="section-note" style={{ marginBottom: 0 }}>
               {t(
-                "健康检查会真的去请求：本机端点、公网隧道（若已开启），并在鉴权开启时确认匿名请求确实被拒。",
-                "The health check makes real requests: the local endpoint, the public tunnel if one is up, and — when auth is on — a check that an anonymous request is actually refused.",
+                "体检会真的去请求：本机端点、公网隧道（若已开启），并在鉴权开启时确认匿名请求确实被拒；每项单独给出结论。",
+                "体检 makes real requests: the local endpoint, the public tunnel if one is up, and — when auth is on — a check that an anonymous request is actually refused. Each check is graded on its own.",
               )}
             </div>
-            {health && (
-              <div className="section-note" style={{ marginBottom: 0 }}>
-                <span className={`act-status ${health.ok ? "completed" : "error"}`}>{health.info}</span>
-                {health.lines.map((line, index) => <div key={index}>· {line}</div>)}
-              </div>
-            )}
           </Card>
 
         </div>
