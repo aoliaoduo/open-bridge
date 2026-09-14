@@ -110,6 +110,9 @@ export interface SettingsConfigView {
   "notify.levelWaiting": string;
   "notify.levelFinished": string;
   "notify.levelProgress": string;
+  "sound.enabled": boolean;
+  "sound.fileWaiting": string;
+  "sound.fileFinished": string;
   "notify.callAttention": boolean;
   "notify.callWaiting": boolean;
   "notify.callFinished": boolean;
@@ -186,6 +189,7 @@ export type SettingsAction =
   /** Device key as pasted (bare or full URL — the host parses and validates). */
   | { command: "saveNotifyKey"; key: string }
   | { command: "saveNgrokAuthtoken"; token: string }
+  | { command: "testSound"; which: "waiting" | "finished" }
   | { command: "testNotify" }
   | { command: "setAuthEnabled"; enabled: boolean }
   | { command: "setDefaultTtl"; seconds: number }
@@ -235,6 +239,9 @@ const CONFIG_SPEC = {
   "notify.levelWaiting": { kind: "string", max: 32 },
   "notify.levelFinished": { kind: "string", max: 32 },
   "notify.levelProgress": { kind: "string", max: 32 },
+  "sound.enabled": { kind: "boolean" },
+  "sound.fileWaiting": { kind: "string", max: 500 },
+  "sound.fileFinished": { kind: "string", max: 500 },
   "notify.callAttention": { kind: "boolean" },
   "notify.callWaiting": { kind: "boolean" },
   "notify.callFinished": { kind: "boolean" },
@@ -266,7 +273,7 @@ export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
     "revokeToken", "deleteToken", "purgeTokens", "revokeAll",
     "setConcurrency", "setConfig", "copyText",
     "clearStats", "saveNotifyKey", "testNotify",
-    "saveNgrokAuthtoken",
+    "saveNgrokAuthtoken", "testSound",
   ]);
   if (!allowed.has(command)) return null;
 
@@ -281,6 +288,13 @@ export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
       // "absent", so a non-string key must fall through to null, not to "".
       if (typeof message.key !== "string") return null;
       return { command, key: message.key.trim().slice(0, 500) };
+    }
+    case "testSound": {
+      // Which sound, not a path: a path from the page would let anything the
+      // console can reach be played, and the point of the button is to prove
+      // the SAVED setting works.
+      const which = message.which === "finished" ? "finished" : "waiting";
+      return { command, which };
     }
     case "saveNgrokAuthtoken": {
       // Same shape as saveNotifyKey: trim only, and "" means "clear" rather

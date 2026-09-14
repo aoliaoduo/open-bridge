@@ -168,7 +168,7 @@ export const SETTINGS_SECTIONS: SettingsSectionSpec[] = [
   { id: "network", label: () => t("端口", "Ports"), hint: () => t("本机监听端口与公网健康检查超时", "Local listen port and public health-check timeout") },
   { id: "files", label: () => t("目录", "Directories"), hint: () => t("文件访问范围与目录白名单", "File access scope and the directory allowlist") },
   { id: "shell", label: () => t("Shell", "Shell"), hint: () => t("命令执行使用的 shell", "The shell commands run through") },
-  { id: "notify", label: () => t("通知", "Notifications"), hint: () => t("手机通知（Bark）：模式、设备密钥与测试发送", "Phone push (Bark): mode, device key and a test send") },
+  { id: "notify", label: () => t("通知", "Notifications"), hint: () => t("什么时候打扰你，以及用手机推送还是本机声音", "When to interrupt you, and whether by phone push or a local sound") },
   { id: "locks", label: () => t("并发", "Locks"), hint: () => t("并发锁与占用/等待上限", "Concurrency locks and hold/wait ceilings") },
 ];
 

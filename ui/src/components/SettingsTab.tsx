@@ -117,6 +117,37 @@ export function DraftField({
  * question stalls the exchange, and only those two are worth a phone that
  * rings until opened.
  */
+/**
+ * The two local-sound slots.
+ *
+ * Deliberately two, not four: attention and waiting share one file because
+ * from the room they are the same event — the AI has stopped and needs you —
+ * and progress has no slot at all. A chime per ticked todo is the fastest way
+ * to make someone disable the feature they just enabled.
+ */
+const SOUND_ROWS = [
+  {
+    key: "waiting",
+    which: "waiting" as const,
+    configKey: "sound.fileWaiting" as const,
+    label: () => t("等你回答 / 需要你回来", "Waiting on you"),
+    hint: () => t(
+      "AI 提了问题在等你选择，或明确需要你回到电脑前。没人回应的话对话就停在那里。",
+      "The AI asked something and is blocked, or explicitly needs you back. Nothing moves until you answer.",
+    ),
+  },
+  {
+    key: "finished",
+    which: "finished" as const,
+    configKey: "sound.fileFinished" as const,
+    label: () => t("对话结束", "Exchange finished"),
+    hint: () => t(
+      "这一轮收尾时响一次。受上面「对话结束时」开关控制。",
+      "One sound when the round wraps up. Follows the 对话结束时 switch above.",
+    ),
+  },
+];
+
 const NOTIFY_EVENT_ROWS = [
   {
     key: "Attention" as const,
@@ -462,12 +493,75 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
       )}
 
       {section === "notify" && (
+      <>
+      {/* Three cards, because there are now three questions and they used to
+          be one. "手机通知（Bark）" as a single heading stopped being true the
+          moment a second channel existed: the event switches and the silence
+          watchdog are not Bark's, they decide what is worth interrupting a
+          person for, and each channel then answers it in its own way. */}
+      <Card
+        id="set-notify-events"
+        title={t("什么时候该打扰你", "When to interrupt you")}
+        desc={t(
+          "先决定哪些事值得被打断 —— 下面两张卡再各自决定用什么方式告诉你。",
+          "Decide what is worth an interruption first; the two cards below each answer it their own way.",
+        )}
+      >
+        <div className="form-grid">
+          <SwitchField
+            label={t("每项任务完成时", "On each finished task")}
+            hint={t(
+              "任务清单每勾选完一条通知一次。",
+              "One alert per item ticked off the task list.",
+            )}
+            checked={settings.notify.onTaskDone}
+            onChange={next => setConfig("notify.onTaskDone", next)}
+          />
+          <SwitchField
+            label={t("对话结束时", "When the exchange ends")}
+            hint={t(
+              "这一轮收尾时通知一次；AI 自己忘了发，服务端会代发。",
+              "One alert when the round wraps up; if the AI forgets, the server sends it.",
+            )}
+            checked={settings.notify.onFinish}
+            onChange={next => setConfig("notify.onFinish", next)}
+          />
+          <Field
+            label={t("无反应提醒", "Silence alert")}
+            hint={t(
+              "连接完全静默超过这个分钟数就叫你一次，不要求存在任务清单——AI 忘了写清单的时候，恰恰最需要这条提醒。0 = 关闭。",
+              "Calls you back after this many minutes of total silence. No todo list required: the times the AI forgets to write one are exactly when you most need telling. 0 disables it.",
+            )}
+          >
+            <DraftField
+              type="number"
+              min={0}
+              max={1440}
+              value={String(settings.notify.idleMinutes)}
+              onCommit={raw => setConfig("notify.idleMinutes", Number(raw.trim()))}
+              onInvalid={() => notify?.(t(
+                "无反应提醒需要 0–1440 的整数分钟，已还原。",
+                "The silence alert needs a whole number of minutes from 0 to 1440; reverted.",
+              ), true)}
+            />
+          </Field>
+          <div className="field span2">
+            <span className="field-hint" style={{ margin: 0 }}>
+              {t(
+                "「需要你回来」和「等你回答」不在上面的开关里，因为它们不受开关控制：AI 提了问题没人答，对话就无限期停在那儿，那不是设置该吞掉的东西。",
+                "Attention and Waiting are not switches above because they are not optional: when the AI asks something and nobody answers, the exchange stalls indefinitely, and that is not something a setting should swallow.",
+              )}
+            </span>
+          </div>
+        </div>
+      </Card>
+
       <Card
         id="set-notify"
-        title={t("手机通知（Bark）", "Phone notifications (Bark)")}
+        title={t("手机（Bark）", "Phone (Bark)")}
         desc={t(
-          "网页 AI 干完活不必守着标签页 — 进展与提醒直接推到 iPhone。",
-          "No need to sit watching the tab while a web AI works — progress and alerts go straight to your iPhone.",
+          "人不在电脑前时用 —— 推送到 iPhone。",
+          "For when you are away from the machine — pushed to your iPhone.",
         )}
       >
         <div className="form-grid">
@@ -477,33 +571,52 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
             checked={settings.notify.enabled}
             onChange={next => setConfig("notify.enabled", next)}
           />
-          <SwitchField
-            label={t("每项任务完成时通知", "Notify on each finished task")}
-            hint={t(
-              "任务清单每勾选完一条，手机收到一条通知。",
-              "Every item ticked off the task list sends a push.",
-            )}
-            checked={settings.notify.onTaskDone}
-            onChange={next => setConfig("notify.onTaskDone", next)}
-          />
-          <SwitchField
-            label={t("对话结束时通知", "Notify when the exchange ends")}
-            hint={t(
-              "这一轮结束时推送一条；AI 自己忘了发，服务端会代发。",
-              "One push when the round ends; if the AI forgets, the server sends it instead.",
-            )}
-            checked={settings.notify.onFinish}
-            onChange={next => setConfig("notify.onFinish", next)}
-          />
-          {/* Not a reference table any more: each row is the control. The
-              switches above decide WHETHER a push is sent; these decide how it
-              arrives, which is the operator's call — they are the one next to
-              the phone. Defaults encode the urgency each event carries, and
-              critical is offered but never defaulted: it overrides the mute
-              switch, and that is a decision to make deliberately. */}
-          {/* span2: .form-grid is two columns, and a four-column table in half
-              of one squeezes the first column until "需要你回来" stacks one
-              character per line. */}
+          <div className="field">
+            <span className="field-label">{t("Bark 设备密钥", "Bark device key")}</span>
+            <span className="field-control">
+              <input
+                type="text"
+                value={barkKeyDraft ?? (settings.notify.configured ? settings.notify.keyMask : "")}
+                placeholder={settings.notify.configured
+                  ? t("粘贴新密钥可替换（输入框仅显示掩码）", "Paste a new key to replace it (the field only shows a mask)")
+                  : t("https://api.day.app/ 后面的那串专属路径", "The unique path that follows https://api.day.app/")}
+                readOnly={settings.notify.configured && barkKeyDraft === null}
+                onChange={e => setBarkKeyDraft(e.target.value)}
+              />
+              <button
+                className="small"
+                disabled={barkKeyDraft === null}
+                onClick={() => {
+                  void act({ command: "saveNotifyKey", key: barkKeyDraft ?? "" }).then(result => {
+                    if ((result as SettingsActionResult | null)?.ok) setBarkKeyDraft(null);
+                  });
+                }}
+              >
+                {t("保存密钥", "Save key")}
+              </button>
+              {settings.notify.configured && barkKeyDraft === null && (
+                <button
+                  className="small ghost"
+                  onClick={() => setBarkKeyDraft("")}
+                  title={t("粘贴新密钥整串替换；清空后点保存即撤销", "Paste a new key to replace it wholesale; clear the field and save to remove it")}
+                >
+                  {t("更换 / 清除", "Replace / clear")}
+                </button>
+              )}
+              <button
+                className="small"
+                disabled={!settings.notify.enabled || !settings.notify.configured}
+                onClick={() => { void act({ command: "testNotify" }); }}
+              >
+                {t("发送测试", "Send a test")}
+              </button>
+            </span>
+            <span className="field-hint">
+              {t("Bark App 首页显示的那串独特路径就是它，整条链接粘贴也行，会自动摘出密钥。服务器：", "It is the unique path shown on the Bark app's home screen; pasting the whole link works too. Server: ")}
+              {settings.notify.serverUrl}
+            </span>
+          </div>
+
           <div className="field span2">
             <span className="field-label">{t("每类通知怎么响", "How each kind arrives")}</span>
             <div className="table-wrap">
@@ -522,7 +635,7 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
                         <div className="notify-name">
                           <span>{row.label()}</span>
                           {row.always ? (
-                            <span className="always-chip" title={t("不受上面两个开关影响", "Not affected by the two switches above")}>
+                            <span className="always-chip" title={t("不受上面的开关影响", "Not affected by the switches above")}>
                               {t("总是发", "always")}
                             </span>
                           ) : null}
@@ -558,91 +671,64 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
             </div>
             <span className="field-hint">
               {t(
-                "「需要你回来」和「等你回答」无论上面两个开关如何都会送达 —— 没人回答的问题会让对话无限期卡住，那不是设置该吞掉的东西。「穿透专注模式」管的是专注模式，不是静音键：手机按了静音它依然不响。真要响就得用「无视静音」，而那需要你先在 iOS 的 设置 → 通知 → Bark 里打开「重要警告」权限，否则系统会把它降级成普通通知 —— 不报错，只是没那么响。铃声在 Bark App 里按设备设置，这里不重复一份。",
-                "Attention and Waiting arrive regardless of the two switches above — an unanswered question stalls the exchange indefinitely, which is not something a setting should swallow. Time-sensitive pierces Focus modes, not the mute switch: on a silenced phone it stays silent. Only Critical overrides that, and it needs Bark's critical-alert permission under iOS Settings → Notifications → Bark; without it the system quietly downgrades the push rather than failing. Ringtones are set per device in the Bark app, so they are not duplicated here.",
-              )}
-            </span>
-          </div>
-          <div className="field">
-            <span className="field-label">{t("Bark 设备密钥", "Bark device key")}</span>
-            <span className="field-control">
-              <input
-                type="text"
-                value={barkKeyDraft ?? (settings.notify.configured ? settings.notify.keyMask : "")}
-                placeholder={settings.notify.configured
-                  ? t("粘贴新密钥可替换（输入框仅显示掩码）", "Paste a new key to replace it (the field only shows a mask)")
-                  : t("https://api.day.app/ 后面的那串专属路径", "The unique path that follows https://api.day.app/")}
-                readOnly={settings.notify.configured && barkKeyDraft === null}
-                onChange={e => setBarkKeyDraft(e.target.value)}
-              />
-              <button
-                className="small"
-                disabled={barkKeyDraft === null}
-                onClick={() => {
-                  // Same discipline as 保存域名: reset only on success so a
-                  // rejection keeps the operator's paste, and a readOnly
-                  // replacement field (not the masked display) reaches the host.
-                  void act({ command: "saveNotifyKey", key: barkKeyDraft ?? "" }).then(result => {
-                    if ((result as SettingsActionResult | null)?.ok) setBarkKeyDraft(null);
-                  });
-                }}
-              >
-                {t("保存密钥", "Save key")}
-              </button>
-              {settings.notify.configured && barkKeyDraft === null && (
-                <button
-                  className="small ghost"
-                  onClick={() => setBarkKeyDraft("")}
-                  title={t("粘贴新密钥整串替换；清空后点保存即撤销", "Paste a new key to replace it wholesale; clear the field and save to remove it")}
-                >
-                  {t("更换 / 清除", "Replace / clear")}
-                </button>
-              )}
-            </span>
-            <span className="field-hint">
-              {t("Bark App 首页显示的那串独特路径就是它，整条链接粘贴也行，会自动摘出密钥。", "It is the unique path shown on the Bark app's home screen; pasting the whole link works too, the key is extracted.")}
-            </span>
-          </div>
-          <Field
-            label={t("无反应提醒", "Silence alert")}
-            hint={t(
-              "连接完全静默超过这个分钟数就推送一次「需要你回来了」，不要求存在任务清单——AI 忘了写清单的时候，恰恰最需要这条提醒。0 = 关闭。",
-              "Pushes once to call you back after this many minutes of total silence. No todo list required: the times the AI forgets to write one are exactly when you most need telling. 0 disables it.",
-            )}
-          >
-            <DraftField
-              type="number"
-              min={0}
-              max={1440}
-              value={String(settings.notify.idleMinutes)}
-              onCommit={raw => setConfig("notify.idleMinutes", Number(raw.trim()))}
-              onInvalid={() => notify?.(t(
-                "无反应提醒需要 0–1440 的整数分钟，已还原。",
-                "The silence alert needs a whole number of minutes from 0 to 1440; reverted.",
-              ), true)}
-            />
-          </Field>
-          <div className="field">
-            <span className="field-label">{t("推送通道", "Push channel")}</span>
-            <span className="field-control">
-              <button
-                className="small"
-                disabled={!settings.notify.enabled || !settings.notify.configured}
-                onClick={() => { void act({ command: "testNotify" }); }}
-              >
-                {t("发送测试通知", "Send a test notification")}
-              </button>
-            </span>
-            <span className="field-hint">
-              {t("服务器：", "Server: ")}{settings.notify.serverUrl}
-              {t(
-                "。官方通道不通时可自建 Bark，配置文件里改 notify.serverUrl（自建 http 仅限本机回环）。",
-                ". If the official channel is unreachable you can self-host Bark and point notify.serverUrl at it in the config file (self-hosted http is loopback-only).",
+                "「穿透专注模式」管的是专注模式，不是静音键：手机按了静音它依然不响。真要响就得用「无视静音」，而那需要你先在 iOS 的 设置 → 通知 → Bark 里打开「重要警告」权限，否则系统会把它降级成普通通知 —— 不报错，只是没那么响。铃声在 Bark App 里按设备设置。",
+                "Time-sensitive pierces Focus modes, not the mute switch: on a silenced phone it stays silent. Only Critical overrides that, and it needs Bark's critical-alert permission under iOS Settings → Notifications → Bark; without it the system quietly downgrades the push rather than failing. Ringtones are set per device in the Bark app.",
               )}
             </span>
           </div>
         </div>
       </Card>
+
+      <Card
+        id="set-sound"
+        title={t("本机声音", "Local sound")}
+        desc={t(
+          "人就在电脑前、但标签页在后台时用 —— 直接在这台机器上放一段音频。不需要 Bark。",
+          "For when you are at the machine with the tab in the background — plays audio on this machine. No Bark required.",
+        )}
+      >
+        <div className="form-grid">
+          <SwitchField
+            label={t("启用本机声音", "Enable local sound")}
+            hint={t("关掉之后下面的路径会留着。", "The paths below are kept when this is off.")}
+            checked={settings.config["sound.enabled"] === true}
+            onChange={next => setConfig("sound.enabled", next)}
+          />
+          <div className="field span2">
+            <span className="field-hint" style={{ margin: "0 0 4px" }}>
+              {t(
+                "只有「AI 停下来等你」的两种情况会响：等你回答/需要你回来，以及对话结束。任务进度不会响 —— 每勾掉一条就叮一声，是让人关掉整个功能的最快方式。",
+                "Only the two situations where the AI has stopped for you make a noise: waiting on your answer, and the end of an exchange. Task progress does not — a chime per ticked item is the fastest way to make someone switch the whole thing off.",
+              )}
+            </span>
+          </div>
+          {SOUND_ROWS.map(row => (
+            <div className="field span2" key={row.key}>
+              <span className="field-label">{row.label()}</span>
+              <span className="field-control">
+                <DraftField
+                  value={settings.config[row.configKey] as string}
+                  placeholder={t("音频文件的完整路径，留空则不响", "Full path to an audio file; empty means silent")}
+                  onCommit={raw => setConfig(row.configKey, raw.trim())}
+                  onInvalid={() => notify?.(t(
+                    "需要一个绝对路径，且是音频文件（.wav .mp3 .m4a .aac .wma .flac）。",
+                    "Needs an absolute path to an audio file (.wav .mp3 .m4a .aac .wma .flac).",
+                  ), true)}
+                />
+                <button
+                  className="small"
+                  disabled={!settings.config[row.configKey]}
+                  onClick={() => { void act({ command: "testSound", which: row.which }); }}
+                >
+                  {t("试听", "Play it")}
+                </button>
+              </span>
+              <span className="field-hint">{row.hint()}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+      </>
       )}
 
       {section === "locks" && (

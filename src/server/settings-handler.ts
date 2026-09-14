@@ -39,6 +39,8 @@ import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
 import { detectShells } from "../shell/shell-provider.js";
 import { detectNgrok } from "../bridge/ngrok-locate.js";
 import { NGROK_AUTHTOKEN_KEY, setCachedAuthtoken } from "../bridge/tunnel.js";
+import { playAlertSound } from "../bridge/sound-alert.js";
+import { existsSync } from "node:fs";
 import { maskBarkKey, validateConfigValue } from "../bridge/config-values.js";
 import { NOTIFY_DEFAULT_TITLE, pushNotification, resolveNotifySettings, type NotifyOutcome } from "../bridge/notify.js";
 import * as path from "node:path";
@@ -85,6 +87,9 @@ export async function buildSettingsState(): Promise<SettingsState> {
       tunnelProvider: cfg.get("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string),
       ngrokExecutable: cfg.get("ngrokExecutable", CONFIG_DEFAULTS.ngrokExecutable as string),
       logMaxBytes: cfg.get("logMaxBytes", CONFIG_DEFAULTS.logMaxBytes as number),
+      "sound.enabled": cfg.get("sound.enabled", false),
+      "sound.fileWaiting": cfg.get("sound.fileWaiting", ""),
+      "sound.fileFinished": cfg.get("sound.fileFinished", ""),
       "notify.levelAttention": cfg.get("notify.levelAttention", CONFIG_DEFAULTS["notify.levelAttention"] as string),
       "notify.levelWaiting": cfg.get("notify.levelWaiting", CONFIG_DEFAULTS["notify.levelWaiting"] as string),
       "notify.levelFinished": cfg.get("notify.levelFinished", CONFIG_DEFAULTS["notify.levelFinished"] as string),
@@ -390,6 +395,22 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       });
     }
 
+    case "testSound": {
+      const key = action.which === "finished" ? "sound.fileFinished" : "sound.fileWaiting";
+      const file = String(cfg.get<string>(key, "") ?? "").trim();
+      if (!file) return { ok: false, state: await buildSettingsState(), error: "这一项还没有设置音频文件。" };
+      // Plays regardless of sound.enabled: the operator pressing this button
+      // is asking "does this file work", not "would this fire right now".
+      // Same reasoning as the Bark test button bypassing the event switches.
+      if (!existsSync(file)) {
+        return { ok: false, state: await buildSettingsState(), error: `文件不存在：${file}` };
+      }
+      const result = playAlertSound(file);
+      return result.played
+        ? done({ info: "已播放。没听到就检查系统音量和默认输出设备。" })
+        : { ok: false, state: await buildSettingsState(), error: `播放失败：${result.reason}` };
+    }
+
     case "saveNgrokAuthtoken": {
       // Stored in the secret store, never in config.json: this is an account
       // credential, and config.json is plain text the operator may well paste
@@ -495,6 +516,9 @@ function fallbackState(): SettingsState {
       tunnelProvider: CONFIG_DEFAULTS.tunnelProvider as string,
       ngrokExecutable: CONFIG_DEFAULTS.ngrokExecutable as string,
       logMaxBytes: CONFIG_DEFAULTS.logMaxBytes as number,
+      "sound.enabled": false,
+      "sound.fileWaiting": "",
+      "sound.fileFinished": "",
       "notify.levelAttention": CONFIG_DEFAULTS["notify.levelAttention"] as string,
       "notify.levelWaiting": CONFIG_DEFAULTS["notify.levelWaiting"] as string,
       "notify.levelFinished": CONFIG_DEFAULTS["notify.levelFinished"] as string,

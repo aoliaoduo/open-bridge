@@ -71,6 +71,20 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = deepFreeze({
   /** Bark server origin; loopback http is allowed (development), other http is refused. */
   "notify.serverUrl": "https://api.day.app",
   /**
+   * Local audio alert: the other half of "tell me something happened".
+   *
+   * Bark answers "I am away from the desk"; this answers "I am right here
+   * with the tab in the background". Deliberately narrower than the phone
+   * channel — only the events that mean the AI has STOPPED and is waiting on
+   * a human. A chime on every completed todo is how a person ends up
+   * disabling the whole thing.
+   */
+  "sound.enabled": false,
+  /** Played for attention and waiting: the AI is blocked on you. */
+  "sound.fileWaiting": "",
+  /** Played when an exchange ends. */
+  "sound.fileFinished": "",
+  /**
    * Per-event Bark delivery style. The switches above decide WHETHER a push is
    * sent; these decide how loudly it arrives, which is a different question
    * and was previously hardcoded.

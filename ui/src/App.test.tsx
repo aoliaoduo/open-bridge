@@ -141,6 +141,9 @@ function settingsState(overrides: Partial<SettingsState> = {}): SettingsState {
     "notify.callWaiting": false,
     "notify.callFinished": false,
     "notify.callProgress": false,
+    "sound.enabled": false,
+    "sound.fileWaiting": "",
+    "sound.fileFinished": "",
     },
     detected: {
       shells: [

@@ -38,6 +38,7 @@
 
 import { probeHttpHealth } from "../network/safe-probe.js";
 import { host } from "../host/host.js";
+import { playAlertSound, soundFileForEvent } from "./sound-alert.js";
 import { CONFIG_DEFAULTS } from "./config-defaults.js";
 import { canonicalBarkOrigin, parseBarkKeyInput } from "./config-values.js";
 import { record, state } from "./state.js";
@@ -390,6 +391,21 @@ export async function pushNotification(
 ): Promise<NotifyOutcome> {
   const outcome = (delivered: boolean, reason: string, status = 0, error = ""): NotifyOutcome =>
     ({ delivered, event, reason, status, error });
+
+  // The local chime fires BEFORE every Bark gate, and that ordering is the
+  // whole point. The two channels answer different questions -- "I am away
+  // from the desk" versus "I am right here with the tab buried" -- so a
+  // machine with no Bark key, or with the phone switches off, must still be
+  // able to make a noise. Wiring the sound behind `settings.usable` would
+  // have made a local-only setup silent, which is the setup most likely to
+  // want a chime.
+  //
+  // Its own gating lives in soundFileForEvent: disabled, or no file for this
+  // event, means "" and nothing happens. Dedupe and rate limits below are
+  // Bark's; a sound is cheap and local, and suppressing the second of two
+  // identical chimes would hide a real repeat.
+  const soundFile = soundFileForEvent(event);
+  if (soundFile) playAlertSound(soundFile);
 
   if (!settings.usable) return logged(outcome(false, settings.blocker || "disabled"), title);
   // "switch_off" rather than the old "mode": the reason names a thing the

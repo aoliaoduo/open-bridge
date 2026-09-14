@@ -42,6 +42,7 @@ const NOTIFY_LEVEL_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 const BOOLEAN_KEYS: ReadonlySet<string> = new Set([
+  "sound.enabled",
   "notify.callAttention",
   "notify.callWaiting",
   "notify.callFinished",
@@ -61,6 +62,17 @@ const NON_NEGATIVE_INT_KEYS: ReadonlySet<string> = new Set([
   "concurrency.holdTimeoutMs",
   "concurrency.waitTimeoutMs",
 ]);
+
+/**
+ * Audio extensions the local alert player handles.
+ *
+ * Duplicated from sound-alert.ts rather than imported: this module must stay
+ * browser-bundle-safe (see the header) and sound-alert.ts pulls in
+ * node:child_process. Two short literal lists that can only disagree about
+ * which files to *accept* is a cheaper failure than dragging a process
+ * spawner into the console bundle.
+ */
+const SOUND_EXTENSIONS = [".wav", ".mp3", ".m4a", ".aac", ".wma", ".flac"] as const;
 
 const MAX_LIST_ITEMS = 50;
 const MAX_PATH_CHARS = 500;
@@ -264,6 +276,31 @@ export function validateConfigValue(key: string, value: unknown): ConfigValidati
     return { ok: true, value };
   }
 
+
+  if (key === "sound.fileWaiting" || key === "sound.fileFinished") {
+    if (typeof value !== "string") {
+      return { ok: false, error: `${key} must be a path string, or "" for no sound. (expected '${key}': string)` };
+    }
+    const path = value.trim();
+    if (!path) return { ok: true, value: "" };
+    if (!isAbsoluteConfigPath(path)) {
+      return {
+        ok: false,
+        error: `${key} must be an absolute path — a relative one would resolve against wherever the bridge happens to be running. (expected '${key}': string)`,
+      };
+    }
+    const extension = /\.[a-z0-9]+$/i.exec(path)?.[0]?.toLowerCase() ?? "";
+    if (!SOUND_EXTENSIONS.includes(extension as (typeof SOUND_EXTENSIONS)[number])) {
+      return {
+        ok: false,
+        error: `${key} must point at an audio file (${SOUND_EXTENSIONS.join(", ")}). (expected '${key}': string)`,
+      };
+    }
+    // Existence is checked by the settings handler, which can say "saved, but
+    // that file is not there" — a warning, not a refusal. Someone configuring
+    // a path before copying the file in is doing something reasonable.
+    return { ok: true, value: path };
+  }
 
   if (key === "notify.serverUrl") {
     // Same shape as oauth's `resource` rule: a bare origin, never a URL with
