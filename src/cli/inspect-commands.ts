@@ -105,6 +105,16 @@ export async function cmdLogs(parsed: ParsedArgs): Promise<void> {
         size = stat.size;
         process.stdout.write(Buffer.concat(parts).toString("utf8"));
       });
+      // The try/catch around this block only sees synchronous throws; a stream
+      // error arrives as an event, and an unhandled one on a ReadStream is an
+      // uncaught exception that takes the CLI down. The window is real -- the
+      // file can be truncated by `logs --clear` or rotation between the
+      // statSync above and the read below -- though hammering clear against a
+      // follower did not manage to hit it, so this guard is reasoning rather
+      // than a reproduction. It costs nothing and the alternative is a crash,
+      // so it stays. Skipping the slice is safe: the next tick re-stats, and
+      // the size check already handles a file that shrank.
+      stream.on("error", () => { /* file changed mid-read; the next tick re-reads */ });
     } catch { /* file gone; keep waiting for it to come back */ }
   }, 1000);
 
@@ -131,6 +141,11 @@ export async function cmdLogs(parsed: ParsedArgs): Promise<void> {
     };
     process.on("SIGINT", finish);
     process.on("SIGTERM", finish);
+    // The same four signals serve handles. SIGHUP is an ssh session ending --
+    // a plausible way to leave a follower running on a remote box -- and
+    // SIGBREAK is what closing the window sends on Windows.
+    process.on("SIGHUP", finish);
+    process.on("SIGBREAK", finish);
     // An unhandled stdout error would kill the process with a stack trace; for
     // a normal `| head` that is noise, so exit quietly instead.
     process.stdout.on("error", finish);
