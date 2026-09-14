@@ -782,7 +782,11 @@ input.switch:disabled { opacity: .5; cursor: not-allowed; }
 
 /* --- two-column page body -------------------------------------------------- */
 
-.split { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+/* 1.65:1 was sized for a right column holding one short property list. The
+   lock table lives there now, so the ratio moves toward even -- the wide
+   column still holds the endpoint URLs, which are the longest strings on the
+   page and the ones worst served by wrapping. */
+.split { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; align-items: start; }
 .split > div > .card:last-child { margin-bottom: 0; }
 @media (max-width: 1080px) { .split { grid-template-columns: minmax(0, 1fr); } }
 
