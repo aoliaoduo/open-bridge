@@ -385,7 +385,17 @@ export async function findFiles(args: Args): Promise<string[]> {
   const base = await securePath(args.path);
   const pattern = String(args.pattern ?? "");
   if (!pattern) throw new Error("pattern is required. (expected 'pattern': string)");
-  const limit = Number.isFinite(Number(args.max_results)) ? Number(args.max_results) : DEFAULT_MAX_SEARCH_RESULTS;
+  // A negative limit is nonsense, and it failed in two OPPOSITE ways depending
+  // on which search path ran: ripgrep reads a negative --max-count as "no
+  // limit" and returned everything, while the built-in scan compares
+  // `out.length >= limit`, true from the very first entry, and returned
+  // nothing. Same argument, same tool, one answer of 166 and one of 0.
+  // Fall back to the default: the caller wanted results, and neither "all of
+  // them" nor "none" is a defensible reading of -1. maxBytes above already
+  // guards this way; max_results was simply missed.
+  const limit = Number.isFinite(Number(args.max_results)) && Number(args.max_results) >= 0
+    ? Math.floor(Number(args.max_results))
+    : DEFAULT_MAX_SEARCH_RESULTS;
 
   async function walk(dir: string): Promise<void> {
     if (out.length >= limit) return;
@@ -412,7 +422,11 @@ export async function searchFiles(args: Args): Promise<unknown[]> {
   // directory-oriented, so the built-in stream scan handles this case directly).
   const baseStat = await fs.stat(base).catch(() => undefined);
   const singleRel = baseStat?.isFile() ? path.relative(root(), base).replace(/\\/g, "/") : undefined;
-  const limit = Number.isFinite(Number(args.max_results)) ? Number(args.max_results) : DEFAULT_MAX_SEARCH_RESULTS;
+  // Same guard as grepFiles above: a negative limit meant "everything" down
+  // the ripgrep path and "nothing" down the stream path.
+  const limit = Number.isFinite(Number(args.max_results)) && Number(args.max_results) >= 0
+    ? Math.floor(Number(args.max_results))
+    : DEFAULT_MAX_SEARCH_RESULTS;
   const offset = Math.max(0, Math.floor(Number(args.offset) || 0));
   const useRegex = args.regex !== false;
   const contextLines = Math.min(Math.max(Number(args.context ?? 0) || 0, 0), 20);

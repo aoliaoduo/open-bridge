@@ -90,3 +90,34 @@ test("look-around queries are answered, not lost to a backend that cannot parse 
   const behind = (await searchFiles({ query: "(?<=alpha )beta" })) as Hit[];
   assert.deepEqual(behind.map(h => `${h.path}:${h.line}`), ["sub/b.txt:1"]);
 });
+
+/**
+ * A negative max_results failed in two opposite directions depending on which
+ * search path ran. Measured against this repo's own src/bridge before the fix:
+ * max_results -1 returned 166 matches (ripgrep reads a negative --max-count as
+ * "no limit") while -1000 returned 0 (the built-in scan compares
+ * `out.length >= limit`, true from the first entry). One argument, one tool,
+ * opposite answers -- and "0 results" is the dangerous one, because it reads
+ * as "nothing matches" rather than "you passed something invalid".
+ */
+test("a negative max_results falls back to the default instead of meaning all or nothing", async () => {
+  for (let i = 0; i < 12; i += 1) {
+    writeFileSync(path.join(dir, `hit-${i}.txt`), "needle here\n");
+  }
+
+  const negative = await searchFiles({ path: ".", query: "needle", max_results: -1 });
+  const alsoNegative = await searchFiles({ path: ".", query: "needle", max_results: -1000 });
+
+  // The point is not the exact count but that both negatives agree and that
+  // neither collapsed to zero -- the caller asked for matches and there are 12.
+  assert.equal(negative.length, alsoNegative.length, "-1 and -1000 must not disagree");
+  assert.equal(negative.length, 12, "a nonsense limit must not hide real matches");
+
+  // Zero stays meaningful: it is a real request for no rows, not a mistake.
+  const zero = await searchFiles({ path: ".", query: "needle", max_results: 0 });
+  assert.equal(zero.length, 0, "0 still means 0");
+
+  // And a sane limit is still honoured exactly.
+  const three = await searchFiles({ path: ".", query: "needle", max_results: 3 });
+  assert.equal(three.length, 3);
+});
