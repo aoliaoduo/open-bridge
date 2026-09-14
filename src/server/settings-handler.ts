@@ -386,8 +386,9 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
     }
 
     case "testNotify": {
-      // "attention" is the one event that passes every mode — the operator
-      // pressing this button IS the attention, and 免打扰 must not mute a test.
+      // "attention" bypasses both switches by design — the operator pressing
+      // this button IS the attention, and a muted test button would report a
+      // broken channel as working.
       const result = await pushNotification(
         resolveNotifySettings(),
         "attention",

@@ -462,8 +462,8 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
           <Field
             label={t("无反应提醒", "Silence alert")}
             hint={t(
-              "连接完全静默超过这个分钟数、且任务清单还有未完成项时，推送一次「需要你回来了」。0 = 关闭。",
-              "When the connection goes quiet for this many minutes with work still open, push once to call you back. 0 disables it.",
+              "连接完全静默超过这个分钟数就推送一次「需要你回来了」，不要求存在任务清单——AI 忘了写清单的时候，恰恰最需要这条提醒。0 = 关闭。",
+              "Pushes once to call you back after this many minutes of total silence. No todo list required: the times the AI forgets to write one are exactly when you most need telling. 0 disables it.",
             )}
           >
             <DraftField

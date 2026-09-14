@@ -92,7 +92,7 @@ export interface NotifySettings {
   serverUrl: string;
   /** Why the channel is not ready ("disabled" / "no_key" / ""), for messages. */
   blocker: string;
-  /** Minutes of total MCP silence with unfinished todos before the watchdog bells; 0 = off. */
+  /** Minutes of total MCP silence before the watchdog bells; 0 = off. Todos are not required. */
   idleMinutes: number;
 }
 
@@ -398,10 +398,11 @@ export async function pushNotification(
     const probe = await probeHttpHealth(url, { timeoutMs: BARK_TIMEOUT_MS });
     if (probe.ok) {
       // Any push that actually landed disarms the finish watchdog. This is the
-      // hinge that makes the fallback mode-aware for free: in frequent mode the
-      // completion bell has already rung by the time a list is fully ticked, so
-      // the watchdog stays quiet; with that switch off the bell is suppressed,
-      // the mark is never set, and the watchdog is the only thing that speaks.
+      // hinge that makes the fallback respect the switches for free: with
+      // onTaskDone on, the completion bell has already rung by the time a list
+      // is fully ticked, so the watchdog stays quiet; with it off the bell is
+      // suppressed, the mark is never set, and the watchdog is the only thing
+      // that speaks.
       markSelfNotified(nowMs);
       return logged(outcome(true, "", probe.status), clippedTitle);
     }
@@ -528,11 +529,11 @@ export function newlyCompletedTodos(previous: readonly unknown[], next: readonly
 }
 
 /**
- * The frequent-mode hook: one push per set_todos call, naming the items
+ * The task-done hook: one push per set_todos call, naming the items
  * (a batch completion pages as one message — 2 s apart, 30 completed items
  * become 30 pages, not 2). Best-effort by design — the bell observes the
- * work list, it never gates it. Mode is checked inside pushNotification,
- * so 免打扰 suppresses here without a duplicated rule.
+ * work list, it never gates it. The `notify.onTaskDone` switch is checked
+ * inside pushNotification, so it suppresses here without a duplicated rule.
  */
 export function pushTodoCompletions(previous: readonly unknown[], next: readonly unknown[]): void {
   const settings = resolveNotifySettings();
@@ -637,9 +638,10 @@ export function idleNoticeTick(nowMs: number = Date.now()): boolean {
 /**
  * Should the server announce an ended conversation the AI never announced?
  *
- * The idle watchdog above deliberately requires an OPEN todo — "silence with
- * work outstanding" is its whole subject. That leaves the opposite case
- * uncovered, and it is the common one: the model ticks the last item, writes
+ * The idle watchdog above covers silence — nobody said anything for N minutes.
+ * That leaves the opposite case uncovered, and it is the common one: the
+ * conversation ends cleanly and promptly, so no silence accumulates. The
+ * model ticks the last item, writes
  * its summary in the chat, and simply never calls `notify("finished")`. The
  * operator, who is not watching the tab, learns nothing. Relying on the model
  * to remember is what already failed — repeatedly — so the server states the
