@@ -535,6 +535,11 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
 
 /* --- settings section rail ------------------------------------------------- */
 
+/* Horizontal scrolling is real on a narrow window -- six section tabs do not
+   always fit -- but the six of them fit easily on a normal one, and the
+   scrollbar was showing there anyway, as a sliver under the tab row. Same
+   treatment as .nav: keep the overflow, hide the bar until the pointer or
+   keyboard focus is actually in the rail. */
 .secnav {
   position: sticky;
   top: var(--bar-h);
@@ -546,7 +551,12 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
   padding: 4px 0 0;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
+  scrollbar-width: none;
 }
+.secnav:hover, .secnav:focus-within { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.secnav::-webkit-scrollbar { height: 8px; }
+.secnav::-webkit-scrollbar-thumb { background: transparent; border-radius: 4px; }
+.secnav:hover::-webkit-scrollbar-thumb, .secnav:focus-within::-webkit-scrollbar-thumb { background: var(--border); }
 .secnav-item {
   border: none;
   border-bottom: 2px solid transparent;
