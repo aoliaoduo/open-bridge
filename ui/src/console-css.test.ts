@@ -109,3 +109,26 @@ test("the drawer breakpoint in Topbar matches the one in the stylesheet", () => 
     `the @media at ${declared}px exists but is not the drawer's own block`,
   );
 });
+
+/**
+ * The ring toggle has landed in the wrong column once already: the delivery
+ * cell carried `white-space: nowrap`, label.check is inline-flex, so the
+ * checkbox and its text were forced onto the select's line, overflowed a
+ * 1%-wide cell and covered the ringtone input — the label disappeared and
+ * only the dot showed.
+ *
+ * The structural half of that is testable without a cascade: the toggle must
+ * live inside the delivery cell, and the ringtone input must be alone in the
+ * last one.
+ */
+test("the ring toggle belongs to the delivery cell, not the ringtone column", () => {
+  const rule = /\.notify-table td:nth-child\(3\)[^{]*\{([^}]*)\}/.exec(css);
+  assert.ok(rule, "the delivery column needs its own rule");
+  assert.doesNotMatch(
+    rule[1] ?? "",
+    /white-space:\s*nowrap/,
+    "nowrap here forces the checkbox onto the select's line and out of the cell",
+  );
+  assert.match(css, /\.notify-table \.delivery-cell[^{]*\{[^}]*flex-direction:\s*column/,
+    "the select and the ring toggle stack rather than sharing a line");
+});

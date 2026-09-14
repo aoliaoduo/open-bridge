@@ -531,6 +531,7 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
                       </td>
                       <td><span className="field-hint">{row.when()}</span></td>
                       <td>
+                        <div className="delivery-cell">
                         <select
                           value={settings.config[`notify.level${row.key}`] as string}
                           onChange={e => setConfig(`notify.level${row.key}`, e.target.value)}
@@ -541,7 +542,7 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
                           <option value="critical">{t("无视静音", "Critical (ignores mute)")}</option>
                         </select>
                         {row.key === "Attention" || row.key === "Waiting" ? (
-                          <label className="check" style={{ marginTop: 4 }}>
+                          <label className="check">
                             <input
                               type="checkbox"
                               className="switch"
@@ -551,6 +552,7 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
                             <span className="field-hint">{t("持续响铃", "Ring until opened")}</span>
                           </label>
                         ) : null}
+                        </div>
                       </td>
                       <td>
                         <DraftField
