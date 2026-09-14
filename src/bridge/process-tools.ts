@@ -459,7 +459,17 @@ export function setTodos(args: Args, session?: SessionState): unknown[] {
  * entry on untouched, so there is no entry-dropping reader to look for.
  */
 function validateTodos(value: unknown): Array<{ id: string; title: string; status: string }> {
-  if (!Array.isArray(value)) throw new Error("todos must be an array. (expected 'todos': object[])");
+  if (!Array.isArray(value)) {
+    // Name the read tool as well as the parameter. `set_todos` is write-only,
+    // so the commonest way to get here is reaching for it to READ the list
+    // (`{action:"list"}` was a real attempt) — at which point "todos must be an
+    // array" is a true statement that answers the wrong question. get_todos is
+    // right there; the guard costs one clause and saves a round trip.
+    throw new Error(
+      "todos must be an array. (expected 'todos': object[]) "
+      + "set_todos replaces the whole list; use get_todos to read the current one.",
+    );
+  }
   const seen = new Set<string>();
   const todos = value.map((item, index) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`Todo ${index + 1} must be an object.`);
@@ -468,7 +478,16 @@ function validateTodos(value: unknown): Array<{ id: string; title: string; statu
     const title = String(todo.title ?? "").trim();
     const status = String(todo.status ?? "");
     if (!id || !title || !["pending", "in_progress", "completed"].includes(status)) {
-      throw new Error(`Todo ${index + 1} requires id, title, and a valid status. (expected 'todos[i]': object)`);
+      // Say which field is missing. "requires id, title, and a valid status"
+      // made the caller re-read all three against their payload to find the one
+      // that was wrong — and status is the one with a closed vocabulary, so an
+      // invalid value there is both the likeliest error and the one a bare
+      // field list cannot explain.
+      const missing = [!id && "id", !title && "title"].filter(Boolean).join(", ");
+      const detail = missing
+        ? `missing ${missing}`
+        : `status must be pending, in_progress or completed (got ${JSON.stringify(status)})`;
+      throw new Error(`Todo ${index + 1}: ${detail}. (expected 'todos[i]': object)`);
     }
     if (seen.has(id)) throw new Error(`Duplicate todo id: ${id}`);
     seen.add(id);

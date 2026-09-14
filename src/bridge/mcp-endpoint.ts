@@ -280,8 +280,19 @@ async function runToolCall(
   } catch (e) {
     state.usage.failures += 1;
     persistUsageStats();
-    record(name, "error", `Failed in ${Date.now() - startedAt} ms.`);
-    return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    // The reason, not just the duration. This line is the ONLY trace a failed
+    // call leaves behind — the console's activity pane, `activity_log` search
+    // and the audit file all read it — and it used to say nothing but how long
+    // the failure took, which is the least useful fact available about it. The
+    // message was already in hand on the very next line, on its way back to the
+    // caller. Anyone debugging from the log alone saw "edit_block failed" and
+    // had to reproduce the call to find out why.
+    //
+    // record() redacts and caps at 500 chars, so the raw text is safe to pass:
+    // this is the same treatment every other audit line gets.
+    const reason = e instanceof Error ? e.message : String(e);
+    record(name, "error", `Failed in ${Date.now() - startedAt} ms: ${reason}`);
+    return { ok: false, message: reason };
   }
 }
 

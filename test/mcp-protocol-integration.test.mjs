@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import {test, before, after} from "node:test";
 import {spawn} from "node:child_process";
 import http from "node:http";
-import {mkdtempSync, rmSync} from "node:fs";
+import {mkdtempSync, readFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import path from "node:path";
 import {routeTokenFor, waitForRuntime} from "./lib/bridge-runtime.mjs";
@@ -116,6 +116,47 @@ async function usage() {
   assert.equal(res.status, 200);
   return JSON.parse(res.body).usage;
 }
+
+test("a failed call records WHY it failed, not just how long it took", async () => {
+  // The audit line is the only trace a failure leaves: the console's activity
+  // pane, `activity_log` search and the audit file all read it. It used to say
+  // "Failed in 1 ms." and nothing else — the reason was in hand on the very
+  // next line, on its way back to the caller, and simply not written down.
+  // Debugging from the log alone meant reproducing the call to learn anything.
+  const { sessionId } = await openSession();
+  const failed = await callTool(sessionId, "set_todos", { todos: "not a list" });
+  assert.match(failed.text, /todos must be an array/, "the caller is told what is wrong");
+
+  await delay(300);
+  const audit = readFileSync(path.join(home, "audit.log"), "utf8")
+    .split("\n").filter(Boolean).map(line => JSON.parse(line));
+  const entry = audit.findLast(row => row.tool === "set_todos" && row.status === "error");
+  assert.ok(entry, "the failure reached the audit log");
+  assert.match(entry.message, /todos must be an array/,
+    "and the log carries the same reason the caller got");
+  // The duration is still there — it is just no longer the ONLY thing there.
+  assert.match(entry.message, /^Failed in \d+ ms: /);
+});
+
+test("a rejected write says which field is wrong, and which tool reads", async () => {
+  const { sessionId } = await openSession();
+
+  // set_todos is write-only, so the commonest way to get an array error is
+  // reaching for it to READ the list. Naming get_todos costs one clause.
+  const notAList = await callTool(sessionId, "set_todos", { todos: "not a list" });
+  assert.match(notAList.text, /use get_todos to read/, "the read tool is named, not just the bad parameter");
+
+  // Naming the offending field beats listing all three and leaving the caller
+  // to diff their payload against the list.
+  const badStatus = await callTool(sessionId, "set_todos", {
+    todos: [{ id: "1", title: "x", status: "doing" }],
+  });
+  assert.match(badStatus.text, /status must be pending, in_progress or completed/);
+  assert.match(badStatus.text, /"doing"/, "the rejected value is quoted back");
+
+  const noTitle = await callTool(sessionId, "set_todos", { todos: [{ id: "1", status: "pending" }] });
+  assert.match(noTitle.text, /missing title/);
+});
 
 test("tools/list advertises the catalog and get_bridge_status agrees on the count", async () => {
   const { res, sessionId } = await openSession();
