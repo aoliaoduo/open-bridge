@@ -101,6 +101,22 @@ test("a TZ too odd to map is left alone and reported as a failure", async () => 
   }
 });
 
+test("asking for UTC and getting UTC is not a failure", async () => {
+  const home = freshHome();
+  try {
+    // The check above cannot be "the offset is zero", because that is also the
+    // right answer for someone who deliberately runs in UTC -- servers do. The
+    // failure is a TZ asking for one offset and silently getting another, so
+    // the two cases are told apart by what TZ asked for, not by the offset.
+    // Without this the fix would report every UTC machine as broken, which is
+    // most CI runners, including the one that caught the original bug.
+    const { stdout } = await runCli(["doctor"], home, 20_000, { TZ: "UTC" });
+    assert.match(stdout, /\[OK\][^\n]*timezone/, "a deliberate UTC is healthy");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("doctor is satisfied by a real IANA zone", async () => {
   const home = freshHome();
   try {

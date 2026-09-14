@@ -202,14 +202,33 @@ export async function cmdDoctor(parsed: ParsedArgs): Promise<void> {
   // than pretending the environment was fine all along.
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
   const rawTz = process.env.TZ;
-  const zoneUnresolved = zone === "" || zone === "Etc/Unknown";
+  // Three ways a zone can be unusable, and platform ICU decides which you see.
+  // "" and "Etc/Unknown" are the two spellings of "I gave up" (Linux and
+  // Windows respectively, for the same TZ=CST-8).
+  //
+  // The third is the dangerous one: glibc accepts a POSIX value this repair
+  // cannot map -- TZ=IST-5:30, a half-hour offset -- and resolves it to plain
+  // "UTC". That is a real IANA name, so a name-only check calls it healthy
+  // while the clock reads 5.5 hours off. Catch it by asking whether the
+  // process actually moved: TZ was set to something non-UTC, yet the offset
+  // is zero. A deliberate TZ=UTC still passes, because the offset it asks for
+  // is the offset it got.
+  const offsetIsZero = new Date().getTimezoneOffset() === 0;
+  const tzAsksForUtc = /^(UTC|GMT|Etc\/UTC|Etc\/GMT|Etc\/GMT0|Z)$/i.test((rawTz ?? "").trim());
+  const silentlyUtc = (rawTz ?? "").trim() !== "" && offsetIsZero && !tzAsksForUtc;
+  const zoneUnresolved = zone === "" || zone === "Etc/Unknown" || silentlyUtc;
   const repaired = !zoneUnresolved && zone.startsWith("Etc/GMT");
   check("timezone", !zoneUnresolved,
     zoneUnresolved
-      ? t(
-        `无法识别 TZ=${JSON.stringify(rawTz ?? "")}，已回落 UTC —— 日志时间会与本机挂钟不一致。改用 IANA 名称（如 TZ=Asia/Shanghai）或直接不设 TZ（跟随系统）`,
-        `Unrecognised TZ=${JSON.stringify(rawTz ?? "")}; fell back to UTC, so log times will not match this machine's clock. Use an IANA name (e.g. TZ=Asia/Shanghai) or unset TZ to follow the system.`,
-      )
+      ? silentlyUtc
+        ? t(
+          `TZ=${JSON.stringify(rawTz ?? "")} 解析成了 ${zone}（+00:00），但它要的不是 UTC —— 这个偏移无法折算（含夏令时规则或半小时偏移），日志时间会与本机挂钟不一致。改用 IANA 名称（如 TZ=Asia/Kolkata、TZ=Asia/Shanghai）或直接不设 TZ（跟随系统）`,
+          `TZ=${JSON.stringify(rawTz ?? "")} resolved to ${zone} (+00:00), which is not what it asked for. This offset cannot be mapped (it carries a DST rule or a half-hour offset), so log times will not match this machine's clock. Use an IANA name (e.g. TZ=Asia/Kolkata, TZ=Asia/Shanghai) or unset TZ to follow the system.`,
+        )
+        : t(
+          `无法识别 TZ=${JSON.stringify(rawTz ?? "")}，已回落 UTC —— 日志时间会与本机挂钟不一致。改用 IANA 名称（如 TZ=Asia/Shanghai）或直接不设 TZ（跟随系统）`,
+          `Unrecognised TZ=${JSON.stringify(rawTz ?? "")}; fell back to UTC, so log times will not match this machine's clock. Use an IANA name (e.g. TZ=Asia/Shanghai) or unset TZ to follow the system.`,
+        )
       : repaired
         ? t(
           `${zone}（${localOffset()}）—— 偏移已对，但这是从无法识别的 TZ 自动折算来的固定偏移、不含夏令时；根治办法是在 shell 配置里去掉那行 TZ（跟随系统时区）`,

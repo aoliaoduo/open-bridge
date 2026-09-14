@@ -364,7 +364,13 @@ export function normalizeTimezone(env: NodeJS.ProcessEnv = process.env): string 
   const resolved = (): string => {
     try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; }
   };
-  if (resolved() !== "Etc/Unknown") return undefined;
+  // "Unresolvable" has three shapes, and which one you get is platform ICU's
+  // business, not ours. Windows answers "Etc/Unknown" for TZ=CST-8; Linux
+  // answers "" (resolvedOptions().timeZone is undefined) for the same value.
+  // Checking only for "Etc/Unknown" left the repair dead on Linux -- the very
+  // platform CI runs -- which is how this stayed invisible until CI said so.
+  const unresolvable = (zone: string): boolean => zone === "" || zone === "Etc/Unknown";
+  if (!unresolvable(resolved())) return undefined;
 
   const raw = env.TZ;
   if (raw === undefined || raw === "") return undefined;
@@ -378,7 +384,7 @@ export function normalizeTimezone(env: NodeJS.ProcessEnv = process.env): string 
   const candidate = hours === 0 ? "Etc/GMT" : `Etc/GMT${hours < 0 ? "-" : "+"}${Math.abs(hours)}`;
   const previous = env.TZ;
   env.TZ = candidate;
-  if (resolved() === "Etc/Unknown") {
+  if (unresolvable(resolved())) {
     env.TZ = previous; // candidate was no better; leave the evidence intact for doctor
     return undefined;
   }
