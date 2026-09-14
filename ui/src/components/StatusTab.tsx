@@ -269,80 +269,84 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
 
         </div>
 
-        <Card title={t("实时状态", "Live state")} desc={t("每 2 秒刷新一次。", "Refreshes every 2 seconds.")}>
-          <PropList
-            items={[
-              { label: t("状态", "State"), value: STATE_LABEL[status?.state ?? ""]?.() ?? status?.state ?? "…" },
-              { label: "Shell", value: status?.shell ?? "…", mono: true },
-              {
-                label: t("鉴权", "Auth"),
-                value: status?.auth_enabled
-                  ? t("已启用（Bearer）", "On (Bearer)")
-                  : t("关闭（只填 URL 即可接入）", "Off (the URL alone connects)"),
-              },
-              { label: t("工具配置档", "Tool profile"), value: status?.tool_profile ?? "…", mono: true },
-              { label: t("工作区数", "Workspaces"), value: status?.allowed_directories?.length ?? 0 },
-            ]}
-          />
-        </Card>
+        <div>
 
-        <Card
-          title={t("文件锁明细", "Lock detail")}
-          desc={
-            <>
-              {t(
-                "并发写同一个目录时，第二个调用者会等锁而不是覆盖对方。持有 是正在写文件的调用，等待 是被挡住的调用；两者都会随时间自己消失。",
-                "When two calls write the same directory the second waits for the lock instead of overwriting. Held is the call currently writing, Waiting is the one blocked; both clear themselves over time.",
-              )}
-            </>
-          }
-        >
-          {lockRows.length === 0 ? (
-            <EmptyState title={t("当前没有加锁，也没有等待者。", "No locks held and nobody waiting.")}>
-              {t(
-                "多客户端同时写同一个目录时，这里会出现资源路径、调用名与已经等了多少。",
-                "When several clients write the same directory, the resource path, the call and how long it has waited show up here.",
-              )}
-            </EmptyState>
-          ) : (
-            <div className="table-wrap">
-              <table className="token-table">
-                <thead>
-                  <tr>
-                    <th>{t("状态", "State")}</th>
-                    <th>{t("资源", "Resource")}</th>
-                    <th>{t("模式", "Mode")}</th>
-                    <th>{t("调用", "Call")}</th>
-                    <th className="num">{t("已持续", "For")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {/* Key includes the index: two waiters can legally queue on the
-                      same resource (that is the whole point of the table), and a
-                      kind+key key collided between them. */}
-                  {lockRows.map((row, index) => (
-                    <tr key={`${row.kind}-${row.key}-${index}`}>
-                      <td>
-                        {row.kind === "held"
-                          ? <Chip tone="ok">{t("持有", "Held")}</Chip>
-                          : <Chip tone="warn">{t("等待", "Waiting")}</Chip>}
-                      </td>
-                      <td className="mono" title={row.key || undefined}>{row.key || "—"}</td>
-                      <td>{row.mode || "—"}</td>
-                      <td className="muted">{row.label || "—"}</td>
-                      <td className="num">{idleLabel(row.ms)}</td>
+          <Card title={t("实时状态", "Live state")} desc={t("每 2 秒刷新一次。", "Refreshes every 2 seconds.")}>
+            <PropList
+              items={[
+                { label: t("状态", "State"), value: STATE_LABEL[status?.state ?? ""]?.() ?? status?.state ?? "…" },
+                { label: "Shell", value: status?.shell ?? "…", mono: true },
+                {
+                  label: t("鉴权", "Auth"),
+                  value: status?.auth_enabled
+                    ? t("已启用（Bearer）", "On (Bearer)")
+                    : t("关闭（只填 URL 即可接入）", "Off (the URL alone connects)"),
+                },
+                { label: t("工具配置档", "Tool profile"), value: status?.tool_profile ?? "…", mono: true },
+                { label: t("工作区数", "Workspaces"), value: status?.allowed_directories?.length ?? 0 },
+              ]}
+            />
+          </Card>
+
+          <Card
+            title={t("文件锁明细", "Lock detail")}
+            desc={
+              <>
+                {t(
+                  "并发写同一个目录时，第二个调用者会等锁而不是覆盖对方。持有 是正在写文件的调用，等待 是被挡住的调用；两者都会随时间自己消失。",
+                  "When two calls write the same directory the second waits for the lock instead of overwriting. Held is the call currently writing, Waiting is the one blocked; both clear themselves over time.",
+                )}
+              </>
+            }
+          >
+            {lockRows.length === 0 ? (
+              <EmptyState title={t("当前没有加锁，也没有等待者。", "No locks held and nobody waiting.")}>
+                {t(
+                  "多客户端同时写同一个目录时，这里会出现资源路径、调用名与已经等了多少。",
+                  "When several clients write the same directory, the resource path, the call and how long it has waited show up here.",
+                )}
+              </EmptyState>
+            ) : (
+              <div className="table-wrap">
+                <table className="token-table">
+                  <thead>
+                    <tr>
+                      <th>{t("状态", "State")}</th>
+                      <th>{t("资源", "Resource")}</th>
+                      <th>{t("模式", "Mode")}</th>
+                      <th>{t("调用", "Call")}</th>
+                      <th className="num">{t("已持续", "For")}</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {/* Key includes the index: two waiters can legally queue on the
+                        same resource (that is the whole point of the table), and a
+                        kind+key key collided between them. */}
+                    {lockRows.map((row, index) => (
+                      <tr key={`${row.kind}-${row.key}-${index}`}>
+                        <td>
+                          {row.kind === "held"
+                            ? <Chip tone="ok">{t("持有", "Held")}</Chip>
+                            : <Chip tone="warn">{t("等待", "Waiting")}</Chip>}
+                        </td>
+                        <td className="mono" title={row.key || undefined}>{row.key || "—"}</td>
+                        <td>{row.mode || "—"}</td>
+                        <td className="muted">{row.label || "—"}</td>
+                        <td className="num">{idleLabel(row.ms)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="card-foot">
+              <span className="section-note" style={{ margin: 0 }}>
+                {t("每 5 秒自动刷新。", "Refreshes every 5 seconds.")}
+              </span>
             </div>
-          )}
-          <div className="card-foot">
-            <span className="section-note" style={{ margin: 0 }}>
-              {t("每 5 秒自动刷新。", "Refreshes every 5 seconds.")}
-            </span>
-          </div>
-        </Card>
+          </Card>
+
+        </div>
       </div>
     </>
   );

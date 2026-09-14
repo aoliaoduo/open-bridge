@@ -230,6 +230,31 @@ describe("StatusTab lock detail", () => {
     expect(screen.getByText("edit_file")).toBeTruthy();
   });
 
+  // The layout bug this guards against passed tsc and every behavioural test:
+  // .split is a two-column grid, so a third direct child does not sit in a
+  // column at all -- it wraps onto a second row under the left one, which is a
+  // worse version of the imbalance moving the card was meant to fix. Nothing
+  // here asserted structure, so the regression shipped looking green.
+  test("the split grid has exactly two columns of content", async () => {
+    statusMock.mockResolvedValue(bridgeStatus({}));
+
+    const { container } = render(
+      <StatusTab act={vi.fn(async () => null)} onRefresh={async () => undefined} notify={vi.fn()} onOpen={vi.fn()} />,
+    );
+    await screen.findByText("MCP 端点");
+
+    const split = container.querySelector(".split");
+    expect(split).toBeTruthy();
+    expect(split!.children.length).toBe(2);
+
+    // And the lock table belongs to the right-hand column, next to live state.
+    const right = split!.children[1]!;
+    expect(right.textContent).toContain("实时状态");
+    expect(right.textContent).toContain("文件锁明细");
+    expect(split!.children[0]!.textContent).toContain("MCP 端点");
+    expect(split!.children[0]!.textContent).not.toContain("文件锁明细");
+  });
+
   test("the public warning jumps to the 安全 page", async () => {
     statusMock.mockResolvedValue(bridgeStatus({
       mcp_url: "https://example.ngrok-free.dev/mcp/live",
