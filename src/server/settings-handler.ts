@@ -31,10 +31,13 @@ import {
   type SecretPayload,
   type SettingsAction,
   type SettingsActionResult,
+  type SettingsDetectedView,
   type SettingsState,
   type SettingsTokenRow,
 } from "../bridge/settings-model.js";
 import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
+import { detectShells } from "../shell/shell-provider.js";
+import { detectNgrok } from "../bridge/ngrok-locate.js";
 import { maskBarkKey, validateConfigValue } from "../bridge/config-values.js";
 import { NOTIFY_DEFAULT_TITLE, pushNotification, resolveNotifySettings, type NotifyOutcome } from "../bridge/notify.js";
 import * as path from "node:path";
@@ -89,7 +92,25 @@ export async function buildSettingsState(): Promise<SettingsState> {
       "oauth.allowedRedirectHosts": cfg.get("oauth.allowedRedirectHosts", CONFIG_DEFAULTS["oauth.allowedRedirectHosts"] as string[]),
     },
     notify: notifyView(),
+    detected: detectedView(),
   };
+}
+
+/**
+ * Probe for the executables the two "type a path here" settings need.
+ *
+ * Done on every state read rather than cached at startup: this is a handful of
+ * existsSync calls, and an operator who installs ngrok specifically because
+ * the page told them it was missing should see it appear on reload rather than
+ * after a restart. Failures collapse to empty lists — detection is a
+ * convenience, and the free-text input behind it still works.
+ */
+function detectedView(): SettingsDetectedView {
+  try {
+    return { shells: detectShells(), ngrok: detectNgrok() };
+  } catch {
+    return { shells: [], ngrok: [] };
+  }
 }
 
 /**
@@ -456,6 +477,9 @@ function fallbackState(): SettingsState {
       "oauth.enabled": CONFIG_DEFAULTS["oauth.enabled"] as boolean,
       "oauth.allowedRedirectHosts": [...(CONFIG_DEFAULTS["oauth.allowedRedirectHosts"] as string[])],
     },
+    // Detection needs no host — it reads the filesystem, not the config — so
+    // the pre-host view can still offer the picker instead of a bare box.
+    detected: detectedView(),
     notify: {
       // The canonical defaults, same as every other fallback field: with a
       // possibly-broken config we report "no key", never a guess about one.

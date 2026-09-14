@@ -1,5 +1,5 @@
 import { routeGroupLabel, routePath, routeSpec, type RouteId } from "../routes";
-import { langPrefLabel, t, type LangPref } from "../i18n";
+import { t } from "../i18n";
 import { themePrefLabel, type ThemePref } from "../theme";
 import type { SettingsState } from "../api";
 import { Chip } from "./Chip";
@@ -9,8 +9,6 @@ interface Props {
   settings: SettingsState | null;
   themePref: ThemePref;
   onCycleTheme: () => void;
-  langPref: LangPref;
-  onCycleLang: () => void;
   onOpen: (id: RouteId) => void;
   onCopyMcp: () => void;
   onRefresh: () => void;
@@ -30,7 +28,7 @@ interface Props {
  * page header, where it can be a heading instead of a tab).
  */
 export function Topbar({
-  route, settings, themePref, onCycleTheme, langPref, onCycleLang, onOpen, onCopyMcp, onRefresh, onToggleDrawer,
+  route, settings, themePref, onCycleTheme, onOpen, onCopyMcp, onRefresh, onToggleDrawer,
 }: Props) {
   const spec = routeSpec(route);
   const running = Boolean(settings?.running);
@@ -67,14 +65,6 @@ export function Topbar({
             v{settings.version}
           </span>
         ) : null}
-        <button
-          type="button"
-          className="ghost small"
-          onClick={onCycleLang}
-          title={t("在 跟随浏览器 / 中文 / English 之间切换", "Switch between Auto / 中文 / English")}
-        >
-          {langPrefLabel(langPref)}
-        </button>
         <button
           type="button"
           className="ghost small"

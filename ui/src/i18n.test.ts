@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import {
-  applyLang, detectLang, lang, langPrefLabel, nextLangPref, resolveLang, storeLangPref, t,
-} from "./i18n";
+import { applyLang, detectLang, lang, resolveLang, t } from "./i18n";
 
 /**
  * Language selection is the one piece of the console an English operator meets
  * before they can read anything else, so the detection rules are pinned here
  * rather than left to manual checking.
+ *
+ * There is no language switch: the browser decides. What used to be a
+ * three-state preference (跟随浏览器 / 中文 / English) is gone, so the tests
+ * that covered the cycle and its button label went with it — the remaining
+ * surface is detection, application, and the storage override that exists for
+ * these tests.
  */
 
 function stubLanguages(languages: string[], primary = languages[0] ?? "") {
@@ -14,7 +18,9 @@ function stubLanguages(languages: string[], primary = languages[0] ?? "") {
 }
 
 beforeEach(() => {
-  applyLang("zh");
+  // The seam vitest.setup.ts uses; cleared per test so detection is visible.
+  window.localStorage.clear();
+  applyLang();
 });
 
 afterEach(() => {
@@ -54,45 +60,45 @@ describe("detectLang", () => {
   });
 });
 
-describe("preference resolution", () => {
-  test("an explicit choice overrides the browser", () => {
+describe("applying the detected language", () => {
+  test("the browser decides, with no preference to consult", () => {
     stubLanguages(["en-US"]);
-    expect(resolveLang("zh")).toBe("zh");
-    expect(resolveLang("en")).toBe("en");
-    expect(resolveLang("system")).toBe("en");
+    expect(resolveLang()).toBe("en");
+    stubLanguages(["zh-CN"]);
+    expect(resolveLang()).toBe("zh");
   });
 
   test("t() follows the applied language and <html lang> follows with it", () => {
-    applyLang("en");
+    stubLanguages(["en-US"]);
+    applyLang();
     expect(lang()).toBe("en");
     expect(t("状态", "Status")).toBe("Status");
     expect(document.documentElement.lang).toBe("en");
 
-    applyLang("zh");
+    stubLanguages(["zh-CN"]);
+    applyLang();
     expect(t("状态", "Status")).toBe("状态");
     expect(document.documentElement.lang).toBe("zh-CN");
   });
 
-  test("the cycle visits all three states and returns", () => {
-    expect(nextLangPref("system")).toBe("zh");
-    expect(nextLangPref("zh")).toBe("en");
-    expect(nextLangPref("en")).toBe("system");
+  test("the stored test seam overrides detection, so suites can pin a language", () => {
+    // Not a user setting — the shipped console never writes this key. It is
+    // how vitest.setup.ts keeps Chinese assertions meaningful under jsdom,
+    // which reports en-US.
+    stubLanguages(["en-US"]);
+    window.localStorage.setItem("openBridge.console.lang", "zh");
+    expect(resolveLang()).toBe("zh");
+    window.localStorage.setItem("openBridge.console.lang", "en");
+    expect(resolveLang()).toBe("en");
   });
 
-  test("each language names itself, so the switch stays readable either way", () => {
-    applyLang("en");
-    expect(langPrefLabel("zh")).toBe("中文");
-    expect(langPrefLabel("en")).toBe("English");
-    applyLang("zh");
-    expect(langPrefLabel("zh")).toBe("中文");
-    expect(langPrefLabel("en")).toBe("English");
-  });
-
-  test("storage refusing to cooperate does not break the choice", () => {
-    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("quota");
+  test("storage refusing to cooperate falls back to detection", () => {
+    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
     });
-    expect(() => storeLangPref("en")).not.toThrow();
-    setItem.mockRestore();
+    stubLanguages(["en-US"]);
+    expect(() => resolveLang()).not.toThrow();
+    expect(resolveLang()).toBe("en");
+    getItem.mockRestore();
   });
 });

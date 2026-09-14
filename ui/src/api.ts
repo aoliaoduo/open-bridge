@@ -7,6 +7,7 @@
 // drift - the console's token row was missing `permanent` and nothing noticed.
 import { t } from "./i18n";
 import type {
+  ExecutableChoice,
   SecretPayload,
   SettingsActionResult,
   SettingsState,
@@ -14,7 +15,9 @@ import type {
 } from "../../src/bridge/settings-model.js";
 import type { ServiceView } from "../../src/bridge/service-tools.js";
 
-export type { SecretPayload, ServiceView, SettingsActionResult, SettingsState, SettingsTokenRow };
+export type {
+  ExecutableChoice, SecretPayload, ServiceView, SettingsActionResult, SettingsState, SettingsTokenRow,
+};
 
 /**
  * API client for the Open Bridge console.

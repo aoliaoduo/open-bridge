@@ -3,7 +3,10 @@ import test from "node:test";
 import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { FILE_LOG_MAX_BYTES, FileLog, localLogStamp, normalizeTimezone as localNormalize } from "../src/host/node-host.js";
+import {
+  FILE_LOG_MAX_BYTES, FileLog, localLogStamp, localUtcOffset,
+  normalizeTimezone as localNormalize,
+} from "../src/host/node-host.js";
 
 /** One line of the shape the bridge writes, padded so a test can fill a file fast. */
 const line = (index: number): string => `line ${index} ${"x".repeat(40)}`;
@@ -21,35 +24,48 @@ const indicesOf = (lines: string[]): number[] =>
 
 /**
  * The log-line prefix is for a human reading the console, so it carries LOCAL
- * wall-clock time with its UTC offset, not `toISOString()`'s Z. This was a real
- * report: an operator in UTC+8 saw every line eight hours behind the action
- * that produced it.
+ * wall-clock time, not `toISOString()`'s Z. This was a real report: an operator
+ * in UTC+8 saw every line eight hours behind the action that produced it.
  *
  * The assertions are timezone-independent on purpose — they compare against the
  * same Date's own local fields, so this passes on a CI runner in UTC and on the
- * author's machine in UTC+8. Asserting a literal "+08:00" would just be a test
+ * author's machine in UTC+8. Asserting a literal "20:02" would just be a test
  * that fails everywhere except one desk.
  */
-test("log lines are stamped in local time with an explicit offset, never UTC Z", () => {
+test("log lines are stamped in local wall-clock time, never UTC Z", () => {
   const at = new Date(2026, 8, 14, 20, 2, 43, 248); // local 2026-09-14 20:02:43.248
   const stamp = localLogStamp(at);
 
-  assert.match(stamp, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$/,
-    "shape is 'YYYY-MM-DD HH:mm:ss.mmm±HH:MM'");
+  assert.match(stamp, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/,
+    "shape is 'YYYY-MM-DD HH:mm:ss.mmm'");
   assert.ok(!stamp.endsWith("Z"), "a Z suffix would mean UTC, which is the bug");
 
   const pad = (value: number, width = 2): string => String(value).padStart(width, "0");
-  assert.equal(stamp.slice(0, 23),
+  assert.equal(stamp,
     `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} `
     + `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}.${pad(at.getMilliseconds(), 3)}`,
     "the printed clock is this machine's wall clock");
+});
 
-  // The offset must be the real one, with the sign a human expects: UTC+8 is
-  // "+08:00" even though getTimezoneOffset() reports -480 minutes.
+/**
+ * The offset used to ride along on every log line, where it was the same
+ * eleven characters thousands of times over. It is gone from the prefix and
+ * kept as its own function, because `doctor` still has to state which zone the
+ * process resolved — there it is the answer, not decoration.
+ */
+test("the stamp carries no UTC offset, but doctor can still ask for one", () => {
+  const at = new Date(2026, 8, 14, 20, 2, 43, 248);
+  assert.doesNotMatch(localLogStamp(at), /[+-]\d{2}:\d{2}$/,
+    "an offset on every line is noise: the reader is sitting in that zone");
+
+  // Sign is the human convention, not getTimezoneOffset()'s: UTC+8 prints
+  // "+08:00" even though the method reports -480 minutes.
+  const pad = (value: number): string => String(Math.abs(value)).padStart(2, "0");
   const offsetMinutes = -at.getTimezoneOffset();
   const sign = offsetMinutes < 0 ? "-" : "+";
-  const expected = `${sign}${pad(Math.floor(Math.abs(offsetMinutes) / 60))}:${pad(Math.abs(offsetMinutes) % 60)}`;
-  assert.equal(stamp.slice(23), expected, "offset sign and value match the environment");
+  assert.equal(localUtcOffset(at),
+    `${sign}${pad(Math.floor(Math.abs(offsetMinutes) / 60))}:${pad(Math.abs(offsetMinutes) % 60)}`,
+    "offset sign and value match the environment");
 });
 
 /**
@@ -82,7 +98,7 @@ test("a written line carries the local stamp, and the audit timestamp stays ISO 
     log.write("hello");
     await log.flush();
     const [written = ""] = await linesOf(log.path());
-    assert.match(written, /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}\] hello$/,
+    assert.match(written, /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] hello$/,
       "the file gets the same human stamp the console stream shows");
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -140,7 +156,7 @@ test("listeners keep receiving stamped lines across rotations", async () => {
     stop();
 
     assert.equal(seen.length, 30, "every write reached the live stream");
-    assert.match(seen[0], /^\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}[+-]\d\d:\d\d\] line 0 /);
+    assert.match(seen[0], /^\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}\] line 0 /);
     assert.match(seen[29], /line 29 /);
     // The stream is live data, not a file read: rotated-away lines were still seen.
     assert.equal((await readdir(dir)).filter(name => name.startsWith("bridge.log")).length, 2);

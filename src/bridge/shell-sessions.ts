@@ -85,9 +85,9 @@ function spawnSessionShell(name: string, cwd: string): { id: string; child: Chil
   const spec = shellSpec();
   if (!isBashLike(spec.file)) {
     throw new Error(
-      `Persistent shell sessions currently require a bash/sh shell (configured: ${spec.file}). ` +
-      "Use run_command for one-off commands, or set shellPath to Git Bash "
-      + "(console settings page, or open-bridge config set shellPath).",
+      `Persistent shell sessions currently require a bash/sh shell (configured: ${spec.file}). `
+      + "Use run_command for one-off commands, or pick a bash on the console settings page "
+      + "(设置 → Shell — it lists the shells found on this machine).",
     );
   }
   const id = "shell-" + randomBytes(6).toString("hex");
@@ -193,8 +193,9 @@ export async function openShell(args: Args): Promise<Record<string, unknown>> {
   if (cmd.spawnError) {
     shellSessions.delete(name);
     throw new Error(
-      `Shell failed to start: ${cmd.spawnError}. ` +
-      "Check shellPath (persistent sessions require a bash/sh shell).",
+      `Shell failed to start: ${cmd.spawnError}. `
+      + "Pick a different shell on the console settings page (设置 → Shell); persistent "
+      + "sessions require a bash/sh shell.",
     );
   }
   host().ui.update();

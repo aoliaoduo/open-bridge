@@ -21,6 +21,7 @@ import { RECONNECT_DELAYS_MS, record, state, redactedPublicUrl } from "./state.j
 import { nextFreeRounds, shouldClaimDomain, watchIntervalMs } from "./tunnel-watch.js";
 import { enqueueLifecycle } from "./lifecycle-queue.js";
 import { publishSelf } from "./peer-registry.js";
+import { detectNgrok } from "./ngrok-locate.js";
 
 /** Consecutive deterministic (DNS/refused/TLS) health failures before aborting startup early. */
 const PUBLIC_HEALTH_DETERMINISTIC_FAILURE_LIMIT = 3;
@@ -380,8 +381,9 @@ export async function startTunnelInternal(generation: number): Promise<void> {
       // not spawn ngrok again, and a pending timer would do exactly that.
       stopReconnectChain();
       throw new NgrokSpawnError(
-        `${error.message} · 检查 ngrokExecutable（未安装或路径不对请在控制台「设置」页修正后重试；`
-        + "ERR_NGROK_9009 需关闭 ngrokUseHttpProxy）。"
+        `${error.message} · 在「设置 → 隧道 → ngrok 可执行文件」里从探测到的列表中选一个`
+        + "（没探测到就是还没装：去 https://ngrok.com/download 下载；只想本机用就把提供商改成 none）；"
+        + "ERR_NGROK_9009 则是要关掉 ngrokUseHttpProxy。"
         + " 这类错误与配置有关，不会自动重试：修好后点 Start，或重新运行 open-bridge serve。",
       );
     }
@@ -425,6 +427,27 @@ function ngrokProcessEnvironment(): NodeJS.ProcessEnv {
   return env;
 }
 
+/**
+ * What to say when ngrok is not where we looked.
+ *
+ * The old message named the config key and stopped there, which is only
+ * actionable if you already know what value to put in it. Detection knows
+ * whether this machine has ngrok at all, and those are two genuinely different
+ * problems: "you picked the wrong copy" (say which ones exist) versus "it is
+ * not installed" (say where to get it). Both beat naming a key.
+ */
+export function ngrokMissingMessage(configured: string): string {
+  const found = detectNgrok();
+  if (found.length) {
+    const list = found.map(choice => `${choice.label}: ${choice.value}`).join(" · ");
+    return `ngrok executable not found (${configured}), but these copies are installed — `
+      + `pick one on the console settings page (设置 → 隧道): ${list}`;
+  }
+  return `ngrok executable not found (${configured}). ngrok does not appear to be installed on this `
+    + "machine: download it from https://ngrok.com/download, then point 设置 → 隧道 → ngrok 可执行文件 "
+    + "at the unpacked file. To run loopback-only instead, set the tunnel provider to none.";
+}
+
 function spawnTunnel(domain: string, generation: number): ChildProcessWithoutNullStreams {
   // An empty stored value (the page allows clearing it back to "auto") must
   // fall back to the PATH binary instead of spawning "".
@@ -451,12 +474,7 @@ function spawnTunnel(domain: string, generation: number): ChildProcessWithoutNul
     state.tunnel = undefined;
     const code = (e as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
-      record(
-        "ngrok",
-        "error",
-        `ngrok executable not found (${exe}). Set ngrokExecutable in the console settings page `
-        + "(open-bridge config set ngrokExecutable <path>).",
-      );
+      record("ngrok", "error", ngrokMissingMessage(exe));
     } else {
       record("ngrok", "error", `ngrok failed: ${e.message}`);
     }

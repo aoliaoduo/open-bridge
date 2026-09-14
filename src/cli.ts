@@ -40,7 +40,7 @@
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import { installNodeHost, localLogStamp, normalizeTimezone, resolveDefaultHome } from "./host/node-host.js";
+import { installNodeHost, localUtcOffset, normalizeTimezone, resolveDefaultHome } from "./host/node-host.js";
 import { t } from "./bridge/cli-i18n.js";
 import { state } from "./bridge/state.js";
 import { currentWorkspaceRoot } from "./bridge/paths.js";
@@ -395,7 +395,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   // (see this file's header): the default data dir, and a way to install a
   // host. Done once here, before any command can ask for either.
   setDefaultHome(resolveDefaultHome());
-  setHostInstaller(installNodeHost, localLogStamp);
+  setHostInstaller(installNodeHost, localUtcOffset);
   const parsed = parseArgs(argv);
   switch (parsed.command) {
     case "serve": case "start": return cmdServe(parsed);

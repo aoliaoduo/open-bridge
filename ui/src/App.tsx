@@ -8,7 +8,13 @@ import { PageHeader } from "./components/PageHeader";
 import { Skeleton } from "./components/Skeleton";
 import { StatusTab } from "./components/StatusTab";
 import { SettingsTab } from "./components/SettingsTab";
-import { applyLang, initLang, nextLangPref, storeLangPref, t, type LangPref } from "./i18n";
+import { initLang, t } from "./i18n";
+
+// The console follows the browser's language, decided once here — before the
+// first render, so the first paint is already right — and never changed after.
+// There is no switch: the browser already carries the answer, and a control
+// that only restates it is one more thing to explain.
+initLang();
 import { SecurityPage } from "./components/SecurityPage";
 import { LogsTab } from "./components/LogsTab";
 import { StatsTab } from "./components/StatsTab";
@@ -61,7 +67,6 @@ export function App() {
   // Overlay drawer, narrow windows only; harmless (and invisible) on desktop.
   const [drawer, setDrawer] = useState(false);
   const [themePref, setThemePref] = useState<ThemePref>(() => initTheme());
-  const [langPref, setLangPref] = useState<LangPref>(() => initLang());
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const secretBox = useRef<HTMLDivElement | null>(null);
 
@@ -98,10 +103,7 @@ export function App() {
   useEffect(() => {
     const label = routeSpec(route).label();
     document.title = `${label} · ${t("Open Bridge 控制台", "Open Bridge Console")}`;
-    // langPref is a dependency because the title is the one piece of UI React
-    // does not repaint for us: without it, switching language leaves the tab
-    // named in the old one until the next navigation.
-  }, [route, langPref]);
+  }, [route]);
 
   // 跟随系统 has to keep following: an OS switch at dusk must repaint the console
   // without a reload. An explicit 浅色/深色 ignores the OS until it is changed.
@@ -165,20 +167,6 @@ export function App() {
     });
   }, []);
 
-  /**
-   * Language works like the theme: apply, remember, re-render. Setting the
-   * state is what repaints the tree — `t()` reads the module-level language on
-   * the way through, so every string follows without a context provider.
-   */
-  const cycleLang = useCallback(() => {
-    setLangPref(previous => {
-      const next = nextLangPref(previous);
-      applyLang(next);
-      storeLangPref(next);
-      return next;
-    });
-  }, []);
-
   /** Run one settings action; applies state/toast/secret/copy side effects. */
   const act = useCallback(async (action: Record<string, unknown>): Promise<SettingsActionResult | null> => {
     try {
@@ -238,8 +226,6 @@ export function App() {
             settings={settings}
             themePref={themePref}
             onCycleTheme={cycleTheme}
-            langPref={langPref}
-            onCycleLang={cycleLang}
             onOpen={open}
             onCopyMcp={() => {
               void copyText(settings?.mcpUrl ?? "");

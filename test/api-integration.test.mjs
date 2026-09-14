@@ -245,8 +245,8 @@ test("a reloaded console is given the log it missed, not an empty pane", async (
   assert.ok(history.length <= 800, `backfill is bounded, got ${history.length}`);
   assert.ok(history.every(line => typeof line === "string" && line.length > 0),
     "no blank or partial frames");
-  // Lines are stamped, and the stamp is local time with an offset (not ISO Z).
-  assert.ok(history.some(line => /^\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}[+-]\d\d:\d\d\]/.test(line)),
+  // Lines are stamped in local wall-clock time (not ISO Z, and no offset tail).
+  assert.ok(history.some(line => /^\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}\]/.test(line)),
     "replayed lines keep the stamp the file has");
 });
 

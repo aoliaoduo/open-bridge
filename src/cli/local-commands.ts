@@ -38,11 +38,11 @@ export interface CliHost {
 }
 
 let installHost: HostInstaller | undefined;
-let logStamp: (() => string) | undefined;
+let utcOffset: (() => string) | undefined;
 
-export function setHostInstaller(installer: HostInstaller, stamp: () => string): void {
+export function setHostInstaller(installer: HostInstaller, offset: () => string): void {
   installHost = installer;
-  logStamp = stamp;
+  utcOffset = offset;
 }
 
 function hostFor(parsed: ParsedArgs): CliHost {
@@ -50,9 +50,9 @@ function hostFor(parsed: ParsedArgs): CliHost {
   return installHost({ homeDir: parsed.flags.get("home") as string | undefined, version: VERSION }).host;
 }
 
-function localLogStamp(): string {
-  if (!logStamp) throw new Error("cli/local-commands: setHostInstaller() was never called");
-  return logStamp();
+function localOffset(): string {
+  if (!utcOffset) throw new Error("cli/local-commands: setHostInstaller() was never called");
+  return utcOffset();
 }
 
 
@@ -212,10 +212,10 @@ export async function cmdDoctor(parsed: ParsedArgs): Promise<void> {
       )
       : repaired
         ? t(
-          `${zone}（${localLogStamp().slice(-6)}）—— 偏移已对，但这是从无法识别的 TZ 自动折算来的固定偏移、不含夏令时；根治办法是在 shell 配置里去掉那行 TZ（跟随系统时区）`,
-          `${zone} (${localLogStamp().slice(-6)}) — the offset is right, but it was derived from an unrecognised TZ and is fixed, with no DST. The real fix is deleting that TZ line from your shell config so the system zone applies.`,
+          `${zone}（${localOffset()}）—— 偏移已对，但这是从无法识别的 TZ 自动折算来的固定偏移、不含夏令时；根治办法是在 shell 配置里去掉那行 TZ（跟随系统时区）`,
+          `${zone} (${localOffset()}) — the offset is right, but it was derived from an unrecognised TZ and is fixed, with no DST. The real fix is deleting that TZ line from your shell config so the system zone applies.`,
         )
-        : `${zone}（${localLogStamp().slice(-6)}）${rawTz ? ` TZ=${rawTz}` : ""}`);
+        : `${zone}（${localOffset()}）${rawTz ? ` TZ=${rawTz}` : ""}`);
   // `<string>` on each read, like every other ngrokDomain/tunnelProvider read
   // site: without the explicit type argument T infers from the literal
   // fallback, so `domain` types as "" and `domain || "未配置…"` reads as a

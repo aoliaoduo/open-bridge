@@ -18,6 +18,10 @@
  */
 
 import { validateConfigValue } from "./config-values.js";
+// Type-only, so the dependency-free rule above still holds: this is erased at
+// compile time and the React console can import this file without dragging
+// node:fs in behind it.
+import type { ExecutableChoice } from "../shell/which.js";
 
 /** Whitelisted lifetimes for a newly created token (seconds; 0 = permanent). */
 export const TTL_CHOICES: ReadonlyArray<{ seconds: number; label: string }> = [
@@ -127,6 +131,24 @@ export interface SettingsNotifyView {
   idleMinutes: number;
 }
 
+/**
+ * What this machine was found to have, so the console can offer a choice
+ * instead of an empty text box.
+ *
+ * Detection runs server-side because only the server can stat the filesystem;
+ * the page just renders the list. Both lists may be empty (nothing found, or
+ * the defaults view before a host exists), and the page must still work —
+ * falling back to free text is the whole reason the text input stays.
+ */
+export type { ExecutableChoice };
+
+export interface SettingsDetectedView {
+  /** Shells that exist here, best first; the first one is what "auto" picks. */
+  shells: ExecutableChoice[];
+  /** ngrok binaries found on PATH and in the usual install locations. */
+  ngrok: ExecutableChoice[];
+}
+
 /** Everything the settings page shows, pushed by the host as one `state` message. */
 export interface SettingsState {
   running: boolean;
@@ -144,6 +166,7 @@ export interface SettingsState {
   concurrency: { enabled: boolean; holdTimeoutMs: number; waitTimeoutMs: number };
   config: SettingsConfigView;
   notify: SettingsNotifyView;
+  detected: SettingsDetectedView;
 }
 
 export type SettingsAction =

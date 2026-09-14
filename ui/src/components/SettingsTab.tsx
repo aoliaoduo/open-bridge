@@ -3,6 +3,7 @@ import { type SettingsActionResult, type SettingsState } from "../api";
 import { SETTINGS_SECTIONS, type SettingsSectionId } from "../routes";
 import { t } from "../i18n";
 import { Card } from "./Card";
+import { ExecutablePicker } from "./ExecutablePicker";
 import { Field } from "./Field";
 import { SectionNav } from "./SectionNav";
 import { Skeleton } from "./Skeleton";
@@ -135,6 +136,18 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
   if (!settings) return <div className="card"><Skeleton lines={4} /></div>;
   const cfg = settings.config;
   const domainValue = domain ?? settings.configuredDomain;
+  // What the server found on this machine. Defaulted because an older server
+  // (or a hand-built fixture) may not send it, and a missing list must degrade
+  // to "type a path", never to a crashed settings page.
+  const shells = settings.detected?.shells ?? [];
+  const ngroks = settings.detected?.ngrok ?? [];
+  // Name what 自动 will actually do, so choosing it is not an act of faith.
+  const autoShellLabel = shells[0]
+    ? `${shells[0].label} — ${shells[0].value}`
+    : t("按平台猜测", "a per-platform guess");
+  const autoNgrokLabel = ngroks[0]
+    ? `${ngroks[0].label} — ${ngroks[0].value}`
+    : t("PATH 里的 ngrok", "the ngrok on PATH");
 
   const setConfig = (key: string, value: unknown) => { void act({ command: "setConfig", key, value }); };
 
@@ -217,12 +230,25 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
 
           <Field
             label={t("ngrok 可执行文件", "ngrok executable")}
-            hint={t("留空则使用 PATH 里的 ngrok。", "Leave empty to use the ngrok on PATH.")}
+            hint={ngroks.length
+              ? t(
+                "已找到下面这些 ngrok；隧道起不来时，多半是这里选错了副本。",
+                "These ngrok copies were found. When a tunnel refuses to start, this is usually the wrong one.",
+              )
+              : t(
+                "这台机器上没找到 ngrok：先从 ngrok.com 下载，再把解压出来的可执行文件路径填在这里（隧道提供商选 none 则不需要）。",
+                "No ngrok found here: download it from ngrok.com, then point this at the unpacked executable. Not needed if the provider is none.",
+              )}
           >
-            <DraftField
+            <ExecutablePicker
               value={cfg.ngrokExecutable}
-              placeholder="ngrok"
-              onCommit={raw => setConfig("ngrokExecutable", raw)}
+              choices={ngroks}
+              // "" and "ngrok" both mean "whatever PATH gives us"; "" is stored
+              // so a future default change is not frozen into the config file.
+              autoValues={["", "ngrok"]}
+              autoLabel={autoNgrokLabel}
+              placeholder={t("ngrok 可执行文件的完整路径", "Full path to the ngrok executable")}
+              onCommit={next => setConfig("ngrokExecutable", next)}
             />
           </Field>
 
@@ -323,12 +349,23 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
         <div className="form-grid">
           <Field
             label={t("Shell 路径", "Shell path")}
-            hint={t("留空自动探测（Git Bash → pwsh → powershell）。", "Leave empty to auto-detect (Git Bash → pwsh → powershell).")}
+            hint={shells.length
+              ? t(
+                `已在这台机器上找到 ${shells.length} 个 shell，选一个即可；自动 = 列表里的第一个。`,
+                `Found ${shells.length} shells on this machine — pick one, or leave it on automatic (the first in the list).`,
+              )
+              : t(
+                "没有探测到已知的 shell，请手动填写完整路径。",
+                "No known shell was detected; type the full path instead.",
+              )}
           >
-            <DraftField
+            <ExecutablePicker
               value={cfg.shellPath}
-              placeholder={t("留空自动探测（Git Bash → pwsh → powershell）", "Leave empty to auto-detect (Git Bash → pwsh → powershell)")}
-              onCommit={raw => setConfig("shellPath", raw)}
+              choices={shells}
+              autoValues={[""]}
+              autoLabel={autoShellLabel}
+              placeholder={t("shell 可执行文件的完整路径", "Full path to a shell executable")}
+              onCommit={next => setConfig("shellPath", next)}
             />
           </Field>
           <Field label={t("Shell 参数", "Shell arguments")} hint={t("留空使用默认参数。", "Leave empty to use the defaults.")}>

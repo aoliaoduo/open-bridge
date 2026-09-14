@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App } from "./App";
+import { applyLang } from "./i18n";
 import type {
   BridgeStatus,
   HealthReport,
@@ -131,6 +132,13 @@ function settingsState(overrides: Partial<SettingsState> = {}): SettingsState {
       logMaxBytes: 10 * 1024 * 1024,
       "oauth.enabled": false,
       "oauth.allowedRedirectHosts": [],
+    },
+    detected: {
+      shells: [
+        { value: "C:\\Program Files\\Git\\bin\\bash.exe", label: "Git Bash", available: true },
+        { value: "C:\\Program Files\\PowerShell\\7\\pwsh.exe", label: "PowerShell 7", available: true },
+      ],
+      ngrok: [{ value: "C:\\tools\\ngrok.exe", label: "PATH", available: true }],
     },
     notify: {
       enabled: true,
@@ -659,14 +667,15 @@ describe("App shell: in-page filtering and rails", () => {
     expect(document.getElementById("set-locks")).toBeTruthy();
   });
 
-  test("the header switches the console between 中文 and English", async () => {
-    render(<App />);
-    await screen.findByText("MCP 端点");
+  test("an English browser gets an English console, with nothing to click", async () => {
+    // The language switch is gone: the browser already carries this answer and
+    // a control that only restates it is a button nobody needs. What matters
+    // now is that detection reaches every surface on the first paint.
+    window.localStorage.clear();
+    vi.stubGlobal("navigator", { languages: ["en-US"], language: "en-US" });
+    applyLang();
 
-    // Starts in 中文 (the suite pins it); one click on the language button is
-    // the whole affordance an English operator needs to find.
-    const button = screen.getByRole("button", { name: "中文" });
-    fireEvent.click(button);
+    render(<App />);
 
     // Sidebar, breadcrumb and page header all follow, because they read the
     // same getters rather than holding strings captured at module load.
@@ -677,8 +686,12 @@ describe("App shell: in-page filtering and rails", () => {
     // The tab name is not React-rendered, so it needs its own dependency.
     expect(document.title).toBe("Status · Open Bridge Console");
 
-    // And the choice is remembered, so a reload does not drop them back.
-    expect(window.localStorage.getItem("openBridge.console.lang")).toBe("en");
+    // No language control is offered at all — neither label may appear as a button.
+    expect(screen.queryByRole("button", { name: "中文" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "English" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Auto" })).toBeNull();
+
+    vi.unstubAllGlobals();
   });
 
   test("a setting lives with the thing it governs, not in a settings drawer", async () => {

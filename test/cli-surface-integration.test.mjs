@@ -80,7 +80,7 @@ test("a POSIX TZ is repaired to the right offset, and doctor still says it is a 
     const { stdout } = await runCli(["doctor"], home, 20_000, { TZ: "CST-8" });
     assert.match(stdout, /\[OK\][^\n]*timezone/, "the clock is no longer silently UTC");
     assert.match(stdout, /Etc\/GMT-8/, "mapped onto the zone with the same inverted-sign convention");
-    assert.match(stdout, /\+08:00/, "and that is the offset log lines will carry");
+    assert.match(stdout, /\+08:00/, "and the resolved offset is spelled out, so the reader can check it");
     assert.match(stdout, /夏令时|TZ/, "the message still points at the environment as the real fix");
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -108,7 +108,7 @@ test("doctor is satisfied by a real IANA zone", async () => {
     assert.match(stdout, /\[OK\][^\n]*timezone[^\n]*Asia\/Shanghai/,
       "a resolvable zone passes and is echoed");
     assert.match(stdout, /\[OK\][^\n]*timezone[^\n]*\+08:00/,
-      "the offset it will stamp logs with is shown, so the reader can confirm it");
+      "doctor is where the offset lives now that log lines no longer repeat it");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

@@ -1,10 +1,13 @@
 /**
- * Console language: 跟随浏览器 / 中文 / English, persisted per browser.
+ * Console language: whatever the browser asks for.
  *
  * The console was written Chinese-first and hard-coded, so an English-speaking
- * operator had no way in at all. This is the same shape as theme.ts on purpose
- * — detect, allow an explicit override, remember it — because the two settings
- * answer the same kind of question and should not behave differently.
+ * operator had no way in at all. It briefly had a three-state header switch
+ * (跟随浏览器 / 中文 / English) mirroring the theme control; that is gone. The
+ * browser already carries the answer, every operator has set it once, and a
+ * control whose only job is to restate a preference the platform supplies is a
+ * button that exists to be ignored. Theme keeps its switch because people
+ * genuinely want dark at night and light by day — language is not like that.
  *
  * Translations are INLINE PAIRS, `t("中文", "English")`, rather than keys into
  * a message table. For a retrofit of an existing Chinese UI that is the safer
@@ -15,9 +18,14 @@
  * sync.
  */
 
-export type LangPref = "system" | "zh" | "en";
 export type ResolvedLang = "zh" | "en";
 
+/**
+ * Kept ONLY as a test seam: vitest.setup.ts pins the language per test because
+ * jsdom reports navigator.language as en-US, which would otherwise render the
+ * console in English and fail every assertion written against Chinese text.
+ * Nothing in the shipped UI writes this key.
+ */
 const STORAGE_KEY = "openBridge.console.lang";
 
 /**
@@ -28,14 +36,15 @@ const STORAGE_KEY = "openBridge.console.lang";
  */
 let currentLang: ResolvedLang = "zh";
 
-function readLangPref(): LangPref {
+/** The pinned test language, or undefined in a real browser. */
+function readLangOverride(): ResolvedLang | undefined {
   try {
     const stored = window.localStorage?.getItem(STORAGE_KEY);
-    if (stored === "zh" || stored === "en" || stored === "system") return stored;
+    if (stored === "zh" || stored === "en") return stored;
   } catch {
-    // Private mode / disabled storage: fall back to detection for this session.
+    // Private mode / disabled storage: detection answers for this session.
   }
-  return "system";
+  return undefined;
 }
 
 /**
@@ -59,9 +68,8 @@ export function detectLang(): ResolvedLang {
   return "zh";
 }
 
-export function resolveLang(pref: LangPref): ResolvedLang {
-  if (pref === "zh" || pref === "en") return pref;
-  return detectLang();
+export function resolveLang(): ResolvedLang {
+  return readLangOverride() ?? detectLang();
 }
 
 /** The active language. Plain read so non-component helpers can translate. */
@@ -78,11 +86,11 @@ export function t(zh: string, en: string): string {
 }
 
 /**
- * Apply a preference: sets the module language and the <html lang> attribute
+ * Resolve and apply: sets the module language and the <html lang> attribute
  * (screen readers and the browser's own translate prompt both read it).
  */
-export function applyLang(pref: LangPref): ResolvedLang {
-  const resolved = resolveLang(pref);
+export function applyLang(): ResolvedLang {
+  const resolved = resolveLang();
   currentLang = resolved;
   try {
     document.documentElement.lang = resolved === "en" ? "en" : "zh-CN";
@@ -92,43 +100,16 @@ export function applyLang(pref: LangPref): ResolvedLang {
   return resolved;
 }
 
-export function storeLangPref(pref: LangPref): void {
-  try {
-    window.localStorage?.setItem(STORAGE_KEY, pref);
-  } catch {
-    // Not being able to remember the choice must not break the choice.
-  }
-}
-
-/** The three-state cycle the header button walks through. */
-export function nextLangPref(pref: LangPref): LangPref {
-  if (pref === "system") return "zh";
-  if (pref === "zh") return "en";
-  return "system";
-}
-
-/**
- * Label for the switch. Each language names itself (中文, English) rather than
- * being translated, which is how a language picker stays usable to someone who
- * cannot read the language currently active.
- */
-export function langPrefLabel(pref: LangPref): string {
-  if (pref === "zh") return "中文";
-  if (pref === "en") return "English";
-  return t("跟随浏览器", "Auto");
-}
-
 /**
  * Apply at import time, before the first React render, so the first paint is
  * already in the right language instead of flashing Chinese at an English
  * operator. Wrapped because this runs in module scope.
  */
-export function initLang(): LangPref {
-  const pref = readLangPref();
+export function initLang(): ResolvedLang {
   try {
-    applyLang(pref);
+    return applyLang();
   } catch {
     // Detection failed (no navigator in a test stub): keep the zh default.
+    return currentLang;
   }
-  return pref;
 }

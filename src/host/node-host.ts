@@ -386,7 +386,26 @@ export function normalizeTimezone(env: NodeJS.ProcessEnv = process.env): string 
 }
 
 /**
- * Stamp a log line with LOCAL wall-clock time, offset included.
+ * This machine's UTC offset, written the way a human expects: "+08:00".
+ *
+ * getTimezoneOffset() is minutes BEHIND UTC — UTC+8 reports -480 — so the sign
+ * is inverted here rather than at each call site.
+ *
+ * Kept separate from the log stamp because the two have different readers.
+ * `doctor` prints this to prove which zone the process actually resolved, and
+ * there it is the whole point of the line. In a log file it was noise: every
+ * line carried the same eleven characters, repeated thousands of times, on a
+ * prefix whose job is to be skimmed.
+ */
+export function localUtcOffset(now: Date = new Date()): string {
+  const pad = (value: number): string => String(Math.abs(value)).padStart(2, "0");
+  const offsetMinutes = -now.getTimezoneOffset();
+  const sign = offsetMinutes < 0 ? "-" : "+";
+  return `${sign}${pad(Math.floor(Math.abs(offsetMinutes) / 60))}:${pad(Math.abs(offsetMinutes) % 60)}`;
+}
+
+/**
+ * Stamp a log line with LOCAL wall-clock time.
  *
  * `toISOString()` is always UTC, so an operator in UTC+8 read every console
  * line eight hours in the past and had to convert in their head to line a log
@@ -395,20 +414,17 @@ export function normalizeTimezone(env: NodeJS.ProcessEnv = process.env): string 
  * `at` field, which stays ISO-8601 UTC precisely because `activity_log`'s
  * `since` filter parses it).
  *
- * The offset is kept in the text so the line stays unambiguous — a bare
- * local time is not interpretable once the file is copied off the machine,
- * and a reader on another host can still convert exactly.
+ * No UTC offset: the reader of a bridge log is the person sitting at the
+ * machine that wrote it, and their own offset is the one thing they never need
+ * telling. Anyone reading the file elsewhere gets the zone from `doctor`, and
+ * anything that needs an exact instant reads `audit.log` instead. Milliseconds
+ * stay — ordering two events inside the same second is a real need.
  */
 export function localLogStamp(now: Date = new Date()): string {
   const pad = (value: number, width = 2): string => String(Math.abs(value)).padStart(width, "0");
-  // getTimezoneOffset() is minutes BEHIND UTC: UTC+8 reports -480, so the sign
-  // is inverted to print the conventional +08:00.
-  const offsetMinutes = -now.getTimezoneOffset();
-  const sign = offsetMinutes < 0 ? "-" : "+";
-  const offset = `${sign}${pad(Math.floor(Math.abs(offsetMinutes) / 60))}:${pad(Math.abs(offsetMinutes) % 60)}`;
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
     + ` ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
-    + `.${pad(now.getMilliseconds(), 3)}${offset}`;
+    + `.${pad(now.getMilliseconds(), 3)}`;
 }
 
 export interface FileLogOptions {
