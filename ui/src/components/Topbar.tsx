@@ -1,7 +1,33 @@
+import { useEffect, useState } from "react";
 import { routeGroupLabel, routePath, routeSpec, type RouteId } from "../routes";
 import { t } from "../i18n";
 import type { SettingsState } from "../api";
 import { Chip } from "./Chip";
+
+/**
+ * Must stay in step with the 900px breakpoint in console.css that turns the
+ * sidebar into a drawer. Two numbers that have to agree is a real risk, so
+ * console-css.test.ts asserts they match rather than trusting a comment.
+ */
+const DRAWER_MAX_WIDTH = 900;
+
+function useNarrowViewport(): boolean {
+  const query = `(max-width: ${DRAWER_MAX_WIDTH}px)`;
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia(query).matches
+      : false,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia(query);
+    const update = (): void => setNarrow(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [query]);
+  return narrow;
+}
 
 interface Props {
   route: RouteId;
@@ -31,22 +57,32 @@ interface Props {
 export function Topbar({
   route, settings, onToggleDrawer,
 }: Props) {
+  const narrow = useNarrowViewport();
   const spec = routeSpec(route);
   const running = Boolean(settings?.running);
 
   return (
     <header className="topbar">
-      <button
-        type="button"
-        className="icon-btn menu-btn"
-        aria-label={t("打开导航", "Open navigation")}
-        title={t("打开导航", "Open navigation")}
-        onClick={onToggleDrawer}
-      >
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        </svg>
-      </button>
+      {/* Rendered only where the drawer exists. Hiding it with CSS was not
+          enough twice over: once because `.menu-btn` lost the cascade to
+          `button.icon-btn` and it stayed visible at every width, and then
+          because even a correctly hidden button is still in the DOM, still
+          focusable by keyboard, and still toggling state that no stylesheet
+          responds to above 900px. A control that cannot do anything should
+          not exist, not merely be invisible. */}
+      {narrow ? (
+        <button
+          type="button"
+          className="icon-btn menu-btn"
+          aria-label={t("打开导航", "Open navigation")}
+          title={t("打开导航", "Open navigation")}
+          onClick={onToggleDrawer}
+        >
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
+        </button>
+      ) : null}
 
       <nav className="crumbs" aria-label={t("面包屑", "Breadcrumb")}>
         <span className="crumb">{t("控制台", "Console")}</span>

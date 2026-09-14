@@ -55,3 +55,47 @@ test("tools without a named better call never produce a hint", () => {
     assert.equal(noteToolCall(state, "get_file_info"), undefined, `call ${i}`);
   }
 });
+
+/**
+ * The measurement behind this: 2138 calls in one day of this repo's own audit
+ * log, `set_todos` called zero times — by the model that had just built the
+ * todo board. Documentation, a console page and the whole notification path
+ * all keyed off a tool nothing ever pointed at while work was happening.
+ */
+test("a session that works without a task list is told once", () => {
+  const state = freshRunState();
+  const hints: string[] = [];
+  // Alternate so no run pattern fires: this must be the todo hint, not a
+  // side effect of hammering one tool.
+  for (let i = 0; i < 12; i += 1) {
+    const hint = noteToolCall(state, i % 2 === 0 ? "edit_block" : "write_file");
+    if (hint) hints.push(hint);
+  }
+  assert.equal(hints.length, 1, "exactly one hint");
+  assert.match(hints[0] ?? "", /no task list exists/);
+  assert.match(hints[0] ?? "", /set_todos/, "names the call that fixes it");
+
+  // Never twice, however long the session runs.
+  for (let i = 0; i < 30; i += 1) {
+    assert.equal(noteToolCall(state, "write_file"), undefined, "the hint does not repeat");
+  }
+});
+
+test("reading and searching never triggers the task-list hint", () => {
+  const state = freshRunState();
+  // A question being answered is not a multi-step task, and nagging about a
+  // todo list here would be exactly the noise that gets every hint filtered.
+  for (let i = 0; i < 40; i += 1) {
+    const hint = noteToolCall(state, i % 2 === 0 ? "read_files" : "search_files");
+    assert.equal(hint, undefined, "no hint for read-only work");
+  }
+});
+
+test("a session that already has a task list is left alone", () => {
+  const state = freshRunState();
+  noteToolCall(state, "set_todos");
+  for (let i = 0; i < 40; i += 1) {
+    const hint = noteToolCall(state, i % 2 === 0 ? "edit_block" : "write_file");
+    assert.equal(hint, undefined, "the list exists; there is nothing to point out");
+  }
+});

@@ -108,6 +108,46 @@ export function DraftField({
 }
 
 /** A switch field: label on top, the switch plus its current state under it. */
+/**
+ * The four notify events, in the order an operator meets them: the two that
+ * block them first, then the two that merely report.
+ *
+ * `always` and `canRing` are properties of the event, not preferences:
+ * attention and waiting bypass the on/off switches because an unanswered
+ * question stalls the exchange, and only those two are worth a phone that
+ * rings until opened.
+ */
+const NOTIFY_EVENT_ROWS = [
+  {
+    key: "Attention" as const,
+    label: () => t("需要你回来", "Attention"),
+    when: () => t("AI 明确需要你回到电脑前", "The AI explicitly needs you back"),
+    always: true,
+    canRing: true,
+  },
+  {
+    key: "Waiting" as const,
+    label: () => t("等你回答", "Waiting"),
+    when: () => t("AI 提了问题，在等你选择", "The AI asked something and is blocked"),
+    always: true,
+    canRing: true,
+  },
+  {
+    key: "Finished" as const,
+    label: () => t("对话结束", "Finished"),
+    when: () => t("这一轮收尾；AI 忘了发则服务端代发", "The round wraps up; the server covers a forgetful AI"),
+    always: false,
+    canRing: false,
+  },
+  {
+    key: "Progress" as const,
+    label: () => t("进展", "Progress"),
+    when: () => t("勾掉一项任务，或 AI 汇报一行进展", "An item is ticked off, or progress is reported"),
+    always: false,
+    canRing: false,
+  },
+];
+
 function SwitchField(
   { label, hint, checked, onChange }: {
     label: string;
@@ -455,50 +495,70 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
             checked={settings.notify.onFinish}
             onChange={next => setConfig("notify.onFinish", next)}
           />
-          {/* The gating rules lived only in code and in docs/tools.md, so the
-              page showed two switches without saying what the other two event
-              types do. An operator could reasonably conclude that turning both
-              off means silence -- it does not, and finding that out from a
-              buzzing phone is the wrong way to learn it. */}
-          <div className="field" style={{ margin: "-4px 0 4px" }}>
-            <span className="field-label">{t("四类通知分别由谁决定", "What controls each kind")}</span>
+          {/* Not a reference table any more: each row is the control. The
+              switches above decide WHETHER a push is sent; these decide how it
+              arrives, which is the operator's call — they are the one next to
+              the phone. Defaults encode the urgency each event carries, and
+              critical is offered but never defaulted: it overrides the mute
+              switch, and that is a decision to make deliberately. */}
+          <div className="field">
+            <span className="field-label">{t("每类通知怎么响", "How each kind arrives")}</span>
             <div className="table-wrap">
               <table className="token-table">
                 <thead>
                   <tr>
                     <th>{t("通知", "Push")}</th>
                     <th>{t("什么时候发", "When")}</th>
-                    <th>{t("受哪个开关控制", "Controlled by")}</th>
+                    <th>{t("送达方式", "Delivery")}</th>
+                    <th>{t("铃声", "Sound")}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td>{t("需要你回来", "Attention")}</td>
-                    <td>{t("AI 明确需要你回到电脑前", "The AI explicitly needs you back at the machine")}</td>
-                    <td><strong>{t("不受控，总是发", "Always sent")}</strong></td>
-                  </tr>
-                  <tr>
-                    <td>{t("等你回答", "Waiting")}</td>
-                    <td>{t("AI 提了问题，在等你选择", "The AI asked something and is blocked on your answer")}</td>
-                    <td><strong>{t("不受控，总是发", "Always sent")}</strong></td>
-                  </tr>
-                  <tr>
-                    <td>{t("对话结束", "Finished")}</td>
-                    <td>{t("这一轮收尾；AI 忘了发则服务端代发", "The round wraps up; the server sends it if the AI forgets")}</td>
-                    <td>{t("对话结束时通知", "Notify when the exchange ends")}</td>
-                  </tr>
-                  <tr>
-                    <td>{t("进展", "Progress")}</td>
-                    <td>{t("任务清单勾掉一项，或 AI 主动汇报一行进展", "An item is ticked off, or the AI reports a line of progress")}</td>
-                    <td>{t("每项任务完成时通知", "Notify on each finished task")}</td>
-                  </tr>
+                  {NOTIFY_EVENT_ROWS.map(row => (
+                    <tr key={row.key}>
+                      <td>
+                        {row.label()}
+                        {row.always ? <><br /><span className="field-hint">{t("总是发", "always sent")}</span></> : null}
+                      </td>
+                      <td><span className="field-hint">{row.when()}</span></td>
+                      <td>
+                        <select
+                          value={settings.config[`notify.level${row.key}`] as string}
+                          onChange={e => setConfig(`notify.level${row.key}`, e.target.value)}
+                        >
+                          <option value="passive">{t("安静（只进列表）", "Passive (list only)")}</option>
+                          <option value="active">{t("普通横幅", "Active banner")}</option>
+                          <option value="timeSensitive">{t("穿透专注模式", "Time-sensitive")}</option>
+                          <option value="critical">{t("无视静音", "Critical (ignores mute)")}</option>
+                        </select>
+                        {row.key === "Attention" || row.key === "Waiting" ? (
+                          <label className="check" style={{ marginTop: 4 }}>
+                            <input
+                              type="checkbox"
+                              className="switch"
+                              checked={settings.config[`notify.call${row.key}`] === true}
+                              onChange={e => setConfig(`notify.call${row.key}`, e.target.checked)}
+                            />
+                            <span className="field-hint">{t("持续响铃", "Ring until opened")}</span>
+                          </label>
+                        ) : null}
+                      </td>
+                      <td>
+                        <DraftField
+                          value={settings.config[`notify.sound${row.key}`] as string}
+                          placeholder={t("App 默认", "App default")}
+                          onCommit={raw => setConfig(`notify.sound${row.key}`, raw.trim())}
+                        />
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
             <span className="field-hint">
               {t(
-                "两个开关互不影响，可以都开、都关。但前两类无论开关如何都会送达 —— 没人回答的问题会让对话无限期卡住，那不是设置该吞掉的东西。另有一条兜底：连接静默超过下面的分钟数，服务端会自己推一条。",
-                "The two switches are independent: both on, both off, either. The first two kinds arrive regardless — an unanswered question stalls the exchange indefinitely, which is not something a setting should swallow. One more safety net: after the silence threshold below, the server pushes by itself.",
+                "「需要你回来」和「等你回答」无论上面两个开关如何都会送达 —— 没人回答的问题会让对话无限期卡住，那不是设置该吞掉的东西。「无视静音」需要你在 iOS 里给 Bark 开「重要警告」权限，否则它只会按普通通知处理。铃声名见 Bark App 的铃声列表，留空用 App 自己的设置。",
+                "Attention and Waiting arrive regardless of the two switches above — an unanswered question stalls the exchange indefinitely, which is not something a setting should swallow. Critical needs Bark's critical-alert permission in iOS; without it the push simply arrives as a normal one. Ringtone names come from the Bark app's own list; leave empty to use whatever the app is set to.",
               )}
             </span>
           </div>

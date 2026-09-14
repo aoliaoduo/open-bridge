@@ -70,4 +70,27 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = deepFreeze({
   "notify.idleMinutes": 60,
   /** Bark server origin; loopback http is allowed (development), other http is refused. */
   "notify.serverUrl": "https://api.day.app",
+  /**
+   * Per-event Bark delivery style. The switches above decide WHETHER a push is
+   * sent; these decide how loudly it arrives, which is a different question
+   * and was previously hardcoded.
+   *
+   * The defaults encode the urgency each event actually carries: waiting and
+   * attention block the operator, so they pierce Focus; finished is worth
+   * noticing but not interrupting; progress is a log line that should not
+   * buzz at all. `critical` is offered but never a default -- it overrides
+   * the mute switch, which is the operator's decision, not ours.
+   */
+  "notify.levelAttention": "timeSensitive",
+  "notify.levelWaiting": "timeSensitive",
+  "notify.levelFinished": "active",
+  "notify.levelProgress": "passive",
+  /** Per-event ringtone; "" means the Bark app's own default. */
+  "notify.soundAttention": "",
+  "notify.soundWaiting": "",
+  "notify.soundFinished": "",
+  "notify.soundProgress": "",
+  /** Ring until opened. Only meaningful for the two blocking events. */
+  "notify.callAttention": false,
+  "notify.callWaiting": false,
 });

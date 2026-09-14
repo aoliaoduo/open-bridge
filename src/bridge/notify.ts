@@ -349,6 +349,38 @@ const ledger: NotifyLedger = { attempts: [], last: undefined };
  * re-pressing a test because they did not hear the first one is precisely
  * the case dedupe would wrongly silence. The mode and the switch still gate.
  */
+/**
+ * Fill in the operator's per-event preferences where the caller said nothing.
+ *
+ * Reads config directly rather than going through NotifySettings: these are
+ * presentation choices consulted once per push, and threading eleven more
+ * fields through the settings struct would make every caller carry knobs it
+ * has no opinion about.
+ */
+export function withEventDefaults(event: NotifyEvent, bark?: BarkPushExtras): BarkPushExtras | undefined {
+  const cfg = host().config;
+  const suffix = event === "attention" ? "Attention"
+    : event === "waiting" ? "Waiting"
+      : event === "finished" ? "Finished"
+        : "Progress";
+  const level = String(cfg.get<string>(`notify.level${suffix}`, "") ?? "").trim();
+  const sound = String(cfg.get<string>(`notify.sound${suffix}`, "") ?? "").trim();
+  // Only the two blocking events offer "ring until opened"; progress and
+  // finished have no such key, and reading one would invent a setting.
+  const call = (event === "attention" || event === "waiting")
+    && cfg.get<boolean>(`notify.call${suffix}`, false) === true;
+
+  const merged: BarkPushExtras = { ...(bark ?? {}) };
+  if (merged.level === undefined && isNotifyLevel(level)) merged.level = level;
+  if (merged.sound === undefined && sound) merged.sound = sound;
+  if (merged.call === undefined && call) merged.call = 1;
+  return Object.keys(merged).length ? merged : undefined;
+}
+
+function isNotifyLevel(value: string): value is NonNullable<BarkPushExtras["level"]> {
+  return value === "active" || value === "timeSensitive" || value === "passive" || value === "critical";
+}
+
 export async function pushNotification(
   settings: NotifySettings,
   event: NotifyEvent,
@@ -393,7 +425,18 @@ export async function pushNotification(
     ledger.attempts = [...ledger.attempts.filter(atMs => nowMs - atMs < NOTIFY_WINDOW_MS), nowMs];
   }
 
-  const url = buildBarkUrl(settings.serverUrl, settings.key, clippedTitle, clippedBody, options.bark);
+  // Per-event defaults from the console, under anything the caller asked for
+  // explicitly. The AI knows what happened; the operator knows how they want
+  // to be told about it, and only one of those two is sitting next to the
+  // phone. An explicit `level` in a notify call still wins -- a model that has
+  // judged something genuinely urgent should be able to say so.
+  const url = buildBarkUrl(
+    settings.serverUrl,
+    settings.key,
+    clippedTitle,
+    clippedBody,
+    withEventDefaults(event, options.bark),
+  );
   try {
     const probe = await probeHttpHealth(url, { timeoutMs: BARK_TIMEOUT_MS });
     if (probe.ok) {

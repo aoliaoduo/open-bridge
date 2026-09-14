@@ -36,7 +36,17 @@ export type ConfigValidation = { ok: true; value: unknown } | { ok: false; error
 /** Shared with the MCP entry so the missing-value refusal cannot drift. */
 export const SETTING_VALUE_REQUIRED = "value is required. (expected 'value': setting value)";
 
+/** Bark delivery styles, per docs on the Bark app's own URL parameters. */
+const NOTIFY_LEVEL_KEYS: ReadonlySet<string> = new Set([
+  "notify.levelAttention", "notify.levelWaiting", "notify.levelFinished", "notify.levelProgress",
+]);
+const NOTIFY_SOUND_KEYS: ReadonlySet<string> = new Set([
+  "notify.soundAttention", "notify.soundWaiting", "notify.soundFinished", "notify.soundProgress",
+]);
+
 const BOOLEAN_KEYS: ReadonlySet<string> = new Set([
+  "notify.callAttention",
+  "notify.callWaiting",
   "unrestrictedFileAccess",
   "autoReconnect",
   "ngrokUseHttpProxy",
@@ -240,6 +250,30 @@ export function validateConfigValue(key: string, value: unknown): ConfigValidati
     // (an explicit, meaningful value — never coerce it to the default).
     if (!isInt(value) || value < 0 || value > 1440) {
       return { ok: false, error: "notify.idleMinutes must be an integer between 0 and 1440 (minutes; 0 = off). (expected 'notify.idleMinutes': number)" };
+    }
+    return { ok: true, value };
+  }
+
+  if (NOTIFY_LEVEL_KEYS.has(key)) {
+    const allowed = ["active", "timeSensitive", "passive", "critical"];
+    if (typeof value !== "string" || !allowed.includes(value)) {
+      return {
+        ok: false,
+        error: `${key} must be one of: ${allowed.join(", ")}. critical overrides the phone's mute switch and needs Bark's critical-alert permission in iOS. (expected '${key}': string)`,
+      };
+    }
+    return { ok: true, value };
+  }
+
+  if (NOTIFY_SOUND_KEYS.has(key)) {
+    // Not validated against a list: Bark ships its own sound set and adds to
+    // it, so an allowlist here would go stale and start refusing names the
+    // app accepts. "" means "whatever the app is set to".
+    if (typeof value !== "string" || value.length > 64 || /[\s/?&#]/.test(value)) {
+      return {
+        ok: false,
+        error: `${key} must be a ringtone name with no spaces or URL characters, or "" for the app default. (expected '${key}': string)`,
+      };
     }
     return { ok: true, value };
   }

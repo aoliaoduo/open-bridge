@@ -133,6 +133,16 @@ function settingsState(overrides: Partial<SettingsState> = {}): SettingsState {
       logMaxBytes: 10 * 1024 * 1024,
       "oauth.enabled": false,
       "oauth.allowedRedirectHosts": [],
+    "notify.levelAttention": "timeSensitive",
+    "notify.levelWaiting": "timeSensitive",
+    "notify.levelFinished": "active",
+    "notify.levelProgress": "passive",
+    "notify.soundAttention": "",
+    "notify.soundWaiting": "",
+    "notify.soundFinished": "",
+    "notify.soundProgress": "",
+    "notify.callAttention": false,
+    "notify.callWaiting": false,
     },
     detected: {
       shells: [

@@ -138,3 +138,32 @@ test("timeout settings refuse values that overflow the 32-bit timer", () => {
     assert.equal(ok(key, 0), 0, `${key} still accepts 0 to disable`);
   }
 });
+
+/**
+ * The per-event Bark styling is the operator's call, so it has to survive a
+ * round trip through the config validator — a select that stores a value the
+ * server refuses would look like it worked until the next push arrived wrong.
+ */
+test("per-event notify levels accept Bark's four styles and refuse anything else", () => {
+  for (const key of [
+    "notify.levelAttention", "notify.levelWaiting", "notify.levelFinished", "notify.levelProgress",
+  ]) {
+    for (const level of ["active", "timeSensitive", "passive", "critical"]) {
+      assert.equal(ok(key, level), level, `${key} accepts ${level}`);
+    }
+    assert.match(err(key, "loud"), /must be one of/, `${key} refuses an invented level`);
+    assert.match(err(key, ""), /must be one of/, `${key} has no empty state — every event has a style`);
+  }
+});
+
+test("per-event ringtones reject anything that would break the Bark URL", () => {
+  for (const key of ["notify.soundAttention", "notify.soundFinished"]) {
+    assert.equal(ok(key, "minuet"), "minuet");
+    // "" is the app default, and is the only way to say "do not set a sound".
+    assert.equal(ok(key, ""), "");
+    // A space or a URL character would corrupt the query string rather than
+    // pick a different tone, so it is refused by name instead of encoded.
+    assert.match(err(key, "two words"), /no spaces or URL characters/);
+    assert.match(err(key, "a&b=c"), /no spaces or URL characters/);
+  }
+});

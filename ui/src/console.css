@@ -723,10 +723,9 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
   .stats, .stats.three { grid-template-columns: 1fr; }
   .crumb-path, .crumb:not(.current), .crumb-sep { display: none; }
   .topbar { gap: 8px; padding: 8px 12px; }
-  /* The .ghost theme toggle gets a more menu elsewhere; the remaining
-     action buttons (复制 MCP / 一键体检 / 刷新本页) plus the chip still fit
-     on a single 720px row thanks to the tightened gap and padding. */
-  .topbar-actions .ghost { display: none; }
+  /* The action buttons this used to thin out (复制 MCP / 一键体检 / 刷新本页
+     and the theme toggle) were removed from the topbar, which now holds only
+     the chip and the version. Nothing left to hide. */
   /* Once the topbar can wrap to two lines, the section rail cannot keep
      its `top: var(--bar-h)` sticky offset — it would slide under the
      second row. Drop sticky on small screens; the section nav is short

@@ -106,6 +106,16 @@ export interface SettingsConfigView {
   ngrokUseHttpProxy: boolean;
   toolProfile: string;
   logMaxBytes: number;
+  "notify.levelAttention": string;
+  "notify.levelWaiting": string;
+  "notify.levelFinished": string;
+  "notify.levelProgress": string;
+  "notify.soundAttention": string;
+  "notify.soundWaiting": string;
+  "notify.soundFinished": string;
+  "notify.soundProgress": string;
+  "notify.callAttention": boolean;
+  "notify.callWaiting": boolean;
   /** OAuth 2.1 authorization server, off by default like the bearer gate. */
   "oauth.enabled": boolean;
   /** Extra redirect hosts a registered client may use; [] means the built-in list. */
@@ -223,6 +233,14 @@ const CONFIG_SPEC = {
   "notify.onTaskDone": { kind: "boolean" },
   "notify.onFinish": { kind: "boolean" },
   "notify.serverUrl": { kind: "string", max: 500 },
+  "notify.levelAttention": { kind: "string", max: 32 },
+  "notify.levelWaiting": { kind: "string", max: 32 },
+  "notify.levelFinished": { kind: "string", max: 32 },
+  "notify.levelProgress": { kind: "string", max: 32 },
+  "notify.soundAttention": { kind: "string", max: 64 },
+  "notify.soundWaiting": { kind: "string", max: 64 },
+  "notify.soundFinished": { kind: "string", max: 64 },
+  "notify.soundProgress": { kind: "string", max: 64 },
   "notify.idleMinutes": { kind: "int", min: 0, max: 1440 },
 } as const;
 

@@ -69,3 +69,43 @@ test("a hide rule outranks the other rules on the same element", () => {
     }
   }
 });
+
+/**
+ * The drawer toggle has now been wrong twice: first visible at every width
+ * because the hide rule lost the cascade, then still in the DOM after the CSS
+ * was fixed — focusable, clickable, and toggling state no stylesheet responds
+ * to above the breakpoint. It is rendered conditionally now, so the guard that
+ * matters is that the two breakpoints agree.
+ */
+test("the drawer breakpoint in Topbar matches the one in the stylesheet", () => {
+  const ts = readFileSync(path.join(process.cwd(), "ui/src/components/Topbar.tsx"), "utf8");
+  const declared = /DRAWER_MAX_WIDTH = (\d+)/.exec(ts)?.[1];
+  assert.ok(declared, "Topbar must declare the breakpoint it renders against");
+  assert.match(
+    css,
+    new RegExp(`@media \\(max-width: ${declared}px\\)`),
+    `console.css has no @media at ${declared}px, so the button renders at widths where the drawer does not exist`,
+  );
+  // And that media query must be the one that actually builds the drawer.
+  //
+  // Slicing a fixed number of characters does NOT work here and the first
+  // version of this test proved it: the 1080px block is three lines long, so
+  // a 1200-char window ran straight into the 900px block below it and found
+  // drawer-open there. The test passed while pointing at the wrong
+  // breakpoint. Walk the braces instead.
+  const open = css.indexOf(`@media (max-width: ${declared}px)`);
+  let depth = 0;
+  let end = open;
+  for (let i = css.indexOf("{", open); i < css.length; i += 1) {
+    if (css[i] === "{") depth += 1;
+    else if (css[i] === "}") {
+      depth -= 1;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+  assert.match(
+    css.slice(open, end),
+    /drawer-open/,
+    `the @media at ${declared}px exists but is not the drawer's own block`,
+  );
+});
