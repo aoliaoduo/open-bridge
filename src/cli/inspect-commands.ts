@@ -107,7 +107,41 @@ export async function cmdLogs(parsed: ParsedArgs): Promise<void> {
       });
     } catch { /* file gone; keep waiting for it to come back */ }
   }, 1000);
-  await new Promise<void>(resolve => { process.on("SIGINT", () => { clearInterval(timer); resolve(); }); });
+
+  // SIGINT is not the only way this ends. `open-bridge logs --follow | head -5`
+  // closes the pipe as soon as head has its five lines, and a follower that
+  // only listens for Ctrl+C keeps waking up every second forever -- invisibly,
+  // until someone finds it in the task manager. Piping into head, less, or a
+  // script that stops reading is ordinary shell usage, not an error.
+  //
+  // Listening for EPIPE on stdout is not enough on its own. The error only
+  // fires when a write actually fails, and this follower writes only when the
+  // log file grows. A quiet log means no write, no error, and no exit: the
+  // very case where the orphan lives longest. So each tick also probes the
+  // pipe with a zero-length write, which fails the same way a real write
+  // would but does not depend on there being anything to say.
+  await new Promise<void>(resolve => {
+    let done = false;
+    const finish = (): void => {
+      if (done) return; // every path below can fire more than once
+      done = true;
+      clearInterval(timer);
+      clearInterval(pipeProbe);
+      resolve();
+    };
+    process.on("SIGINT", finish);
+    process.on("SIGTERM", finish);
+    // An unhandled stdout error would kill the process with a stack trace; for
+    // a normal `| head` that is noise, so exit quietly instead.
+    process.stdout.on("error", finish);
+    process.stdout.on("close", finish);
+    const pipeProbe = setInterval(() => {
+      // destroyed covers the Windows case, where the handle closes without an
+      // error event ever being delivered.
+      if (process.stdout.destroyed || process.stdout.writableEnded) { finish(); return; }
+      try { process.stdout.write(""); } catch { finish(); }
+    }, 1000);
+  });
 }
 
 /**

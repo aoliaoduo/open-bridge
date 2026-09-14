@@ -16,7 +16,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawn } from "node:child_process";
-import {mkdtempSync, readdirSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readdirSync, writeFileSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -166,6 +166,58 @@ test("an unknown command fails loudly instead of quietly starting something", as
     assert.notEqual(code, 0, "a typo is an error");
     assert.match(stdout + stderr, /definitely-not-a-command|用法|unknown/i, "and the message mentions what was typed or how to get help");
     assert.deepEqual(readdirSync(home), [], "nothing was launched to find that out");
+  } finally {
+    removeTempDir(home);
+  }
+});
+
+/**
+ * `logs --follow | head -5` is ordinary shell usage, and it used to leave an
+ * orphan behind: head closes the pipe once it has its lines, and a follower
+ * watching only for SIGINT kept waking every second to write into a reader
+ * that no longer existed. Nobody sees it -- there is no window and no output
+ * -- so it accumulates until someone opens the task manager.
+ *
+ * Listening for EPIPE alone did not fix it, which is the part worth pinning
+ * down: the error only fires when a write actually fails, and this follower
+ * writes only when the log grows. A quiet log meant no write, no error, and
+ * no exit -- exactly when the orphan survives longest. The fix probes the
+ * pipe on a timer instead, so this test deliberately does not write to the
+ * log while it waits.
+ */
+test("logs --follow exits when the pipe it writes to closes", async () => {
+  const home = freshHome();
+  try {
+    // The follower needs an existing log file: without one cmdLogs prints
+    // "no log yet" and returns before it ever starts following, which is how
+    // the first version of this test passed against the bug it was meant to
+    // catch. Write enough lines that head -3 is satisfied from the first read,
+    // then leave the file alone -- a quiet log is precisely the case where the
+    // old code never attempted a write and so never noticed the closed pipe.
+    mkdirSync(path.join(home, "logs"), { recursive: true });
+    writeFileSync(
+      path.join(home, "logs", "bridge.log"),
+      Array.from({ length: 20 }, (_, i) => `[2026-09-15 02:00:0${i % 10}] [test] line ${i}`).join("\n") + "\n",
+    );
+
+    // Destroying the child's stdout from here does NOT reproduce the bug: that
+    // closes the read end inside this process, and the follower never learns
+    // of it. Only a real downstream reader that exits -- head -- closes the
+    // write end the follower holds. Verified both ways: with `head` in the
+    // pipeline the old code hangs and this test fails; with a destroy() it
+    // passed against the bug, which is how the first version of this test
+    // managed to be useless.
+    const pipeline = spawn(
+      `"${process.execPath}" "${CLI}" logs --follow | head -3`,
+      { env: { ...process.env, OPEN_BRIDGE_HOME: home }, stdio: ["ignore", "ignore", "ignore"], shell: true },
+    );
+
+    const verdict = await Promise.race([
+      new Promise(resolve => pipeline.on("exit", () => resolve("exited"))),
+      new Promise(resolve => setTimeout(() => resolve("still running"), 10_000)),
+    ]);
+    if (verdict !== "exited") pipeline.kill("SIGKILL");
+    assert.equal(verdict, "exited", "the follower noticed its reader was gone");
   } finally {
     removeTempDir(home);
   }
