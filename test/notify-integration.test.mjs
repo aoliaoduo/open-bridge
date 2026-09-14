@@ -249,6 +249,47 @@ test("writes echo masks; a refused paste names the field; no log ever holds the 
   }
 });
 
+test("the audit line reports what actually happened, including the silences", async () => {
+  // The old line was hardcoded `record("notify", "progress", ...)` and written
+  // BEFORE the send, so a delivered `finished` event read as
+  // "[notify] progress: push finished" and a failed one still claimed a push.
+  // Worse, every gated path returned silently, which made "why didn't my phone
+  // ring?" undebuggable. Both halves are pinned here.
+  const readLog = () => {
+    try { return readFileSync(path.join(home, "logs", "bridge.log"), "utf8"); } catch { return ""; }
+  };
+
+  // Deliveries earlier in this file already wrote their lines; assert on those
+  // rather than sending another. The 6-per-60s budget is shared by every test
+  // here, and spending one to re-prove a delivery would starve the budget test.
+  const sentLines = readLog().split("\n").filter(l => l.includes("[notify]"));
+  assert.ok(
+    sentLines.some(l => l.includes("completed:") && l.includes("sent ")),
+    `a delivered push logs as completed/sent, got: ${sentLines.slice(-6).join(" | ")}`,
+  );
+  assert.ok(
+    !sentLines.some(l => /progress: push (finished|attention|waiting)/.test(l)),
+    "the old miscategorised wording is gone",
+  );
+
+  // A suppressed push must leave a trace naming the reason. This one costs no
+  // budget by construction: it never reaches the wire.
+  await callTool(sessionId, "set_config_value", { key: "notify.onFinish", value: false });
+  const beforeGated = readLog().length;
+  const gated = toolJson((await callTool(sessionId, "notify", {
+    event: "finished", message: "这条会被开关挡住",
+  })).text);
+  assert.equal(gated.delivered, false);
+  assert.equal(gated.reason, "switch_off");
+  await delay(400);
+  const gatedLines = readLog().slice(beforeGated).split("\n").filter(l => l.includes("[notify]"));
+  assert.ok(
+    gatedLines.some(l => l.includes("not sent (switch_off)")),
+    `a gated push says so in the log, got: ${gatedLines.join(" | ")}`,
+  );
+  await callTool(sessionId, "set_config_value", { key: "notify.onFinish", value: true });
+});
+
 test("the AI picks Bark knobs per call; junk knobs are refused by name", async () => {
   const knobsBefore = pushes.length;
   const fancy = toolJson((await callTool(sessionId, "notify", {

@@ -273,11 +273,11 @@ export async function pushNotification(
   const outcome = (delivered: boolean, reason: string, status = 0, error = ""): NotifyOutcome =>
     ({ delivered, event, reason, status, error });
 
-  if (!settings.usable) return outcome(false, settings.blocker || "disabled");
+  if (!settings.usable) return logged(outcome(false, settings.blocker || "disabled"), title);
   // "switch_off" rather than the old "mode": the reason names a thing the
   // operator can actually find and flip, instead of a vocabulary they no
   // longer have.
-  if (eventSuppressed(settings, event)) return outcome(false, "switch_off");
+  if (eventSuppressed(settings, event)) return logged(outcome(false, "switch_off"), title);
 
   const clippedTitle = title.trim().slice(0, BARK_TITLE_LIMIT);
   const clippedBody = body.replace(/\r\n?/g, "\n").trim().slice(0, BARK_BODY_LIMIT);
@@ -288,13 +288,15 @@ export async function pushNotification(
   if (!options.bypassLedger && last
     && event === last.kind && clippedTitle === last.title && clippedBody === last.body
     && nowMs - last.atMs < NOTIFY_DEDUPE_MS) {
-    return outcome(false, "duplicate");
+    return logged(outcome(false, "duplicate"), clippedTitle);
   }
   ledger.last = { kind: event, title: clippedTitle, body: clippedBody, atMs: nowMs };
 
   if (!options.bypassLedger) {
     ledger.attempts = ledger.attempts.filter(atMs => nowMs - atMs < NOTIFY_WINDOW_MS);
-    if (ledger.attempts.length >= NOTIFY_MAX_PER_WINDOW) return outcome(false, "rate_limited");
+    if (ledger.attempts.length >= NOTIFY_MAX_PER_WINDOW) {
+      return logged(outcome(false, "rate_limited"), clippedTitle);
+    }
     ledger.attempts.push(nowMs);
   } else {
     // A manual press never gates itself — the operator re-pressing because
@@ -306,9 +308,6 @@ export async function pushNotification(
 
   const url = buildBarkUrl(settings.serverUrl, settings.key, clippedTitle, clippedBody, options.bark);
   try {
-    // The url embeds the operator's device key: log a shape, never the string
-    // (and the redactor has no way to know this particular path segment is it).
-    record("notify", "progress", `push ${event}: ${clippedTitle.slice(0, 60)}`);
     const probe = await probeHttpHealth(url, { timeoutMs: BARK_TIMEOUT_MS });
     if (probe.ok) {
       // Any push that actually landed disarms the finish watchdog. This is the
@@ -317,18 +316,48 @@ export async function pushNotification(
       // the watchdog stays quiet; with that switch off the bell is suppressed,
       // the mark is never set, and the watchdog is the only thing that speaks.
       markSelfNotified(nowMs);
-      return outcome(true, "", probe.status);
+      return logged(outcome(true, "", probe.status), clippedTitle);
     }
     const detail = probe.error || `Bark responded with HTTP ${probe.status}`;
-    record("notify", "warning", `push failed (${event}): ${detail}`.slice(0, 500));
-    return outcome(false, "send_failed", probe.status, detail);
+    return logged(outcome(false, "send_failed", probe.status, detail), clippedTitle);
   } catch (error) {
     // probeHttpHealth re-throws only INPUT refusals (bad url/unsafe target);
     // a push whose own URL was refused is a configuration problem worth a line.
     const detail = error instanceof Error ? error.message : String(error);
-    record("notify", "warning", `push refused (${event}): ${detail}`.slice(0, 500));
-    return outcome(false, "send_failed", 0, detail);
+    return logged(outcome(false, "send_failed", 0, detail), clippedTitle);
   }
+}
+
+/**
+ * Write the audit line for one push, and hand the outcome straight back so
+ * call sites stay one-liners.
+ *
+ * The status is derived from what actually happened instead of being a
+ * hardcoded "progress" — that older line made a delivered `finished` event
+ * read as `[notify] progress: push finished`, which is two different senses of
+ * the word "progress" (the activity lifecycle vs. the notify event) colliding
+ * in one line. It was also written BEFORE the probe, so it announced a push
+ * that might then fail, and the UI painted it 「进行中」 forever because nothing
+ * ever moved it off that status.
+ *
+ * A suppressed push is logged too, and that is the point: "my phone did not
+ * ring" was previously undebuggable, because every gated path returned in
+ * silence. The one exception is a channel that is off or keyless — the
+ * operator set that deliberately, and a warning per set_todos would be noise
+ * about a decision they already made.
+ */
+function logged(result: NotifyOutcome, title: string): NotifyOutcome {
+  // The url embeds the operator's device key, so only ever a shape is logged
+  // here — never the string (the redactor cannot know that path segment is it).
+  const label = title ? `: ${title.slice(0, 60)}` : "";
+  if (result.delivered) {
+    record("notify", "completed", `sent ${result.event}${label}`);
+  } else if (result.reason === "send_failed") {
+    record("notify", "warning", `send failed (${result.event}): ${result.error}`.slice(0, 500));
+  } else if (result.reason !== "disabled" && result.reason !== "no_key") {
+    record("notify", "warning", `not sent (${result.reason}): ${result.event}${label}`.slice(0, 500));
+  }
+  return result;
 }
 
 /** Built-in phrasing so a call that only names the event still means something. */
