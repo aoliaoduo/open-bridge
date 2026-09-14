@@ -5,6 +5,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { ProcessOutputBuffer } from "../process/output-buffer.js";
+import type { ToolRunState } from "./tool-run-hints.js";
 import { WorkspaceContext } from "../workspace/context.js";
 
 // --- Payload limits (defaults, not capability caps) ---
@@ -87,6 +88,13 @@ export type SessionState = {
   todos: unknown[];
   /** In-flight MCP requests on this session; idle-only eviction waits for zero. */
   activeRequests: number;
+  /**
+   * Consecutive-call bookkeeping for the batching hints. Optional because a
+   * session created before this existed (or by a test that builds the shape by
+   * hand) must keep working; `noteToolCall` is only reached through a lazy
+   * initialiser.
+   */
+  runHints?: ToolRunState;
 };
 
 export type UsageStats = {
