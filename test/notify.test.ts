@@ -221,7 +221,34 @@ test("finish watchdog: the AI's own push silences it", () => {
 
 test("finish watchdog: unfinished work is the idle watchdog's job, not this one", () => {
   assert.equal(finishNoticeVerdict({ ...DONE, allCompleted: false }), false);
-  assert.equal(finishNoticeVerdict({ ...DONE, hasTodos: false }), false);
+  // A list with open items stays the idle watchdog's case even if some other
+  // field would otherwise qualify — the two must not page for one silence.
+  assert.equal(
+    finishNoticeVerdict({ ...DONE, allCompleted: false, lastUsedMs: DONE.nowMs - 600_000 }),
+    false,
+  );
+});
+
+test("finish watchdog: a conversation with NO list still gets announced", () => {
+  // The whole point of decoupling: an operator who asked one question and
+  // walked away is just as away as one who watched a list finish. Requiring a
+  // completed list meant short exchanges — the common case — never rang.
+  const noList = { ...DONE, hasTodos: false, allCompleted: true };
+  // Silence must reach the operator's full idle threshold here, because
+  // without a list the only evidence of "ended" is the silence itself.
+  assert.equal(
+    finishNoticeVerdict({ ...noList, lastUsedMs: DONE.nowMs - 10 * 60_000 }),
+    true,
+    "10 min of quiet at idleMinutes=10 is an ended conversation",
+  );
+  // One minute of quiet clears the 45 s settle a finished list uses, and that
+  // is exactly what must NOT be enough without a list: mid-conversation
+  // reading time would otherwise be announced as "finished".
+  assert.equal(
+    finishNoticeVerdict(noList),
+    false,
+    "a minute of quiet is someone reading, not someone gone",
+  );
 });
 
 test("finish watchdog: it waits for the run to actually be over", () => {

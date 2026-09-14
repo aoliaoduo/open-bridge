@@ -471,7 +471,7 @@ export function idleNoticeTick(nowMs: number = Date.now()): boolean {
 }
 
 /**
- * Should the server announce a finished work list the AI never announced?
+ * Should the server announce an ended conversation the AI never announced?
  *
  * The idle watchdog above deliberately requires an OPEN todo — "silence with
  * work outstanding" is its whole subject. That leaves the opposite case
@@ -481,9 +481,17 @@ export function idleNoticeTick(nowMs: number = Date.now()): boolean {
  * to remember is what already failed — repeatedly — so the server states the
  * fact it can see for itself.
  *
+ * Crucially this is NOT tied to todos. A conversation that never wrote a list
+ * — a question answered, a one-off command, an edit made — ends just as
+ * really, and the operator is just as away from the desk. Requiring a
+ * completed list to earn a push made the machinery useless for exactly the
+ * short exchanges it was wanted for, so a missing list is now a valid ending
+ * (held longer, see the settle delay below) rather than a veto.
+ *
  * Conditions are deliberately tight, because a wrong "done" is worse than a
  * missing one:
- *  - a list that exists and is entirely completed (nothing in flight),
+ *  - no list at all, or a list that is entirely completed (never a list with
+ *    open items — that silence belongs to the idle watchdog),
  *  - no request currently running (the run is really over, not mid-call),
  *  - a short settle delay after the last call, so the natural
  *    `set_todos` → summary → `notify` ending fires the model's own push first
@@ -491,8 +499,8 @@ export function idleNoticeTick(nowMs: number = Date.now()): boolean {
  *  - and the AI must not have pushed anything itself since that completion —
  *    `notifiedSinceMs` is how a well-behaved model switches this off.
  *
- * The latch is the completion clock, so one announcement per finished list:
- * new work advances it and re-arms the watchdog.
+ * The latch is the completion clock (the last call when there is no list), so
+ * there is one announcement per ending: new work advances it and re-arms.
  */
 export function finishNoticeVerdict(input: {
   usable: boolean;
@@ -509,12 +517,23 @@ export function finishNoticeVerdict(input: {
   // idleMinutes === 0 is the operator switching the watchdogs off entirely;
   // this one honours that same switch rather than inventing a second knob.
   if (!input.usable || input.idleMinutes <= 0) return false;
-  if (!input.hasTodos || !input.allCompleted) return false;
+  // An UNFINISHED list is the idle watchdog's territory, not this one's.
+  // Staying out of it is what keeps the two from paging for the same silence.
+  if (input.hasTodos && !input.allCompleted) return false;
   if (input.activeRequests > 0) return false;
   if (!Number.isFinite(input.completedAtMs) || input.completedAtMs <= 0) return false;
   // The model already said it — that is the outcome we wanted, stay quiet.
   if (input.notifiedSinceMs >= input.completedAtMs) return false;
-  const settleMs = Math.min(FINISH_SETTLE_MS, input.idleMinutes * 60_000);
+  // Two endings, two strengths of evidence, two delays.
+  //
+  // A list flipped wholly to completed is an explicit "done": act on it fast
+  // (45s) so someone who walked away hears within the minute. A session with
+  // NO list offers no such statement — the only evidence is silence, which is
+  // also what reading a long answer looks like. Waiting the operator's full
+  // idle threshold is what stops that case from crying "finished" mid-chat.
+  const settleMs = input.hasTodos
+    ? Math.min(FINISH_SETTLE_MS, input.idleMinutes * 60_000)
+    : input.idleMinutes * 60_000;
   if (input.nowMs - input.lastUsedMs < settleMs) return false;
   return input.announcedForMs !== input.completedAtMs;
 }
@@ -552,7 +571,9 @@ function completionSnapshot(): { hasTodos: boolean; allCompleted: boolean; compl
   let hasTodos = false;
   let allCompleted = true;
   let completedAtMs = 0;
+  let latestActivityMs = 0;
   for (const session of state.sessions.values()) {
+    if (session.lastUsed > latestActivityMs) latestActivityMs = session.lastUsed;
     const todos = Array.isArray(session.todos) ? session.todos : [];
     if (todos.length === 0) continue;
     hasTodos = true;
@@ -562,6 +583,13 @@ function completionSnapshot(): { hasTodos: boolean; allCompleted: boolean; compl
     }
     if (session.lastUsed > completedAtMs) completedAtMs = session.lastUsed;
   }
+  // With no list at all there is no completion clock, but the episode still
+  // has an end: the last call anyone made. Using it as the latch key gives a
+  // listless conversation the same "announce once, re-arm on new work"
+  // behaviour a finished list gets — without it, `completedAtMs === 0` would
+  // veto every push and a chat that never called set_todos would stay silent,
+  // which is the exact coupling this watchdog is meant to break.
+  if (!hasTodos) return { hasTodos, allCompleted, completedAtMs: latestActivityMs };
   return { hasTodos, allCompleted, completedAtMs };
 }
 
@@ -584,13 +612,13 @@ export function finishNoticeTick(nowMs: number = Date.now()): boolean {
   });
   if (!fire) return false;
   finishAnnouncedForMs = completion.completedAtMs;
-  void pushNotification(
-    settings,
-    "finished",
-    NOTIFY_DEFAULT_TITLE,
-    "任务清单已全部完成，但 AI 没有自己发通知 —— 由服务端代为告知。",
-    Date.now(),
-  ).catch(() => undefined);
+  // The two endings read differently to a human glancing at a phone, so say
+  // which one happened instead of one vague "done".
+  const body = completion.hasTodos
+    ? "任务清单已全部完成，但 AI 没有自己发通知 —— 由服务端代为告知。"
+    : "这轮对话已经结束（没有任务清单），AI 没有自己发通知 —— 由服务端代为告知。";
+  void pushNotification(settings, "finished", NOTIFY_DEFAULT_TITLE, body, Date.now())
+    .catch(() => undefined);
   return true;
 }
 
