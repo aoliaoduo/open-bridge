@@ -180,15 +180,19 @@ test("manual notify delivers in frequent mode; an identical repeat dedupes", asy
   assert.equal(two.reason, "duplicate");
 });
 
-test("dnd mode gates progress (manual and automatic) but answers attention/finished", async () => {
+test("the task switch gates progress (manual and automatic) but never attention/waiting", async () => {
   const switched = toolJson((await callTool(sessionId, "set_config_value", {
-    key: "notify.mode", value: "dnd",
+    key: "notify.onTaskDone", value: false,
   })).text);
-  assert.equal(switched.value, "dnd");
+  assert.equal(switched.value, false);
   const progressCall = await callTool(sessionId, "notify", { event: "progress", message: "安静点" });
   const progRes = toolJson(progressCall.text);
   assert.equal(progRes.delivered, false);
-  assert.equal(progRes.reason, "mode");
+  assert.equal(progRes.reason, "switch_off");
+  // `waiting` surviving every switch is pinned in test/notify.test.ts against
+  // eventSuppressed directly. It is NOT re-sent here on purpose: the 6-per-60s
+  // budget is shared by every test in this file, and spending a real push on
+  // something already proven pure would starve the later budget test.
   // The automatic bell is suppressed by the same rule: mark item 2 done and
   // confirm no new GET arrives within the suppression window.
   const pushesBefore = pushes.length;
@@ -205,15 +209,18 @@ test("dnd mode gates progress (manual and automatic) but answers attention/finis
   assert.ok(await waitForPushes(pushesBefore + 1));
 });
 
-test("a session opened under the live config is taught the mode it must obey", async () => {
+test("a session opened under the live config is taught the switches it must obey", async () => {
   const opened = await openSession("notify-readme");
-  assert.match(opened.instructions, /Phone notifications \(Bark, dnd mode\)/);
+  assert.match(opened.instructions, /Phone notifications \(Bark\)/);
+  // The waiting duty is unconditional, so it must be in the text whatever the
+  // switches are set to at connect time.
+  assert.match(opened.instructions, /event:"waiting"/);
   assert.match(opened.instructions, /suppressed/);
 });
 
-test("the console test button rings through dnd, and refuses to ring when the switch is off", async () => {
+test("the console test button rings through a closed switch, and refuses when the channel is off", async () => {
   const test1 = await consoleAction({ command: "testNotify" });
-  assert.equal(test1.body.ok, true, "an operator press IS the attention; the mode must not mute it");
+  assert.equal(test1.body.ok, true, "an operator press IS the attention; no switch may mute it");
   const off = await consoleAction({ command: "setConfig", key: "notify.enabled", value: false });
   assert.equal(off.body.ok, true);
   const test2 = await consoleAction({ command: "testNotify" });
@@ -248,7 +255,7 @@ test("the AI picks Bark knobs per call; junk knobs are refused by name", async (
     event: "attention", title: "灵活通知", message: "带铃声与时效等级",
     sound: "minuet", level: "timeSensitive", badge: 2,
   })).text);
-  assert.equal(fancy.delivered, true, "attention passes the dnd gate");
+  assert.equal(fancy.delivered, true, `attention passes every switch (reason: ${fancy.reason})`);
   assert.ok(await waitForPushes(knobsBefore + 1));
   const query = new URL(`https://bark.test${pushes[knobsBefore].url}`).searchParams;
   assert.equal(query.get("sound"), "minuet");
@@ -264,7 +271,7 @@ test("the AI picks Bark knobs per call; junk knobs are refused by name", async (
 
 
 test("the per-minute budget bounds a runaway loop", async () => {
-  await callTool(sessionId, "set_config_value", { key: "notify.mode", value: "frequent" });
+  await callTool(sessionId, "set_config_value", { key: "notify.onTaskDone", value: true });
   const results = [];
   for (let i = 0; i < 12; i += 1) {
     const r = toolJson((await callTool(sessionId, "notify", {

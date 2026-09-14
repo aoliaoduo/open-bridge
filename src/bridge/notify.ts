@@ -3,15 +3,26 @@
  *
  * The operator configures everything in the console (设置 → 手机通知): the device
  * key (the distinctive `https://api.day.app/<key>/…` path segment the Bark app
- * shows — a pasted URL is parsed to the key on save) and the mode:
+ * shows — a pasted URL is parsed to the key on save) and two INDEPENDENT
+ * switches, either, both, or neither:
  *
- *  - `frequent` (频繁): push a message for each todo item that flips to
- *    completed (the set_todos diff, so it needs no AI discipline), and every
- *    plain notify call delivers.
- *  - `dnd` (免打扰): only events that genuinely mean "a human is needed" get
- *    through — attention (需要选择/回话) and finished (对话结束). Softer events
- *    return delivered:false with the reason instead of failing: the AI learns
- *    the gate and adapts rather than seeing errors.
+ *  - `notify.onTaskDone` (每项任务完成时通知): each todo item that flips to
+ *    completed pushes, read from the set_todos diff so it needs no AI
+ *    discipline.
+ *  - `notify.onFinish` (对话结束时通知): the end-of-exchange push, whether the
+ *    AI sends it or the server's watchdog does.
+ *
+ * These were one either/or `mode` enum (`frequent`/`dnd`) and that was the
+ * bug: wanting a bell per finished task AND a bell when the exchange ends is
+ * the obvious combination, and an enum made it unexpressible. Two booleans
+ * also delete the question "which mode includes what" — each switch names
+ * exactly the thing it controls.
+ *
+ * What is NOT switchable: events meaning a human is needed right now
+ * (`attention`, `waiting`). Those always deliver while the channel is usable.
+ * An operator who does not want to be interrupted turns the channel off; a
+ * question nobody answers stalls the conversation forever, so it is never the
+ * thing we silence by default.
  *
  * Deliberately absent: a provider registry (Bark today; when a second provider
  * arrives, its keys get their own namespaced config), per-event sound/level
@@ -32,12 +43,17 @@ import { canonicalBarkOrigin, parseBarkKeyInput } from "./config-values.js";
 import { record, state } from "./state.js";
 import type { JsonArgs } from "./json-args.js";
 
-export const NOTIFY_EVENT_VALUES = ["progress", "attention", "finished"] as const;
+export const NOTIFY_EVENT_VALUES = ["progress", "attention", "waiting", "finished"] as const;
 export type NotifyEvent = (typeof NOTIFY_EVENT_VALUES)[number];
-export type NotifyMode = "frequent" | "dnd";
 
-/** Events whose whole meaning is "a human is needed" — they pass every mode. */
-const ATTENTION_EVENTS: ReadonlySet<NotifyEvent> = new Set<NotifyEvent>(["attention", "finished"]);
+/**
+ * Events that always deliver: the conversation cannot continue without the
+ * operator. `waiting` is the explicit "I asked a question and am blocked on
+ * the answer" — from the server's side an AI awaiting input and an AI that
+ * finished look identical (calls simply stop), so the model naming it is the
+ * only way to tell the two apart with certainty.
+ */
+const ALWAYS_EVENTS: ReadonlySet<NotifyEvent> = new Set<NotifyEvent>(["attention", "waiting"]);
 
 /** bark GET needs no response body; 8 s is patient for a push over the world. */
 const BARK_TIMEOUT_MS = 8_000;
@@ -66,7 +82,10 @@ export interface NotifySettings {
   /** Master switch AND a usable key: no push happens when either is missing. */
   usable: boolean;
   enabled: boolean;
-  mode: NotifyMode;
+  /** 每项任务完成时通知 — the set_todos completion bell. */
+  onTaskDone: boolean;
+  /** 对话结束时通知 — the end-of-exchange bell, AI-sent or watchdog-sent. */
+  onFinish: boolean;
   /** Already parsed; "" when nothing/invalid is stored. Never echo it back. */
   key: string;
   /** Canonical origin, defaulting to the official api.day.app host. */
@@ -80,7 +99,6 @@ export interface NotifySettings {
 export interface NotifyOutcome {
   delivered: boolean;
   event: NotifyEvent;
-  mode: NotifyMode;
   /** The stable verb for suppression bookkeeping; "" when it went out. */
   reason: string;
   /** Bark's HTTP status when it answered; 0 when nothing was sent. */
@@ -92,8 +110,8 @@ export interface NotifyOutcome {
 export function resolveNotifySettings(): NotifySettings {
   const cfg = host().config;
   const enabled = cfg.get("notify.enabled", CONFIG_DEFAULTS["notify.enabled"]) === true;
-  const rawMode = cfg.get("notify.mode", CONFIG_DEFAULTS["notify.mode"]);
-  const mode: NotifyMode = rawMode === "dnd" ? "dnd" : "frequent";
+  const onTaskDone = cfg.get("notify.onTaskDone", CONFIG_DEFAULTS["notify.onTaskDone"]) === true;
+  const onFinish = cfg.get("notify.onFinish", CONFIG_DEFAULTS["notify.onFinish"]) === true;
   // A hand-edited config.json is untrusted input like every other read:
   // re-parse on the read side so the send path never trusts bytes on disk.
   const rawKey = cfg.get("notify.barkKey", CONFIG_DEFAULTS["notify.barkKey"]);
@@ -107,7 +125,7 @@ export function resolveNotifySettings(): NotifySettings {
   }
   const blocker = !enabled ? "disabled" : key ? "" : "no_key";
   const idleMinutes = clampIdleMinutes(cfg.get<unknown>("notify.idleMinutes", CONFIG_DEFAULTS["notify.idleMinutes"]));
-  return { usable: enabled && Boolean(key), enabled, mode, key, serverUrl, blocker, idleMinutes };
+  return { usable: enabled && Boolean(key), enabled, onTaskDone, onFinish, key, serverUrl, blocker, idleMinutes };
 }
 
 const DEFAULT_IDLE_MINUTES = CONFIG_DEFAULTS["notify.idleMinutes"] as number;
@@ -210,9 +228,20 @@ export function parseBarkExtras(args: JsonArgs): { ok: true; extras: BarkPushExt
   return { ok: true, extras };
 }
 
-/** The mode gate — one decision point for every push producer. */
-export function modeSuppresses(mode: NotifyMode, event: NotifyEvent): boolean {
-  return mode === "dnd" && !ATTENTION_EVENTS.has(event);
+/**
+ * The switch gate — one decision point for every push producer.
+ *
+ * Reads as: interrupts always pass; the two optional bells ask their own
+ * switch; anything else (`progress`) is a courtesy that rides along with the
+ * task-completion switch, since both mean "routine forward motion".
+ */
+export function eventSuppressed(
+  settings: Pick<NotifySettings, "onTaskDone" | "onFinish">,
+  event: NotifyEvent,
+): boolean {
+  if (ALWAYS_EVENTS.has(event)) return false;
+  if (event === "finished") return !settings.onFinish;
+  return !settings.onTaskDone;
 }
 
 /** The shared ledger of recent attempts; exported view only, treat as opaque. */
@@ -242,10 +271,13 @@ export async function pushNotification(
   options: { bypassLedger?: boolean; bark?: BarkPushExtras } = {},
 ): Promise<NotifyOutcome> {
   const outcome = (delivered: boolean, reason: string, status = 0, error = ""): NotifyOutcome =>
-    ({ delivered, event, mode: settings.mode, reason, status, error });
+    ({ delivered, event, reason, status, error });
 
   if (!settings.usable) return outcome(false, settings.blocker || "disabled");
-  if (modeSuppresses(settings.mode, event)) return outcome(false, "mode");
+  // "switch_off" rather than the old "mode": the reason names a thing the
+  // operator can actually find and flip, instead of a vocabulary they no
+  // longer have.
+  if (eventSuppressed(settings, event)) return outcome(false, "switch_off");
 
   const clippedTitle = title.trim().slice(0, BARK_TITLE_LIMIT);
   const clippedBody = body.replace(/\r\n?/g, "\n").trim().slice(0, BARK_BODY_LIMIT);
@@ -282,8 +314,8 @@ export async function pushNotification(
       // Any push that actually landed disarms the finish watchdog. This is the
       // hinge that makes the fallback mode-aware for free: in frequent mode the
       // completion bell has already rung by the time a list is fully ticked, so
-      // the watchdog stays quiet; in quiet mode that bell is suppressed, the
-      // mark is never set, and the watchdog is the only thing that speaks.
+      // the watchdog stays quiet; with that switch off the bell is suppressed,
+      // the mark is never set, and the watchdog is the only thing that speaks.
       markSelfNotified(nowMs);
       return outcome(true, "", probe.status);
     }
@@ -303,6 +335,7 @@ export async function pushNotification(
 const NOTIFY_PHRASES: Record<NotifyEvent, string> = {
   progress: "进展更新：Open Bridge 完成了一个步骤。",
   attention: "需要你回到电脑前 — Open Bridge 等你确认或选择。",
+  waiting: "AI 问了你一个问题，正在等你回答 —— 不回复它就一直卡着。",
   finished: "Open Bridge 的任务对话已结束，可以回来看看结果。",
 };
 /**
@@ -611,9 +644,16 @@ export function finishNoticeTick(nowMs: number = Date.now()): boolean {
   finishAnnouncedForMs = completion.completedAtMs;
   // The two endings read differently to a human glancing at a phone, so say
   // which one happened instead of one vague "done".
+  // Deliberately non-committal about WHICH ending this is. From the server's
+  // vantage point "the AI answered and stopped" and "the AI asked a question
+  // and is waiting" are the same observation: calls stopped arriving. Claiming
+  // 「对话已结束」 was wrong half the time, and wrong in the expensive
+  // direction — someone who reads "finished" does not hurry back to answer a
+  // question that is blocking everything. Both endings want the same action
+  // from the human, so the text asks for that action and asserts nothing else.
   const body = completion.hasTodos
-    ? "任务清单已全部完成，但 AI 没有自己发通知 —— 由服务端代为告知。"
-    : "这轮对话已经结束（没有任务清单），AI 没有自己发通知 —— 由服务端代为告知。";
+    ? "任务清单已全部完成，AI 停下了 —— 可能在等你回复，也可能已经做完。去看一眼。"
+    : "AI 停下了 —— 可能在等你回复，也可能这轮已经结束。去看一眼。";
   void pushNotification(settings, "finished", NOTIFY_DEFAULT_TITLE, body, Date.now())
     .catch(() => undefined);
   return true;
@@ -627,20 +667,31 @@ export function finishNoticeTick(nowMs: number = Date.now()): boolean {
  */
 export function notifyUsageInstructions(settings: NotifySettings): string {
   if (!settings.usable) return "";
-  if (settings.mode === "dnd") {
-    return "\n\n# Phone notifications (Bark, dnd mode)\n"
-      + "The operator wants to be paged ONLY when a human is actually needed: call "
-      + "notify(event:\"attention\") when you need their choice, approval or return to the keyboard, "
-      + "and notify(event:\"finished\") when the exchange ends and they can check the result. "
-      + "Everything softer (event:\"progress\") is suppressed in this mode \u2014 do not reach for it "
-      + "to report routine steps or to work around the gate. set_todos/completion progress also "
-      + "stays silent here; that is the point.";
+  // The non-negotiable half comes first, because it is the one that costs the
+  // operator real time when it is skipped: a question asked into an empty room
+  // stalls until they happen to look at the screen.
+  let text = "\n\n# Phone notifications (Bark)\n"
+    + "ALWAYS call notify(event:\"waiting\") immediately after you ask the operator a question or "
+    + "present a choice and cannot continue without their answer \u2014 asking and then going quiet "
+    + "strands the conversation until they happen to glance at the screen. Call "
+    + "notify(event:\"attention\") when you need them back at the keyboard for any other reason. "
+    + "These two always deliver; they are not affected by the switches below.";
+  if (settings.onTaskDone) {
+    text += "\nThe operator turned ON \u300c\u6bcf\u9879\u4efb\u52a1\u5b8c\u6210\u65f6\u901a\u77e5\u300d: every todo item that flips to "
+      + "completed in set_todos is pushed automatically, so do not also notify for those. Mark items "
+      + "completed as you finish them rather than in one batch at the end \u2014 batching turns a "
+      + "progress feed into a single lump and defeats the setting. Use event:\"progress\" only for "
+      + "something between items that the list cannot express.";
+  } else {
+    text += "\nThe operator turned OFF \u300c\u6bcf\u9879\u4efb\u52a1\u5b8c\u6210\u65f6\u901a\u77e5\u300d: completed todos and "
+      + "event:\"progress\" are suppressed. Do not work around that gate by relabelling routine "
+      + "progress as attention.";
   }
-  return "\n\n# Phone notifications (Bark, frequent mode)\n"
-    + "The operator opted into push updates: every todo item that flips to completed in set_todos "
-    + "is delivered automatically, so do not also notify for those. Use notify for what the list "
-    + "cannot say: event:\"progress\" with one line about something between items, "
-    + "event:\"attention\" when a human is needed now, and event:\"finished\" when the exchange ends.";
+  text += settings.onFinish
+    ? "\nThe operator turned ON \u300c\u5bf9\u8bdd\u7ed3\u675f\u65f6\u901a\u77e5\u300d: call notify(event:\"finished\") as the last "
+      + "thing you do in an exchange. If you forget, the server sends one itself after a short delay."
+    : "\nThe operator turned OFF \u300c\u5bf9\u8bdd\u7ed3\u675f\u65f6\u901a\u77e5\u300d: event:\"finished\" is suppressed.";
+  return text;
 }
 
 /**

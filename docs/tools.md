@@ -140,11 +140,12 @@
 
 ### 手机通知（notify）
 
-**notify** — 推一条通知到用户手机（Bark）。`event` 三选一：`progress`（常规进展，频繁模式送达）/ `attention`（需要用户回电脑：等选择、等回复）/ `finished`（这轮对话结束）。`title`/`message` 可省，缺省有内置话术。
+**notify** — 推一条通知到用户手机（Bark）。`event` 四选一：`progress`（常规进展）/ `attention`（需要用户回电脑）/ **`waiting`（你问了问题、不拿到回答就没法继续）** / `finished`（这轮对话结束）。`title`/`message` 可省，缺省有内置话术。
 
-- **模式是服务端门，不是约定**：`notify.mode` 为 `dnd`（免打扰）时只送 attention/finished；progress 一律 `delivered:false, reason:"mode"`——这是结构化的「没送」，不是错误，照常继续干活，别拿 attention 包装常规进展绕门。
+- **提问后必须发 `waiting`**：从服务端看，「AI 答完了」和「AI 在等你选」完全一样——调用都停了。你不说，没人知道对话正卡在一个没人回答的问题上。问完就发，这是硬要求。
+- **门是服务端的，不是约定**：两个独立开关 `notify.onTaskDone`（每项任务完成时通知）与 `notify.onFinish`（对话结束时通知），可以都开、都关。被关掉的事件返回 `delivered:false, reason:"switch_off"`——这是结构化的「没送」，不是错误，照常继续干活，别拿 attention 包装常规进展绕门。**`attention` 与 `waiting` 不受开关影响，永远送达**：没人回答的问题会让对话无限期卡住，那不是设置该吞掉的东西。
 - **可选的 Bark 参数（每次调用自选）**：`sound`（铃声名，如 `minuet`/`bell`）、`level`（`active` 默认 / `timeSensitive` 可穿透 iOS 专注模式 / `passive` 静默入列表）、`call: 1`（持续响铃直到点开，仅真急事，上限 10）、`badge`（角标 0-9999，0 清除）、`url`（点通知跳转的 http(s) 链接）。非法值会被点名拒绝。`icon`/`image`/加密/复制类参数未开放——它们需要 iOS15+、预共享密钥或替用户做决定，不属于汇报通道。
-- **频繁模式的清单播报是服务端自动的**：`set_todos` 每把一条推进 completed，就推一条汇总（一次调用改多条只推一条）。免打扰模式下这路静音。所以频繁模式下**不要**再为清单完成手动 notify。
+- **清单播报是服务端自动的**：`notify.onTaskDone` 开着时，`set_todos` 每把一条推进 completed 就推一条汇总（一次调用改多条只推一条），关掉则静音。所以开着时**不要**再为清单完成手动 notify。另一面是：**做完一条就勾一条**，别攒到最后一次性提交——批量提交会把一串进展压成一条通知，等于白设这个开关。
 - **抑制不消耗预算**：被门挡住的调用不算发送。真实发送有 60 秒 6 条的共享窗口 + 完全相同内容的 60 秒去重；`duplicate`/`rate_limited` 也是 `delivered:false`，改文案或稍后再试。
 - **设备密钥只在控制台配置**（设置 → 手机通知，粘贴 `https://api.day.app/<key>` 整条链接会自动摘出密钥）。`get_config` 只回掩码；`notify.serverUrl` 可换自建 Bark（默认官方 `https://api.day.app`，自建 http 仅限本机回环）。
 - **无反应监视**：连接静默超过 `notify.idleMinutes`（默认 60，0 = 关）且清单还有未完成项时，服务端自己推一条 attention——网页 AI 卡死/断线时唯一能叫回人的通道。

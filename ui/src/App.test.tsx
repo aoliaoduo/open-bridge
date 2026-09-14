@@ -134,7 +134,8 @@ function settingsState(overrides: Partial<SettingsState> = {}): SettingsState {
     },
     notify: {
       enabled: true,
-      mode: "frequent",
+      onTaskDone: true,
+    onFinish: true,
       configured: false,
       keyMask: "",
       serverUrl: "https://api.day.app",

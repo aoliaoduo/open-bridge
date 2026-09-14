@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { displayWidth, padLabel } from "../src/cli.js";
+import { displayWidth, padLabel } from "../src/cli/format.js";
 
 test("displayWidth counts ASCII as one column each", () => {
   assert.equal(displayWidth("Web MCP: 123"), 12);

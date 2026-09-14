@@ -59,10 +59,24 @@ test("an origin is an origin: no credentials, query, fragment or path", () => {
   assert.throws(() => canonicalBarkOrigin("https://api.day.app/push"), /path/);
 });
 
-test("notify.mode is a closed vocabulary (shared validator)", () => {
-  assert.equal(validateConfigValue("notify.mode", "dnd").value, "dnd");
-  assert.equal(validateConfigValue("notify.mode", " frequent ").value, "frequent");
-  assert.equal(validateConfigValue("notify.mode", "quiet").ok, false);
+test("notify.mode is gone, and says where it went instead of failing silently", () => {
+  // Rejected rather than ignored: a script still writing the old key must be
+  // told the setting moved, not watch a write succeed and change nothing.
+  const verdict = validateConfigValue("notify.mode", "dnd");
+  assert.equal(verdict.ok, false);
+  assert.match(verdict.error ?? "", /notify\.onTaskDone/);
+  assert.match(verdict.error ?? "", /notify\.onFinish/);
+  assert.equal(validateConfigValue("notify.mode", "frequent").ok, false);
+});
+
+test("the two bells are independent booleans, settable in any combination", () => {
+  for (const key of ["notify.onTaskDone", "notify.onFinish"] as const) {
+    assert.equal(validateConfigValue(key, true).value, true);
+    assert.equal(validateConfigValue(key, false).value, false);
+    // Not a boolean-ish string: a typo must not decide who gets paged.
+    assert.equal(validateConfigValue(key, "yes").ok, false);
+    assert.equal(validateConfigValue(key, 1).ok, false);
+  }
 });
 
 test("notify.idleMinutes: integer with a ceiling; 0 stays off, not default", () => {

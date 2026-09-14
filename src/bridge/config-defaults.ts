@@ -58,8 +58,14 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = deepFreeze({
   "notify.enabled": true,
   /** The device key path segment of `https://api.day.app/<key>/…`; "" = not set. */
   "notify.barkKey": "",
-  /** `frequent` pushes progress (every completed todo item); `dnd` pushes only attention/done. */
-  "notify.mode": "frequent",
+  /**
+   * Two independent bells, either/both/neither. They replaced a `notify.mode`
+   * enum whose two values could not be combined — and "a bell per finished
+   * task AND a bell when the exchange ends" is the obvious thing to want.
+   * A stored `notify.mode` is migrated on read (see migrateNotifyMode).
+   */
+  "notify.onTaskDone": true,
+  "notify.onFinish": true,
   /** Minutes of silence with an open work list before the idle watchdog bells; 0 = off. */
   "notify.idleMinutes": 60,
   /** Bark server origin; loopback http is allowed (development), other http is refused. */

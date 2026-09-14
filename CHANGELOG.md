@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`notify` 新增 `waiting` 事件：AI 提问后必须推送，否则对话会卡死。** 起因是一个真实的失败模式：AI 在对话里请用户做选择，用户不在电脑前，没人回答 —— 对话就永远停在那里。从服务端看，「AI 答完了」和「AI 在等你选」**是同一个观测结果**：调用停了。服务端分不出来，也不该猜，所以让模型自己说：问完问题立刻发 `waiting`。它和 `attention` 一样**不受任何开关影响**，永远送达 —— 没人回答的问题会无限期阻塞对话，那不是设置该吞掉的东西。工具描述、连接指令与 `docs/tools.md` 都把这条写成硬要求。
+
 - **控制台与 CLI 讲两种语言了：中文 / English。** 这个项目一直只有中文界面，而它要接的 MCP 客户端和用它的人并不都读中文。现在控制台按浏览器语言自动选，顶栏那个按钮在**跟随系统 → 中文 → English** 之间轮换并把选择记在 `localStorage`（刷新、重启都还在）；CLI 没有浏览器可问，就按 POSIX 的老规矩读 `LC_ALL` → `LC_MESSAGES` → `LANG`，另给一个 `OPEN_BRIDGE_LANG` 强制覆盖——系统是英文但想看中文输出的人，不该被迫改整个 locale。
 
   译文**成对内联**写在用到它的地方（`t("中文", "English")`），没有集中的消息表，也没有 key。理由很实际：改一句文案时两种语言就在同一行，漏译当场可见；而消息表最常见的结局是 key 还在、某一种语言的值早已过时，且谁也不知道。两个参数都是必填的，半边翻译根本编译不过。
@@ -27,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `notify` 支持 AI 按次自选 Bark 推送参数：`sound`（铃声）、`level`（`active`/`timeSensitive`/`passive`）、`call`（1 = 持续响铃，上限 10）、`badge`（0-9999）、`url`（点击跳转）；非法值按参数名拒绝。无反应监视与控制台测试推送固定 `timeSensitive`。无反应提醒默认值 10 → 60 分钟。
 
 ### Changed
+- **通知从「频繁 / 免打扰」二选一，改成两个独立开关。** 原来 `notify.mode` 是个 enum，于是「每项任务完成都通知」和「对话结束时通知」**只能选一个** —— 而这两个恰恰是最该同时打开的组合。现在是 `notify.onTaskDone` 与 `notify.onFinish`，可以都开、都关、开一个。被开关挡住的事件返回 `delivered:false, reason:"switch_off"`（原 `"mode"`）。旧的 `notify.mode` 写入会被**明确拒绝并告知新键名**，而不是静默忽略：还在用旧键的脚本应该收到报错，而不是眼看写入成功却什么都没发生。
+
+- **服务端兜底通知不再断言「对话已结束」。** 45 秒静默后那条推送原文是「这轮对话已经结束」，但服务端根本没有能力区分「答完了」和「在等你回答」——**有一半的时候它在撒谎**，而且是朝着代价更大的方向撒：看到「已结束」的人不会赶回来回答一个正卡住全局的问题。现在措辞改成「AI 停下了 —— 可能在等你回复，也可能已经做完。去看一眼。」一条通知覆盖两种情况，不误导。
+
+- **拆分 `src/cli.ts`：1111 行 → 418 行，其余按「命令需要什么」分到 `src/cli/` 六个模块。** 原文件里唯一的边界是注释横幅。新的分组依据不是字母序，而是**每个命令依赖什么**，因为那决定了它会怎么失败：`query-commands`（stop/status/url/prompt，需要一个活着的实例）、`inspect-commands`（instances/logs/health）、`local-commands`（config/token/doctor，只碰本地数据目录）、`registry`（运行时记录 + 回环 JSON 客户端）、`args`、`format`、`version`。`cli.ts` 只留三样：帮助文本、`serve`（唯一在本进程里启动整个 Bridge 的命令）、分发表。
+
+  一个约束值得记下来：`AGENTS.md` 规定 `node-host.ts` **只许有两个 import 方**，而拆分天然会诱导新模块直接去 import 它。这里改成由入口点**注入**（`setDefaultHome` / `setHostInstaller`）——拆文件不该悄悄放宽架构约束。复核命令仍是恰好 2 条命中。
+
 - **`AGENTS.md` 里「核心零宿主依赖」那句改成了可验证的说法。** 原文读起来像「`src/bridge|http|mcp|network|process|shell|workspace` 不许 import `node:fs`」，而实测核心里有 17 个文件直接用 `node:fs` / `node:fs/promises`、8 个用 `node:child_process`（`file-tools.ts` 是个文件工具，它当然要用 fs）—— 省字的架构描述，正是下一个改代码的人拿去"清理"正常代码的依据；本仓库已经为「与代码不符的注释」修过 6 处，这是同一类病。真正的约束从来是**依赖方向**：`node-host.ts` 只允许被 `src/cli.ts`（安装宿主）与 `src/server/api-router.ts` import，`grep -rnE 'from "[^"]*node-host\.js"' src/` 恰好 2 条命中即为干净 —— 这条命令本身也是现写的现验：第一版写成 `grep -rn '"node-host' src/`，实测**零命中**（真实 import 是 `from "./host/node-host.js"`，引号后面紧跟的是 `./`，不是 `node-host`），照着它去"复核"会得到「怎么到处都没引」的错误结论。写一条检查命令，就得连它一起证伪。`src/host/host.ts` 的模块头同一种措辞一并改准 —— 它还自相矛盾：写着核心 "must never import a host API directly"，而核心每个模块都 import 本文件的 `host()`。顺带补上 `AGENTS.md` 漏记的两件事：这份文件会被注入给每个连上实例的模型（`mcp-endpoint.ts` 各切 8000 字符，写错一条就被反复消费，所以别把 README 抄进来）、UI 测试跟组件放在 `ui/src/**` 而不是 `test/`（`vitest.config.ts` 的 include 只认那个位置，放错就是静默不跑）。
 - **新增 `CLAUDE.md`：一行指针，正文永远只在 `AGENTS.md` 维护。** 服务端本来就会把根目录的 `AGENTS.md` 与 `CLAUDE.md` 都注入连接说明、README 也早就这么承诺，而仓库里只有前者 —— 默认读 `CLAUDE.md` 的工具于是拿到零份约定。是指针不是副本：两份"约定"必然漂移成互相矛盾的说法。
 - 控制台导航重组：新增「安全」页收敛暴露面、Bearer 门禁、个人令牌与 OAuth 2.1（原「令牌」页、体检页暴露面卡、设置页 OAuth 卡迁入），「第二道锁」退役统一叫 Bearer 门禁，路由令牌不再称为凭证（只是地址）；体检回归只读诊断，状态页警告改为跳转；文件锁表以「文件锁明细」搬到状态页；/console/tokens 跳转新页，书签不断。纯前端重组，后端 API 零改动。

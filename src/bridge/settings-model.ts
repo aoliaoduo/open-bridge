@@ -115,7 +115,8 @@ export interface SettingsConfigView {
  */
 export interface SettingsNotifyView {
   enabled: boolean;
-  mode: "frequent" | "dnd";
+  onTaskDone: boolean;
+  onFinish: boolean;
   /** A usable key is stored (parsed form non-empty). */
   configured: boolean;
   /** Masked device key for display; "" when unconfigured. */
@@ -194,7 +195,8 @@ const CONFIG_SPEC = {
   // here: it writes through saveNotifyKey (parse-and-store is a dedicated flow,
   // like saveDomain) and it never appears in the read-only view.
   "notify.enabled": { kind: "boolean" },
-  "notify.mode": { kind: "enum", values: ["frequent", "dnd"] },
+  "notify.onTaskDone": { kind: "boolean" },
+  "notify.onFinish": { kind: "boolean" },
   "notify.serverUrl": { kind: "string", max: 500 },
   "notify.idleMinutes": { kind: "int", min: 0, max: 1440 },
 } as const;

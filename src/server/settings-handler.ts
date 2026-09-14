@@ -101,7 +101,8 @@ function notifyView() {
   const settings = resolveNotifySettings();
   return {
     enabled: settings.enabled,
-    mode: settings.mode,
+    onTaskDone: settings.onTaskDone,
+    onFinish: settings.onFinish,
     configured: Boolean(settings.key),
     keyMask: maskBarkKey(settings.key),
     serverUrl: settings.serverUrl,
@@ -414,7 +415,7 @@ function notifyActionVerdict(result: NotifyOutcome, freshState: SettingsState): 
     send_failed: `推送失败：${result.error || `Bark 返回了 HTTP ${result.status || "0"}`}。密钥可能不对。`,
     rate_limited: "一分钟内的推送太多，限流保护已触发，稍后再试。",
     duplicate: "刚推送过完全相同的一条，没有重复发送。",
-    mode: "这条不该出现：测试以「attention」事件发送，任何模式都会送达。",
+    switch_off: "这条不该出现：测试以「attention」事件发送，两个开关都管不到它。",
   };
   return { ok: false, state: freshState, error: `测试未送达：${why[result.reason] ?? result.reason}` };
 }
@@ -459,7 +460,8 @@ function fallbackState(): SettingsState {
       // The canonical defaults, same as every other fallback field: with a
       // possibly-broken config we report "no key", never a guess about one.
       enabled: CONFIG_DEFAULTS["notify.enabled"] as boolean,
-      mode: CONFIG_DEFAULTS["notify.mode"] as "frequent" | "dnd",
+      onTaskDone: CONFIG_DEFAULTS["notify.onTaskDone"] as boolean,
+      onFinish: CONFIG_DEFAULTS["notify.onFinish"] as boolean,
       configured: false,
       keyMask: "",
       serverUrl: CONFIG_DEFAULTS["notify.serverUrl"] as string,

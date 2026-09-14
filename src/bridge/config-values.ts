@@ -43,6 +43,8 @@ const BOOLEAN_KEYS: ReadonlySet<string> = new Set([
   "concurrency.enabled",
   "oauth.enabled",
   "notify.enabled",
+  "notify.onTaskDone",
+  "notify.onFinish",
 ]);
 
 const NON_NEGATIVE_INT_KEYS: ReadonlySet<string> = new Set([
@@ -204,12 +206,13 @@ export function validateConfigValue(key: string, value: unknown): ConfigValidati
   }
 
   if (key === "notify.mode") {
-    // Closed vocabulary: a typo'd mode must not silently decide who gets paged.
-    const normalized = typeof value === "string" ? value.trim() : value;
-    if (normalized !== "frequent" && normalized !== "dnd") {
-      return { ok: false, error: "notify.mode must be 'frequent' (push every completed todo) or 'dnd' (only attention/finished events)." };
-    }
-    return { ok: true, value: normalized };
+    // The enum this replaced. Kept as a REJECTION rather than silently
+    // ignored: someone scripting against the old key deserves to be told
+    // where the setting went, not to watch a write succeed and do nothing.
+    return {
+      ok: false,
+      error: "notify.mode was replaced by two independent switches: notify.onTaskDone (push each completed todo) and notify.onFinish (push when the exchange ends). Set those instead.",
+    };
   }
 
   if (key === "notify.idleMinutes") {

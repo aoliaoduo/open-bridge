@@ -9,13 +9,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  buildBarkUrl, clampIdleMinutes, finishNoticeVerdict, idleWatchVerdict, modeSuppresses,
+  buildBarkUrl, clampIdleMinutes, eventSuppressed, finishNoticeVerdict, idleWatchVerdict,
   newlyCompletedTodos, notifyUsageInstructions, parseBarkExtras,
 } from "../src/bridge/notify.js";
 
 const KEY = "aaaaaaaaaaaaaaaaaaaaaa"; // obviously fake: a real Bark key must never appear in a repo
-const FREQ = { usable: true, enabled: true, mode: "frequent", key: KEY, serverUrl: "https://api.day.app", blocker: "", idleMinutes: 10 } as const;
-const DND = { ...FREQ, mode: "dnd" } as const;
+/** Both bells on — the default, and the combination the old enum could not express. */
+const FREQ = { usable: true, enabled: true, onTaskDone: true, onFinish: true, key: KEY, serverUrl: "https://api.day.app", blocker: "", idleMinutes: 10 } as const;
+/** Both bells off: only the always-on interrupts survive. */
+const DND = { ...FREQ, onTaskDone: false, onFinish: false } as const;
 
 // --- the Bark URL -------------------------------------------------------------
 
@@ -36,13 +38,40 @@ test("buildBarkUrl: stored trailing slash absorbed; empty segments omitted", () 
 
 // --- the mode gate -----------------------------------------------------------------
 
-test("frequent admits every event; dnd admits only the attention floor", () => {
-  assert.equal(modeSuppresses("frequent", "progress"), false);
-  assert.equal(modeSuppresses("frequent", "attention"), false);
-  assert.equal(modeSuppresses("frequent", "finished"), false);
-  assert.equal(modeSuppresses("dnd", "progress"), true);
-  assert.equal(modeSuppresses("dnd", "attention"), false);
-  assert.equal(modeSuppresses("dnd", "finished"), false);
+test("the two switches are independent, and all four combinations behave", () => {
+  const both = { onTaskDone: true, onFinish: true };
+  const neither = { onTaskDone: false, onFinish: false };
+  const tasksOnly = { onTaskDone: true, onFinish: false };
+  const finishOnly = { onTaskDone: false, onFinish: true };
+
+  // The combination the old frequent/dnd enum made unexpressible, and the
+  // whole reason this changed: a bell per task AND a bell at the end.
+  assert.equal(eventSuppressed(both, "progress"), false);
+  assert.equal(eventSuppressed(both, "finished"), false);
+
+  assert.equal(eventSuppressed(tasksOnly, "progress"), false);
+  assert.equal(eventSuppressed(tasksOnly, "finished"), true);
+
+  assert.equal(eventSuppressed(finishOnly, "progress"), true);
+  assert.equal(eventSuppressed(finishOnly, "finished"), false);
+
+  assert.equal(eventSuppressed(neither, "progress"), true);
+  assert.equal(eventSuppressed(neither, "finished"), true);
+});
+
+test("attention and waiting ignore both switches — a stalled question always rings", () => {
+  // Someone who wants silence turns the channel off. While it is on, a
+  // question nobody answers blocks the exchange indefinitely, so it is never
+  // the thing a switch is allowed to swallow.
+  for (const settings of [
+    { onTaskDone: true, onFinish: true },
+    { onTaskDone: false, onFinish: false },
+    { onTaskDone: true, onFinish: false },
+    { onTaskDone: false, onFinish: true },
+  ]) {
+    assert.equal(eventSuppressed(settings, "attention"), false);
+    assert.equal(eventSuppressed(settings, "waiting"), false);
+  }
 });
 
 // --- idleMinutes clamping ------------------------------------------------------------
@@ -115,9 +144,23 @@ test("the watchdog latches one notice per episode and re-arms when activity move
 
 // --- what the connect-time AI is taught --------------------------------------------
 
-test("instructions appear only for a usable channel, and name the mode's rules", () => {
-  assert.match(notifyUsageInstructions(FREQ), /frequent mode/);
+test("instructions state the waiting duty unconditionally, then describe each switch", () => {
+  // The waiting rule is what stops an AI from asking a question into an empty
+  // room, so it must be present whatever the switches say.
+  for (const settings of [FREQ, DND]) {
+    assert.match(notifyUsageInstructions(settings), /event:"waiting"/);
+    assert.match(notifyUsageInstructions(settings), /always deliver/);
+  }
+  // Each switch is described in whichever position it is actually in, so the
+  // model is never told about a bell that will not ring.
+  assert.match(notifyUsageInstructions(FREQ), /turned ON/);
+  assert.match(notifyUsageInstructions(FREQ), /Mark items completed as you finish them/);
+  assert.match(notifyUsageInstructions(DND), /turned OFF/);
   assert.equal(notifyUsageInstructions(DND).includes("suppressed"), true);
+  // Mixed: the task bell on, the finish bell off — each half described truthfully.
+  const mixed = notifyUsageInstructions({ ...FREQ, onFinish: false });
+  assert.match(mixed, /turned ON \u300c每项任务完成时通知\u300d/);
+  assert.match(mixed, /turned OFF \u300c对话结束时通知\u300d/);
   assert.equal(notifyUsageInstructions({ ...FREQ, usable: false }), "",
     "no lecture about machinery the connect cannot reach");
 });

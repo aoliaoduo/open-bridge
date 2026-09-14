@@ -358,17 +358,30 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
             checked={settings.notify.enabled}
             onChange={next => setConfig("notify.enabled", next)}
           />
-          <Field
-            label={t("汇报模式", "Reporting mode")}
-            hint={settings.notify.mode === "frequent"
-              ? t("任务清单每勾选完一条，手机收到一条完成通知。", "Every item ticked off the task list sends a completion push.")
-              : t("只在 AI 真的需要你时推送：回来处理、做选择、或这一轮结束了。", "Pushes only when the AI genuinely needs you: come back, make a call, or this round is over.")}
-          >
-            <select value={settings.notify.mode} onChange={e => setConfig("notify.mode", e.target.value)}>
-              <option value="frequent">{t("频繁 — 每条任务完成都通知", "Frequent — every finished task")}</option>
-              <option value="dnd">{t("免打扰 — 只推「需要你回电脑前」的事件", "Do not disturb — only when you are needed")}</option>
-            </select>
-          </Field>
+          <SwitchField
+            label={t("每项任务完成时通知", "Notify on each finished task")}
+            hint={t(
+              "任务清单每勾选完一条，手机收到一条通知。",
+              "Every item ticked off the task list sends a push.",
+            )}
+            checked={settings.notify.onTaskDone}
+            onChange={next => setConfig("notify.onTaskDone", next)}
+          />
+          <SwitchField
+            label={t("对话结束时通知", "Notify when the exchange ends")}
+            hint={t(
+              "这一轮结束时推送一条；AI 自己忘了发，服务端会代发。",
+              "One push when the round ends; if the AI forgets, the server sends it instead.",
+            )}
+            checked={settings.notify.onFinish}
+            onChange={next => setConfig("notify.onFinish", next)}
+          />
+          <p className="field-hint" style={{ margin: "-4px 0 4px" }}>
+            {t(
+              "两个开关互不影响，可以都开、都关。AI 提问等你选择、或明确需要你回来时，无论开关如何都会推送 —— 没人回答的问题会让对话一直卡着。",
+              "The two switches are independent: both on, both off, either. When the AI asks a question and waits, or explicitly needs you back, it pushes regardless — an unanswered question stalls the exchange indefinitely.",
+            )}
+          </p>
           <div className="field">
             <span className="field-label">{t("Bark 设备密钥", "Bark device key")}</span>
             <span className="field-control">
