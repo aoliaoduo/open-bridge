@@ -414,6 +414,32 @@ button.menu-btn { display: none; }
 }
 .token-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .token-table tbody tr:last-child td { border-bottom: none; }
+
+/* The notify matrix carries two prose columns and two controls. Without
+   explicit widths the browser gives the label column whatever the controls
+   leave over, which on a narrow card is a few characters -- 需要你回来 came
+   out one character per line. The names never wrap; the "when" column is the
+   one that should absorb the slack. */
+.notify-table th:first-child, .notify-table td:first-child { width: 1%; white-space: nowrap; }
+.notify-table td:first-child .field-hint { white-space: normal; }
+.notify-table th:nth-child(2) { width: auto; }
+.notify-table th:nth-child(3), .notify-table td:nth-child(3) { width: 1%; white-space: nowrap; }
+.notify-table th:last-child, .notify-table td:last-child { width: 140px; }
+.notify-name { display: flex; align-items: center; gap: 6px; }
+/* "总是发" is a property of the event, not a setting, so it reads as a badge
+   rather than a second line of label text — stacked under the name it looked
+   like part of it. */
+.always-chip {
+  flex: none;
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--muted);
+}
+.notify-table select { width: 100%; min-width: 148px; }
+.notify-table input[type="text"] { width: 100%; min-width: 0; }
 .token-table tbody tr { transition: background-color .12s; }
 .token-table tbody tr:hover { background: var(--surface-2); }
 .token-table tr.dead td { opacity: .45; }

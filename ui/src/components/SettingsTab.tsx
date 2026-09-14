@@ -501,10 +501,13 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
               the phone. Defaults encode the urgency each event carries, and
               critical is offered but never defaulted: it overrides the mute
               switch, and that is a decision to make deliberately. */}
-          <div className="field">
+          {/* span2: .form-grid is two columns, and a four-column table in half
+              of one squeezes the first column until "需要你回来" stacks one
+              character per line. */}
+          <div className="field span2">
             <span className="field-label">{t("每类通知怎么响", "How each kind arrives")}</span>
             <div className="table-wrap">
-              <table className="token-table">
+              <table className="token-table notify-table">
                 <thead>
                   <tr>
                     <th>{t("通知", "Push")}</th>
@@ -517,8 +520,14 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
                   {NOTIFY_EVENT_ROWS.map(row => (
                     <tr key={row.key}>
                       <td>
-                        {row.label()}
-                        {row.always ? <><br /><span className="field-hint">{t("总是发", "always sent")}</span></> : null}
+                        <div className="notify-name">
+                          <span>{row.label()}</span>
+                          {row.always ? (
+                            <span className="always-chip" title={t("不受上面两个开关影响", "Not affected by the two switches above")}>
+                              {t("总是发", "always")}
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       <td><span className="field-hint">{row.when()}</span></td>
                       <td>
