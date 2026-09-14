@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, copyText, reloadConsole, type SecretPayload, type SettingsActionResult, type SettingsState } from "./api";
-import { currentRoute, navigate, routeSpec, type RouteId } from "./routes";
+import { currentRoute, currentSettingsSection, navigate, navigateToSettings, routeSpec, settingsSectionSpec, type RouteId, type SettingsSectionId } from "./routes";
 import { applyTheme, initTheme, nextThemePref, storeThemePref, watchSystemTheme, type ThemePref } from "./theme";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
@@ -47,6 +47,9 @@ function storeCollapsed(value: boolean): void {
  */
 export function App() {
   const [route, setRoute] = useState<RouteId>(() => currentRoute());
+  // Which settings sub-page is open. Independent state (not parsed per render)
+  // so back/forward and in-page clicks drive it the same way.
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>(() => currentSettingsSection());
   const [settings, setSettings] = useState<SettingsState | null>(null);
   const [toast, setToast] = useState<ToastMsg | null>(null);
   const [secret, setSecret] = useState<SecretPayload | null>(null);
@@ -76,9 +79,13 @@ export function App() {
   useEffect(() => { void refreshSettings(); }, [refreshSettings]);
 
   // Back/forward buttons must move between pages too, otherwise pushState would
-  // leave the address bar and the rendered page disagreeing.
+  // leave the address bar and the rendered page disagreeing. Settings
+  // sub-pages ride the same popstate: one history entry per card switch.
   useEffect(() => {
-    const onPopState = () => setRoute(currentRoute());
+    const onPopState = () => {
+      setRoute(currentRoute());
+      setSettingsSection(currentSettingsSection());
+    };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
@@ -129,6 +136,13 @@ export function App() {
     setRoute(id);
   }, []);
 
+  /** Switch to a settings sub-page; works from anywhere (one history entry). */
+  const openSettings = useCallback((section: SettingsSectionId) => {
+    navigateToSettings(section);
+    setRoute("settings");
+    setSettingsSection(section);
+  }, []);
+
   const toggleCollapsed = useCallback(() => {
     setCollapsed(previous => {
       storeCollapsed(!previous);
@@ -169,6 +183,15 @@ export function App() {
   }, [showToast]);
 
   const spec = routeSpec(route);
+  // Settings sub-pages speak for themselves in the header: the section's own
+  // label and hint replace the generic "设置" ones, so the header always
+  // names what is actually being configured.
+  const header = route === "settings"
+    ? (() => {
+        const sectionSpec = settingsSectionSpec(settingsSection);
+        return { title: `设置 · ${sectionSpec.label}`, hint: sectionSpec.hint };
+      })()
+    : { title: spec.label, hint: spec.hint };
 
   return (
     // The shell root carries the layout class but stays interactive; inert is
@@ -202,7 +225,7 @@ export function App() {
           />
 
           <main className="content">
-            <PageHeader title={spec.label} hint={spec.hint} />
+            <PageHeader title={header.title} hint={header.hint} />
             <div className="page" key={`${route}-${reloadKey}`}>
               {route === "status" && <StatusTab act={act} onRefresh={refreshSettings} notify={showToast} onOpen={open} />}
               {route === "sessions" && <SessionsPage notify={showToast} />}
@@ -216,7 +239,15 @@ export function App() {
               ) : (
                 <Skeleton lines={4} />
               ))}
-              {route === "settings" && <SettingsTab settings={settings} act={act} notify={showToast} />}
+              {route === "settings" && (
+                <SettingsTab
+                  settings={settings}
+                  act={act}
+                  notify={showToast}
+                  section={settingsSection}
+                  onSectionChange={openSettings}
+                />
+              )}
             </div>
           </main>
         </div>

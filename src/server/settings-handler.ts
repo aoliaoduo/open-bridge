@@ -35,6 +35,8 @@ import {
   type SettingsTokenRow,
 } from "../bridge/settings-model.js";
 import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
+import { maskBarkKey, validateConfigValue } from "../bridge/config-values.js";
+import { NOTIFY_DEFAULT_TITLE, pushNotification, resolveNotifySettings, type NotifyOutcome } from "../bridge/notify.js";
 import * as path from "node:path";
 import { resetUsageStats } from "../bridge/usage-store.js";
 import { host } from "../host/host.js";
@@ -86,6 +88,24 @@ export async function buildSettingsState(): Promise<SettingsState> {
       "oauth.enabled": cfg.get("oauth.enabled", CONFIG_DEFAULTS["oauth.enabled"] as boolean),
       "oauth.allowedRedirectHosts": cfg.get("oauth.allowedRedirectHosts", CONFIG_DEFAULTS["oauth.allowedRedirectHosts"] as string[]),
     },
+    notify: notifyView(),
+  };
+}
+
+/**
+ * The masked notification view — resolve through the SAME reader the send path
+ * uses, so what the page shows and what actually pushes cannot disagree (a
+ * garbage hand-edited key means "not configured" in both places).
+ */
+function notifyView() {
+  const settings = resolveNotifySettings();
+  return {
+    enabled: settings.enabled,
+    mode: settings.mode,
+    configured: Boolean(settings.key),
+    keyMask: maskBarkKey(settings.key),
+    serverUrl: settings.serverUrl,
+    idleMinutes: settings.idleMinutes,
   };
 }
 
@@ -345,7 +365,58 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       await cfg.update("concurrency.waitTimeoutMs", action.waitTimeoutMs);
       return done({ info: "并发设置已保存。" });
     }
+
+    case "saveNotifyKey": {
+      // The value arrives exactly as pasted; validateConfigValue owns BOTH the
+      // grammar and the full-URL → bare-key parsing, shared with the MCP write
+      // path so the two entries cannot drift. "" clears the channel.
+      const checked = validateConfigValue("notify.barkKey", action.key);
+      if (!checked.ok) {
+        return { ok: false, state: await buildSettingsState(), error: checked.error };
+      }
+      await cfg.update("notify.barkKey", checked.value);
+      const stored = checked.value as string;
+      if (!stored) return done({ info: "设备密钥已清除：推送停用（开关保持原样）。" });
+      const extracted = action.key.includes("/") || action.key.includes(":");
+      return done({
+        info: extracted
+          ? `设备密钥已保存（已从链接中摘出：${maskBarkKey(stored)}）。点「发送测试」验证手机。`
+          : `设备密钥已保存（${maskBarkKey(stored)}）。点「发送测试」验证手机。`,
+      });
+    }
+
+    case "testNotify": {
+      // "attention" is the one event that passes every mode — the operator
+      // pressing this button IS the attention, and 免打扰 must not mute a test.
+      const result = await pushNotification(
+        resolveNotifySettings(),
+        "attention",
+        NOTIFY_DEFAULT_TITLE,
+        "Open Bridge 测试通知：配置已生效，AI 干活时进度会推送到这里。",
+        Date.now(),
+        // 人手动作绕过账本（重新按一次是因为没听见），并用时效性等级让
+        // 测试推送在专注模式下也可见——收不到测试是排查的第一现场。
+        { bypassLedger: true, bark: { level: "timeSensitive" } },
+      );
+      return notifyActionVerdict(result, await buildSettingsState());
+    }
   }
+}
+
+/** Map a push outcome onto the console's ok/info/error shape. */
+function notifyActionVerdict(result: NotifyOutcome, freshState: SettingsState): SettingsActionResult {
+  if (result.delivered) {
+    return { ok: true, state: freshState, info: "测试通知已发出 — 手机该响了。没收到就检查 Bark App 与网络连接。" };
+  }
+  const why: Record<string, string> = {
+    disabled: "通知开关是关的：先打开本页的「启用通知」。",
+    no_key: "还没有设备密钥：粘贴 Bark 里的密钥并保存。",
+    send_failed: `推送失败：${result.error || `Bark 返回了 HTTP ${result.status || "0"}`}。密钥可能不对。`,
+    rate_limited: "一分钟内的推送太多，限流保护已触发，稍后再试。",
+    duplicate: "刚推送过完全相同的一条，没有重复发送。",
+    mode: "这条不该出现：测试以「attention」事件发送，任何模式都会送达。",
+  };
+  return { ok: false, state: freshState, error: `测试未送达：${why[result.reason] ?? result.reason}` };
 }
 
 function fallbackState(): SettingsState {
@@ -383,6 +454,16 @@ function fallbackState(): SettingsState {
       toolProfile: CONFIG_DEFAULTS.toolProfile as string,
       "oauth.enabled": CONFIG_DEFAULTS["oauth.enabled"] as boolean,
       "oauth.allowedRedirectHosts": [...(CONFIG_DEFAULTS["oauth.allowedRedirectHosts"] as string[])],
+    },
+    notify: {
+      // The canonical defaults, same as every other fallback field: with a
+      // possibly-broken config we report "no key", never a guess about one.
+      enabled: CONFIG_DEFAULTS["notify.enabled"] as boolean,
+      mode: CONFIG_DEFAULTS["notify.mode"] as "frequent" | "dnd",
+      configured: false,
+      keyMask: "",
+      serverUrl: CONFIG_DEFAULTS["notify.serverUrl"] as string,
+      idleMinutes: CONFIG_DEFAULTS["notify.idleMinutes"] as number,
     },
   };
 }

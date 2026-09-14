@@ -116,7 +116,7 @@ export const ROUTES: RouteSpec[] = [
   {
     id: "settings",
     label: "设置",
-    hint: "隧道、端口、工作区与并发等运行参数",
+    hint: "隧道、端口、目录、Shell、通知、并发与日志轮转",
     group: "config",
     icon: ["M4 7h16", "M4 12h16", "M4 17h16", "M9.5 5v4", "M15.5 10v4", "M9.5 15v4"],
   },
@@ -132,6 +132,65 @@ export function routeSpec(id: RouteId): RouteSpec {
 export function routeGroupLabel(id: RouteId): string {
   const spec = routeSpec(id);
   return ROUTE_GROUPS.find(group => group.id === spec.group)?.label ?? "";
+}
+
+/**
+ * 设置 is one sidebar page but seven real sub-pages: each card lives at its own
+ * path (`/console/settings/<section>`) so a deep link opens exactly the card
+ * the operator meant — the anchor-scroll rail only ever faked this.
+ */
+export type SettingsSectionId = "tunnel" | "network" | "files" | "shell" | "notify" | "locks" | "logs";
+
+export interface SettingsSectionSpec {
+  id: SettingsSectionId;
+  label: string;
+  /** One-line answer to "what does this sub-page configure"; drives PageHeader. */
+  hint: string;
+}
+
+/** Card order matches the operator's mental model: connectivity first, hygiene last. */
+export const SETTINGS_SECTIONS: SettingsSectionSpec[] = [
+  { id: "tunnel", label: "隧道", hint: "ngrok 隧道、预留域名与公网发布" },
+  { id: "network", label: "端口", hint: "本机监听端口与公网健康检查超时" },
+  { id: "files", label: "目录", hint: "文件访问范围与目录白名单" },
+  { id: "shell", label: "Shell", hint: "命令执行的 shell 与对外公布的工具集" },
+  { id: "notify", label: "通知", hint: "手机通知（Bark）：模式、设备密钥与测试发送" },
+  { id: "locks", label: "并发", hint: "并发锁与占用/等待上限" },
+  { id: "logs", label: "日志轮转", hint: "bridge.log 的单文件大小上限与轮转" },
+];
+
+export const SETTINGS_DEFAULT_SECTION: SettingsSectionId = "tunnel";
+
+export function settingsSectionSpec(id: SettingsSectionId): SettingsSectionSpec {
+  // Same totality argument as routeSpec: the union and the array are written
+  // together; the fallback keeps the header render total anyway.
+  return SETTINGS_SECTIONS.find(section => section.id === id) ?? SETTINGS_SECTIONS[0]!;
+}
+
+export function settingsSectionPath(id: SettingsSectionId): string {
+  return `${routePath("settings")}/${id}`;
+}
+
+/**
+ * The sub-section of a /console/settings/... path, defaulting for the bare
+ * /console/settings (the sidebar's link) and for anything foreign — an
+ * unknown tail means the URL was mistyped, and the first card is the safe answer.
+ */
+export function currentSettingsSection(pathname?: string): SettingsSectionId {
+  const trimmed = (pathname ?? window.location?.pathname ?? "").replace(/\/+$/, "");
+  const prefix = `${routePath("settings")}/`;
+  if (!trimmed.startsWith(prefix)) return SETTINGS_DEFAULT_SECTION;
+  const tail = trimmed.slice(prefix.length);
+  return SETTINGS_SECTIONS.some(section => section.id === tail)
+    ? (tail as SettingsSectionId)
+    : SETTINGS_DEFAULT_SECTION;
+}
+
+/** pushState for a settings sub-page; mirrors navigate()'s SPA-only rule. */
+export function navigateToSettings(section: SettingsSectionId): void {
+  const target = settingsSectionPath(section);
+  if (window.location.pathname === target) return;
+  window.history.pushState({ route: "settings", section }, "", target);
 }
 
 export const CONSOLE_BASE = "/console";
@@ -153,6 +212,9 @@ export function currentRoute(pathname?: string): RouteId {
   // The 令牌 page moved to 安全: old bookmarks land on the new page
   // instead of falling through to 状态.
   if (tail === "tokens") return "security";
+  // Settings sub-pages (/console/settings/notify, …) are all one sidebar page:
+  // the section itself is currentSettingsSection's business, not the route's.
+  if (tail === "settings" || tail.startsWith("settings/")) return "settings";
   return ROUTES.some(route => route.id === tail) ? (tail as RouteId) : "status";
 }
 

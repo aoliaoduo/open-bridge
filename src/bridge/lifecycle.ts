@@ -21,6 +21,7 @@ import { killTunnelTree, setInstanceRestart, startTunnelInternal, stopPublicWatc
 import { publishSelf, stopRepublishLoop, withdrawSelf } from "./peer-registry.js";
 import { startHttpInternal, stopLocalServer } from "./http-listener.js";
 import { stopSessionPruneLoop } from "./session-table.js";
+import { clearNotifyLedger } from "./notify.js";
 
 async function startInternal(): Promise<void> {
   if (state.server) {
@@ -82,6 +83,7 @@ async function stopInternal(notify = true): Promise<void> {
   stopPublicWatch();
   stopRepublishLoop();
   stopSessionPruneLoop();
+  clearNotifyLedger();
   state.tunnelRole = "none";
   state.missingPublicRounds = 0;
   // Reset the backoff too: it used to survive a stop, so the next start began

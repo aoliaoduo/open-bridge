@@ -52,6 +52,7 @@
 | 建目录 / 复制 / 移动 / 删除 | `file_op{op:…}` | — |
 | 就绪探测 | `connectivity`（`{url}` 或 `{port}`） | 不要用 `run_command curl`（慢且要自己解析） |
 | 连续多次相关调用、或结果很大 | `run_script`（在脚本里循环、过滤、聚合，只把需要的返回） | 逐个调用会浪费往返与上下文 |
+| 手机响一声 | `notify`（或清单勾选自动推） | 不要 `report_progress`（那只进客户端日志流，不碰手机） |
 | 想批量并行调用 | `batch`（`mode: "parallel"`） | 嵌套 `batch` 会被拒绝 |
 
 ---
@@ -134,6 +135,18 @@
 **service_status** — `live`（默认）：保存的服务 + 实时进程状态 + 健康检查，检查受 `timeout_ms` 约束（默认 5000，最大 120000；慢的检查返回 `{ok:false, timed_out:true}` 而不是拖住整个响应）。`definitions`：只列定义，不做探测，适合轮询。
 
 **read_service_log** — 读某个服务的持久日志（默认 service-logs 目录，`save_service` 的 `log_file` 可覆盖）。日志**跨重启追加**。省略 `offset` 读尾部；给 `offset` 往更早翻页。
+
+### 手机通知（notify）
+
+**notify** — 推一条通知到用户手机（Bark）。`event` 三选一：`progress`（常规进展，频繁模式送达）/ `attention`（需要用户回电脑：等选择、等回复）/ `finished`（这轮对话结束）。`title`/`message` 可省，缺省有内置话术。
+
+- **模式是服务端门，不是约定**：`notify.mode` 为 `dnd`（免打扰）时只送 attention/finished；progress 一律 `delivered:false, reason:"mode"`——这是结构化的「没送」，不是错误，照常继续干活，别拿 attention 包装常规进展绕门。
+- **可选的 Bark 参数（每次调用自选）**：`sound`（铃声名，如 `minuet`/`bell`）、`level`（`active` 默认 / `timeSensitive` 可穿透 iOS 专注模式 / `passive` 静默入列表）、`call: 1`（持续响铃直到点开，仅真急事，上限 10）、`badge`（角标 0-9999，0 清除）、`url`（点通知跳转的 http(s) 链接）。非法值会被点名拒绝。`icon`/`image`/加密/复制类参数未开放——它们需要 iOS15+、预共享密钥或替用户做决定，不属于汇报通道。
+- **模式是服务端门，不是约定**：`notify.mode` 为 `dnd`（免打扰）时只送 attention/finished；progress 一律 `delivered:false, reason:"mode"`——这是结构化的「没送」，不是错误，照常继续干活，别拿 attention 包装常规进展绕门。
+- **频繁模式的清单播报是服务端自动的**：`set_todos` 每把一条推进 completed，就推一条汇总（一次调用改多条只推一条）。免打扰模式下这路静音。所以频繁模式下**不要**再为清单完成手动 notify。
+- **抑制不消耗预算**：被门挡住的调用不算发送。真实发送有 60 秒 6 条的共享窗口 + 完全相同内容的 60 秒去重；`duplicate`/`rate_limited` 也是 `delivered:false`，改文案或稍后再试。
+- **设备密钥只在控制台配置**（设置 → 手机通知，粘贴 `https://api.day.app/<key>` 整条链接会自动摘出密钥）。`get_config` 只回掩码；`notify.serverUrl` 可换自建 Bark（默认官方 `https://api.day.app`，自建 http 仅限本机回环）。
+- **无反应监视**：连接静默超过 `notify.idleMinutes`（默认 60，0 = 关）且清单还有未完成项时，服务端自己推一条 attention——网页 AI 卡死/断线时唯一能叫回人的通道。
 
 ### 桥自身状态
 

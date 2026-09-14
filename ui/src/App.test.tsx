@@ -132,6 +132,14 @@ function settingsState(overrides: Partial<SettingsState> = {}): SettingsState {
       "oauth.enabled": false,
       "oauth.allowedRedirectHosts": [],
     },
+    notify: {
+      enabled: true,
+      mode: "frequent",
+      configured: false,
+      keyMask: "",
+      serverUrl: "https://api.day.app",
+      idleMinutes: 60,
+    },
     ...overrides,
   };
 }
@@ -237,9 +245,12 @@ describe("App shell", () => {
     expect(await screen.findByText("隧道（ngrok）")).toBeTruthy();
     expect(screen.queryByText("MCP 端点")).toBeNull();
     expect(window.location.pathname).toBe("/console/settings");
-    // 日志 card: the rotation cap is editable and shows the value the server sent.
+    // Settings sub-pages are real paths now: clicking the rail swaps the card
+    // AND the URL, so the 日志轮转 card is directly linkable and reloadable.
+    fireEvent.click(screen.getByRole("button", { name: "日志轮转" }));
     expect(await screen.findByText("单文件上限")).toBeTruthy();
     expect(await screen.findByDisplayValue("10485760")).toBeTruthy();
+    expect(window.location.pathname).toBe("/console/settings/logs");
   });
 
   test("deep-links straight to a page from the URL", async () => {
@@ -465,7 +476,7 @@ test("the directory whitelist is a textarea: every line survives editing", async
   // HTML value sanitization strips newlines from <input type="text">, so the
   // list silently collapsed into one bogus path the moment an operator edited
   // and blurred it. Two directories must come back as two.
-  window.history.pushState({}, "", "/console/settings");
+  window.history.pushState({}, "", "/console/settings/files");
   mocks.settings.mockResolvedValue(settingsState({
     config: {
       ...settingsState().config,
@@ -499,9 +510,9 @@ test("the directory whitelist is a textarea: every line survives editing", async
 test("a number outside the server's bounds is refused with a toast, not saved", async () => {
   // The field used to keep whatever was typed while the config held something
   // else — the operator only found out on the next reload.
-  window.history.pushState({}, "", "/console/settings");
+  window.history.pushState({}, "", "/console/settings/network");
   const { container } = render(<App />);
-  await screen.findByText("单文件上限");
+  await screen.findByText("公网健康检查");
   const inputs = [...container.querySelectorAll("input[type=number]")] as HTMLInputElement[];
   const health = inputs.find(input => input.value === "20000");
   expect(health).toBeTruthy();
@@ -690,8 +701,9 @@ describe("App shell: card detail layer", () => {
     const { container } = render(<App />);
     await screen.findByText("隧道（ngrok）");
 
+    // The 隧道 sub-page carries the two boolean switches of this card.
     const switches = [...container.querySelectorAll("input.switch")] as HTMLInputElement[];
-    expect(switches.length).toBeGreaterThanOrEqual(3);
+    expect(switches.length).toBe(2);
     expect(switches.every(input => input.type === "checkbox")).toBe(true);
 
     // And they still write the same config key they wrote as a plain checkbox.

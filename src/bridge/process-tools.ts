@@ -2,7 +2,8 @@ import { host } from "../host/host.js";
 import { randomBytes } from "node:crypto";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { testReadyPattern, validateReadyPattern } from "../mcp/regex-worker.js";
-import { persistTodos } from "./todo-store.js";
+import { persistTodos, loadTodoStore } from "./todo-store.js";
+import { pushTodoCompletions } from "./notify.js";
 import {
   MAX_INLINE_OUTPUT,
   READY_PATTERN_WINDOW_BYTES,
@@ -435,12 +436,19 @@ export function listSessions(): unknown {
 /** Todos live on the MCP session that set them. */
 export function setTodos(args: Args, session?: SessionState): unknown[] {
   const next = validateTodos(args.todos);
+  // Frequent-mode bell: capture the previous list BEFORE overwriting. The
+  // session list is the baseline when the caller has one; the persisted store
+  // covers the legacy/no-session path. Push happens after the write lands —
+  // a notification about a saved state, never about one in flight — and
+  // pushTodoCompletions swallows every failure itself.
+  const previous = session?.todos ?? state.latestSession?.todos ?? loadTodoStore().todos;
   if (session) {
     session.todos = next;
     state.latestSession = session;
   }
   persistTodos(next);
   host().ui.update();
+  pushTodoCompletions(previous, next);
   return next;
 }
 

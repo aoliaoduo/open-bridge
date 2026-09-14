@@ -42,6 +42,7 @@ const BOOLEAN_KEYS: ReadonlySet<string> = new Set([
   "ngrokUseHttpProxy",
   "concurrency.enabled",
   "oauth.enabled",
+  "notify.enabled",
 ]);
 
 const NON_NEGATIVE_INT_KEYS: ReadonlySet<string> = new Set([
@@ -180,5 +181,125 @@ export function validateConfigValue(key: string, value: unknown): ConfigValidati
     return { ok: true, value };
   }
 
+  // ---- phone notifications (Bark) ------------------------------------------
+
+  if (key === "notify.barkKey") {
+    // Accept a bare device key OR a pasted `https://api.day.app/<key>/…` URL:
+    // the Bark app literally shows the full link, and the distinctive part to
+    // copy is a path segment most people cannot name. Parse it HERE so both
+    // write paths (MCP + console) store the identical canonical value, and the
+    // send path can trust what it reads. "" is legal: clearing the key is the
+    // operator's way to disarm notifications without losing the other settings.
+    if (typeof value !== "string") {
+      return { ok: false, error: "notify.barkKey must be a string. (expected 'notify.barkKey': string)" };
+    }
+    const parsed = parseBarkKeyInput(value);
+    if (parsed === null) {
+      return {
+        ok: false,
+        error: "notify.barkKey must be the Bark device key (4-64 letters/digits/-/_), or a full https://api.day.app/<key> URL to copy it from.",
+      };
+    }
+    return { ok: true, value: parsed };
+  }
+
+  if (key === "notify.mode") {
+    // Closed vocabulary: a typo'd mode must not silently decide who gets paged.
+    const normalized = typeof value === "string" ? value.trim() : value;
+    if (normalized !== "frequent" && normalized !== "dnd") {
+      return { ok: false, error: "notify.mode must be 'frequent' (push every completed todo) or 'dnd' (only attention/finished events)." };
+    }
+    return { ok: true, value: normalized };
+  }
+
+  if (key === "notify.idleMinutes") {
+    // Integers only, upper-bounded at one day, and 0 = "the watchdog is off"
+    // (an explicit, meaningful value — never coerce it to the default).
+    if (!isInt(value) || value < 0 || value > 1440) {
+      return { ok: false, error: "notify.idleMinutes must be an integer between 0 and 1440 (minutes; 0 = off). (expected 'notify.idleMinutes': number)" };
+    }
+    return { ok: true, value };
+  }
+
+  if (key === "notify.serverUrl") {
+    // Same shape as oauth's `resource` rule: a bare origin, never a URL with
+    // credentials, a query, or a path that could redirect pushes elsewhere.
+    // https by default; plain http only for an explicit loopback dev server.
+    // "" clears a custom origin: the read side falls back to the official
+    // host, exactly like clearing the device key disarms the channel.
+    if (typeof value !== "string") {
+      return { ok: false, error: "notify.serverUrl must be a string. (expected 'notify.serverUrl': string)" };
+    }
+    if (!value.trim()) return { ok: true, value: "" };
+    let origin: string;
+    try {
+      origin = canonicalBarkOrigin(value.trim());
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    return { ok: true, value: origin };
+  }
+
   return { ok: false, error: `Unsupported Open Bridge setting: ${key}` };
+}
+
+/** Device-key character set used by the Bark server: URL-safe, no path syntax. */
+const BARK_KEY_PATTERN = /^[A-Za-z0-9_-]{4,64}$/;
+
+/**
+ * Turn whatever the operator pasted into a bare device key — or null. The
+ * Bark app shows `https://api.day.app/<key>/`, so a full URL is accepted and
+ * its first path segment is taken as the key; a bare key passes unchanged.
+ * "" means "clear the key" and parses to "".
+ */
+export function parseBarkKeyInput(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  // A full URL form is matched by ITS OWN grammar and then must yield a good
+  // key — a malformed `https://[oops` never reaches the key test as-is:
+  // brackets would let it pass the pattern and build a broken Bark URL.
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) || /^api\.day\.app\//i.test(trimmed)) {
+    const fromUrl = barkKeyFromUrl(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+    return fromUrl && BARK_KEY_PATTERN.test(fromUrl) ? fromUrl : null;
+  }
+  return BARK_KEY_PATTERN.test(trimmed) ? trimmed : null;
+}
+
+/** First path segment of the URL = the device key. Anything else fails to null. */
+function barkKeyFromUrl(input: string): string {
+  try {
+    const url = new URL(input);
+    const first = url.pathname.split("/").filter(Boolean)[0] ?? "";
+    return first ? decodeURIComponent(first) : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Validate + canonicalize a Bark server origin: https (or http on loopback),
+ * no credentials/query/fragment, no path — everything after the origin comes
+ * from the key and message, so a stored path could silently retarget pushes.
+ */
+export function canonicalBarkOrigin(input: string): string {
+  const url = new URL(input);
+  if (!["http:", "https:"].includes(url.protocol)) throw new Error("notify.serverUrl must be an http(s) origin.");
+  if (url.username || url.password) throw new Error("notify.serverUrl must not carry credentials.");
+  if (url.search || url.hash) throw new Error("notify.serverUrl must be an origin without a query or fragment.");
+  if (url.pathname !== "/" && url.pathname !== "") throw new Error("notify.serverUrl must be an origin without a path.");
+  const host = url.hostname.toLowerCase();
+  const loopback = host === "127.0.0.1" || host === "localhost" || host === "[::1]" || host === "::1";
+  if (url.protocol === "http:" && !loopback) throw new Error("notify.serverUrl may use plain http only on loopback (local development).");
+  return url.origin.toLowerCase();
+}
+
+/**
+ * Mask a stored device key for any display surface: same shape as the route
+ * token's redaction (head + tail visible, middle always the same, so short
+ * keys cannot leak through a "keep 2/3" split).
+ */
+export function maskBarkKey(key: string): string {
+  if (!key) return "";
+  if (key.length <= 8) return "••••••••";
+  return `${key.slice(0, 4)}…${"•".repeat(Math.min(key.length - 6, 20))}…${key.slice(-2)}`;
 }

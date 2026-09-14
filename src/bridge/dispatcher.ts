@@ -39,6 +39,7 @@ import {
 } from "./tool-families.js";
 import { normalizeToolCall, type CanonicalCall } from "./tool-call-shape.js";
 import { listSkills } from "./skills.js";
+import { notifyTool } from "./notify.js";
 import { enrichFsError, suggestionHint } from "./error-hints.js";
 import type { JsonArgs } from "./json-args.js";
 
@@ -103,6 +104,9 @@ const HANDLERS: Record<string, Handler> = {
   activity_log: activityLogFamily,
   get_usage_stats: getUsageStats,
 
+  // ---- phone notifications ----------------------------------------------
+  notify: notifyTool,
+
   // ---- orchestration -----------------------------------------------------
   batch: batchTool,
   run_script: runScript,
@@ -144,7 +148,19 @@ export async function invoke(
   }
   // Redacted argument summary for the audit log (T-1): secrets in parameters
   // are scrubbed by redactSensitiveText before the summary is recorded.
-  const argsSummary = buildArgsSummary(callArgs, redactSensitiveText);
+  // One scrub the generic redactor cannot see: `set_config_value` writing the
+  // Bark device key. The audit must record that it was set, never what —
+  // 22 characters sail under every truncation and none of the token patterns.
+  const secretValueWrite = tool === "set_config_value"
+    && /(?:^|\.)barkKey$/i.test(String(callArgs.key ?? ""));
+  const argsSummary = buildArgsSummary(secretValueWrite
+    ? {
+        ...callArgs,
+        value: typeof callArgs.value === "string" && callArgs.value
+          ? `<set:${callArgs.value.length} chars>`
+          : "<cleared>",
+      }
+    : callArgs, redactSensitiveText);
   // The audit log keeps the name the caller used (that is the fact worth
   // recording) and states what a legacy name resolved to, so a client still
   // speaking the old vocabulary is visible instead of invisible.

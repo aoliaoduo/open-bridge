@@ -108,6 +108,24 @@ export interface SettingsConfigView {
   "oauth.allowedRedirectHosts": string[];
 }
 
+/**
+ * What the console shows for phone notifications. The device key itself never
+ * appears here — only whether one is configured and a mask to recognise it by.
+ * Same posture as the bearer tokens: write-only through this surface.
+ */
+export interface SettingsNotifyView {
+  enabled: boolean;
+  mode: "frequent" | "dnd";
+  /** A usable key is stored (parsed form non-empty). */
+  configured: boolean;
+  /** Masked device key for display; "" when unconfigured. */
+  keyMask: string;
+  /** Canonical Bark server origin actually used for sends. */
+  serverUrl: string;
+  /** Silence minutes before the idle watchdog bells; 0 = off. */
+  idleMinutes: number;
+}
+
 /** Everything the settings page shows, pushed by the host as one `state` message. */
 export interface SettingsState {
   running: boolean;
@@ -124,6 +142,7 @@ export interface SettingsState {
   tokens: SettingsTokenRow[];
   concurrency: { enabled: boolean; holdTimeoutMs: number; waitTimeoutMs: number };
   config: SettingsConfigView;
+  notify: SettingsNotifyView;
 }
 
 export type SettingsAction =
@@ -131,6 +150,9 @@ export type SettingsAction =
   | { command: "copyUrl" | "copyPrompt" | "start" | "stop" | "rotateEndpoint" | "purgeTokens" | "revokeAll" | "copySecret" | "dismissSecret" }
   | { command: "clearStats" | "healthCheck" }
   | { command: "saveDomain"; domain: string }
+  /** Device key as pasted (bare or full URL — the host parses and validates). */
+  | { command: "saveNotifyKey"; key: string }
+  | { command: "testNotify" }
   | { command: "setAuthEnabled"; enabled: boolean }
   | { command: "setDefaultTtl"; seconds: number }
   | { command: "createToken"; label: string; ttlSeconds: number }
@@ -168,6 +190,13 @@ const CONFIG_SPEC = {
   port: { kind: "int", min: 0, max: 65535 },
   publicHealthTimeoutMs: { kind: "int", min: 3000, max: 120000 },
   logMaxBytes: { kind: "int", min: 0, max: 1024 * 1024 * 1024 },
+  // The switches of the notification card. The DEVICE KEY is deliberately not
+  // here: it writes through saveNotifyKey (parse-and-store is a dedicated flow,
+  // like saveDomain) and it never appears in the read-only view.
+  "notify.enabled": { kind: "boolean" },
+  "notify.mode": { kind: "enum", values: ["frequent", "dnd"] },
+  "notify.serverUrl": { kind: "string", max: 500 },
+  "notify.idleMinutes": { kind: "int", min: 0, max: 1440 },
 } as const;
 
 export type SettingsConfigKey = keyof typeof CONFIG_SPEC;
@@ -186,7 +215,7 @@ export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
     "setAuthEnabled", "setDefaultTtl", "createToken", "armPublicLock", "rotateToken",
     "revokeToken", "deleteToken", "purgeTokens", "revokeAll",
     "setConcurrency", "setConfig", "copyText", "copySecret", "dismissSecret",
-    "clearStats", "healthCheck",
+    "clearStats", "healthCheck", "saveNotifyKey", "testNotify",
   ]);
   if (!allowed.has(command)) return null;
 
@@ -194,6 +223,14 @@ export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
     typeof value === "string" ? value.trim().slice(0, max) : "";
 
   switch (command) {
+    case "saveNotifyKey": {
+      // The raw paste is kept only to TRIM (a pasted URL with stray whitespace
+      // must still parse); an embedded space then reaches the host validator as
+      // a refusal, exactly like a malformed domain does. "" means "clear", not
+      // "absent", so a non-string key must fall through to null, not to "".
+      if (typeof message.key !== "string") return null;
+      return { command, key: message.key.trim().slice(0, 500) };
+    }
     case "saveDomain": {
       // Trim only — a domain with embedded spaces must reach the host's
       // validator as-is so the user sees the refusal instead of a silently

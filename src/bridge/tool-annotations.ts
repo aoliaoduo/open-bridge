@@ -76,6 +76,13 @@ const MUTATING: ToolAnnotations = { readOnlyHint: false, idempotentHint: false, 
 const PROCESS_CONTROL: ToolAnnotations = { readOnlyHint: false, idempotentHint: false, openWorldHint: false };
 
 /**
+ * A push reaches the operator through the network and is one more event per
+ * call once the dedupe window passes — visible from the outside, not a no-op,
+ * and it destroys nothing.
+ */
+const OUTBOUND: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
+
+/**
  * Every advertised tool's hints. Exhaustive by construction: a tool missing from
  * this table is a bug the test suite catches, not a silently unannotated entry.
  */
@@ -131,6 +138,9 @@ const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotations>> = {
   service: MUTATING,
   service_status: READ_NETWORK,
   read_service_log: READ,
+
+  // ---- Phone notifications -------------------------------------------------
+  notify: OUTBOUND,
 
   // ---- Bridge introspection ----------------------------------------------
   bridge_status: READ,

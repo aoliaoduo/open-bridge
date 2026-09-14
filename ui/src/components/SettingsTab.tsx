@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { type SettingsActionResult, type SettingsState } from "../api";
+import { SETTINGS_SECTIONS, type SettingsSectionId } from "../routes";
 import { Card } from "./Card";
 import { Field } from "./Field";
 import { SectionNav } from "./SectionNav";
@@ -10,21 +11,11 @@ interface Props {
   act: (action: Record<string, unknown>) => Promise<unknown>;
   /** Invalid-input feedback: shows a toast instead of failing silently. */
   notify?: (text: string, isError?: boolean) => void;
+  /** Which settings sub-page is open — the URL is the source of truth. */
+  section: SettingsSectionId;
+  /** Sub-page switch: App turns this into a history entry, not a scroll. */
+  onSectionChange: (id: SettingsSectionId) => void;
 }
-
-/**
- * 设置 card order, mirrored by the section rail under the page header. Ids are
- * explicit strings rather than titles run through a slugifier: a reworded
- * heading must not silently break every anchor on the page.
- */
-const SETTINGS_SECTIONS = [
-  { id: "set-tunnel", label: "隧道" },
-  { id: "set-network", label: "端口" },
-  { id: "set-files", label: "目录" },
-  { id: "set-shell", label: "Shell" },
-  { id: "set-locks", label: "并发" },
-  { id: "set-logs", label: "日志轮转" },
-];
 
 /** Bounds mirror the server's CONFIG_SPEC (src/bridge/settings-model.ts) so a
  *  value the UI accepts never comes back as an inscrutable 400. */
@@ -135,8 +126,11 @@ function SwitchField(
   );
 }
 
-export function SettingsTab({ settings, act, notify }: Props) {
+export function SettingsTab({ settings, act, notify, section, onSectionChange }: Props) {
   const [domain, setDomain] = useState<string | null>(null);
+  // A draft for the device-key field (separate from the stored key so the
+  // mask shown vs. replaced stay distinguishable; null means "no edit yet").
+  const [barkKeyDraft, setBarkKeyDraft] = useState<string | null>(null);
 
   if (!settings) return <div className="card"><Skeleton lines={4} /></div>;
   const cfg = settings.config;
@@ -161,8 +155,15 @@ export function SettingsTab({ settings, act, notify }: Props) {
 
   return (
     <>
-      <SectionNav items={SETTINGS_SECTIONS} />
+      {/* One card per sub-page: the strip switches the route, the URL and the
+          rendered card move together, and a reload lands where you were. */}
+      <SectionNav
+        items={SETTINGS_SECTIONS.map(({ id, label }) => ({ id, label }))}
+        active={section}
+        onSelect={onSectionChange}
+      />
 
+      {section === "tunnel" && (
       <Card id="set-tunnel" title="隧道（ngrok）" desc="隧道让公网上的客户端连到这台机器；不开隧道时只有本机能访问。">
         <div className="form-grid">
           <Field label="提供商" hint="none 表示只用本机回环地址，适合纯本机客户端。">
@@ -221,7 +222,9 @@ export function SettingsTab({ settings, act, notify }: Props) {
           />
         </div>
       </Card>
+      )}
 
+      {section === "network" && (
       <Card id="set-network" title="网络" desc="本机监听端口与公网健康检查的超时。">
         <div className="form-grid">
           <Field label="本地端口" hint="0 = 自动选择空闲端口（重启 Bridge 生效）；失焦时保存。">
@@ -247,7 +250,9 @@ export function SettingsTab({ settings, act, notify }: Props) {
           </Field>
         </div>
       </Card>
+      )}
 
+      {section === "files" && (
       <Card id="set-files" title="文件访问" desc="默认允许访问项目根之外的路径（个人本机推荐）；关掉之后只有下面列出的目录可读写。">
         <SwitchField
           label="允许访问项目根之外的路径"
@@ -272,7 +277,9 @@ export function SettingsTab({ settings, act, notify }: Props) {
           </div>
         )}
       </Card>
+      )}
 
+      {section === "shell" && (
       <Card id="set-shell" title="Shell 与工具" desc="命令通过哪个 shell 执行，以及这台实例对外公布哪些工具。">
         <div className="form-grid">
           <Field label="Shell 路径" hint="留空自动探测（Git Bash → pwsh → powershell）。">
@@ -297,7 +304,89 @@ export function SettingsTab({ settings, act, notify }: Props) {
           </Field>
         </div>
       </Card>
+      )}
 
+      {section === "notify" && (
+      <Card id="set-notify" title="手机通知（Bark）" desc="网页 AI 干完活不必守着标签页 — 进展与提醒直接推到 iPhone。">
+        <div className="form-grid">
+          <SwitchField
+            label="启用手机通知"
+            hint="关掉之后 notify 工具与自动汇报全部静音；设备密钥会留着。"
+            checked={settings.notify.enabled}
+            onChange={next => setConfig("notify.enabled", next)}
+          />
+          <Field label="汇报模式" hint={settings.notify.mode === "frequent"
+            ? "任务清单每勾选完一条，手机收到一条完成通知。"
+            : "只在 AI 真的需要你时推送：回来处理、做选择、或这一轮结束了。"}>
+            <select value={settings.notify.mode} onChange={e => setConfig("notify.mode", e.target.value)}>
+              <option value="frequent">频繁 — 每条任务完成都通知</option>
+              <option value="dnd">免打扰 — 只推「需要你回电脑前」的事件</option>
+            </select>
+          </Field>
+          <div className="field">
+            <span className="field-label">Bark 设备密钥</span>
+            <span className="field-control">
+              <input
+                type="text"
+                value={barkKeyDraft ?? (settings.notify.configured ? settings.notify.keyMask : "")}
+                placeholder={settings.notify.configured ? "粘贴新密钥可替换（输入框仅显示掩码）" : "https://api.day.app/ 后面的那串专属路径"}
+                readOnly={settings.notify.configured && barkKeyDraft === null}
+                onChange={e => setBarkKeyDraft(e.target.value)}
+              />
+              <button
+                className="small"
+                disabled={barkKeyDraft === null}
+                onClick={() => {
+                  // Same discipline as 保存域名: reset only on success so a
+                  // rejection keeps the operator's paste, and a readOnly
+                  // replacement field (not the masked display) reaches the host.
+                  void act({ command: "saveNotifyKey", key: barkKeyDraft ?? "" }).then(result => {
+                    if ((result as SettingsActionResult | null)?.ok) setBarkKeyDraft(null);
+                  });
+                }}
+              >
+                保存密钥
+              </button>
+              {settings.notify.configured && barkKeyDraft === null && (
+                <button
+                  className="small ghost"
+                  onClick={() => setBarkKeyDraft("")}
+                  title="粘贴新密钥整串替换；清空后点保存即撤销"
+                >
+                  更换 / 清除
+                </button>
+              )}
+            </span>
+            <span className="field-hint">Bark App 首页显示的那串独特路径就是它，整条链接粘贴也行，会自动摘出密钥。</span>
+          </div>
+          <Field label="无反应提醒" hint="连接完全静默超过这个分钟数、且任务清单还有未完成项时，推送一次「需要你回来了」。0 = 关闭。">
+            <DraftField
+              type="number"
+              min={0}
+              max={1440}
+              value={String(settings.notify.idleMinutes)}
+              onCommit={raw => setConfig("notify.idleMinutes", Number(raw.trim()))}
+              onInvalid={() => notify?.("无反应提醒需要 0–1440 的整数分钟，已还原。", true)}
+            />
+          </Field>
+          <div className="field">
+            <span className="field-label">推送通道</span>
+            <span className="field-control">
+              <button
+                className="small"
+                disabled={!settings.notify.enabled || !settings.notify.configured}
+                onClick={() => { void act({ command: "testNotify" }); }}
+              >
+                发送测试通知
+              </button>
+            </span>
+            <span className="field-hint">服务器：{settings.notify.serverUrl}。官方通道不通时可自建 Bark，配置文件里改 notify.serverUrl（自建 http 仅限本机回环）。</span>
+          </div>
+        </div>
+      </Card>
+      )}
+
+      {section === "locks" && (
       <Card id="set-locks" title="并发锁" desc="并发写同一个目录时让第二个调用者等待，而不是互相覆盖。">
         <SwitchField
           label="串行化可能产生竞争的工具调用"
@@ -344,7 +433,9 @@ export function SettingsTab({ settings, act, notify }: Props) {
           </div>
         )}
       </Card>
+      )}
 
+      {section === "logs" && (
       <Card
         id="set-logs"
         title="日志"
@@ -368,6 +459,7 @@ export function SettingsTab({ settings, act, notify }: Props) {
           </Field>
         </div>
       </Card>
+      )}
 
     </>
   );

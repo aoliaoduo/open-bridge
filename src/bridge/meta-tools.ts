@@ -7,7 +7,7 @@ import { validateNgrokDomain } from "../http/request-policy.js";
 import { authStatus } from "../http/auth.js";
 import { lockSnapshot } from "./resource-locks.js";
 import { CONFIG_DEFAULTS } from "./config-defaults.js";
-import { SETTING_VALUE_REQUIRED, validateConfigValue } from "./config-values.js";
+import { SETTING_VALUE_REQUIRED, maskBarkKey, validateConfigValue } from "./config-values.js";
 import { auditLogPath, clientMcpUrl, localMcpUrl, record, state } from "./state.js";
 import type { JsonArgs } from "./json-args.js";
 import { notifyLogging } from "./state.js";
@@ -116,7 +116,29 @@ export function getConfig(): Record<string, unknown> {
   for (const [key, fallback] of Object.entries(CONFIG_DEFAULTS)) {
     out[key] = cfg.get(key, fallback);
   }
+  // The Bark device key is a SEND-ONLY credential: echoing it into an MCP
+  // response would hand the remote client a path it could curl directly,
+  // bypassing the audit, the mode gate and the rate budget. Like the token
+  // secrets, it is displayed as a shape, never whole.
+  if (typeof out["notify.barkKey"] === "string" && out["notify.barkKey"]) {
+    out["notify.barkKey"] = maskBarkKey(out["notify.barkKey"] as string);
+  }
   return out;
+}
+
+/**
+ * Echo back ONE canonical shape after a write. The Bark key is the one
+ * credential this path can touch: a set/rotate echo is otherwise the friendliest
+ * confirmation and a leaked key is a silent push channel the holder can use
+ * outside the server's own gates (maskBarkKey lives in config-values where the
+ * console shares exactly one rule).
+ */
+function echoConfigValue(key: string): unknown {
+  if (key === "notify.barkKey") {
+    const value = host().config.get(key, CONFIG_DEFAULTS[key]);
+    return typeof value === "string" && value ? maskBarkKey(value) : "";
+  }
+  return host().config.get(key, CONFIG_DEFAULTS[key]);
 }
 
 export async function setConfigValue(args: Args): Promise<unknown> {
@@ -130,7 +152,7 @@ export async function setConfigValue(args: Args): Promise<unknown> {
     // saveDomain flow (same function, so the two cannot drift).
     const domain = validateNgrokDomain(value);
     await host().config.update(key, domain);
-    return { key: `openBridge.${key}`, value: host().config.get(key, CONFIG_DEFAULTS[key]) };
+    return { key: `openBridge.${key}`, value: echoConfigValue(key) };
   }
   // Every other key shares one validator with the console's generic setConfig
   // path (config-values.ts): same rules, same messages, no drift.
@@ -154,7 +176,7 @@ export async function setConfigValue(args: Args): Promise<unknown> {
     }
   }
   await host().config.update(key, next);
-  return { key: `openBridge.${key}`, value: host().config.get(key, CONFIG_DEFAULTS[key]) };
+  return { key: `openBridge.${key}`, value: echoConfigValue(key) };
 }
 
 export function getRecentActivity(args: Args): unknown {

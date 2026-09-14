@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **手机通知（Bark）：网页 AI 干活时把进展与「需要你回来」直接推到 iPhone。** 控制台「设置 → 手机通知」粘贴 Bark 显示的整条链接（`https://api.day.app/<设备密钥>/…`），写入即解析出密钥；两种模式：**频繁**（任务清单每勾选完一条，服务端在 `set_todos` 落盘时自动推一条汇总，不靠 AI 自觉）与**免打扰**（只送 attention/finished——需要选择/回复、对话结束；进展类一律 `delivered:false, reason:"mode"`，是结构化的「没送」而非错误）。新增 MCP 工具 `notify`（`event`: progress/attention/finished，39 个工具）；连接指令随配置注入使用说明（会话建立时快照，模式判定每次发送实时读）。**无反应监视**：连接静默超过 `notify.idleMinutes`（默认 60，0 = 关）且清单还有未完成项时服务端自己推一条 attention——网页 AI 标签页崩死时唯一能叫回人的通道（骑在既有 60 秒会话清扫节拍上，不新增定时器）。防轰炸：真实发送共享 60 秒 6 条窗口 + 相同内容 60 秒去重，被挡的调用得到结构化原因；控制台「发送测试」是人手动作，绕过账本但保留开关/模式判定。**密钥单进不出**：`get_config`、`set_config_value` 回显、设置页视图、审计摘要、运行日志一律掩码或形状（`set_config_value` 写入 barkKey 的审计行记 `<set:N chars>`）；发送走既有 `probeHttpHealth` 通路（先解析后钉 IP、不跟随重定向、只读响应头），`notify.serverUrl` 默认官方 api.day.app，自建服务仅允许 https 或回环 http。
+
+- **设置页拆成真子页面**：`/console/settings/<段>`（`tunnel`/`network`/`files`/`shell`/`notify`/`locks`/`logs`），原「单页长滚动 + 锚点跳转」改为每个子页一个真实路径——地址栏可深链、可刷新、前进后退可用；页头随子页显示对应标题与说明；侧栏与旧书签（`/console/settings`）落在默认「隧道」页。`SectionNav` 由内部锚点滚动改为受控路由切换。
+- `notify` 支持 AI 按次自选 Bark 推送参数：`sound`（铃声）、`level`（`active`/`timeSensitive`/`passive`）、`call`（1 = 持续响铃，上限 10）、`badge`（0-9999）、`url`（点击跳转）；非法值按参数名拒绝。无反应监视与控制台测试推送固定 `timeSensitive`。无反应提醒默认值 10 → 60 分钟。
+
 ### Changed
 - 控制台导航重组：新增「安全」页收敛暴露面、Bearer 门禁、个人令牌与 OAuth 2.1（原「令牌」页、体检页暴露面卡、设置页 OAuth 卡迁入），「第二道锁」退役统一叫 Bearer 门禁，路由令牌不再称为凭证（只是地址）；体检回归只读诊断，状态页警告改为跳转；文件锁表以「文件锁明细」搬到状态页；/console/tokens 跳转新页，书签不断。纯前端重组，后端 API 零改动。
 - **行为不变的重复合并与清理：**UI 里「暴露面 → 文案/语气」原本在状态页与安全页各养一份且措辞已漂移，合并为 `ui/src/exposure.ts` 一张表；`regex-worker` 两个仅差一行输入形状的 worker 源（行批量匹配 / 单次测试）合并为一个；`theme.ts` 只被测试引用的三个函数收回私有；`App.tsx` 拆掉只有一个实现的 `SettingsStateGuard` 中转层；`paths.ts` 删掉无人用的 `unrestricted()` 转发；`processes.ts` 删掉一段重复注释；`session-table` 把 `pruneSessions` 与 `makeRoomForSession` 逐字重复的 LRU 驱逐块提取成 `evictOldestIdleSession()`；`safe-probe.classifyIpv4` 删掉三条永远走不到的保留段子句（`100.100.100.200` 已被 100.64.0.0/10 覆盖，`192.0.2.0/24`、`192.88.99.0/24` 已分别被更宽的 192.0.0.0/16、192.88.0.0/16 判断覆盖），分类行为逐 IP 不变；一键启动脚本的示例路径从作者本机桌面换成通用示例。
@@ -209,7 +215,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **一键启动脚本先问「工作目录」，再启动。** 「工作区」是 AI 权限的边界，而双击启动时它默认等于
   `.cmd` 所在的目录（也就是本仓库自己）——想给别的项目用只能迂回。现在双击后先提示输入目录
-  （`"C:\Users\aolia\Desktop\aoliaoduo"` 与 `C:\Users\aolia\Desktop\aoliaoduo` 都收，引号自动去掉），
+  （`"D:\work\my-project"` 与 `D:\work\my-project` 都收，引号自动去掉），
   回车＝沿用上一次输入的目录（记在同目录的 `start-open-bridge.last-dir`，已加进 `.gitignore`）；
   目录不存在会先问一句再建；也可以把目录当第一个参数传（桌面快捷方式/计划任务用得上）。
   启动命令相应变成 `serve --root "<你输入的目录>" --open`。

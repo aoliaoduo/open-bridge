@@ -50,4 +50,18 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = deepFreeze({
   "concurrency.enabled": true,
   "concurrency.holdTimeoutMs": 300_000,
   "concurrency.waitTimeoutMs": 120_000,
+  /**
+   * Phone notifications (Bark). The switch ships ON so "connect and tell my
+   * phone" works the moment a key exists, but nothing can push until the
+   * operator supplies one — an unset key is its own default-off.
+   */
+  "notify.enabled": true,
+  /** The device key path segment of `https://api.day.app/<key>/…`; "" = not set. */
+  "notify.barkKey": "",
+  /** `frequent` pushes progress (every completed todo item); `dnd` pushes only attention/done. */
+  "notify.mode": "frequent",
+  /** Minutes of silence with an open work list before the idle watchdog bells; 0 = off. */
+  "notify.idleMinutes": 60,
+  /** Bark server origin; loopback http is allowed (development), other http is refused. */
+  "notify.serverUrl": "https://api.day.app",
 });

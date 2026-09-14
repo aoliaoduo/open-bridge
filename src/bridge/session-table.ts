@@ -8,6 +8,7 @@
 import { host } from "../host/host.js";
 import { MAX_SESSIONS, state } from "./state.js";
 import { pruneCommands } from "./processes.js";
+import { idleNoticeTick } from "./notify.js";
 
 /** Idle MCP sessions are reclaimed after this long without activity. */
 const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
@@ -60,6 +61,10 @@ export function startSessionPruneLoop(): void {
     // long-idle Bridge kept every finished command's buffers (3 x 32 MiB)
     // and its %TEMP% capture file alive indefinitely.
     try { pruneCommands(); } catch { /* best-effort sweep */ }
+    // The notification idle-watchdog rides this sweep instead of owning a
+    // second timer: one 60 s heartbeat for "time passed on an idle Bridge",
+    // started and stopped as one unit. Its own decisions are guarded inside.
+    try { idleNoticeTick(); } catch { /* best-effort sweep */ }
   }, SESSION_PRUNE_INTERVAL_MS);
 }
 

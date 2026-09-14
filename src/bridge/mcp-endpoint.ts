@@ -24,6 +24,7 @@ import { discoverWorkspaceSkills, skillsIndexSuffix } from "./skills.js";
 import { invoke } from "./dispatcher.js";
 import { normalizeToolCall } from "./tool-call-shape.js";
 import { persistUsageStats } from "./usage-store.js";
+import { notifyUsageInstructions, resolveNotifySettings } from "./notify.js";
 
 /**
  * The typed payload for one tool result: `asStructuredContent`, minus the
@@ -108,7 +109,21 @@ export const sharedEventStore = new BoundedInMemoryEventStore();
  * long prompt is how the two eras drift apart without anyone noticing.
  */
 function serverInstructions(): string {
-  return SERVER_INSTRUCTIONS_BASE + projectInstructionSuffix() + skillsSuffix();
+  return SERVER_INSTRUCTIONS_BASE + notifySuffix() + projectInstructionSuffix() + skillsSuffix();
+}
+
+/**
+ * The live notification guidance — a connect-time snapshot, like skills. Mode
+ * flips after connect take effect on the server side immediately (the gate
+ * reads config per push); the suffix is coaching, not contract. Discovery
+ * failure must not keep a session from starting, same rule as the skills index.
+ */
+function notifySuffix(): string {
+  try {
+    return notifyUsageInstructions(resolveNotifySettings());
+  } catch {
+    return "";
+  }
 }
 
 const SERVER_INSTRUCTIONS_BASE =
