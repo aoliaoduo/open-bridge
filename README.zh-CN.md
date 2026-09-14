@@ -222,6 +222,8 @@ open-bridge config set oauth.enabled true
 
 要让 ChatGPT 网页版这类外部客户端连进来：
 
+ngrok 要先登记一次账号 authtoken 才肯建隧道。在控制台的**设置 → 隧道**里粘贴保存即可；习惯命令行的也可以跑 `ngrok config add-authtoken <token>`，两条路等价——控制台这个入口是为了让第一次使用不必先开终端。
+
 ```bash
 open-bridge config set ngrokDomain <你预留的域名>.ngrok-free.dev
 open-bridge serve                 # 注意：不带 --no-tunnel（--open 可选，自动打开控制台）

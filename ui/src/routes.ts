@@ -164,7 +164,7 @@ export interface SettingsSectionSpec {
 
 /** Card order matches the operator's mental model: connectivity first, hygiene last. */
 export const SETTINGS_SECTIONS: SettingsSectionSpec[] = [
-  { id: "tunnel", label: () => t("隧道", "Tunnel"), hint: () => t("ngrok 隧道、预留域名与公网发布", "ngrok tunnel, reserved domain and public exposure") },
+  { id: "tunnel", label: () => t("隧道", "Tunnel"), hint: () => t("隧道提供商、凭据、预留域名与公网发布", "Tunnel provider, credentials, reserved domain and public exposure") },
   { id: "network", label: () => t("端口", "Ports"), hint: () => t("本机监听端口与公网健康检查超时", "Local listen port and public health-check timeout") },
   { id: "files", label: () => t("目录", "Directories"), hint: () => t("文件访问范围与目录白名单", "File access scope and the directory allowlist") },
   { id: "shell", label: () => t("Shell", "Shell"), hint: () => t("命令执行使用的 shell", "The shell commands run through") },

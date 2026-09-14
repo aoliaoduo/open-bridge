@@ -17,7 +17,7 @@ import { buildWebAiPrompt } from "./onboarding.js";
 import { workspaceStateSuffix } from "./paths.js";
 import { cancelAllPendingRestarts, terminateProcess } from "./processes.js";
 import { enqueueLifecycle } from "./lifecycle-queue.js";
-import { killTunnelTree, setInstanceRestart, startTunnelInternal, stopPublicWatch } from "./tunnel.js";
+import { killTunnelTree, loadNgrokAuthtoken, setInstanceRestart, startTunnelInternal, stopPublicWatch } from "./tunnel.js";
 import { publishSelf, stopRepublishLoop, withdrawSelf } from "./peer-registry.js";
 import { startHttpInternal, stopLocalServer } from "./http-listener.js";
 import { selfProbe } from "./self-probe.js";
@@ -42,6 +42,9 @@ async function startInternal(): Promise<void> {
     return;
   }
   await loadRouteToken();
+  // Read before the tunnel can spawn: spawnTunnel is synchronous and the
+  // secret store is not.
+  await loadNgrokAuthtoken();
   try {
     await startHttpInternal();
   } catch (error) {

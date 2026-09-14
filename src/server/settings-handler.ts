@@ -38,6 +38,7 @@ import {
 import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
 import { detectShells } from "../shell/shell-provider.js";
 import { detectNgrok } from "../bridge/ngrok-locate.js";
+import { NGROK_AUTHTOKEN_KEY, setCachedAuthtoken } from "../bridge/tunnel.js";
 import { maskBarkKey, validateConfigValue } from "../bridge/config-values.js";
 import { NOTIFY_DEFAULT_TITLE, pushNotification, resolveNotifySettings, type NotifyOutcome } from "../bridge/notify.js";
 import * as path from "node:path";
@@ -65,6 +66,9 @@ export async function buildSettingsState(): Promise<SettingsState> {
     statusText: running ? (state.sessions.size ? `已连接 · ${state.sessions.size} 个会话` : "已就绪") : "离线",
     mcpUrl: clientMcpUrl(),
     configuredDomain: cfg.get("ngrokDomain", ""),
+    // Only whether one is stored and a masked hint -- never the token. The
+    // console has to be able to say "configured" without being able to leak it.
+    ngrokAuthtokenMask: maskBarkKey((await host().secrets.get(NGROK_AUTHTOKEN_KEY).catch(() => "")) ?? ""),
     authEnabled: authEnabled(),
     defaultTtlSeconds: tokenTtlSeconds(),
     usableCount: await usableTokenCount(),
@@ -385,6 +389,34 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       });
     }
 
+    case "saveNgrokAuthtoken": {
+      // Stored in the secret store, never in config.json: this is an account
+      // credential, and config.json is plain text the operator may well paste
+      // into an issue when asking for help.
+      const raw = typeof action.token === "string" ? action.token.trim() : "";
+      if (!raw) {
+        await host().secrets.store(NGROK_AUTHTOKEN_KEY, "");
+        setCachedAuthtoken("");
+        return done({ info: "Authtoken 已清除。ngrok 会改用它自己配置文件里的凭据（如果配过）。" });
+      }
+      // ngrok tokens are base64-ish with an underscore separating the two
+      // halves. Checking the shape turns "the tunnel will not start" into
+      // "that does not look like an authtoken", which is the difference
+      // between a five-minute and a five-hour debugging session.
+      if (raw.length < 20 || /\s/.test(raw)) {
+        return {
+          ok: false,
+          state: await buildSettingsState(),
+          error: "这不像一个 ngrok authtoken：应该是一长串不含空格的字符，在 ngrok 控制台的 Your Authtoken 页面复制。",
+        };
+      }
+      await host().secrets.store(NGROK_AUTHTOKEN_KEY, raw);
+      setCachedAuthtoken(raw);
+      return done({
+        info: `Authtoken 已保存（${maskBarkKey(raw)}）。重启隧道后生效：设置页上方的「重启隧道」，或重启应用。`,
+      });
+    }
+
     case "testNotify": {
       // "attention" bypasses both switches by design — the operator pressing
       // this button IS the attention, and a muted test button would report a
@@ -436,6 +468,9 @@ function fallbackState(): SettingsState {
     statusText: "错误",
     mcpUrl: clientMcpUrl(),
     configuredDomain: "",
+    // The fallback runs when state could not be built; claiming "no authtoken"
+    // is the safe direction -- it understates rather than inventing one.
+    ngrokAuthtokenMask: "",
     authEnabled: false,
     defaultTtlSeconds: 0,
     usableCount: 0,

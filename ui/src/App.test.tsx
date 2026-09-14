@@ -111,6 +111,7 @@ function settingsState(overrides: Partial<SettingsState> = {}): SettingsState {
     statusText: "已就绪",
     mcpUrl: "http://127.0.0.1:18080/mcp/tok",
     configuredDomain: "",
+    ngrokAuthtokenMask: "",
     authEnabled: false,
     defaultTtlSeconds: 0,
     usableCount: 0,
@@ -251,7 +252,11 @@ describe("App shell", () => {
 
     fireEvent.click(tabLink("设置"));
 
-    expect(await screen.findByText("隧道（ngrok）")).toBeTruthy();
+    // The rail button and the card heading are both "隧道" -- same as Shell,
+    // and correct now that the heading no longer names one provider. Assert
+    // on the card's own text instead of a title that legitimately appears
+    // twice.
+    expect(await screen.findByText(/隧道让公网上的客户端连到这台机器/)).toBeTruthy();
     expect(screen.queryByText("MCP 端点")).toBeNull();
     expect(window.location.pathname).toBe("/console/settings");
     // Settings sub-pages are real paths now: clicking the rail swaps the card
@@ -655,7 +660,7 @@ describe("App shell: in-page filtering and rails", () => {
     window.history.pushState({}, "", "/console/settings");
 
     render(<App />);
-    await screen.findByText("隧道（ngrok）");
+    await screen.findByText(/隧道让公网上的客户端连到这台机器/);
 
     const item = screen.getByRole("button", { name: "并发" });
     expect(item.getAttribute("aria-current")).toBeNull();
@@ -720,6 +725,48 @@ describe("App shell: in-page filtering and rails", () => {
     expect(screen.queryByLabelText("工具集")).toBeNull();
     expect(screen.queryByLabelText("单文件上限")).toBeNull();
   });
+  /**
+   * The authtoken had no console entry at all: a first-time user with the
+   * ngrok binary installed had to find `ngrok config add-authtoken` in a
+   * terminal, which is exactly the step that stops someone who is not already
+   * comfortable with a shell. The reserved-domain field sat right there
+   * implying the rest was configured.
+   */
+  test("the ngrok authtoken can be saved from the tunnel page", async () => {
+    render(<App />);
+    await screen.findByText("MCP 端点");
+    fireEvent.click(tabLink("设置"));
+    await screen.findByText(/隧道让公网上的客户端连到这台机器/);
+
+    const field = screen.getByPlaceholderText(/Your Authtoken/);
+    fireEvent.change(field, { target: { value: "test-ngrok-authtoken" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存 Authtoken" }));
+
+    await waitFor(() => {
+      expect(mocks.settingsAction).toHaveBeenCalledWith({
+        command: "saveNgrokAuthtoken",
+        token: "test-ngrok-authtoken",
+      });
+    });
+  });
+
+  test("a stored authtoken shows as a mask and is not editable until 替换", async () => {
+    // The field must never render the real token: this page is screen-shared
+    // and pasted into issues. Same discipline as the Bark device key.
+    mocks.settings.mockResolvedValue(settingsState({ ngrokAuthtokenMask: "2abc…••••…45" }));
+
+    render(<App />);
+    await screen.findByText("MCP 端点");
+    fireEvent.click(tabLink("设置"));
+    await screen.findByText(/隧道让公网上的客户端连到这台机器/);
+
+    const field = screen.getByDisplayValue("2abc…••••…45") as HTMLInputElement;
+    expect(field.readOnly).toBe(true);
+    expect(screen.getByRole("button", { name: "保存 Authtoken" }).hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "替换" }));
+    expect((screen.getByPlaceholderText(/粘贴新的 authtoken/) as HTMLInputElement).readOnly).toBe(false);
+  });
 });
 
 describe("App shell: card detail layer", () => {
@@ -761,7 +808,7 @@ describe("App shell: card detail layer", () => {
     window.history.pushState({}, "", "/console/settings");
 
     const { container } = render(<App />);
-    await screen.findByText("隧道（ngrok）");
+    await screen.findByText(/隧道让公网上的客户端连到这台机器/);
 
     // The 隧道 sub-page carries the two boolean switches of this card.
     const switches = [...container.querySelectorAll("input.switch")] as HTMLInputElement[];

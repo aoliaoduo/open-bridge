@@ -181,6 +181,8 @@ Local or LAN only? Add `--no-tunnel` and skip ngrok entirely.
 
 To let an external client such as ChatGPT on the web reach you:
 
+ngrok needs your account authtoken once before it will open a tunnel. Paste it into **Settings → Tunnel** in the console and save — or run `ngrok config add-authtoken <token>` if you prefer the terminal; either works, and the console entry exists so that a first run does not require one.
+
 ```bash
 open-bridge config set ngrokDomain <your-reserved-domain>.ngrok-free.dev
 open-bridge serve                 # note: without --no-tunnel; --open is optional

@@ -424,8 +424,47 @@ function ngrokProcessEnvironment(): NodeJS.ProcessEnv {
       if (/^(https?_proxy|all_proxy|no_proxy)$/i.test(key)) delete env[key];
     }
   }
+  // An authtoken saved in the console is handed to the agent the way ngrok
+  // documents: NGROK_AUTHTOKEN. It is only applied when the operator has not
+  // already put one in the environment themselves -- someone who exported it
+  // on purpose (CI, a shared shell) should not have it silently overridden by
+  // a value they typed months ago.
+  //
+  // This is NOT a replacement for `ngrok config add-authtoken`. That writes
+  // ngrok's own config file and keeps working; this covers the case the CLI
+  // path does not, which is a first-time user who has the binary but has
+  // never run a terminal command against it.
+  const saved = cachedAuthtoken.trim();
+  if (saved && !String(env.NGROK_AUTHTOKEN ?? "").trim()) env.NGROK_AUTHTOKEN = saved;
   return env;
 }
+
+/**
+ * The authtoken, read once at startup.
+ *
+ * spawnTunnel is synchronous and the secret store is not, so the value is
+ * cached rather than awaited at spawn time. Reconnects reuse the cache; a
+ * token saved from the console refreshes it through `setCachedAuthtoken`, so
+ * "save then restart the tunnel" works without restarting the process.
+ */
+let cachedAuthtoken = "";
+
+export function setCachedAuthtoken(value: string): void {
+  cachedAuthtoken = typeof value === "string" ? value : "";
+}
+
+export async function loadNgrokAuthtoken(): Promise<void> {
+  try {
+    cachedAuthtoken = (await host().secrets.get(NGROK_AUTHTOKEN_KEY)) ?? "";
+  } catch {
+    // A secret store that cannot be read must not stop the bridge from
+    // starting: the tunnel simply falls back to ngrok's own config file.
+    cachedAuthtoken = "";
+  }
+}
+
+/** Account-level, so deliberately NOT suffixed per workspace like the route token. */
+export const NGROK_AUTHTOKEN_KEY = "openBridge.ngrokAuthtoken";
 
 /**
  * What to say when ngrok is not where we looked.

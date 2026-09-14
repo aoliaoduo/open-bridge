@@ -132,6 +132,7 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
   // A draft for the device-key field (separate from the stored key so the
   // mask shown vs. replaced stay distinguishable; null means "no edit yet").
   const [barkKeyDraft, setBarkKeyDraft] = useState<string | null>(null);
+  const [authtokenDraft, setAuthtokenDraft] = useState<string | null>(null);
 
   if (!settings) return <div className="card"><Skeleton lines={4} /></div>;
   const cfg = settings.config;
@@ -182,7 +183,7 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
       {section === "tunnel" && (
       <Card
         id="set-tunnel"
-        title={t("隧道（ngrok）", "Tunnel (ngrok)")}
+        title={t("隧道", "Tunnel")}
         desc={t(
           "隧道让公网上的客户端连到这台机器；不开隧道时只有本机能访问。",
           "A tunnel lets clients on the internet reach this machine; without one, only this machine can.",
@@ -198,6 +199,47 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
               <option value="none">{t("none（仅本地）", "none (local only)")}</option>
             </select>
           </Field>
+
+          <div className="field">
+            <span className="field-label">{t("Authtoken", "Authtoken")}</span>
+            <span className="field-control">
+              <input
+                type="text"
+                value={authtokenDraft ?? settings.ngrokAuthtokenMask}
+                placeholder={settings.ngrokAuthtokenMask
+                  ? t("粘贴新的 authtoken 可替换（输入框仅显示掩码）", "Paste a new authtoken to replace it (the field only shows a mask)")
+                  : t("在 ngrok 控制台的 Your Authtoken 页面复制", "Copy it from Your Authtoken in the ngrok dashboard")}
+                readOnly={Boolean(settings.ngrokAuthtokenMask) && authtokenDraft === null}
+                onChange={e => setAuthtokenDraft(e.target.value)}
+              />
+              <button
+                className="small"
+                disabled={authtokenDraft === null}
+                onClick={() => {
+                  void act({ command: "saveNgrokAuthtoken", token: authtokenDraft ?? "" }).then(result => {
+                    if ((result as SettingsActionResult | null)?.ok) setAuthtokenDraft(null);
+                  });
+                }}
+              >
+                {t("保存 Authtoken", "Save authtoken")}
+              </button>
+              {Boolean(settings.ngrokAuthtokenMask) && authtokenDraft === null && (
+                <button
+                  className="small ghost"
+                  onClick={() => setAuthtokenDraft("")}
+                  title={t("粘贴新 token 整串替换；清空后点保存即删除", "Paste a new token to replace it wholesale; clear the field and save to remove it")}
+                >
+                  {t("替换", "Replace")}
+                </button>
+              )}
+            </span>
+            <span className="field-hint">
+              {t(
+                "ngrok 需要一次性登记账号凭据才能建立隧道。以前只能在终端跑 ngrok config add-authtoken，现在填在这里即可——保存后重启隧道生效。已经用过那条命令的不必再填。",
+                "ngrok needs your account credential once before it can open a tunnel. This used to require running ngrok config add-authtoken in a terminal; saving it here does the same. Restart the tunnel to apply. If you already ran that command, you can leave this empty.",
+              )}
+            </span>
+          </div>
 
           <div className="field">
             <span className="field-label">{t("预留域名", "Reserved domain")}</span>
