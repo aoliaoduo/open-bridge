@@ -137,12 +137,10 @@ function settingsState(overrides: Partial<SettingsState> = {}): SettingsState {
     "notify.levelWaiting": "timeSensitive",
     "notify.levelFinished": "active",
     "notify.levelProgress": "passive",
-    "notify.soundAttention": "",
-    "notify.soundWaiting": "",
-    "notify.soundFinished": "",
-    "notify.soundProgress": "",
     "notify.callAttention": false,
     "notify.callWaiting": false,
+    "notify.callFinished": false,
+    "notify.callProgress": false,
     },
     detected: {
       shells: [

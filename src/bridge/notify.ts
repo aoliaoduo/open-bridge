@@ -364,15 +364,14 @@ export function withEventDefaults(event: NotifyEvent, bark?: BarkPushExtras): Ba
       : event === "finished" ? "Finished"
         : "Progress";
   const level = String(cfg.get<string>(`notify.level${suffix}`, "") ?? "").trim();
-  const sound = String(cfg.get<string>(`notify.sound${suffix}`, "") ?? "").trim();
-  // Only the two blocking events offer "ring until opened"; progress and
-  // finished have no such key, and reading one would invent a setting.
-  const call = (event === "attention" || event === "waiting")
-    && cfg.get<boolean>(`notify.call${suffix}`, false) === true;
+  // Every event can ring. Offering it on only two was a judgement about which
+  // events "deserve" it, and the page had no room to explain the distinction —
+  // so it read as a bug. Someone who wants their phone to ring until they
+  // acknowledge a finished run is not making a mistake.
+  const call = cfg.get<boolean>(`notify.call${suffix}`, false) === true;
 
   const merged: BarkPushExtras = { ...(bark ?? {}) };
   if (merged.level === undefined && isNotifyLevel(level)) merged.level = level;
-  if (merged.sound === undefined && sound) merged.sound = sound;
   if (merged.call === undefined && call) merged.call = 1;
   return Object.keys(merged).length ? merged : undefined;
 }

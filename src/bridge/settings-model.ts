@@ -110,12 +110,10 @@ export interface SettingsConfigView {
   "notify.levelWaiting": string;
   "notify.levelFinished": string;
   "notify.levelProgress": string;
-  "notify.soundAttention": string;
-  "notify.soundWaiting": string;
-  "notify.soundFinished": string;
-  "notify.soundProgress": string;
   "notify.callAttention": boolean;
   "notify.callWaiting": boolean;
+  "notify.callFinished": boolean;
+  "notify.callProgress": boolean;
   /** OAuth 2.1 authorization server, off by default like the bearer gate. */
   "oauth.enabled": boolean;
   /** Extra redirect hosts a registered client may use; [] means the built-in list. */
@@ -237,10 +235,10 @@ const CONFIG_SPEC = {
   "notify.levelWaiting": { kind: "string", max: 32 },
   "notify.levelFinished": { kind: "string", max: 32 },
   "notify.levelProgress": { kind: "string", max: 32 },
-  "notify.soundAttention": { kind: "string", max: 64 },
-  "notify.soundWaiting": { kind: "string", max: 64 },
-  "notify.soundFinished": { kind: "string", max: 64 },
-  "notify.soundProgress": { kind: "string", max: 64 },
+  "notify.callAttention": { kind: "boolean" },
+  "notify.callWaiting": { kind: "boolean" },
+  "notify.callFinished": { kind: "boolean" },
+  "notify.callProgress": { kind: "boolean" },
   "notify.idleMinutes": { kind: "int", min: 0, max: 1440 },
 } as const;
 

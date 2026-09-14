@@ -85,12 +85,9 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = deepFreeze({
   "notify.levelWaiting": "timeSensitive",
   "notify.levelFinished": "active",
   "notify.levelProgress": "passive",
-  /** Per-event ringtone; "" means the Bark app's own default. */
-  "notify.soundAttention": "",
-  "notify.soundWaiting": "",
-  "notify.soundFinished": "",
-  "notify.soundProgress": "",
-  /** Ring until opened. Only meaningful for the two blocking events. */
+    /** Ring until opened. Available on every event. */
   "notify.callAttention": false,
   "notify.callWaiting": false,
+  "notify.callFinished": false,
+  "notify.callProgress": false,
 });

@@ -430,9 +430,10 @@ button.menu-btn { display: none; }
    stacks instead: select on one line, the optional ring toggle under it. */
 .notify-table th:nth-child(3), .notify-table td:nth-child(3) { width: 1%; }
 .notify-table .delivery-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
-/* Wide enough for a ringtone name (minuet, birdsong, telegraph) plus the
-   placeholder, without stealing room from the 什么时候发 column. */
-.notify-table th:last-child, .notify-table td:last-child { width: 150px; }
+/* Three columns now: the ringtone picker is gone. Bark already remembers a
+   sound per device, and a per-event override was a setting nobody asked for
+   sitting next to two that matter. */
+.notify-table th:last-child, .notify-table td:last-child { width: 1%; }
 .notify-name { display: flex; align-items: center; gap: 6px; }
 /* "总是发" is a property of the event, not a setting, so it reads as a badge
    rather than a second line of label text — stacked under the name it looked
@@ -447,7 +448,7 @@ button.menu-btn { display: none; }
   color: var(--muted);
 }
 .notify-table select { width: 100%; min-width: 148px; }
-.notify-table input[type="text"] { width: 100%; min-width: 0; }
+
 .token-table tbody tr { transition: background-color .12s; }
 .token-table tbody tr:hover { background: var(--surface-2); }
 .token-table tr.dead td { opacity: .45; }

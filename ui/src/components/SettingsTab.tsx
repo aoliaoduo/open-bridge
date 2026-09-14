@@ -513,7 +513,6 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
                     <th>{t("通知", "Push")}</th>
                     <th>{t("什么时候发", "When")}</th>
                     <th>{t("送达方式", "Delivery")}</th>
-                    <th>{t("铃声", "Sound")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -541,25 +540,16 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
                           <option value="timeSensitive">{t("穿透专注模式", "Time-sensitive")}</option>
                           <option value="critical">{t("无视静音", "Critical (ignores mute)")}</option>
                         </select>
-                        {row.key === "Attention" || row.key === "Waiting" ? (
-                          <label className="check">
-                            <input
-                              type="checkbox"
-                              className="switch"
-                              checked={settings.config[`notify.call${row.key}`] === true}
-                              onChange={e => setConfig(`notify.call${row.key}`, e.target.checked)}
-                            />
-                            <span className="field-hint">{t("持续响铃", "Ring until opened")}</span>
-                          </label>
-                        ) : null}
+                        <label className="check">
+                          <input
+                            type="checkbox"
+                            className="switch"
+                            checked={settings.config[`notify.call${row.key}`] === true}
+                            onChange={e => setConfig(`notify.call${row.key}`, e.target.checked)}
+                          />
+                          <span className="field-hint">{t("持续响铃直到点开", "Ring until opened")}</span>
+                        </label>
                         </div>
-                      </td>
-                      <td>
-                        <DraftField
-                          value={settings.config[`notify.sound${row.key}`] as string}
-                          placeholder={t("App 默认", "App default")}
-                          onCommit={raw => setConfig(`notify.sound${row.key}`, raw.trim())}
-                        />
                       </td>
                     </tr>
                   ))}
@@ -568,8 +558,8 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
             </div>
             <span className="field-hint">
               {t(
-                "「需要你回来」和「等你回答」无论上面两个开关如何都会送达 —— 没人回答的问题会让对话无限期卡住，那不是设置该吞掉的东西。「无视静音」需要你在 iOS 里给 Bark 开「重要警告」权限，否则它只会按普通通知处理。铃声名见 Bark App 的铃声列表，留空用 App 自己的设置。",
-                "Attention and Waiting arrive regardless of the two switches above — an unanswered question stalls the exchange indefinitely, which is not something a setting should swallow. Critical needs Bark's critical-alert permission in iOS; without it the push simply arrives as a normal one. Ringtone names come from the Bark app's own list; leave empty to use whatever the app is set to.",
+                "「需要你回来」和「等你回答」无论上面两个开关如何都会送达 —— 没人回答的问题会让对话无限期卡住，那不是设置该吞掉的东西。「穿透专注模式」管的是专注模式，不是静音键：手机按了静音它依然不响。真要响就得用「无视静音」，而那需要你先在 iOS 的 设置 → 通知 → Bark 里打开「重要警告」权限，否则系统会把它降级成普通通知 —— 不报错，只是没那么响。铃声在 Bark App 里按设备设置，这里不重复一份。",
+                "Attention and Waiting arrive regardless of the two switches above — an unanswered question stalls the exchange indefinitely, which is not something a setting should swallow. Time-sensitive pierces Focus modes, not the mute switch: on a silenced phone it stays silent. Only Critical overrides that, and it needs Bark's critical-alert permission under iOS Settings → Notifications → Bark; without it the system quietly downgrades the push rather than failing. Ringtones are set per device in the Bark app, so they are not duplicated here.",
               )}
             </span>
           </div>

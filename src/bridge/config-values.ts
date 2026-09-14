@@ -40,13 +40,12 @@ export const SETTING_VALUE_REQUIRED = "value is required. (expected 'value': set
 const NOTIFY_LEVEL_KEYS: ReadonlySet<string> = new Set([
   "notify.levelAttention", "notify.levelWaiting", "notify.levelFinished", "notify.levelProgress",
 ]);
-const NOTIFY_SOUND_KEYS: ReadonlySet<string> = new Set([
-  "notify.soundAttention", "notify.soundWaiting", "notify.soundFinished", "notify.soundProgress",
-]);
 
 const BOOLEAN_KEYS: ReadonlySet<string> = new Set([
   "notify.callAttention",
   "notify.callWaiting",
+  "notify.callFinished",
+  "notify.callProgress",
   "unrestrictedFileAccess",
   "autoReconnect",
   "ngrokUseHttpProxy",
@@ -265,18 +264,6 @@ export function validateConfigValue(key: string, value: unknown): ConfigValidati
     return { ok: true, value };
   }
 
-  if (NOTIFY_SOUND_KEYS.has(key)) {
-    // Not validated against a list: Bark ships its own sound set and adds to
-    // it, so an allowlist here would go stale and start refusing names the
-    // app accepts. "" means "whatever the app is set to".
-    if (typeof value !== "string" || value.length > 64 || /[\s/?&#]/.test(value)) {
-      return {
-        ok: false,
-        error: `${key} must be a ringtone name with no spaces or URL characters, or "" for the app default. (expected '${key}': string)`,
-      };
-    }
-    return { ok: true, value };
-  }
 
   if (key === "notify.serverUrl") {
     // Same shape as oauth's `resource` rule: a bare origin, never a URL with

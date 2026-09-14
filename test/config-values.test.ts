@@ -155,15 +155,19 @@ test("per-event notify levels accept Bark's four styles and refuse anything else
     assert.match(err(key, ""), /must be one of/, `${key} has no empty state — every event has a style`);
   }
 });
-
-test("per-event ringtones reject anything that would break the Bark URL", () => {
-  for (const key of ["notify.soundAttention", "notify.soundFinished"]) {
-    assert.equal(ok(key, "minuet"), "minuet");
-    // "" is the app default, and is the only way to say "do not set a sound".
-    assert.equal(ok(key, ""), "");
-    // A space or a URL character would corrupt the query string rather than
-    // pick a different tone, so it is refused by name instead of encoded.
-    assert.match(err(key, "two words"), /no spaces or URL characters/);
-    assert.match(err(key, "a&b=c"), /no spaces or URL characters/);
+/**
+ * Every console control writes through setConfig, which refuses any key not
+ * in CONFIG_SPEC. Adding a setting means touching CONFIG_DEFAULTS, the
+ * validator, the state payload AND that list, and missing the last one fails
+ * at the worst moment: the switch renders, the operator clicks it, and the
+ * page answers with the generic 无法识别的操作. That is exactly what shipped
+ * for notify.call* -- the type declared them, the validator accepted them,
+ * and the console could not save them.
+ */
+test("every per-event notify key the console renders is actually writable", () => {
+  for (const event of ["Attention", "Waiting", "Finished", "Progress"]) {
+    assert.equal(ok(`notify.call${event}`, true), true, `notify.call${event} must be settable`);
+    assert.equal(ok(`notify.call${event}`, false), false);
+    assert.equal(ok(`notify.level${event}`, "active"), "active");
   }
 });
