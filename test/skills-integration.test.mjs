@@ -14,7 +14,8 @@ import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
 import { spawn } from "node:child_process";
 import http from "node:http";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {mkdtempSync, mkdirSync, writeFileSync} from "node:fs";
+import { removeTempDir } from "./tmpdir.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { routeTokenFor, waitForRuntime } from "./lib/bridge-runtime.mjs";
@@ -59,8 +60,8 @@ before(async () => {
 after(async () => {
   if (child && !child.killed) child.kill("SIGTERM");
   await delay(300);
-  rmSync(home, { recursive: true, force: true });
-  rmSync(workspace, { recursive: true, force: true });
+  removeTempDir(home);
+  removeTempDir(workspace);
 });
 
 test("the connecting client is told which skills exist, and that the file is the source of truth", () => {

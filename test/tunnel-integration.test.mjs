@@ -24,6 +24,7 @@ import assert from "node:assert/strict";
 import {test, before, after} from "node:test";
 import {spawn} from "node:child_process";
 import {mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync} from "node:fs";
+import { removeTempDir } from "./tmpdir.mjs";
 import {tmpdir} from "node:os";
 import path from "node:path";
 import {readRuntimeFor, runtimeFileFor} from "./lib/bridge-runtime.mjs";
@@ -131,7 +132,7 @@ before(async () => {
 after(async () => {
   if (child && !child.killed) child.kill("SIGTERM");
   await delay(300);
-  rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
   rmSync(fixture, { recursive: true, force: true });
 });
 

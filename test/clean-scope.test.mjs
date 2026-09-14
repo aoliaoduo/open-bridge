@@ -8,7 +8,8 @@
  */
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, writeFileSync} from "node:fs";
+import { removeTempDir } from "./tmpdir.mjs";
 import {tmpdir} from "node:os";
 import path from "node:path";
 import {cleanDist} from "../scripts/clean.mjs";
@@ -32,7 +33,7 @@ test("the core scope keeps the console bundle and still removes stale core outpu
     assert.equal(existsSync(path.join(root, "dist", "ui", "index.html")), true, "the vite bundle survives");
     assert.equal(existsSync(path.join(root, "dist", "bridge")), false, "stale core output goes");
   } finally {
-    rmSync(root, {recursive: true, force: true});
+    removeTempDir(root);
   }
 });
 
@@ -43,7 +44,7 @@ test("the full scope removes the console bundle too", async () => {
     assert.equal(existsSync(path.join(root, "dist", "ui")), false);
     assert.equal(existsSync(path.join(root, "dist", "cli.js")), false);
   } finally {
-    rmSync(root, {recursive: true, force: true});
+    removeTempDir(root);
   }
 });
 
@@ -53,6 +54,6 @@ test("nothing to clean is not an error", async () => {
     assert.deepEqual(await cleanDist(root, "core"), []);
     assert.deepEqual(await cleanDist(root, "all"), []);
   } finally {
-    rmSync(root, {recursive: true, force: true});
+    removeTempDir(root);
   }
 });

@@ -10,7 +10,8 @@ import assert from "node:assert/strict";
 import {test, before, after} from "node:test";
 import {spawn} from "node:child_process";
 import http from "node:http";
-import {mkdtempSync, readFileSync, rmSync} from "node:fs";
+import {mkdtempSync, readFileSync} from "node:fs";
+import { removeTempDir } from "./tmpdir.mjs";
 import {tmpdir} from "node:os";
 import path from "node:path";
 import {readRuntimeFor, routeTokenFor, waitForRuntime} from "./lib/bridge-runtime.mjs";
@@ -51,7 +52,7 @@ before(async () => {
 after(async () => {
   if (child && !child.killed) child.kill("SIGTERM");
   await delay(300);
-  rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
 });
 
 const base = () => `http://127.0.0.1:${port}`;

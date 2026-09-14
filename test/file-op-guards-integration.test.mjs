@@ -21,7 +21,8 @@ import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
 import { spawn } from "node:child_process";
 import http from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync} from "node:fs";
+import { removeTempDir } from "./tmpdir.mjs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -61,8 +62,8 @@ before(async () => {
 after(async () => {
   if (child && !child.killed) child.kill("SIGTERM");
   await delay(300);
-  rmSync(workspace, { recursive: true, force: true });
-  rmSync(home, { recursive: true, force: true });
+  removeTempDir(workspace);
+  removeTempDir(home);
 });
 
 test("a delete aimed at the workspace root is refused, and the project is intact", async () => {

@@ -20,7 +20,8 @@ import {test, before, after} from "node:test";
 import {spawn} from "node:child_process";
 import http from "node:http";
 import {createHash} from "node:crypto";
-import {mkdtempSync, rmSync} from "node:fs";
+import {mkdtempSync} from "node:fs";
+import { removeTempDir } from "./tmpdir.mjs";
 import {tmpdir} from "node:os";
 import path from "node:path";
 import {routeTokenFor, waitForRuntime} from "./lib/bridge-runtime.mjs";
@@ -62,7 +63,7 @@ before(async () => {
 after(async () => {
   if (child && !child.killed) child.kill("SIGTERM");
   await delay(300);
-  rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
 });
 
 function rawRequest(method, reqPath, body, headers = {}) {

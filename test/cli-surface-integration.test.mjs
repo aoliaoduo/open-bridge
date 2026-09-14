@@ -16,7 +16,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import {mkdtempSync, readdirSync} from "node:fs";
+import { removeTempDir } from "./tmpdir.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -62,7 +63,7 @@ test("serve --help prints the serve usage and starts nothing", async () => {
       "no runtime record, no serve lock, no secrets: help touched nothing on disk");
     assert.equal(stderr, "", "and it said nothing on stderr");
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    removeTempDir(home);
   }
 });
 
@@ -83,7 +84,7 @@ test("a POSIX TZ is repaired to the right offset, and doctor still says it is a 
     assert.match(stdout, /\+08:00/, "and the resolved offset is spelled out, so the reader can check it");
     assert.match(stdout, /夏令时|TZ/, "the message still points at the environment as the real fix");
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    removeTempDir(home);
   }
 });
 
@@ -97,7 +98,7 @@ test("a TZ too odd to map is left alone and reported as a failure", async () => 
     assert.match(stdout, /IST-5:30/, "the offending value is quoted back");
     assert.match(stdout, /Asia\/Shanghai/, "and a valid IANA name is suggested");
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    removeTempDir(home);
   }
 });
 
@@ -113,7 +114,7 @@ test("asking for UTC and getting UTC is not a failure", async () => {
     const { stdout } = await runCli(["doctor"], home, 20_000, { TZ: "UTC" });
     assert.match(stdout, /\[OK\][^\n]*timezone/, "a deliberate UTC is healthy");
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    removeTempDir(home);
   }
 });
 
@@ -126,7 +127,7 @@ test("doctor is satisfied by a real IANA zone", async () => {
     assert.match(stdout, /\[OK\][^\n]*timezone[^\n]*\+08:00/,
       "doctor is where the offset lives now that log lines no longer repeat it");
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    removeTempDir(home);
   }
 });
 
@@ -138,7 +139,7 @@ test("serve -h is the same promise as --help", async () => {
     assert.match(stdout, /open-bridge serve — 启动一个实例/);
     assert.deepEqual(readdirSync(home), []);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    removeTempDir(home);
   }
 });
 
@@ -154,7 +155,7 @@ test("the global help still describes every command it advertises", async () => 
     }
     assert.deepEqual(readdirSync(home), [], "help is a read-only command");
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    removeTempDir(home);
   }
 });
 
@@ -166,6 +167,6 @@ test("an unknown command fails loudly instead of quietly starting something", as
     assert.match(stdout + stderr, /definitely-not-a-command|用法|unknown/i, "and the message mentions what was typed or how to get help");
     assert.deepEqual(readdirSync(home), [], "nothing was launched to find that out");
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    removeTempDir(home);
   }
 });

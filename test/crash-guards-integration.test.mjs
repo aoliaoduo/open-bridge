@@ -20,7 +20,8 @@ import { test, before, after } from "node:test";
 import { spawn } from "node:child_process";
 import http from "node:http";
 import net from "node:net";
-import { mkdtempSync, rmSync } from "node:fs";
+import {mkdtempSync} from "node:fs";
+import { removeTempDir } from "./tmpdir.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { waitForRuntime } from "./lib/bridge-runtime.mjs";
@@ -50,7 +51,7 @@ before(async () => {
 after(async () => {
   if (child && !child.killed) child.kill("SIGTERM");
   await delay(300);
-  rmSync(home, { recursive: true, force: true });
+  removeTempDir(home);
 });
 
 /** Raw bytes at the socket, so no client-side URL validation can reject it first. */

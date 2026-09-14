@@ -39,7 +39,8 @@ import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
 import { spawn } from "node:child_process";
 import http from "node:http";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {mkdirSync, mkdtempSync, writeFileSync} from "node:fs";
+import { removeTempDir } from "./tmpdir.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { routeTokenFor, waitForRuntime } from "./lib/bridge-runtime.mjs";
@@ -83,8 +84,8 @@ before(async () => {
 after(async () => {
   if (child && !child.killed) child.kill("SIGTERM");
   await delay(300);
-  rmSync(workspace, { recursive: true, force: true });
-  rmSync(home, { recursive: true, force: true });
+  removeTempDir(workspace);
+  removeTempDir(home);
 });
 
 /** Start the stdin echo and return its command id, once it is really ready. */

@@ -17,6 +17,7 @@ import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import http from "node:http";
 import { mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } from "node:fs";
+import { removeTempDir } from "./tmpdir.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -108,9 +109,9 @@ after(async () => {
     if (child && !child.killed) child.kill("SIGTERM");
   }
   await delay(600);
-  rmSync(home, { recursive: true, force: true });
-  rmSync(dirA, { recursive: true, force: true });
-  rmSync(dirB, { recursive: true, force: true });
+  removeTempDir(home);
+  removeTempDir(dirA);
+  removeTempDir(dirB);
 });
 
 test("two directories run two Bridges against one shared data dir", async () => {
