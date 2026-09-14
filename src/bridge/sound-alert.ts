@@ -138,15 +138,34 @@ function playerCommand(file: string): { command: string; args: string[] } | unde
         + "Write-Host '';"
         + `Write-Host '  ${file.replace(/'/g, "''").replace(/\r?\n/g, " ")}';`
         + "Write-Host '';"
-        + "Write-Host '  关闭这个窗口即可停止播放（或按 Ctrl+C）。';"
-        + "Write-Host '  Close this window to stop the sound (or press Ctrl+C).';"
-        // Poll instead of sleeping the whole duration: a Start-Sleep that long
-        // ignores Ctrl+C until it returns, so the second documented way out
-        // would not actually work.
+        + "Write-Host '  按任意键停止播放，或直接关闭这个窗口。';"
+        + "Write-Host '  Press any key to stop, or just close this window.';"
+        // Stop on a keypress, not on Ctrl+C.
+        //
+        // The previous text promised Ctrl+C and it did not work: PowerShell
+        // started with -Command runs a non-interactive pipeline, and a loop of
+        // Start-Sleep never reaches a point where the engine checks for an
+        // interrupt. Measured here -- the process ignored a console control
+        // event entirely. Documenting a way out that does nothing is worse
+        // than documenting only the one that works, because the operator
+        // presses it, nothing happens, and now they distrust the window too.
+        //
+        // KeyAvailable polling keeps the console responsive AND gives a second
+        // real exit: the loop notices a key within 150ms, stops the player and
+        // returns. Closing the window still works exactly as before.
         + "if ($p.NaturalDuration.HasTimeSpan) {"
         + "  $end = (Get-Date).AddMilliseconds($p.NaturalDuration.TimeSpan.TotalMilliseconds);"
-        + "  while ((Get-Date) -lt $end) { Start-Sleep -Milliseconds 200 }"
-        + "} else { Start-Sleep -Seconds 3 };"
+        + "  while ((Get-Date) -lt $end) {"
+        + "    if ([Console]::KeyAvailable) { [Console]::ReadKey($true) | Out-Null; break };"
+        + "    Start-Sleep -Milliseconds 150"
+        + "  }"
+        + "} else {"
+        + "  $end = (Get-Date).AddSeconds(3);"
+        + "  while ((Get-Date) -lt $end) {"
+        + "    if ([Console]::KeyAvailable) { [Console]::ReadKey($true) | Out-Null; break };"
+        + "    Start-Sleep -Milliseconds 150"
+        + "  }"
+        + "};"
         + "$p.Stop(); $p.Close()",
       ],
     };
