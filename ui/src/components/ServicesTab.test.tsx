@@ -19,7 +19,7 @@ const web = (running: boolean): ServiceView => ({
   cwd: "C:\\work\\demo",
   port: 5173,
   health_url: null,
-  log_file: "C:\\Users\\aolia\\.open-bridge\\logs\\svc-web.log",
+  log_file: "C:\\work\\demo\\.open-bridge\\logs\\svc-web.log",
   running,
   command_id: running ? "cmd-1" : null,
 });

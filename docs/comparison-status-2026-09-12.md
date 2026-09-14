@@ -1,6 +1,6 @@
 # open-bridge-app 对三个参照项目：取了多少、是否更强
 
-判定日期：2026-09-12 ｜ 对象：`C:\Users\aolia\Desktop\codex\GitHub\{DesktopCommanderMCP, devspace, taskquay}`
+判定日期：2026-09-12 ｜ 对象：`DesktopCommanderMCP`、`devspace`、`taskquay`（本地克隆目录）
 沿用仓库内既有的对照基线：`open-bridge-app/docs/refactor-comparison.md`（512 行，含 D1–D9 / T1–T7 / M1–M3 清单）
 
 > **这是一份带日期的实测快照。** 里面的版本号、工具数、断言数是判定当时的读数，之后会随提交变化（同一文件里出现的 54 / 55 两种工具计数，就是这种变化的痕迹）。要引用「现在」的数字，请看 `package.json`、`README.md`，或直接问一台运行中的实例：`get_bridge_status`。

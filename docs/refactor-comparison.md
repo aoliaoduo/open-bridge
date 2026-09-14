@@ -1,6 +1,6 @@
 # 三项目对比与取舍报告
 
-> 对象：`DesktopCommanderMCP`、`devspace`、`taskquay`（均在 `C:\Users\aolia\Desktop\codex\GitHub\`）
+> 对象：`DesktopCommanderMCP`、`devspace`、`taskquay`（本地克隆目录）
 > 基准：本项目 **open-bridge-app**（工作区 = 当前目录）
 > 结论日期：本轮调研
 > **本报告只做判断，不改代码。** 所有结论都能被下面的命令复现；凡未能实证的都标注为「未确认」。
@@ -470,7 +470,7 @@ taskquay 的 README 有 222 行，其中**多处自我披露未验证**，值得
 
 ```powershell
 # 量化基线
-Get-ChildItem C:\Users\aolia\Desktop\codex\GitHub -Directory
+# <dir containing the three cloned projects> 下的各项目目录
 Get-ChildItem -Recurse -File <proj>\src | Measure-Object -Property Length -Sum     # 体积
 Select-String -Path <proj>\package.json -Pattern 'dependencies' -Context 0,40      # 依赖树
 
