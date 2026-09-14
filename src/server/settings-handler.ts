@@ -413,7 +413,11 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       await host().secrets.store(NGROK_AUTHTOKEN_KEY, raw);
       setCachedAuthtoken(raw);
       return done({
-        info: `Authtoken 已保存（${maskBarkKey(raw)}）。重启隧道后生效：设置页上方的「重启隧道」，或重启应用。`,
+        // Deliberately not naming a console button: the status page explains
+        // why there is no start/stop/restart there (stopping would take the
+        // page down with it). The instance is owned by its terminal window,
+        // so that is the honest instruction.
+        info: `Authtoken 已保存（${maskBarkKey(raw)}）。下次启动隧道时生效：关掉承载本实例的终端窗口再重新启动（一键启动脚本双击一次即可）。`,
       });
     }
 

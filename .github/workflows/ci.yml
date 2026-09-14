@@ -1,8 +1,34 @@
 name: CI
 
+# Every push to main used to spend ~4 minutes across three runners, including
+# pushes that only touched prose. The paths-ignore list skips those: a
+# CHANGELOG or README edit cannot break a build, and waiting on a matrix to
+# confirm that slows the loop for no information.
+#
+# Deliberately a denylist, not an allowlist. A new source directory added
+# later is covered by default; forgetting to add it to an allowlist would
+# quietly leave real code untested, which is the expensive direction of the
+# mistake. AGENTS.md and the workflow itself are NOT ignored -- they change
+# how the build behaves.
+#
+# workflow_dispatch stays, so a docs-only commit can still be verified on
+# demand from the Actions tab when it matters (a release, say).
 on:
   push:
     branches: [main]
+    # `paths` with negative patterns, NOT `paths-ignore`: paths-ignore has no
+    # exceptions -- a "!AGENTS.md" line there is read as a literal filename and
+    # silently does nothing, which would have let AGENTS.md changes skip CI.
+    # Order matters; later patterns win.
+    paths:
+      - "**"
+      - "!**/*.md"
+      - "!LICENSE"
+      - "!.gitignore"
+      # Markdown that DOES change behaviour: AGENTS.md is injected into every
+      # session's instructions, and docs/tools.md is the tool contract.
+      - "AGENTS.md"
+      - "docs/tools.md"
   pull_request:
   workflow_dispatch:
 

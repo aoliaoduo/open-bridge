@@ -235,8 +235,8 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
             </span>
             <span className="field-hint">
               {t(
-                "ngrok 需要一次性登记账号凭据才能建立隧道。以前只能在终端跑 ngrok config add-authtoken，现在填在这里即可——保存后重启隧道生效。已经用过那条命令的不必再填。",
-                "ngrok needs your account credential once before it can open a tunnel. This used to require running ngrok config add-authtoken in a terminal; saving it here does the same. Restart the tunnel to apply. If you already ran that command, you can leave this empty.",
+                "ngrok 需要一次性登记账号凭据才能建立隧道。以前只能在终端跑 ngrok config add-authtoken，现在填在这里即可——保存后重启实例生效（关掉终端窗口再启动一次）。已经用过那条命令的不必再填。",
+                "ngrok needs your account credential once before it can open a tunnel. This used to require running ngrok config add-authtoken in a terminal; saving it here does the same. It takes effect on the next start — close the terminal window that owns this instance and start it again. If you already ran that command, you can leave this empty.",
               )}
             </span>
           </div>
@@ -266,7 +266,7 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
               </button>
             </span>
             <span className="field-hint">
-              {t("留空则使用 ngrok 分配的随机地址；改动后需要重启隧道。", "Leave empty to use the random address ngrok assigns; a change needs a tunnel restart.")}
+              {t("留空则使用 ngrok 分配的随机地址；改动在下次启动实例时生效。", "Leave empty to use the random address ngrok assigns; a change takes effect on the next start.")}
             </span>
           </div>
 
