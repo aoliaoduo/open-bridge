@@ -9,7 +9,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setHost, type Host } from "../src/host/host.js";
-import { searchFiles } from "../src/bridge/file-tools.js";
+import { listDirectory, searchFiles } from "../src/bridge/file-tools.js";
 
 let dir: string;
 
@@ -120,4 +120,34 @@ test("a negative max_results falls back to the default instead of meaning all or
   // And a sane limit is still honoured exactly.
   const three = await searchFiles({ path: ".", query: "needle", max_results: 3 });
   assert.equal(three.length, 3);
+});
+
+/**
+ * Same trap as max_results, found in the same sweep: Math.max(0, -5) is 0, so
+ * a negative max_entries listed an empty directory. "There is nothing here"
+ * and "that argument was nonsense" must not look identical -- the first gets
+ * believed and acted on.
+ */
+test("a negative max_entries falls back to the default instead of listing nothing", async () => {
+  for (let i = 0; i < 6; i += 1) {
+    writeFileSync(path.join(dir, `entry-${i}.txt`), "x\n");
+  }
+
+  const negative = await listDirectory({ path: ".", max_entries: -5 });
+  assert.ok(Array.isArray(negative), "list_directory returns the rows directly");
+  // The fixture dir carries files from the beforeEach setup too, so assert the
+  // property that matters rather than an exact count: the six just written are
+  // all present, i.e. nothing was hidden by the bad argument.
+  const names = (negative as Array<{ name: string }>).map(e => e.name);
+  for (let i = 0; i < 6; i += 1) {
+    assert.ok(names.includes("entry-" + i + ".txt"), "entry-" + i + ".txt must survive a nonsense cap");
+  }
+
+  // 0 is a real request for no rows and stays exactly that.
+  const zero = await listDirectory({ path: ".", max_entries: 0 });
+  assert.equal((zero as unknown[]).length, 0, "0 still means 0");
+
+  // A sane cap is still honoured.
+  const two = await listDirectory({ path: ".", max_entries: 2 });
+  assert.equal((two as unknown[]).length, 2);
 });

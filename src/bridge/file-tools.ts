@@ -321,7 +321,14 @@ async function renameOrCopy(source: string, destination: string): Promise<void> 
 
 export async function listDirectory(args: Args): Promise<unknown> {
   const base = await securePath(args.path);
-  const max = Number.isFinite(Number(args.max_entries)) ? Math.max(0, Number(args.max_entries)) : DEFAULT_MAX_DIRECTORY_ENTRIES;
+  // Math.max(0, -5) is 0, so a negative cap listed an empty directory -- which
+  // reads as "there is nothing here" rather than "that argument was nonsense",
+  // the same trap max_results had. Negatives fall back to the default; 0 is
+  // left alone because asking for no rows is a real request.
+  const rawMaxEntries = Number(args.max_entries);
+  const max = Number.isFinite(rawMaxEntries) && rawMaxEntries >= 0
+    ? Math.floor(rawMaxEntries)
+    : DEFAULT_MAX_DIRECTORY_ENTRIES;
   // `Number("abc")` is NaN and `Math.max(NaN, 1)` is NaN, which made every
   // `level < depth` test false: a garbage depth silently returned a depth-1
   // listing instead of failing. Only non-finite input is refused — 0 and
