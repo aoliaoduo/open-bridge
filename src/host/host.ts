@@ -1,13 +1,19 @@
 /**
  * Host abstraction — the single seam between the core Bridge and its host.
  *
- * The core (src/bridge, src/http, src/mcp, ...) must never import a host API
- * directly (no host-module imports, no `node:fs` config file paths). Everything the host
- * provides — configuration, secret storage, persisted state, notifications,
- * the UI push channel — flows through this interface, injected once at
- * startup via `setHost`. The standalone app wires a file-backed NodeHost; a
- * future desktop shell (Tauri/Electron) can wire its own implementation
- * without touching core.
+ * What the core may depend on is *this interface*, never a concrete host:
+ * `node-host.ts` is imported by `src/cli.ts` (which installs the host) and by
+ * `src/server/api-router.ts`, and by nothing else in `src/bridge`, `src/http`,
+ * `src/mcp`, … That is the checkable rule — it is NOT a ban on Node built-ins:
+ * plenty of core modules use `node:fs` or `node:child_process` directly, and
+ * that is correct (a file tool that could not touch the filesystem would be
+ * pointless). Configuration/secret/state *file paths*, however, must come from
+ * `config` / `secrets` / `state` / `storageDir()`, not from a hardcoded path.
+ * Everything the host provides — configuration, secret storage, persisted
+ * state, notifications, the UI push channel — flows through this interface,
+ * injected once at startup via `setHost`. The standalone app wires a
+ * file-backed NodeHost; a future desktop shell (Tauri/Electron) can wire its
+ * own implementation without touching core.
  */
 
 export type NotifyLevel = "info" | "warn" | "error";
