@@ -24,11 +24,11 @@ const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([
 const CLI = path.join(ROOT, "bin", "open-bridge.js");
 
 /** Run the CLI to completion; fail loudly instead of hanging the suite. */
-function runCli(args, home, timeoutMs = 20_000) {
+function runCli(args, home, timeoutMs = 20_000, extraEnv = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd: ROOT,
-      env: { ...process.env, OPEN_BRIDGE_HOME: home },
+      env: { ...process.env, OPEN_BRIDGE_HOME: home, ...extraEnv },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -61,6 +61,54 @@ test("serve --help prints the serve usage and starts nothing", async () => {
     assert.deepEqual(readdirSync(home), [],
       "no runtime record, no serve lock, no secrets: help touched nothing on disk");
     assert.equal(stderr, "", "and it said nothing on stderr");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A TZ the runtime cannot resolve costs nothing at startup and everything when
+ * reading logs: Node just runs in UTC, so on a UTC+8 desk every line reads
+ * eight hours stale. This actually happened here — `export TZ=CST-8` in
+ * ~/.bashrc, a POSIX-style value ICU does not know. doctor exists to catch
+ * environment faults like this, so it has to say so out loud.
+ */
+test("a POSIX TZ is repaired to the right offset, and doctor still says it is a workaround", async () => {
+  const home = freshHome();
+  try {
+    // POSIX inverts the sign: CST-8 means UTC+8.
+    const { stdout } = await runCli(["doctor"], home, 20_000, { TZ: "CST-8" });
+    assert.match(stdout, /\[OK\][^\n]*timezone/, "the clock is no longer silently UTC");
+    assert.match(stdout, /Etc\/GMT-8/, "mapped onto the zone with the same inverted-sign convention");
+    assert.match(stdout, /\+08:00/, "and that is the offset log lines will carry");
+    assert.match(stdout, /夏令时|TZ/, "the message still points at the environment as the real fix");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("a TZ too odd to map is left alone and reported as a failure", async () => {
+  const home = freshHome();
+  try {
+    // A half-hour offset has no Etc/GMT* equivalent, so guessing would trade a
+    // visibly wrong clock for a quietly wrong one. It must stay a failure.
+    const { stdout } = await runCli(["doctor"], home, 20_000, { TZ: "IST-5:30" });
+    assert.match(stdout, /\[!!\][^\n]*timezone/, "an unresolvable zone is a failure, not a pass");
+    assert.match(stdout, /IST-5:30/, "the offending value is quoted back");
+    assert.match(stdout, /Asia\/Shanghai/, "and a valid IANA name is suggested");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("doctor is satisfied by a real IANA zone", async () => {
+  const home = freshHome();
+  try {
+    const { stdout } = await runCli(["doctor"], home, 20_000, { TZ: "Asia/Shanghai" });
+    assert.match(stdout, /\[OK\][^\n]*timezone[^\n]*Asia\/Shanghai/,
+      "a resolvable zone passes and is echoed");
+    assert.match(stdout, /\[OK\][^\n]*timezone[^\n]*\+08:00/,
+      "the offset it will stamp logs with is shown, so the reader can confirm it");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

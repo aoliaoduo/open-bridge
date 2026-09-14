@@ -22,7 +22,7 @@ import { request as httpRequest } from "node:http";
 import * as net from "node:net";
 import * as path from "node:path";
 import { createRequire } from "node:module";
-import { installNodeHost, resolveDefaultHome } from "./host/node-host.js";
+import { installNodeHost, localLogStamp, normalizeTimezone, resolveDefaultHome } from "./host/node-host.js";
 import { CONFIG_DEFAULTS } from "./bridge/config-defaults.js";
 import { state } from "./bridge/state.js";
 import { currentWorkspaceRoot, workspaceSuffixFor } from "./bridge/paths.js";
@@ -941,6 +941,24 @@ async function cmdDoctor(parsed: ParsedArgs): Promise<void> {
   }
   const rg = nodeHost.bundledRipgrep();
   check("ripgrep", rg !== undefined, rg ?? "未内置，将回退到 PATH 中的 rg");
+  // A TZ the runtime cannot resolve is not an error anywhere — Node silently
+  // runs in UTC — so every log line quietly reads hours away from the wall
+  // clock. Real case: `export TZ=CST-8` (a POSIX-style value Windows/ICU does
+  // not know) in ~/.bashrc turned a UTC+8 desk into UTC logs. `Etc/Unknown`
+  // is exactly the "I gave up" answer, and it is worth naming here.
+  // main() already ran normalizeTimezone(), so a repairable POSIX value shows
+  // up here as the Etc/GMT* zone it was mapped to — report that plainly rather
+  // than pretending the environment was fine all along.
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  const rawTz = process.env.TZ;
+  const zoneUnresolved = zone === "" || zone === "Etc/Unknown";
+  const repaired = !zoneUnresolved && zone.startsWith("Etc/GMT");
+  check("timezone", !zoneUnresolved,
+    zoneUnresolved
+      ? `无法识别 TZ=${JSON.stringify(rawTz ?? "")}，已回落 UTC —— 日志时间会与本机挂钟不一致。改用 IANA 名称（如 TZ=Asia/Shanghai）或直接不设 TZ（跟随系统）`
+      : repaired
+        ? `${zone}（${localLogStamp().slice(-6)}）—— 偏移已对，但这是从无法识别的 TZ 自动折算来的固定偏移、不含夏令时；根治办法是在 shell 配置里去掉那行 TZ（跟随系统时区）`
+        : `${zone}（${localLogStamp().slice(-6)}）${rawTz ? ` TZ=${rawTz}` : ""}`);
   // `<string>` on each read, like every other ngrokDomain/tunnelProvider read
   // site: without the explicit type argument T infers from the literal
   // fallback, so `domain` types as "" and `domain || "未配置…"` reads as a
@@ -962,6 +980,12 @@ async function cmdDoctor(parsed: ParsedArgs): Promise<void> {
 // --- main -------------------------------------------------------------------
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
+  // Before anything can log: a POSIX-style TZ (`CST-8`) leaves Node in UTC
+  // without a word of complaint, which makes every timestamp this process
+  // writes silently wrong. Repairing it here covers serve and the read-only
+  // commands alike — `logs` printing stamps from a differently-configured
+  // process than the one that wrote them would be its own small nightmare.
+  normalizeTimezone();
   const parsed = parseArgs(argv);
   switch (parsed.command) {
     case "serve": case "start": return cmdServe(parsed);

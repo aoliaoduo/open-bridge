@@ -337,6 +337,80 @@ class MultiSubscriberUi implements UiChannel {
 /** `logs/bridge.log` rotates to a single previous generation at this size. */
 export const FILE_LOG_MAX_BYTES = 10 * 1024 * 1024;
 
+/**
+ * Repair a `TZ` the runtime cannot resolve, so the process stops silently
+ * running in UTC.
+ *
+ * Node resolves `TZ` through ICU, which only speaks IANA names. A POSIX-style
+ * value — `CST-8`, the form glibc/Git Bash accept and the form people actually
+ * have in their shell profile — is not an error there: ICU reports
+ * `Etc/Unknown` and Node quietly runs the whole process in UTC. Nothing logs,
+ * nothing throws, and every timestamp is simply hours off. That is how it was
+ * found here: logs eight hours behind a correctly-configured UTC+8 machine.
+ *
+ * The POSIX offset sign is inverted relative to ISO (`CST-8` means UTC+8), and
+ * `Etc/GMT-8` uses that very same inverted convention — so a whole-hour offset
+ * carries straight across with its sign intact.
+ *
+ * Deliberately narrow. It only acts when the zone is already unresolvable (the
+ * process is provably wrong, so there is nothing working to break), and only
+ * for a bare abbreviation plus a whole-hour offset. Anything carrying a DST
+ * rule is left alone: `Etc/GMT*` has no DST, so "fixing" it would trade an
+ * obviously wrong clock for a subtly wrong one. `doctor` reports what is left.
+ *
+ * @returns the IANA zone adopted, or undefined if nothing was changed.
+ */
+export function normalizeTimezone(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const resolved = (): string => {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; }
+  };
+  if (resolved() !== "Etc/Unknown") return undefined;
+
+  const raw = env.TZ;
+  if (raw === undefined || raw === "") return undefined;
+  // Abbreviation + whole-hour offset only: no DST field, no ":30" minutes.
+  const match = /^[A-Za-z]{3,}([+-]?\d{1,2})$/.exec(raw.trim());
+  if (!match) return undefined;
+  const hours = Number(match[1]);
+  if (!Number.isInteger(hours) || Math.abs(hours) > 14) return undefined;
+
+  // Etc/GMT0 exists but plain "Etc/GMT" is the conventional spelling for zero.
+  const candidate = hours === 0 ? "Etc/GMT" : `Etc/GMT${hours < 0 ? "-" : "+"}${Math.abs(hours)}`;
+  const previous = env.TZ;
+  env.TZ = candidate;
+  if (resolved() === "Etc/Unknown") {
+    env.TZ = previous; // candidate was no better; leave the evidence intact for doctor
+    return undefined;
+  }
+  return candidate;
+}
+
+/**
+ * Stamp a log line with LOCAL wall-clock time, offset included.
+ *
+ * `toISOString()` is always UTC, so an operator in UTC+8 read every console
+ * line eight hours in the past and had to convert in their head to line a log
+ * line up with what they had just done. This prefix is read by humans only:
+ * nothing parses it back (the machine-readable timestamp is `audit.log`'s
+ * `at` field, which stays ISO-8601 UTC precisely because `activity_log`'s
+ * `since` filter parses it).
+ *
+ * The offset is kept in the text so the line stays unambiguous — a bare
+ * local time is not interpretable once the file is copied off the machine,
+ * and a reader on another host can still convert exactly.
+ */
+export function localLogStamp(now: Date = new Date()): string {
+  const pad = (value: number, width = 2): string => String(Math.abs(value)).padStart(width, "0");
+  // getTimezoneOffset() is minutes BEHIND UTC: UTC+8 reports -480, so the sign
+  // is inverted to print the conventional +08:00.
+  const offsetMinutes = -now.getTimezoneOffset();
+  const sign = offsetMinutes < 0 ? "-" : "+";
+  const offset = `${sign}${pad(Math.floor(Math.abs(offsetMinutes) / 60))}:${pad(Math.abs(offsetMinutes) % 60)}`;
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+    + ` ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+    + `.${pad(now.getMilliseconds(), 3)}${offset}`;
+}
+
 export interface FileLogOptions {
   /** Rotate once the live file has reached this many bytes (0 disables rotation). */
   maxBytes?: number;
@@ -356,7 +430,7 @@ export class FileLog {
   }
 
   write(line: string): void {
-    const stamped = `[${new Date().toISOString()}] ${line}`;
+    const stamped = `[${localLogStamp()}] ${line}`;
     for (const listener of this.listeners) {
       try { listener(stamped); } catch { /* listeners never break logging */ }
     }
