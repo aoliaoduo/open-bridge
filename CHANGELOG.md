@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **随包分发的 ripgrep 缺少许可证正本，而且授权写错了。** `vendor/rg.exe` 是 5.4 MB 的预编译二进制，`vendor/` 又在 `package.json` 的 `files` 里 —— 也就是说它跟着每一次 `npm install` 出门。`vendor/README.md` 写着「MIT 或 Apache-2.0 双授权」，那是 Rust 生态最常见的搭配，**但不是 ripgrep 用的**：上游 `COPYING` 写得很清楚，是 **Unlicense 或 MIT**。MIT 要求分发时附带许可证副本，仓库里一份都没有，只有一个指向上游的链接。现在 `vendor/LICENSE-MIT` 与 `vendor/UNLICENSE` 两份正本就放在二进制旁边，说明文字也改对了，并留了一句话记下它曾经是错的。仓库转公开前该清的东西。
+
+- **新增 `SECURITY.md`。** 这个项目把本机的文件、shell 和进程交给 AI 客户端，公开之后「它的安全模型是什么」一定会被问到，而答案此前散落在 README 的一节、几处代码注释和若干 CHANGELOG 条目里。文件写了三件事：**威胁模型**（谁被信任 —— AI 客户端被信任，没有沙箱、没有逐次确认；提示词注入是真实风险且本项目不处理）、**三档暴露面**的准确定义，以及**哪些事是刻意不锁的**（`unrestrictedFileAccess` 默认开、非零退出码不算失败、行为标注只是给客户端的信息而非限制）—— 最后这一节是有意写在前面的：把「这是选择」和「这是疏漏」分开，报告者才不用为已知取向浪费时间。
+
+  每一条技术主张都对着代码核过，不是照记忆写的：审计摘要截断 500 字符（`state.ts:253`）、Bark 密钥掩码成 `<set:N chars>`（`dispatcher.ts:160`）、CORS 只授予 `/mcp`、`/oauth`、`/.well-known` 三条前缀（`http-listener.ts:171-173`）。初稿把日志轮转写成固定 10 MB，核对时发现它是可配置的 `logMaxBytes`（默认 10 MB），已改准 —— **安全文档写错比不写更糟**，它会让人以为某条边界存在。
+
 - **集成测试断言中文输出，却从不指定语言 —— 于是在 CI 上红了三次。** 双语那轮给 CLI 加了语言检测（`OPEN_BRIDGE_LANG` → `LC_ALL` → `LC_MESSAGES` → `LANG`），UI 测试当时因为 jsdom 报 `en-US` 集体变红，用 `vitest.setup.ts` 把语言钉住修好了；**`test/*.test.mjs` 那一层被漏掉了**。这些套件 spawn `bin/open-bridge.js` 并断言它人读的输出，而那些断言写的是中文串。
 
   本机 `LANG=zh_CN.UTF-8`，所以本地 `npm run verify` 一直全绿；GitHub 的 Ubuntu runner 是 `LANG=C.UTF-8`，CLI **正确地**答英文，于是 11 条断言失败。测的不是代码，是运行它的那台机器的环境。
