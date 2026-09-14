@@ -11,7 +11,7 @@ import { streamReadLines, truncateToUtf8Bytes } from "../mcp/stream-read.js";
 import { findFuzzyMatch, formatFuzzyDiagnostics } from "../mcp/fuzzy-match.js";
 import { boundedText, unifiedDiff } from "../mcp/line-diff.js";
 import { matchFile } from "../mcp/glob.js";
-import { ripgrepAvailable, runRipgrep } from "../mcp/search-ripgrep.js";
+import { ripgrepAvailable, ripgrepPatternRejection, runRipgrep } from "../mcp/search-ripgrep.js";
 import { matchLinesInWorker, SafeRegexError, SAFE_REGEX_BATCH_TIMEOUT_MS } from "../mcp/regex-worker.js";
 import { searchFileStream, type BatchMatcher } from "../mcp/stream-search.js";
 import {
@@ -393,7 +393,18 @@ export async function searchFiles(args: Args): Promise<unknown[]> {
 
   // Prefer ripgrep when available (fast, .gitignore-aware, regex/globs, context).
   const rgExe = resolveRipgrepExecutable();
-  if (!singleRel && (await ripgrepAvailable(rgExe))) {
+  // A pattern ripgrep's default engine cannot parse (look-around, backreferences)
+  // is answered by the built-in JS-regex walk — which is the semantics this tool
+  // documents anyway. Detecting it here skips a spawn that is guaranteed to exit 2,
+  // and the audit line names the construct: a bare "ripgrep failed" told the caller
+  // nothing it could act on (it is a `progress` record, so it never reaches the
+  // result), which is why the same search kept degrading silently for a whole day.
+  const rgDeclined = useRegex ? ripgrepPatternRejection(needle) : undefined;
+  if (!singleRel && rgDeclined) {
+    record("search_files", "progress",
+      `ripgrep's regex engine does not support ${rgDeclined}; used the built-in scanner (JavaScript regex semantics).`);
+  }
+  if (!singleRel && !rgDeclined && (await ripgrepAvailable(rgExe))) {
     try {
       const { matches: rgMatches, partial } = await runRipgrep({
         query: needle,
@@ -416,10 +427,16 @@ export async function searchFiles(args: Args): Promise<unknown[]> {
           ? { context_before: m.context_before ?? [], context_after: m.context_after ?? [] }
           : {}),
       }));
-    } catch {
-      record("search_files", "progress", "ripgrep failed; using built-in scan.");
+    } catch (error) {
+      // Say WHAT failed, not just that something did. record() redacts and bounds
+      // the message itself; ripgrep's own diagnostics are short and name the
+      // construct (or the unreadable path), which is the part worth keeping.
+      const reason = (error instanceof Error ? error.message : String(error))
+        .replace(/\s+/g, " ")
+        .slice(0, 240);
+      record("search_files", "progress", `ripgrep failed; using built-in scan — ${reason || "no detail from ripgrep"}`);
     }
-  } else if (!singleRel) {
+  } else if (!singleRel && !rgDeclined) {
     record("search_files", "progress", "ripgrep not found; using built-in scan.");
   }
 

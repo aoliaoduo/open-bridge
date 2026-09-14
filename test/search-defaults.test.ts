@@ -78,3 +78,15 @@ test("a single-file path scans just that file", async () => {
 test("an invalid pattern fails loudly instead of answering empty", async () => {
   await assert.rejects(searchFiles({ query: "([" }));
 });
+
+test("look-around queries are answered, not lost to a backend that cannot parse them", async () => {
+  // ripgrep's default engine refuses look-around (exit 2, "Consider enabling
+  // PCRE2"), while a JavaScript RegExp — the semantics this tool documents — takes
+  // it. Whether the call skips ripgrep up front (pattern detected) or falls back
+  // after a failed spawn (not detected), the ANSWER must be identical; that is the
+  // outcome that actually matters to the caller, so that is what this pins.
+  const ahead = (await searchFiles({ query: "alpha(?= beta)" })) as Hit[];
+  assert.deepEqual(ahead.map(h => `${h.path}:${h.line}`), ["sub/b.txt:1"]);
+  const behind = (await searchFiles({ query: "(?<=alpha )beta" })) as Hit[];
+  assert.deepEqual(behind.map(h => `${h.path}:${h.line}`), ["sub/b.txt:1"]);
+});

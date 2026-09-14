@@ -20,6 +20,7 @@ import { enqueueLifecycle } from "./lifecycle-queue.js";
 import { killTunnelTree, setInstanceRestart, startTunnelInternal, stopPublicWatch } from "./tunnel.js";
 import { publishSelf, stopRepublishLoop, withdrawSelf } from "./peer-registry.js";
 import { startHttpInternal, stopLocalServer } from "./http-listener.js";
+import { selfProbe } from "./self-probe.js";
 import { stopSessionPruneLoop } from "./session-table.js";
 import { clearNotifyLedger } from "./notify.js";
 
@@ -231,7 +232,13 @@ export async function runHealthCheck(): Promise<HealthReport> {
     host().notify("warn", summary);
     return { ok: false, summary, details: ["实例未运行"] };
   }
-  const local = await probe(`http://127.0.0.1:${state.port}/healthz/${state.routeToken}`);
+  // Local probes go through selfProbe, not `probe`: a fetch to our own port
+  // leaves the connection in undici's keep-alive pool *inside this process*, and
+  // shutdown then destroys a socket whose client handle is still live — on
+  // Windows/Node 24 that aborts in libuv and the instance exits with a fastfail
+  // code instead of 0. The tunnel probe below stays on fetch on purpose: it
+  // targets another host, and its 8 s budget belongs to that path.
+  const local = await selfProbe(state.port, `/healthz/${state.routeToken}`);
   const details = [`本地端点 ${local.ok ? "正常" : "失败"}（${local.status || local.body}）`];
   const publicCheck = state.tunnelUrl
     ? await probe(state.tunnelUrl.replace(`/mcp/${state.routeToken}`, `/healthz/${state.routeToken}`), {
@@ -248,7 +255,7 @@ export async function runHealthCheck(): Promise<HealthReport> {
   // is worse than no gate: the operator would believe they are protected. An
   // anonymous initialize must come back 401 while auth is enabled.
   const gateStatus = authEnabled()
-    ? (await probe(`http://127.0.0.1:${state.port}/mcp/${state.routeToken}`, {
+    ? (await selfProbe(state.port, `/mcp/${state.routeToken}`, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
         body: JSON.stringify({

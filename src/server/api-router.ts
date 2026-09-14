@@ -9,11 +9,19 @@
  *    public Host, so the admin surface can never be reached over the tunnel —
  *    /mcp stays the only public route, exactly like the extension days.
  *  - Mutation gate: every POST also requires the X-Open-Bridge-Console header
- *    matching the route token. A cross-origin page cannot read the token
- *    (no CORS headers are emitted) and cannot even SEND the header without a
- *    preflight we never answer — CSRF is dead by construction. The console
- *    HTML (loopback-only) has the token injected server-side.
- *  - GET endpoints carry no secret-bearing data beyond what the panel showed.
+ *    matching the route token. A cross-origin page cannot read the token (these
+ *    surfaces get no CORS grant — see the per-path `corsGrant` block in
+ *    `src/bridge/http-listener.ts`, which is what enforces this) and cannot even
+ *    SEND the header without a preflight we never answer — CSRF is dead by
+ *    construction. The console HTML (loopback-only) has the token injected
+ *    server-side.
+ *  - GET endpoints are loopback-gated only, and they are NOT free of secrets:
+ *    /api/settings (`state.mcpUrl`), /api/prompt and /api/status all carry the route
+ *    token in their bodies. Same-origin + no CORS grant is what keeps those readable
+ *    only by the console; adding CORS here would hand the token to whatever page the
+ *    operator has open, since a cross-origin request to 127.0.0.1 passes the Host
+ *    gate. The console's own page (served below) has the token injected
+ *    server-side.
  */
 
 import * as fs from "node:fs/promises";

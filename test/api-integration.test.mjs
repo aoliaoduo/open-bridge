@@ -88,6 +88,53 @@ test("api status is loopback-readable without a token", async () => {
   assert.ok(body.status.tool_count >= 36);
 });
 
+test("CORS is granted only where a browser must reach us — never on the admin surface", async () => {
+  // The listener used to answer EVERY response with Access-Control-Allow-Origin: *,
+  // /api included — and GET /api/settings returns this instance's own mcpUrl with
+  // the route token inside it. The loopback Host gate is no defense against that:
+  // the page doing the read is running on this machine, so its fetch to 127.0.0.1
+  // satisfies the gate. The admin surface is same-origin by construction, so
+  // dropping the grant costs nothing legitimate and closes the leak.
+  const settings = await fetch(`${base()}/api/settings`);
+  assert.equal(settings.status, 200);
+  assert.equal(settings.headers.get("access-control-allow-origin"), null,
+    "/api reads must not be cross-origin readable");
+  const settingsBody = await settings.json();
+  // The header is load-bearing precisely because of what these bodies carry —
+  // pinned so nobody "restores CORS for the console" without noticing. (Note the
+  // envelope: /api/settings wraps its view in `{ ok, state }`, and the MCP URL
+  // with the token inside it is `state.mcpUrl`, not a top-level field.)
+  assert.ok(String(settingsBody.state?.mcpUrl ?? "").includes(routeToken),
+    "state.mcpUrl is expected to contain the route token (that is what the missing CORS grant protects)");
+  for (const route of ["/api/prompt", "/api/status"]) {
+    const res = await fetch(`${base()}${route}`);
+    const text = await res.text();
+    assert.equal(res.headers.get("access-control-allow-origin"), null,
+      `${route} must not be cross-origin readable either`);
+    assert.ok(text.includes(routeToken), `${route} carries the token in its body — the grant below is the only thing keeping it private`);
+  }
+
+  for (const pathname of [`/console/`, `/console/status`, `/healthz/${routeToken}`]) {
+    const res = await fetch(`${base()}${pathname}`);
+    assert.equal(res.status, 200, `${pathname} should still serve`);
+    assert.equal(res.headers.get("access-control-allow-origin"), null,
+      `${pathname} must not be cross-origin readable`);
+    // Read the body to the end: a test that leaves a half-read response parked in
+    // undici's pool is a test that depends on GC timing. (This was first written as
+    // the fix for a `serve` crash on shutdown; that turned out to be the instance
+    // pooling its *own* self-probe connections — fixed in src/bridge/self-probe.ts.
+    // The drain is still worth keeping, it just is not the reason it passes.)
+    await res.body?.cancel();
+  }
+
+  // And the grant a browser-hosted MCP client genuinely needs still works:
+  // preflight for /mcp answers with the CORS headers.
+  const preflight = await fetch(`${base()}/mcp/${routeToken}`, { method: "OPTIONS" });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get("access-control-allow-origin"), "*");
+  await preflight.body?.cancel();
+});
+
 test("one version everywhere: package.json, /api/status and /api/settings agree", async () => {
   // A hard-coded fallback in src/host/node-host.ts used to be a second copy of
   // the version; it drifted on every bump for anything that built the host
@@ -506,6 +553,8 @@ test("shutdown endpoint stops the process", async () => {
   }
   assert.equal(res.status, 200);
   const code = await new Promise(resolve => child.on("exit", resolve));
-  assert.equal(code, 0);
+  // A bare `3221226505 !== 0` is a Windows fastfail code with no story attached;
+  // without the process' own last words this failure is undebuggable.
+  assert.equal(code, 0, `serve exited with ${code}; last output: ${serveOutput.slice(-900)}`);
   port = 0;
 });

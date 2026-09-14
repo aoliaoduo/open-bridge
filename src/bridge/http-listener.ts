@@ -26,6 +26,7 @@ import { createMcp, headerValue, modernNodeHandlerOf, sharedEventStore } from ".
 import { currentExtraRouteHandler, notifyLocalServerReady } from "./route-hooks.js";
 import { makeRoomForSession, pruneSessions, startSessionPruneLoop } from "./session-table.js";
 import { publishSelf, readablePeerFiles, startRepublishLoop } from "./peer-registry.js";
+import { selfProbe } from "./self-probe.js";
 import { readJsonBody } from "../http/request-body.js";
 
 /** Ensure one slot is free before creating a session; false when all are busy. */
@@ -150,12 +151,32 @@ export async function startHttpInternal(): Promise<void> {
       "x-content-type-options": "nosniff",
     };
     for (const [key, value] of Object.entries(securityHeaders)) res.setHeader(key, value);
-    // CORS is safe here because the route token IS the credential: browser-hosted
-    // MCP clients could otherwise never call the endpoint cross-origin.
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "content-type, accept, mcp-session-id, mcp-protocol-version, last-event-id, authorization");
-    res.setHeader("Access-Control-Expose-Headers", "mcp-session-id");
-    res.setHeader("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS");
+    // CORS is granted per path, and only where a browser has to be able to reach
+    // us: the MCP endpoint (a browser-hosted client could otherwise never call it,
+    // and the route token in the URL *is* its credential) and the OAuth endpoints
+    // (a web client must be able to run discovery → register → token itself).
+    //
+    // It is deliberately NOT granted on /api, /console or /healthz, because a
+    // `Access-Control-Allow-Origin: *` on those handed the route token to any page
+    // the operator happened to have open. Three loopback reads carry it: /api/settings
+    // (`state.mcpUrl`), /api/prompt (the ready-made connection text) and /api/status.
+    // The loopback-Host gate does not protect against that — the cross-origin page is
+    // running ON this machine, and its request to 127.0.0.1 satisfies the gate
+    // perfectly; private-network rules are browser policy, not a spec this server may
+    // assume. The admin surface is same-origin by construction (the console is served
+    // from this very listener), so no legitimate caller ever needed a CORS grant on
+    // it. api-router.ts's security-model comment states that as intent; this block is
+    // the enforcement, and test/api-integration.test.mjs pins both halves (no grant
+    // on the token-bearing reads, grant kept on /mcp).
+    const corsGrant = url.pathname.startsWith("/mcp/")
+      || url.pathname.startsWith("/oauth/")
+      || url.pathname.startsWith("/.well-known/");
+    if (corsGrant) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Headers", "content-type, accept, mcp-session-id, mcp-protocol-version, last-event-id, authorization");
+      res.setHeader("Access-Control-Expose-Headers", "mcp-session-id");
+      res.setHeader("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS");
+    }
     const reject = (status: number, message = "Not found"): void => {
       if (!res.headersSent) res.writeHead(status, { ...securityHeaders, "content-type": "application/json" });
       res.end(JSON.stringify({ error: message }));
@@ -415,13 +436,20 @@ export async function startHttpInternal(): Promise<void> {
   await publishSelf();
   if (state.peersRegistered) startRepublishLoop();
   // Self-verify before publishing any tunnel: fail fast on a broken listener
-  // instead of after the tunnel is up.
-  const health = await fetch(`http://127.0.0.1:${state.port}/healthz/${state.routeToken}`, { signal: AbortSignal.timeout(3_000) })
-    .then(async response => {
-      if (!response.ok) return `HTTP ${response.status}`;
-      const payload = await response.json().catch(() => undefined) as { ok?: unknown } | undefined;
-      return payload?.ok === true ? undefined : "healthz did not confirm readiness";
-    })
-    .catch(error => error instanceof Error ? error.message : String(error));
+  // instead of after the tunnel is up. Through selfProbe, not fetch — a pooled
+  // self-connection is a shutdown bug (see src/bridge/self-probe.ts).
+  const health = await selfProbe(state.port, `/healthz/${state.routeToken}`, { timeoutMs: 3_000 })
+    .then(result => {
+      if (!result.ok) return result.status ? `HTTP ${result.status}` : result.body;
+      let payload: unknown;
+      try {
+        payload = JSON.parse(result.body) as unknown;
+      } catch {
+        payload = undefined;
+      }
+      return (payload as { ok?: unknown } | undefined)?.ok === true
+        ? undefined
+        : "healthz did not confirm readiness";
+    });
   if (health) throw new Error(`Local Bridge health check failed: ${health}`);
 }

@@ -67,6 +67,8 @@
 
 **search_files** — 在工作区文件里搜文本：有 ripgrep 就用（快、尊重 `.gitignore`），否则内置扫描。`query` 默认按**正则**解析（`regex: false` 才按字面匹配；非法正则直接报错，不会静默给空）；`include` 限定文件（如 `["*.ts"]`）；`context`（0–20）在每处匹配前后带若干行；`offset` + `max_results` 翻页。`path` 可以是目录或单个文件。
 
+- 正则语义是 **JavaScript** 的（内置扫描用的就是 `RegExp`）。ripgrep 的默认引擎不支持先行/后顾（`(?=`、`(?!`、`(?<=`、`(?<!`）与反向引用（`\1`），这类查询会由内置扫描回答 —— 结果一致，只是慢一些，不会因此少给或不报错。看到空结果时先确认不是正则写错或 `include` 太窄。
+
 **read_files** — 读一个或多个文件；大文件用 `start_line` / `end_line`（1 基、含两端）读区间。返回的 `sha256` **始终覆盖整个文件**，可作 `expected_sha256` 做乐观写入。`encoding: "base64"` 读二进制。
 
 **get_file_info** — 元数据。≤128 MiB 的文件带 `sha256`；更大的返回 `null`，而不是把整个文件读进内存。
@@ -142,7 +144,6 @@
 
 - **模式是服务端门，不是约定**：`notify.mode` 为 `dnd`（免打扰）时只送 attention/finished；progress 一律 `delivered:false, reason:"mode"`——这是结构化的「没送」，不是错误，照常继续干活，别拿 attention 包装常规进展绕门。
 - **可选的 Bark 参数（每次调用自选）**：`sound`（铃声名，如 `minuet`/`bell`）、`level`（`active` 默认 / `timeSensitive` 可穿透 iOS 专注模式 / `passive` 静默入列表）、`call: 1`（持续响铃直到点开，仅真急事，上限 10）、`badge`（角标 0-9999，0 清除）、`url`（点通知跳转的 http(s) 链接）。非法值会被点名拒绝。`icon`/`image`/加密/复制类参数未开放——它们需要 iOS15+、预共享密钥或替用户做决定，不属于汇报通道。
-- **模式是服务端门，不是约定**：`notify.mode` 为 `dnd`（免打扰）时只送 attention/finished；progress 一律 `delivered:false, reason:"mode"`——这是结构化的「没送」，不是错误，照常继续干活，别拿 attention 包装常规进展绕门。
 - **频繁模式的清单播报是服务端自动的**：`set_todos` 每把一条推进 completed，就推一条汇总（一次调用改多条只推一条）。免打扰模式下这路静音。所以频繁模式下**不要**再为清单完成手动 notify。
 - **抑制不消耗预算**：被门挡住的调用不算发送。真实发送有 60 秒 6 条的共享窗口 + 完全相同内容的 60 秒去重；`duplicate`/`rate_limited` 也是 `delivered:false`，改文案或稍后再试。
 - **设备密钥只在控制台配置**（设置 → 手机通知，粘贴 `https://api.day.app/<key>` 整条链接会自动摘出密钥）。`get_config` 只回掩码；`notify.serverUrl` 可换自建 Bark（默认官方 `https://api.day.app`，自建 http 仅限本机回环）。

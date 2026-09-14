@@ -26,6 +26,31 @@ export async function ripgrepAvailable(executable = "rg"): Promise<boolean> {
   }
 }
 
+/**
+ * Name the construct that makes ripgrep's *default* regex engine refuse a
+ * pattern which a JavaScript `RegExp` accepts — look-around (`(?=`, `(?!`,
+ * `(?<=`, `(?<!`) and backreferences (`\1`…`\9`). ripgrep says so on stderr with
+ * exit code 2 ("Consider enabling PCRE2…"), which the caller would otherwise
+ * only ever see as a bare "ripgrep failed".
+ *
+ * This is a **routing hint, never a verdict**: a false positive skips ripgrep and
+ * the built-in JS-regex walk answers (correct results, more slowly); a false
+ * negative lets ripgrep get spawned, fail, and take the same fallback path with
+ * the reason attached. Either way the answer comes from the engine whose
+ * semantics `search_files` actually documents, so no call can be made wrong by
+ * getting this decision wrong.
+ *
+ * `(?<name>` is a named group, which ripgrep handles fine — hence the explicit
+ * `[=!]` after `(?<`. A leading backslash (`\(?=`) is a literal paren, and this
+ * deliberately does not try to count escapes: see "false positive" above.
+ */
+export function ripgrepPatternRejection(query: string): string | undefined {
+  if (/\(\?<[=!]/.test(query)) return "look-around (lookbehind)";
+  if (/\(\?[=!]/.test(query)) return "look-around (lookahead/negative)";
+  if (/\\[1-9]/.test(query)) return "backreferences";
+  return undefined;
+}
+
 function toRgGlob(pattern: string): string {
   const p = pattern.replace(/\\/g, "/");
   return p.includes("/") ? p : `**/${p}`;
