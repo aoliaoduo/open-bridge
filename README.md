@@ -6,9 +6,7 @@
 
 把本机的文件、命令、进程和服务，变成一个标准的 MCP 端点，交给 ChatGPT 网页版 / Claude / Cursor 这类 AI 客户端直接调用。
 
-**一个 Node 进程，一个端口，同时提供 MCP 端点和网页控制台。**
-
-源自 VS Code 扩展 Open Bridge（0.5.17 终版）的独立化演进：核心服务器、工具集、并发锁与鉴权模型原样继承，宿主从 VS Code 换成本机 CLI + 浏览器控制台。
+**一个 Node 进程，一个端口，同时提供 MCP 端点和网页控制台。** 不依赖任何编辑器。
 
 | 数据流向（从上往下） | 说明 |
 | --- | --- |
@@ -227,7 +225,7 @@ open-bridge config set ngrokDomain <你预留的域名>.ngrok-free.dev
 open-bridge serve                 # 注意：不带 --no-tunnel（--open 可选，自动打开控制台）
 ```
 
-- 免费 ngrok 账号只分配一个子域，**同一域名同时只能被一个实例占用**。旧的 VS Code 扩展实例正占着也不必先停它：本机实例注册表（`bridge-peers.json`）是跨实例共享的——持有隧道的实例按令牌摘要查表并转发到对应实例。应用会把自己的那一行登记进**已存在**的注册表（不会在别人目录里凭空建文件），于是公网请求经那条隧道转发到应用，`tunnel_role` 显示 `follower`，控制台会注明这条地址依赖那个实例；持有方退出后，应用在下一轮探测里自己接管域名（变成 `owner`）。需要额外路径时用 `sharedPeerRegistry`。
+- 免费 ngrok 账号只分配一个子域，**同一域名同时只能被一个实例占用**。别的实例正占着也不必先停它：本机实例注册表（`bridge-peers.json`）是跨实例共享的——持有隧道的实例按令牌摘要查表并转发到对应实例。应用会把自己的那一行登记进**已存在**的注册表（不会在别人目录里凭空建文件），于是公网请求经那条隧道转发到应用，`tunnel_role` 显示 `follower`，控制台会注明这条地址依赖那个实例；持有方退出后，应用在下一轮探测里自己接管域名（变成 `owner`）。需要额外路径时用 `sharedPeerRegistry`。
 - 抢域名这件事很谨慎：**只有 ngrok 明确回答"这个域名没人在用"时才认领**，超时/5xx 一律按"不知道"处理并继续观察。万一撞上 `ERR_NGROK_334`（域名已被别人占用），实例会老老实实只在本机服务，并持续观察那条隧道，一旦发现自己能被正常转发就自动切回 `follower`——不会把自己卡死，也不会起第二个 ngrok 去打架。
 - 配置里没填域名、或域名写错 → 只会得到 `ERR_NGROK_313` 之类的明确报错，本地服务不受影响。
 
@@ -288,9 +286,6 @@ bridge-peers.json        本机实例注册表（多实例共享隧道用）
 **担心公网裸奔？**
 `status` / `health` / 控制台都会明确告诉你当前暴露等级（`local` / `public-open` / `public-authed`）。要收紧就在控制台安全页签发令牌并打开 Bearer 门禁；不想暴露就直接 `--no-tunnel`。
 
-**要不要装 VS Code 扩展？**
-不需要。扩展 0.5.17 已封存为终版，独立版是主力。
-
 ---
 
 ## 开发
@@ -302,30 +297,18 @@ npm run verify       # typecheck + lint + build + 全部测试（单元 / 集成
 npm run dev -- serve --no-tunnel   # tsx 免编译直接跑
 ```
 
-测试分层：`test/*.test.ts` 是单元测试；`test/*-integration.test.mjs` 会**真的启动 `bin/open-bridge.js` 并走 HTTP**（外壳、鉴权闸门、两代 MCP 协议、多实例），其中鉴权闸门与协议不变量两份套件是从扩展时代移植过来的——它们当初是用真实事故换来的断言。
+测试分层：`test/*.test.ts` 是单元测试；`test/*-integration.test.mjs` 会**真的启动 `bin/open-bridge.js` 并走 HTTP**（外壳、鉴权闸门、两代 MCP 协议、多实例），其中鉴权闸门与协议不变量两份套件比其余代码都老——每一条断言都是某次真实事故换来的，改动时请当作事故报告读。
 
-架构：`src/bridge|http|mcp|network|process|shell|workspace` 是零宿主依赖的核心；`src/host/` 是宿主抽象（Host 接口 + 文件版实现）；`src/server/` 是 API/控制台；`src/cli.ts` 是入口。任何宿主（Tauri 壳、甚至回归 VS Code 壳）只需实现一次 Host 接口。`src/bridge/` 一个文件一个职责：`lifecycle.ts` 只管何时启动/停止与公开域名归谁，`http-listener.ts` 管 socket 与两代 MCP 分发，`tunnel.ts` 管 ngrok 进程与重连，`session-table.ts` / `peer-registry.ts` / `mcp-endpoint.ts` 各管会话表、peer 注册表、协议端点，`route-hooks.ts` 是宿主钩子（依赖单向、无环）。
+架构：`src/bridge|http|mcp|network|process|shell|workspace` 是零宿主依赖的核心；`src/host/` 是宿主抽象（Host 接口 + 文件版实现）；`src/server/` 是 API/控制台；`src/cli.ts` 是入口。换宿主（比如套一层 Tauri）只需实现一次 Host 接口。`src/bridge/` 一个文件一个职责：`lifecycle.ts` 只管何时启动/停止与公开域名归谁，`http-listener.ts` 管 socket 与两代 MCP 分发，`tunnel.ts` 管 ngrok 进程与重连，`session-table.ts` / `peer-registry.ts` / `mcp-endpoint.ts` 各管会话表、peer 注册表、协议端点，`route-hooks.ts` 是宿主钩子（依赖单向、无环）。
 
 依赖：运行时只有 `@modelcontextprotocol/server` + `@modelcontextprotocol/node`（2.x，负责 2026-07-28 的按请求协议）与 `@modelcontextprotocol/sdk`（1.x，负责 2025 世代的会话式传输）。**没有任何 Web 框架**——`/mcp`、`/api`、`/console` 全部挂在 `node:http` 上。
 
 ---
 
-## 与 VS Code 扩展的关系
+## 两件刻意不做的事
 
-独立版**在能力上继承扩展**（配置键名一一对应：扩展 56 个定义；独立版另有 `list_skills` 与 `run_script` 两个工具，
-并把服务、文件系统、进程控制、桥状态、审计日志、连通性六组近义工具合并成带 action 参数的工具族，
-共 39 个定义，按配置档过滤后对外；旧工具名仍然可用，见 `docs/tools.md`），并去掉只在编辑器里有意义的壳（webview HTML、命令面板、`autoStart` 等），把宿主换成 CLI + 浏览器控制台。
-
-已经**强于扩展**的地方：
-
-- 多实例：一个目录一个实例、共享一条隧道；扩展受限于"一个窗口一个 Bridge"
-- 稳定性：重连链可取消（不再无限重试）、拆除时序有防 ECONNRESET 处理、域名认领绝不靠猜
-- 可运维：`instances` / `logs` / `health` / `doctor`，以及 HTTP API 与 9 个页面的控制台（每页一个路径）
-
-刻意**不做**的两件事：
-
-- **运行时切换工作区**（扩展的 `switchWorkspace`）：改成"第二个目录 = 第二个实例"，比在跑着的实例里换根更干净
-- **把进程输出镜像进真实终端**（扩展的 `visible=true`）：独立进程弹系统窗口太打扰；输出一律走 `read_process_output` 按需读
+- **运行时切换工作区**：改成"第二个目录 = 第二个实例"。在一个跑着的实例里换根，意味着已打开的文件句柄、进程的 cwd、锁表和审计日志要同时改写指向，任何一处漏掉都是难查的串目录事故；多开一个实例没有这些问题。
+- **把进程输出镜像进真实终端**：后台进程弹出系统窗口太打扰，且窗口一关进程就没了。输出一律留在缓冲区，用 `read_process_output` 按需读。
 
 ## License
 
