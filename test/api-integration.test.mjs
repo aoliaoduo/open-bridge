@@ -516,9 +516,12 @@ test("rotation swaps the token without interrupting the listener", async () => {
 
   // No rebind and no waiting: the very next request goes to the same listener
   // on the same port, where the old token is already dead.
-  assert.equal((await postAction({ command: "ready" }, routeToken)).status, 403, "old token is dead");
+  // copyPrompt is the probe: a real command with no side effects. It replaced
+  // `ready`, a webview-era no-op that existed only so an editor could announce
+  // its panel had loaded; a browser has no such handshake.
+  assert.equal((await postAction({ command: "copyPrompt" }, routeToken)).status, 403, "old token is dead");
   routeToken = rotated;
-  assert.equal((await postAction({ command: "ready" })).status, 200, "new token works");
+  assert.equal((await postAction({ command: "copyPrompt" })).status, 200, "new token works");
   assert.equal(serveExit, null, "the listener survived the rotation, as it must");
 
   // Deterministic proof that the listener was never restarted — no timing

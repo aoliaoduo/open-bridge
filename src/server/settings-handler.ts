@@ -169,9 +169,6 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
   });
 
   switch (action.command) {
-    case "ready":
-      return done();
-
     case "clearStats": {
       // The counters are cumulative and were previously un-resettable: the
       // implementation existed (usage-store.resetUsageStats) but nothing could
@@ -187,17 +184,6 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       const report = await runHealthCheck();
       return done({ info: report.summary, healthLines: report.details, healthOk: report.ok });
     }
-    case "copyUrl": {
-      const url = clientMcpUrl();
-      if (!url) throw new Error("Bridge 未运行，还没有可复制的 URL。");
-      return done({
-        info: state.tunnelUrl
-          ? "MCP URL 已复制到剪贴板。"
-          : "MCP URL 已复制到剪贴板（当前仅本机可访问，未开启隧道）。",
-        copyText: url,
-      });
-    }
-
     case "copyPrompt": {
       // Onboarding: hand the client a ready-made opening message carrying the
       // URL (and, when the bearer gate is on, how to authenticate), instead of
@@ -215,14 +201,6 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
 
     case "copyText":
       return done({ info: "已复制。", copyText: action.text });
-
-    case "copySecret":
-      // The standalone host never retains a pending secret server-side; the
-      // console holds the one-time value from the mint/rotate response.
-      throw new Error("密钥只在签发响应中返回一次。请使用页面上展示的密钥。");
-
-    case "dismissSecret":
-      return done();
 
     case "start": {
       await start();
@@ -423,6 +401,15 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       return notifyActionVerdict(result, await buildSettingsState());
     }
   }
+  // Exhaustiveness, and a better guard than the no-op `ready` case that used
+  // to make this function fall through to a return by accident: adding a
+  // command to the allowlist without handling it here is now a type error,
+  // not a silently-undefined response.
+  return assertHandled(action);
+}
+
+function assertHandled(action: never): never {
+  throw new Error(`Unhandled console action: ${JSON.stringify(action)}`);
 }
 
 /** Map a push outcome onto the console's ok/info/error shape. */

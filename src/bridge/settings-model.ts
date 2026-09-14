@@ -170,8 +170,7 @@ export interface SettingsState {
 }
 
 export type SettingsAction =
-  | { command: "ready" }
-  | { command: "copyUrl" | "copyPrompt" | "start" | "stop" | "rotateEndpoint" | "purgeTokens" | "revokeAll" | "copySecret" | "dismissSecret" }
+  | { command: "copyPrompt" | "start" | "stop" | "rotateEndpoint" | "purgeTokens" | "revokeAll" }
   | { command: "clearStats" | "healthCheck" }
   | { command: "saveDomain"; domain: string }
   /** Device key as pasted (bare or full URL — the host parses and validates). */
@@ -228,18 +227,25 @@ export type SettingsConfigKey = keyof typeof CONFIG_SPEC;
 
 
 /**
- * Validate an inbound webview message against a strict allowlist. Anything
- * malformed becomes `null` and is dropped — the webview is untrusted input.
+ * Validate an inbound console action against a strict allowlist. Anything
+ * malformed becomes `null` and is dropped — the browser is untrusted input.
+ *
+ * The name and the allowlist are both older than this host: in the VS Code
+ * extension these arrived as webview `postMessage` payloads, and several
+ * entries existed only because a webview cannot reach the system clipboard
+ * without asking its host to do it. A browser can, so `copyUrl`, `copySecret`
+ * and `dismissSecret` had no sender left, and `ready` had no meaning once the
+ * page stopped being handed to it by an editor.
  */
 export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
   if (!raw || typeof raw !== "object") return null;
   const message = raw as Record<string, unknown>;
   const command = typeof message.command === "string" ? message.command : "";
   const allowed: ReadonlySet<string> = new Set([
-    "ready", "copyUrl", "copyPrompt", "start", "stop", "rotateEndpoint", "saveDomain",
+    "copyPrompt", "start", "stop", "rotateEndpoint", "saveDomain",
     "setAuthEnabled", "setDefaultTtl", "createToken", "armPublicLock", "rotateToken",
     "revokeToken", "deleteToken", "purgeTokens", "revokeAll",
-    "setConcurrency", "setConfig", "copyText", "copySecret", "dismissSecret",
+    "setConcurrency", "setConfig", "copyText",
     "clearStats", "healthCheck", "saveNotifyKey", "testNotify",
   ]);
   if (!allowed.has(command)) return null;

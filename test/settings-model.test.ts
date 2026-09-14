@@ -10,7 +10,7 @@ import {
 // --- message normalization -------------------------------------------------
 
 test("normalize passes through every command the page can send", () => {
-  const simple = ["ready", "copyUrl", "start", "stop", "rotateEndpoint", "purgeTokens", "revokeAll", "copySecret", "dismissSecret"];
+  const simple = ["copyPrompt", "start", "stop", "rotateEndpoint", "purgeTokens", "revokeAll"];
   for (const command of simple) {
     assert.deepEqual(normalizeSettingsMessage({ command }), { command }, command);
   }
@@ -18,10 +18,16 @@ test("normalize passes through every command the page can send", () => {
 
 test("normalize rejects unknown, missing and non-object messages", () => {
   assert.equal(normalizeSettingsMessage(null), null);
-  assert.equal(normalizeSettingsMessage("ready"), null);
+  assert.equal(normalizeSettingsMessage("copyPrompt"), null);
   assert.equal(normalizeSettingsMessage({}), null);
   assert.equal(normalizeSettingsMessage({ command: "eval" }), null);
-  assert.equal(normalizeSettingsMessage({ command: "ready;deleteEverything" }), null);
+  assert.equal(normalizeSettingsMessage({ command: "copyPrompt;deleteEverything" }), null);
+  // The webview-era commands are gone from the allowlist, not just unused:
+  // an old client still sending them gets the same null every other unknown
+  // command gets, rather than a silently-accepted no-op.
+  for (const gone of ["ready", "copyUrl", "copySecret", "dismissSecret"]) {
+    assert.equal(normalizeSettingsMessage({ command: gone }), null, `retired: ${gone}`);
+  }
 });
 
 test("normalize validates id-bearing commands strictly", () => {

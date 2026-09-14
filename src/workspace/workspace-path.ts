@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 
-/** Relative input stays anchored to the VS Code workspace; absolute input stays explicit. */
+/** Relative input stays anchored to the workspace root; absolute input stays explicit. */
 export function resolveFromWorkspace(workspaceRoot: string, input = "."): string {
   const workspace = path.resolve(workspaceRoot);
   return path.isAbsolute(input) ? path.resolve(input) : path.resolve(workspace, input || ".");
