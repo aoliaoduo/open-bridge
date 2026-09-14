@@ -3,6 +3,10 @@ dist/
 build/
 *.log
 start-open-bridge.last-dir
+# 临时草稿（提交信息、一次性脚本）。`git add -A` 连着把 commit-msg.tmp 提交进去
+# 过两次，两次都要 amend 补救 —— 名字约定不如让 git 自己记住。
+*.tmp
+*.tmp.py
 .DS_Store
 
 # agent 工作区工具的本地状态（不属于项目本体）

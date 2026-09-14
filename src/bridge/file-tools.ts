@@ -234,6 +234,40 @@ function zeroMatchError(
   }
 }
 
+/** How many matches to name before the list stops being read. */
+const AMBIGUOUS_MATCH_LINES = 8;
+
+/**
+ * Where the matches are, when old_text is not unique.
+ *
+ * The zero-match path has full fuzzy diagnostics; the too-many-matches path
+ * used to have nothing but a count, even though it is the easier of the two to
+ * answer — the positions are already known. The caller was told "found 3" and
+ * left to grep for the three themselves, which is the work they had just asked
+ * this tool to do.
+ *
+ * Line numbers specifically, not snippets: the fix is almost always to widen
+ * old_text with a neighbouring line, and a line number is what you need to go
+ * look at that neighbour.
+ */
+function ambiguousMatchDetail(content: string, needle: string): string {
+  const lines: number[] = [];
+  let index = content.indexOf(needle);
+  while (index !== -1 && lines.length <= AMBIGUOUS_MATCH_LINES) {
+    // Count newlines before the hit rather than splitting the file: a needle
+    // that spans lines still reports where it STARTS, which is the anchor the
+    // caller will widen from.
+    let line = 1;
+    for (let i = 0; i < index; i += 1) if (content[i] === "\n") line += 1;
+    lines.push(line);
+    index = content.indexOf(needle, index + needle.length);
+  }
+  if (!lines.length) return "";
+  const shown = lines.slice(0, AMBIGUOUS_MATCH_LINES);
+  const suffix = lines.length > AMBIGUOUS_MATCH_LINES ? ", ..." : "";
+  return ` Matches start at line${shown.length > 1 ? "s" : ""} ${shown.join(", ")}${suffix}.`;
+}
+
 let resolvedRipgrep: string | undefined;
 
 /**
@@ -768,7 +802,9 @@ export async function editBlock(args: Args): Promise<unknown> {
       const occurrences = content.split(needle).length - 1;
       if (occurrences !== 1) {
         if (occurrences === 0) throw zeroMatchError(toLf(content), toLf(oldText), String(args.path), `edits[${i}]`, 1);
-        throw new Error(`edits[${i}]: expected 1 replacement, found ${occurrences}.`);
+        throw new Error(`edits[${i}]: expected 1 replacement, found ${occurrences}.`
+          + `${ambiguousMatchDetail(content, needle)}`
+          + " Include more surrounding lines to make old_text unique.");
       }
       content = content.replace(needle, () => applyEol(newText, eol));
       replacements += 1;
@@ -811,10 +847,13 @@ export async function editBlock(args: Args): Promise<unknown> {
     throw zeroMatchError(toLf(raw), toLf(oldText), String(args.path), "edit_block", expected);
   }
   if (occurrences !== expected) {
+    // Where they are, then what to do about it. The positions are the half the
+    // caller cannot derive from this message, so they come first.
+    const where = occurrences > 1 ? ambiguousMatchDetail(raw, needle) : "";
     const guidance = !args.replace_all && occurrences > 1
       ? " Pass replace_all=true or set expected_replacements to replace every occurrence, or include more surrounding lines to make old_text unique."
       : "";
-    throw new Error(`Expected ${expected} replacement(s), found ${occurrences}.${guidance}`);
+    throw new Error(`Expected ${expected} replacement(s), found ${occurrences}.${where}${guidance}`);
   }
   // split/join replaces every occurrence without interpreting $ sequences in
   // the replacement (String.replace would expand $&, $', ... and corrupt the

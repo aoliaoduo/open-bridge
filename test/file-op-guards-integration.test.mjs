@@ -141,6 +141,28 @@ test("a dropped path never becomes a file called undefined", async () => {
   assert.match(read.text, /non-empty string/);
 });
 
+test("an ambiguous old_text is answered with where the matches are", async () => {
+  // The zero-match path has fuzzy diagnostics; too-many-matches used to have
+  // only a count, leaving the caller to grep for the positions themselves —
+  // the exact work they had just asked this tool to do. Real case from this
+  // repo: `### Fixed` appears three times in CHANGELOG.md.
+  const name = "ambiguous.md";
+  writeFileSync(path.join(workspace, name),
+    ["# doc", "", "### Fixed", "- one", "", "### Fixed", "- two", "", "### Fixed", "- three", ""].join("\n"));
+
+  const result = await callTool("edit_block", { path: name, old_text: "### Fixed", new_text: "### Broken" });
+  assert.equal(result.isError, true, "an ambiguous anchor must not pick one at random");
+  assert.match(result.text, /found 3/, "the count is still reported");
+  // The half that was missing: which three.
+  assert.match(result.text, /Matches start at lines 3, 6, 9\./,
+    "the caller is told where, not just how many");
+  assert.match(result.text, /make old_text unique/, "and what to do about it");
+
+  // Nothing was written: a rejected edit leaves the file exactly as it was.
+  assert.match(readFileSync(path.join(workspace, name), "utf8"), /### Fixed/);
+  assert.ok(!readFileSync(path.join(workspace, name), "utf8").includes("Broken"));
+});
+
 test("moving a file onto an existing directory is refused instead of deleting it", async () => {
   const result = await callTool("file_op", { op: "move", source: "canary.txt", destination: "d", overwrite: true });
   assert.equal(result.isError, true, "replacing a directory with a file must fail");

@@ -57,6 +57,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **行为不变的重复合并与清理：**UI 里「暴露面 → 文案/语气」原本在状态页与安全页各养一份且措辞已漂移，合并为 `ui/src/exposure.ts` 一张表；`regex-worker` 两个仅差一行输入形状的 worker 源（行批量匹配 / 单次测试）合并为一个；`theme.ts` 只被测试引用的三个函数收回私有；`App.tsx` 拆掉只有一个实现的 `SettingsStateGuard` 中转层；`paths.ts` 删掉无人用的 `unrestricted()` 转发；`processes.ts` 删掉一段重复注释；`session-table` 把 `pruneSessions` 与 `makeRoomForSession` 逐字重复的 LRU 驱逐块提取成 `evictOldestIdleSession()`；`safe-probe.classifyIpv4` 删掉三条永远走不到的保留段子句（`100.100.100.200` 已被 100.64.0.0/10 覆盖，`192.0.2.0/24`、`192.88.99.0/24` 已分别被更宽的 192.0.0.0/16、192.88.0.0/16 判断覆盖），分类行为逐 IP 不变；一键启动脚本的示例路径从作者本机桌面换成通用示例。
 
 ### Fixed
+- **失败的工具调用不记录失败原因 —— 整轮审计日志里 13 条 error，没有一条说了为什么。** `mcp-endpoint.ts` 那个 catch 写的是 ``record(name, "error", `Failed in ${...} ms.`)``，而**原因就在手里**：下一行就把它返回给调用方了。日志里只剩耗时——恰恰是失败时最没用的那个数字。
+
+  这条路径**所有 39 个工具共用**，而它是一次失败留下的**唯一痕迹**：控制台活动面板、`activity_log` 搜索、审计文件读的都是它。从日志排查只能看到「edit_block 失败了」，想知道为什么就得把调用重跑一遍。现在写成 `Failed in 483 ms: <原因>`，耗时保留但不再是全部。`record()` 本来就会过 `redactSensitiveText` 并截到 500 字符，原样传进去即可，与其他审计行一视同仁。
+
+  讽刺的是上一轮刚修完 `notify` 的「审计行不说实话」——同一类毛病，在隔壁文件的公共路径上，当时没往上看一层。
+
+- **`edit_block` 匹配到多处时只说数量，不说在哪。** 零匹配那条路径有完整的模糊诊断（最近似的行窗口 + 漂移说明），多匹配这条路径只有一句 `found 3` 加一句「加点上下文让它唯一」——而**位置是已知的**，让调用方自己再 grep 一遍，正是它刚刚委托给这个工具的活。真实案例：本仓库 `CHANGELOG.md` 里 `### Fixed` 出现 3 次，我这几轮为此失败了 6 次。现在报 `Matches start at lines 3, 6, 9.`，超过 8 处截断。给行号而不是给片段，是因为修法几乎总是「往外扩一行」，而你需要行号才能去看那一行旁边是什么。`edit_block` 与 `file_op{op:"edit"}` 两个入口共用同一个辅助函数。
+
+- **`set_todos` 的参数守卫答非所问。** 拿它去读清单（`{action:"list"}`）得到的是 `todos must be an array` —— 一句完全正确、但回答了错误问题的话。真实情况是「`set_todos` 只能写，读要用 `get_todos`」，而 `get_todos` 确实存在。守卫按 AGENTS.md 点名了参数，却没指出**工具选错了**。现在补一句 `use get_todos to read the current one`。条目校验同理：原来是 `requires id, title, and a valid status`，三个字段列一遍让调用方自己去比对；现在直接说 `missing title`，或者 `status must be pending, in_progress or completed (got "doing")` —— status 是唯一有封闭词表的字段，也就是列字段名最解释不清的那个。
+
+- **`.gitignore` 补上 `*.tmp`。** `git add -A` 连着两次把临时的提交信息文件（`commit-msg.tmp`、`msg.tmp`）提交进去，两次都靠 amend 补救。这不是手滑能根治的事——工作区里有临时文件，而用的是「全加进来」的命令。让 git 自己记住比靠命名约定可靠。
+
 - **「最新进展」会把上一个 AI 留下的话当成正在发生的事。** 重启后打开任务页，看到的是一份今天的清单、标着**实时**，下面一张「最新进展」卡片写着「高危子集已提交（424+127+60 全绿）」——那是 23 小时前另一轮对话的半句话，测试数都对不上了（当时 424/127/60，现在 496/145/93）。
 
   根因在 `todo-store.ts`：`persistTodos()` 写清单时有一行 `lastProgress: current.lastProgress ?? null`，把旧进展一路带进新文档。这行合并**是故意的**，防止同一 tick 里排队的 `set_todos` 与 `report_progress` 互相把对方的字段覆盖成空——所以修法不是停止携带，而是**给携带过来的东西贴上标签**。
