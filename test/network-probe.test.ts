@@ -233,3 +233,25 @@ test("probe failure-return contracts: refused, HTTP timeout, DNS failure, redire
     await close(loop.server);
   }
 });
+
+/**
+ * setTimeout keeps its delay in a 32-bit signed int and substitutes 1ms past
+ * 2147483647. A probe told to wait 1e18 ms against an unreachable address
+ * therefore returned in 17ms reporting "timed out" -- a caller would read
+ * that as a closed port, having never actually waited.
+ *
+ * Asserted against a listening socket rather than by timing a real wait: the
+ * observable contract is that an enormous timeout behaves like a patient one
+ * (the probe succeeds) instead of like an instant one (it reports a timeout).
+ * Timing the unreachable case would mean a 20-second test.
+ */
+test("an over-large timeout does not collapse into an instant one", async () => {
+  const { server, port } = await listen(net.createServer(socket => socket.end()));
+  try {
+    const result = await probeTcpPort("127.0.0.1", port, { scope: "any", timeoutMs: 1e18 });
+    assert.equal(result.open, true, "1e18 must mean 'be patient', not 'give up at 1ms'");
+    assert.ok(!result.error, `no timeout should be reported: ${result.error}`);
+  } finally {
+    server.close();
+  }
+});

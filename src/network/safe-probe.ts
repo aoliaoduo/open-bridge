@@ -474,12 +474,23 @@ function normalizePort(port: number): number {
   return port;
 }
 
+/**
+ * The upper bound matters as much as the finite check. setTimeout keeps its
+ * delay in a 32-bit signed int and silently uses 1ms beyond 2147483647, so a
+ * probe asked to wait 1e18 ms against an unreachable address came back in
+ * 17ms saying "timed out" -- a caller reading that would conclude the port is
+ * closed, having never actually waited. Capping is right for a probe: the
+ * intent behind an enormous timeout is "be patient", and 24.8 days delivers
+ * that better than 1ms does.
+ */
+const MAX_TIMER_MS = 2_147_483_647;
+
 function normalizeTimeout(value: number | undefined, fallback: number): number {
   const timeout = value ?? fallback;
   if (!Number.isFinite(timeout) || timeout < 0) {
     throw new NetworkProbeError("INVALID_URL", "timeoutMs must be a non-negative finite number.");
   }
-  return Math.floor(timeout);
+  return Math.min(Math.floor(timeout), MAX_TIMER_MS);
 }
 
 async function resolveWithDeadline(hostname: string, options: ProbeOptions, timeoutMs: number): Promise<ResolvedProbeTarget> {
