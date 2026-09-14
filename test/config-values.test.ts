@@ -116,3 +116,25 @@ test("publicHealthTimeoutMs and logMaxBytes ranges", () => {
   assert.match(err("logMaxBytes", -1), /between 0 and 1073741824/);
   assert.match(err("logMaxBytes", 1024 * 1024 * 1024 + 1), /between 0 and 1073741824/);
 });
+
+/**
+ * setTimeout keeps its delay in a 32-bit signed int. Past 2147483647 Node
+ * prints TimeoutOverflowWarning and uses 1ms instead, so a caller asking for
+ * an effectively infinite hold (1e18) gets a lock released on the next tick --
+ * the precise opposite of the request, surfacing much later as a resource
+ * handed to a second caller while the first still holds it.
+ *
+ * Found by feeding every numeric config key the values a model emits when it
+ * guesses: strings, negatives, floats, NaN, Infinity, 1e18. Five of the seven
+ * keys already refused all of them; these three took 1e18 and stored it.
+ */
+test("timeout settings refuse values that overflow the 32-bit timer", () => {
+  for (const key of ["concurrency.holdTimeoutMs", "concurrency.waitTimeoutMs", "auth.tokenTtlSeconds"]) {
+    assert.equal(ok(key, 2_147_483_647), 2_147_483_647, `${key} accepts the largest usable value`);
+    assert.match(err(key, 2_147_483_648), /at most 2147483647/, `${key} refuses one past it`);
+    assert.match(err(key, 1e18), /at most 2147483647/, `${key} refuses 1e18`);
+    // 0 stays meaningful: it is how these are disabled, and must not be
+    // collateral damage of an upper bound.
+    assert.equal(ok(key, 0), 0, `${key} still accepts 0 to disable`);
+  }
+});

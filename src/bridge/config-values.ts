@@ -59,6 +59,16 @@ const MAX_STRING_CHARS = 500;
 /** Longest possible DNS name: a longer "host" can never match anything. */
 const MAX_HOST_CHARS = 253;
 const LOG_MAX_BYTES_MAX = 1024 * 1024 * 1024;
+/**
+ * setTimeout stores its delay in a 32-bit signed int. Past 2147483647 Node
+ * warns and silently uses 1ms, so "hold this lock for essentially ever"
+ * (1e18) becomes "release it next tick" -- the exact inversion of what was
+ * asked for, and the kind that only shows up as a lock mysteriously handed to
+ * a second caller. Refuse at the edit instead of accepting a number that
+ * cannot mean what it says. Same family as the Math.max(0, NaN) rule in
+ * AGENTS.md: a bad number must be refused, never quietly reinterpreted.
+ */
+const MAX_TIMER_MS = 2_147_483_647;
 
 const isInt = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n);
 
@@ -143,6 +153,16 @@ export function validateConfigValue(key: string, value: unknown): ConfigValidati
   if (NON_NEGATIVE_INT_KEYS.has(key)) {
     if (!isInt(value) || value < 0) {
       return { ok: false, error: `${key} must be a non-negative integer. (expected '${key}': number)` };
+    }
+    // The two concurrency values are fed to setTimeout directly. tokenTtlSeconds
+    // is compared against a clock instead, but the same ceiling suits it: a TTL
+    // of 2^31 seconds is ~68 years, which is indistinguishable from "never
+    // expires" -- not something an auth setting should grant by typo.
+    if (value > MAX_TIMER_MS) {
+      return {
+        ok: false,
+        error: `${key} must be at most ${MAX_TIMER_MS}. Larger values overflow the 32-bit timer and are silently treated as 1ms — the opposite of a long timeout. Use 0 to disable instead. (expected '${key}': number)`,
+      };
     }
     return { ok: true, value };
   }
