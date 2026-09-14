@@ -94,14 +94,32 @@ function throwIfSpawnFailed(commandState: { spawnError?: string }): void {
  * `setTimeout(cb, NaN)` fires at ~0 ms — the bug that once instantly "timed
  * out" running commands in run_command. MCP arguments are LLM-generated, so a
  * "30s" string or a null lands here more often than anyone would like.
- * An optional `max` caps the result; callers without one keep the old
- * behavior. `interact_with_process` passes 60000: its wait is a blind
- * sleep (nothing wakes it early), unlike the event-bounded waits elsewhere.
+ * An optional `max` caps the result further; `interact_with_process` passes
+ * 60000 because its wait is a blind sleep (nothing wakes it early), unlike
+ * the event-bounded waits elsewhere.
+ *
+ * The default ceiling is the 32-bit timer limit, and it is not optional. Past
+ * 2147483647 setTimeout warns and substitutes 1ms, so `timeout_ms: 1e18` --
+ * an unmistakable "wait essentially forever" -- returned after 38ms in a
+ * measured run and reported a still-running process as finished. That is the
+ * same inversion as the NaN case above, at the other end of the range, so it
+ * gets the same treatment rather than being left to each caller to remember:
+ * three of the five call sites passed no max, and there is no reason for a
+ * fourth to have to think about it.
+ *
+ * Clamping rather than refusing is right *here* because this is the
+ * millisecond helper for tool arguments, where an over-large number still has
+ * an obvious intent ("as long as possible") and the ceiling is 24.8 days --
+ * longer than any plausible wait. Config settings took the opposite route and
+ * refuse, because a stored setting should never silently mean something other
+ * than what it says.
  */
-export function clampMs(value: unknown, fallback: number, max = Number.POSITIVE_INFINITY): number {
-  if (value === undefined || value === null) return fallback;
+export const MAX_TIMER_MS = 2_147_483_647;
+
+export function clampMs(value: unknown, fallback: number, max = MAX_TIMER_MS): number {
+  if (value === undefined || value === null) return Math.min(fallback, MAX_TIMER_MS);
   const n = Number(value);
-  return Number.isFinite(n) && n >= 0 ? Math.min(n, max) : fallback;
+  return Number.isFinite(n) && n >= 0 ? Math.min(n, max, MAX_TIMER_MS) : Math.min(fallback, MAX_TIMER_MS);
 }
 
 export async function runOrStartProcess(args: Args, name: string): Promise<unknown> {

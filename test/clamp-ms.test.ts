@@ -39,6 +39,29 @@ test("an explicit max caps the value (interact_with_process waits at most 60 s)"
   assert.equal(clampMs(undefined, 250, 60_000), 250);
 });
 
-test("without a max, large values still pass through (existing callers)", () => {
+test("without an explicit max, large values still pass through", () => {
+  // An hour is a legitimate wait and must survive: the ceiling added below is
+  // about protecting the timer, not second-guessing long waits.
   assert.equal(clampMs(3_600_000, 250), 3_600_000);
+});
+
+/**
+ * setTimeout keeps its delay in a 32-bit signed int; past 2147483647 Node
+ * warns and uses 1ms instead. So `timeout_ms: 1e18` -- plainly "wait as long
+ * as it takes" -- used to return in 38ms (measured) and report a process that
+ * was still running as finished. Same inversion as the NaN case, at the other
+ * end of the range.
+ *
+ * Three of the five call sites passed no max, so the ceiling belongs in the
+ * helper rather than in each caller's memory.
+ */
+test("values beyond the 32-bit timer limit are capped, not passed through", () => {
+  assert.equal(clampMs(1e18, 250), 2_147_483_647, "1e18 would have fired at ~1ms");
+  assert.equal(clampMs(2_147_483_648, 250), 2_147_483_647, "one past the limit is capped");
+  assert.equal(clampMs(2_147_483_647, 250), 2_147_483_647, "the largest usable value is untouched");
+  assert.equal(clampMs(Number.MAX_SAFE_INTEGER, 250), 2_147_483_647);
+  // An explicit max still wins when it is tighter -- the cap is a backstop.
+  assert.equal(clampMs(1e18, 250, 60_000), 60_000);
+  // A fallback cannot smuggle an overflowing value in either.
+  assert.equal(clampMs("nonsense", 1e18), 2_147_483_647);
 });
