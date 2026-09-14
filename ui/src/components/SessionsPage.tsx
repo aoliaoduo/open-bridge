@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type SessionView } from "../api";
+import { t } from "../i18n";
 import { Card } from "./Card";
 import { ConfirmButton } from "./ConfirmButton";
 import { CopyButton } from "./CopyButton";
@@ -10,12 +11,12 @@ import { Skeleton } from "./Skeleton";
 // The 文件锁明细 card on 状态页 imports this: one formatter, two tables.
 export function idleLabel(ms: number): string {
   const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 5) return "刚刚";
-  if (seconds < 60) return `${seconds} 秒`;
+  if (seconds < 5) return t("刚刚", "just now");
+  if (seconds < 60) return t(`${seconds} 秒`, `${seconds}s`);
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} 分 ${seconds % 60} 秒`;
+  if (minutes < 60) return t(`${minutes} 分 ${seconds % 60} 秒`, `${minutes}m ${seconds % 60}s`);
   const hours = Math.floor(minutes / 60);
-  return `${hours} 小时 ${minutes % 60} 分`;
+  return t(`${hours} 小时 ${minutes % 60} 分`, `${hours}h ${minutes % 60}m`);
 }
 
 /**
@@ -93,10 +94,13 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
   const close = async (id: string) => {
     if (closingId) return;
     setClosingId(id);
-    setNote(`正在断开 ${id.slice(0, 8)}…`);
+    setNote(t(`正在断开 ${id.slice(0, 8)}…`, `Disconnecting ${id.slice(0, 8)}…`));
     try {
       await api.closeSession(id);
-      setNote(`已断开 ${id.slice(0, 8)}…：对方需要重新握手才能继续调用。`);
+      setNote(t(
+        `已断开 ${id.slice(0, 8)}…：对方需要重新握手才能继续调用。`,
+        `Disconnected ${id.slice(0, 8)}… — that client must handshake again before it can call.`,
+      ));
       await refresh();
     } catch (error) {
       setNote(error instanceof Error ? error.message : String(error));
@@ -109,23 +113,27 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
   return (
     <>
       <Card
-        title="已连接的客户端"
+        title={t("已连接的客户端", "Connected clients")}
         desc={
           <>
-            一行是一个活着的 MCP 会话：客户端在 <span className="mono">initialize</span> 之后出现，
-            空闲超过 60 分钟或被容量挤出时自动消失。<span className="mono">断开</span> 只关掉这一个会话。
+            {t("一行是一个活着的 MCP 会话：客户端在 ", "One row per live MCP session: a client appears after ")}
+            <span className="mono">initialize</span>
+            {t(
+              " 之后出现，空闲超过 60 分钟或被容量挤出时自动消失。断开 只关掉这一个会话。",
+              " and disappears after 60 minutes idle or when capacity evicts it. Disconnect closes just that one session.",
+            )}
           </>
         }
         actions={
-          <div className="segmented" role="group" aria-label="会话视图">
+          <div className="segmented" role="group" aria-label={t("会话视图", "Session view")}>
             <button type="button" className={view === "all" ? "active" : ""} onClick={() => setView("all")}>
-              全部 {sessions ? sessions.length : ""}
+              {t("全部", "All")} {sessions ? sessions.length : ""}
             </button>
             <button type="button" className={view === "active" ? "active" : ""} onClick={() => setView("active")}>
-              活跃 {activeCount}
+              {t("活跃", "Active")} {activeCount}
             </button>
             <button type="button" className={view === "idle" ? "active" : ""} onClick={() => setView("idle")}>
-              空闲 ≥5 分 {staleCount}
+              {t("空闲 ≥5 分", "Idle ≥5m")} {staleCount}
             </button>
           </div>
         }
@@ -139,38 +147,47 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
               </svg>
               <input
                 type="text"
-                placeholder="按客户端或会话 ID 过滤…"
+                placeholder={t("按客户端或会话 ID 过滤…", "Filter by client or session ID…")}
                 value={query}
                 onChange={event => setQuery(event.target.value)}
-                aria-label="过滤会话"
+                aria-label={t("过滤会话", "Filter sessions")}
               />
             </label>
             <span className="grow" />
-            <span className="count">显示 {visible.length} / 共 {sessions.length} 个会话</span>
+            <span className="count">
+              {t(`显示 ${visible.length} / 共 ${sessions.length} 个会话`, `${visible.length} of ${sessions.length} sessions`)}
+            </span>
           </div>
         )}
 
         {sessions === null ? (
           <Skeleton lines={3} />
         ) : sessions.length === 0 ? (
-          <EmptyState title="当前没有客户端连接。">
-            把 <span className="mono">状态</span> 页里 MCP 端点卡片的地址填进客户端之后，这里会出现它的名字与空闲时间。
+          <EmptyState title={t("当前没有客户端连接。", "No clients connected.")}>
+            {t("把 ", "Paste the MCP endpoint from the ")}
+            <span className="mono">{t("状态", "Status")}</span>
+            {t(
+              " 页里 MCP 端点卡片的地址填进客户端之后，这里会出现它的名字与空闲时间。",
+              " page into a client and its name and idle time show up here.",
+            )}
           </EmptyState>
         ) : visible.length === 0 ? (
-          <EmptyState title="没有匹配的会话。">换个关键词，或切回「全部」视图。</EmptyState>
+          <EmptyState title={t("没有匹配的会话。", "No matching sessions.")}>
+            {t("换个关键词，或切回「全部」视图。", "Try another keyword, or switch back to the All view.")}
+          </EmptyState>
         ) : (
           <div className="table-wrap">
             <table className="token-table">
               <thead>
                 <tr>
-                  <th>客户端</th>
-                  <th>会话</th>
-                  <th>首次连接</th>
-                  <th>空闲</th>
-                  <th className="num">调用数</th>
-                  <th className="num">进行中</th>
-                  <th className="num">待办</th>
-                  <th className="actions">操作</th>
+                  <th>{t("客户端", "Client")}</th>
+                  <th>{t("会话", "Session")}</th>
+                  <th>{t("首次连接", "Connected")}</th>
+                  <th>{t("空闲", "Idle")}</th>
+                  <th className="num">{t("调用数", "Calls")}</th>
+                  <th className="num">{t("进行中", "In flight")}</th>
+                  <th className="num">{t("待办", "To do")}</th>
+                  <th className="actions">{t("操作", "Actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -182,8 +199,11 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
                         {session.id.slice(0, 8)}…
                         <CopyButton
                           value={session.id}
-                          label="复制会话 ID"
-                          onCopied={() => notify?.(`已复制会话 ID ${session.id.slice(0, 8)}…`)}
+                          label={t("复制会话 ID", "Copy session ID")}
+                          onCopied={() => notify?.(t(
+                            `已复制会话 ID ${session.id.slice(0, 8)}…`,
+                            `Copied session ID ${session.id.slice(0, 8)}…`,
+                          ))}
                         />
                       </span>
                     </td>
@@ -194,7 +214,11 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
                     <td className="num">{session.todos > 0 ? session.todos : "—"}</td>
                     <td className="actions">
                       <span className="row-actions">
-                        <ConfirmButton label="断开" disabled={closingId === session.id} onConfirm={() => void close(session.id)} />
+                        <ConfirmButton
+                          label={t("断开", "Disconnect")}
+                          disabled={closingId === session.id}
+                          onConfirm={() => void close(session.id)}
+                        />
                       </span>
                     </td>
                   </tr>
@@ -204,7 +228,9 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
           </div>
         )}
         <div className="card-foot">
-          <span className="section-note" style={{ margin: 0 }}>每 5 秒自动刷新。</span>
+          <span className="section-note" style={{ margin: 0 }}>
+            {t("每 5 秒自动刷新。", "Refreshes every 5 seconds.")}
+          </span>
         </div>
       </Card>
 

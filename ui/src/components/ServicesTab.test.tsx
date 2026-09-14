@@ -50,7 +50,7 @@ describe("ServicesTab", () => {
     fireEvent.click(screen.getByText("停止"));
     expect(serviceActionMock).toHaveBeenCalledWith("stop", "web");
     // The note is unique; the row's badge is not (the note says "已停止" too).
-    expect(await screen.findByText("web：已停止")).toBeTruthy();
+    expect(await screen.findByText("web: 已停止")).toBeTruthy();
     expect(screen.getAllByText("已停止").length).toBeGreaterThan(0);
   });
 

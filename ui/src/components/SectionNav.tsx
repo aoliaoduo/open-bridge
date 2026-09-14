@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 export interface SectionLink<T extends string = string> {
   /** id of the section element on the page. */
   id: T;
@@ -26,7 +28,7 @@ export function SectionNav<T extends string>({ items, active, onSelect }: {
   onSelect: (id: T) => void;
 }) {
   return (
-    <nav className="secnav" aria-label="设置分区">
+    <nav className="secnav" aria-label={t("设置分区", "Settings sections")}>
       {items.map(item => (
         <button
           key={item.id}

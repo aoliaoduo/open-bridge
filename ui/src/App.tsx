@@ -8,6 +8,7 @@ import { PageHeader } from "./components/PageHeader";
 import { Skeleton } from "./components/Skeleton";
 import { StatusTab } from "./components/StatusTab";
 import { SettingsTab } from "./components/SettingsTab";
+import { applyLang, initLang, nextLangPref, storeLangPref, t, type LangPref } from "./i18n";
 import { SecurityPage } from "./components/SecurityPage";
 import { LogsTab } from "./components/LogsTab";
 import { StatsTab } from "./components/StatsTab";
@@ -60,6 +61,7 @@ export function App() {
   // Overlay drawer, narrow windows only; harmless (and invisible) on desktop.
   const [drawer, setDrawer] = useState(false);
   const [themePref, setThemePref] = useState<ThemePref>(() => initTheme());
+  const [langPref, setLangPref] = useState<LangPref>(() => initLang());
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const secretBox = useRef<HTMLDivElement | null>(null);
 
@@ -94,9 +96,12 @@ export function App() {
   // With several consoles open (one per instance/port) the browser tab is the
   // only thing that says which page this one is.
   useEffect(() => {
-    const label = routeSpec(route).label;
-    document.title = `${label} · Open Bridge 控制台`;
-  }, [route]);
+    const label = routeSpec(route).label();
+    document.title = `${label} · ${t("Open Bridge 控制台", "Open Bridge Console")}`;
+    // langPref is a dependency because the title is the one piece of UI React
+    // does not repaint for us: without it, switching language leaves the tab
+    // named in the old one until the next navigation.
+  }, [route, langPref]);
 
   // 跟随系统 has to keep following: an OS switch at dusk must repaint the console
   // without a reload. An explicit 浅色/深色 ignores the OS until it is changed.
@@ -160,6 +165,20 @@ export function App() {
     });
   }, []);
 
+  /**
+   * Language works like the theme: apply, remember, re-render. Setting the
+   * state is what repaints the tree — `t()` reads the module-level language on
+   * the way through, so every string follows without a context provider.
+   */
+  const cycleLang = useCallback(() => {
+    setLangPref(previous => {
+      const next = nextLangPref(previous);
+      applyLang(next);
+      storeLangPref(next);
+      return next;
+    });
+  }, []);
+
   /** Run one settings action; applies state/toast/secret/copy side effects. */
   const act = useCallback(async (action: Record<string, unknown>): Promise<SettingsActionResult | null> => {
     try {
@@ -190,9 +209,9 @@ export function App() {
   const header = route === "settings"
     ? (() => {
         const sectionSpec = settingsSectionSpec(settingsSection);
-        return { title: `设置 · ${sectionSpec.label}`, hint: sectionSpec.hint };
+        return { title: `${t("设置", "Settings")} · ${sectionSpec.label()}`, hint: sectionSpec.hint() };
       })()
-    : { title: spec.label, hint: spec.hint };
+    : { title: spec.label(), hint: spec.hint() };
 
   return (
     // The shell root carries the layout class but stays interactive; inert is
@@ -219,9 +238,18 @@ export function App() {
             settings={settings}
             themePref={themePref}
             onCycleTheme={cycleTheme}
+            langPref={langPref}
+            onCycleLang={cycleLang}
             onOpen={open}
-            onCopyMcp={() => { void copyText(settings?.mcpUrl ?? ""); showToast("MCP 地址已复制。"); }}
-            onRefresh={() => { setReloadKey(key => key + 1); void refreshSettings(); showToast("已刷新。"); }}
+            onCopyMcp={() => {
+              void copyText(settings?.mcpUrl ?? "");
+              showToast(t("MCP 地址已复制。", "MCP URL copied."));
+            }}
+            onRefresh={() => {
+              setReloadKey(key => key + 1);
+              void refreshSettings();
+              showToast(t("已刷新。", "Refreshed."));
+            }}
             onToggleDrawer={() => setDrawer(value => !value)}
           />
 
@@ -231,10 +259,10 @@ export function App() {
               {route === "status" && <StatusTab act={act} onRefresh={refreshSettings} notify={showToast} onOpen={open} />}
               {route === "sessions" && <SessionsPage notify={showToast} />}
               {route === "todos" && <TodosPage />}
-              {route === "tools" && <ToolsPage notify={showToast} />}
+              {route === "tools" && <ToolsPage notify={showToast} settings={settings} act={act} />}
               {route === "health" && <HealthPage onOpen={open} />}
               {route === "services" && <ServicesTab notify={showToast} />}
-              {route === "logs" && <LogsTab />}
+              {route === "logs" && <LogsTab settings={settings} act={act} notify={showToast} />}
               {route === "stats" && <StatsTab />}
               {route === "security" && (settings ? (
                 <SecurityPage settings={settings} act={act} notify={showToast} />
@@ -279,14 +307,19 @@ export function App() {
             ref={secretBox}
             onClick={event => event.stopPropagation()}
           >
-            <h2 id="secret-title">{secret.kind === "minted" ? "令牌已创建" : "令牌已轮换"}</h2>
+            <h2 id="secret-title">
+              {secret.kind === "minted" ? t("令牌已创建", "Token created") : t("令牌已轮换", "Token rotated")}
+            </h2>
             <div className="section-note">
-              {secret.label} · {secret.ttl} — 明文只显示这一次，请立即保存。
+              {secret.label} · {secret.ttl}
+              {t(" — 明文只显示这一次，请立即保存。", " — the plaintext is shown only now; save it immediately.")}
             </div>
             <div className="secret-value">{secret.secret}</div>
             <div className="row" style={{ justifyContent: "flex-end" }}>
-              <button onClick={() => { void copyText(secret.secret); showToast("密钥已复制。"); }}>复制</button>
-              <button className="primary" onClick={() => setSecret(null)}>我已保存</button>
+              <button onClick={() => { void copyText(secret.secret); showToast(t("密钥已复制。", "Secret copied.")); }}>
+                {t("复制", "Copy")}
+              </button>
+              <button className="primary" onClick={() => setSecret(null)}>{t("我已保存", "I have saved it")}</button>
             </div>
           </div>
         </div>

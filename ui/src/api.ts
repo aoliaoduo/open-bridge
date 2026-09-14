@@ -5,6 +5,7 @@
 // contract (src/bridge/settings-model.ts) and the console consumes it, so the
 // two cannot drift apart. Deleting the local copies also surfaced a real
 // drift - the console's token row was missing `permanent` and nothing noticed.
+import { t } from "./i18n";
 import type {
   SecretPayload,
   SettingsActionResult,
@@ -163,7 +164,12 @@ async function getJson<T>(path: string): Promise<T> {
   // status lost.
   const data = (await res.json().catch(() => undefined)) as (T & { error?: string }) | undefined;
   if (!res.ok) throw new Error(data?.error ?? `GET ${path} → HTTP ${res.status}`);
-  if (data === undefined) throw new Error(`GET ${path} → 响应不是有效 JSON (HTTP ${res.status})`);
+  if (data === undefined) {
+    throw new Error(t(
+      `GET ${path} → 响应不是有效 JSON (HTTP ${res.status})`,
+      `GET ${path} → response was not valid JSON (HTTP ${res.status})`,
+    ));
+  }
   return data;
 }
 

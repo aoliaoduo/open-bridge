@@ -234,20 +234,19 @@ test("finish watchdog: a conversation with NO list still gets announced", () => 
   // walked away is just as away as one who watched a list finish. Requiring a
   // completed list meant short exchanges — the common case — never rang.
   const noList = { ...DONE, hasTodos: false, allCompleted: true };
-  // Silence must reach the operator's full idle threshold here, because
-  // without a list the only evidence of "ended" is the silence itself.
+  // Same 45 s settle as a finished list: being told promptly is the point, so
+  // a listless conversation does not wait out the idle threshold.
+  assert.equal(finishNoticeVerdict(noList), true, "a minute of quiet ends a listless chat");
   assert.equal(
     finishNoticeVerdict({ ...noList, lastUsedMs: DONE.nowMs - 10 * 60_000 }),
     true,
-    "10 min of quiet at idleMinutes=10 is an ended conversation",
+    "and longer silence certainly does",
   );
-  // One minute of quiet clears the 45 s settle a finished list uses, and that
-  // is exactly what must NOT be enough without a list: mid-conversation
-  // reading time would otherwise be announced as "finished".
+  // Still not instant: the settle delay has to let the model's own notify win.
   assert.equal(
-    finishNoticeVerdict(noList),
+    finishNoticeVerdict({ ...noList, lastUsedMs: DONE.nowMs - 1_000 }),
     false,
-    "a minute of quiet is someone reading, not someone gone",
+    "one second is mid-run, not an ending",
   );
 });
 

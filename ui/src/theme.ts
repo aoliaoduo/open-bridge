@@ -13,6 +13,8 @@
  * and the dark palette is written once instead of twice.
  */
 
+import { t } from "./i18n";
+
 export type ThemePref = "system" | "light" | "dark";
 export type ResolvedTheme = "light" | "dark";
 
@@ -66,9 +68,9 @@ export function nextThemePref(pref: ThemePref): ThemePref {
 }
 
 export function themePrefLabel(pref: ThemePref): string {
-  if (pref === "light") return "浅色";
-  if (pref === "dark") return "深色";
-  return "跟随系统";
+  if (pref === "light") return t("浅色", "Light");
+  if (pref === "dark") return t("深色", "Dark");
+  return t("跟随系统", "System");
 }
 
 /**

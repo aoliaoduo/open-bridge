@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { copyText } from "../api";
+import { t } from "../i18n";
 
 /**
  * Inline copy affordance with its own confirmation.
@@ -11,7 +12,7 @@ import { copyText } from "../api";
  * to trust a toast to know which row was copied.
  */
 export function CopyButton(
-  { value, label = "复制", onCopied, disabled = false, title, className = "" }: {
+  { value, label, onCopied, disabled = false, title, className = "" }: {
     value: string;
     label?: string;
     /** Optional shell notification; the button confirms itself either way. */
@@ -21,6 +22,10 @@ export function CopyButton(
     className?: string;
   },
 ) {
+  // Defaulted here rather than in the signature: a default parameter is
+  // evaluated once per render, but it must re-read the active language, and
+  // callers that pass their own label are unaffected either way.
+  const text = label ?? t("复制", "Copy");
   const [done, setDone] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -31,8 +36,8 @@ export function CopyButton(
       type="button"
       className={`copy-btn ${done ? "done" : ""} ${className}`.trim()}
       disabled={disabled}
-      title={title ?? `${label}：${value}`}
-      aria-label={done ? `${label}（已复制）` : label}
+      title={title ?? `${text}: ${value}`}
+      aria-label={done ? `${text}${t("（已复制）", " (copied)")}` : text}
       onClick={() => {
         void copyText(value).then(() => {
           setDone(true);
@@ -50,7 +55,7 @@ export function CopyButton(
             <path d="M15 5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
           </>}
       </svg>
-      {done ? "已复制" : label}
+      {done ? t("已复制", "Copied") : text}
     </button>
   );
 }

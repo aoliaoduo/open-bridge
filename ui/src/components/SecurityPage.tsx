@@ -13,6 +13,7 @@ import {
 // never restate.
 import { TTL_CHOICES } from "../../../src/bridge/settings-model.js";
 import { EXPOSURE_META } from "../exposure";
+import { t } from "../i18n";
 import { Card } from "./Card";
 import { Chip } from "./Chip";
 import { ConfirmButton } from "./ConfirmButton";
@@ -115,60 +116,74 @@ export function SecurityPage({ settings, act, notify }: Props) {
   };
 
   const tokenPill = (token: SettingsTokenRow) => {
-    if (token.revoked) return <Chip tone="err">已吊销</Chip>;
-    if (token.expired) return <Chip tone="err">已过期</Chip>;
-    return <Chip tone="ok">有效</Chip>;
+    if (token.revoked) return <Chip tone="err">{t("已吊销", "Revoked")}</Chip>;
+    if (token.expired) return <Chip tone="err">{t("已过期", "Expired")}</Chip>;
+    return <Chip tone="ok">{t("有效", "Valid")}</Chip>;
   };
 
   return (
     <>
       <Card
-        title="总览"
-        desc="这个实例现在能被谁访问：地址、暴露等级，以及两道门的开关。"
+        title={t("总览", "Overview")}
+        desc={t(
+          "这个实例现在能被谁访问：地址、暴露等级，以及两道门的开关。",
+          "Who can reach this instance right now: the address, the exposure level and both gates.",
+        )}
       >
         {report === null ? (
           <Skeleton lines={3} />
         ) : (
           <PropList
             items={[
-              { label: "当前状态", value: <Chip tone={exposure?.tone ?? "idle"}>{report.exposure}</Chip> },
-              { label: "含义", value: exposure?.text ?? "—" },
+              { label: t("当前状态", "Current state"), value: <Chip tone={exposure?.tone ?? "idle"}>{report.exposure}</Chip> },
+              { label: t("含义", "Meaning"), value: exposure?.text() ?? "—" },
               {
-                label: "地址",
+                label: t("地址", "Address"),
                 value: (
                   <span className="row-actions">
                     <span className="mono">{settings.mcpUrl}</span>
                     <CopyButton
                       value={settings.mcpUrl}
-                      label="复制地址"
-                      onCopied={() => notify?.("MCP 地址已复制。")}
+                      label={t("复制地址", "Copy address")}
+                      onCopied={() => notify?.(t("MCP 地址已复制。", "MCP URL copied."))}
                     />
                   </span>
                 ),
               },
               {
-                label: "Bearer 门禁",
-                value: <Chip tone={settings.authEnabled ? "ok" : "idle"}>{settings.authEnabled ? "已开启" : "已关闭"}</Chip>,
+                label: t("Bearer 门禁", "Bearer gate"),
+                value: (
+                  <Chip tone={settings.authEnabled ? "ok" : "idle"}>
+                    {settings.authEnabled ? t("已开启", "On") : t("已关闭", "Off")}
+                  </Chip>
+                ),
               },
               {
                 label: "OAuth 2.1",
-                value: <Chip tone={cfg["oauth.enabled"] ? "ok" : "idle"}>{cfg["oauth.enabled"] ? "已开启" : "已关闭"}</Chip>,
+                value: (
+                  <Chip tone={cfg["oauth.enabled"] ? "ok" : "idle"}>
+                    {cfg["oauth.enabled"] ? t("已开启", "On") : t("已关闭", "Off")}
+                  </Chip>
+                ),
               },
               {
-                label: "操作",
+                label: t("操作", "Actions"),
                 value: (
                   <button
                     type="button"
                     className="small icon-text"
                     disabled={rotating || !settings.running}
                     onClick={() => void rotate()}
-                    title="换掉 MCP 地址里的路由令牌，旧地址立即失效（控制台会自动重载）"
+                    title={t(
+                      "换掉 MCP 地址里的路由令牌，旧地址立即失效（控制台会自动重载）",
+                      "Replace the route token in the MCP URL; the old address stops working immediately (the console reloads itself)",
+                    )}
                   >
                     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                       <path d="M19 5v5h-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                       <path d="M18.4 10a7 7 0 1 0 .2 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
                     </svg>
-                    {rotating ? "轮换中…" : "轮换端点"}
+                    {rotating ? t("轮换中…", "Rotating…") : t("轮换端点", "Rotate endpoint")}
                   </button>
                 ),
               },
@@ -178,12 +193,15 @@ export function SecurityPage({ settings, act, notify }: Props) {
       </Card>
 
       <Card
-        title="Bearer 门禁"
-        desc="打开后，/mcp 的每个请求都必须带 Bearer 令牌；只填 URL 连不上。"
+        title={t("Bearer 门禁", "Bearer gate")}
+        desc={t(
+          "打开后，/mcp 的每个请求都必须带 Bearer 令牌；只填 URL 连不上。",
+          "Once on, every request to /mcp must carry a Bearer token; the URL alone will not connect.",
+        )}
       >
         <div className="form-grid">
           <div className="field">
-            <span className="field-label">Bearer 门禁</span>
+            <span className="field-label">{t("Bearer 门禁", "Bearer gate")}</span>
             <span className="field-control">
               <label className="check">
                 <input
@@ -192,48 +210,57 @@ export function SecurityPage({ settings, act, notify }: Props) {
                   checked={settings.authEnabled}
                   onChange={e => void act({ command: "setAuthEnabled", enabled: e.target.checked })}
                 />
-                <span>{settings.authEnabled ? "已开启（Bearer）" : "已关闭"}</span>
+                <span>{settings.authEnabled ? t("已开启（Bearer）", "On (Bearer)") : t("已关闭", "Off")}</span>
               </label>
             </span>
             <span className="field-hint">
               {settings.authEnabled
-                ? "已开启：请求必须带 Bearer 令牌。"
-                : "已关闭：只填 URL 即可接入。"}
+                ? t("已开启：请求必须带 Bearer 令牌。", "On: requests must carry a Bearer token.")
+                : t("已关闭：只填 URL 即可接入。", "Off: the URL alone is enough to connect.")}
             </span>
           </div>
           <div className="field">
-            <span className="field-label">一步完成</span>
+            <span className="field-label">{t("一步完成", "One step")}</span>
             <span className="field-control">
               <ConfirmButton
                 className="primary"
                 disabled={arming}
-                label={arming ? "启用中…" : "签发令牌并启用门禁"}
+                label={arming ? t("启用中…", "Enabling…") : t("签发令牌并启用门禁", "Mint a token and enable the gate")}
                 onConfirm={() => void arm()}
               />
             </span>
-            <span className="field-hint">已有可用令牌时会复用，不多发；明文只显示一次。</span>
+            <span className="field-hint">
+              {t("已有可用令牌时会复用，不多发；明文只显示一次。", "Reuses a usable token if there is one; the plaintext is shown once.")}
+            </span>
           </div>
         </div>
       </Card>
 
       <Card
-        title="个人令牌"
-        desc="发给客户端的钥匙：可设有效期，可单独吊销/轮换。明文只在创建那一刻显示一次；轮换会立即作废旧值，吊销则直接作废。"
+        title={t("个人令牌", "Personal tokens")}
+        desc={t(
+          "发给客户端的钥匙：可设有效期，可单独吊销/轮换。明文只在创建那一刻显示一次；轮换会立即作废旧值，吊销则直接作废。",
+          "The keys you hand to clients: each can expire and be revoked or rotated on its own. The plaintext appears once at creation; rotating invalidates the old value immediately, revoking kills it outright.",
+        )}
         actions={
           <div className="btn-group">
-            <Chip tone={settings.usableCount > 0 ? "ok" : "idle"}>{settings.usableCount} 有效</Chip>
-            <Chip tone={settings.deadCount > 0 ? "warn" : "idle"}>{settings.deadCount} 失效</Chip>
+            <Chip tone={settings.usableCount > 0 ? "ok" : "idle"}>
+              {t(`${settings.usableCount} 有效`, `${settings.usableCount} valid`)}
+            </Chip>
+            <Chip tone={settings.deadCount > 0 ? "warn" : "idle"}>
+              {t(`${settings.deadCount} 失效`, `${settings.deadCount} dead`)}
+            </Chip>
             <button type="button" className="small primary" onClick={() => setShowForm(v => !v)}>
-              {showForm ? "收起" : "新建令牌"}
+              {showForm ? t("收起", "Close") : t("新建令牌", "New token")}
             </button>
           </div>
         }
       >
         <div className="field">
-          <span className="field-label">新令牌默认有效期</span>
+          <span className="field-label">{t("新令牌默认有效期", "Default lifetime for new tokens")}</span>
           <span className="field-control">
             <select
-              aria-label="新令牌默认有效期"
+              aria-label={t("新令牌默认有效期", "Default lifetime for new tokens")}
               value={settings.defaultTtlSeconds}
               onChange={e => void act({ command: "setDefaultTtl", seconds: Number(e.target.value) })}
             >
@@ -242,13 +269,21 @@ export function SecurityPage({ settings, act, notify }: Props) {
               ))}
             </select>
           </span>
-          <span className="field-hint">只影响之后新建的令牌；已有令牌的到期时间不变。</span>
+          <span className="field-hint">
+            {t("只影响之后新建的令牌；已有令牌的到期时间不变。", "Applies to tokens created later; existing expiry dates do not change.")}
+          </span>
         </div>
 
         {showForm && (
           <div className="form-inline">
-            <input type="text" placeholder="标签（如 chatgpt-web）" value={label} onChange={e => setLabel(e.target.value)} aria-label="令牌标签" />
-            <select value={ttl} onChange={e => setTtl(Number(e.target.value))} aria-label="令牌有效期">
+            <input
+              type="text"
+              placeholder={t("标签（如 chatgpt-web）", "Label (e.g. chatgpt-web)")}
+              value={label}
+              onChange={e => setLabel(e.target.value)}
+              aria-label={t("令牌标签", "Token label")}
+            />
+            <select value={ttl} onChange={e => setTtl(Number(e.target.value))} aria-label={t("令牌有效期", "Token lifetime")}>
               {TTL_CHOICES.map(choice => (
                 <option key={choice.seconds} value={choice.seconds}>{choice.label}</option>
               ))}
@@ -257,27 +292,30 @@ export function SecurityPage({ settings, act, notify }: Props) {
                 the one-time plaintext of the first was overwritten — an
                 unauthenticated-forever token nobody could ever use. */}
             <button className="primary small" disabled={creating} onClick={() => void create()}>
-              {creating ? "创建中…" : "创建"}
+              {creating ? t("创建中…", "Creating…") : t("创建", "Create")}
             </button>
           </div>
         )}
 
         {settings.tokens.length === 0 ? (
           <div className="section-note" style={{ marginBottom: 0 }}>
-            还没有令牌。用上面的「签发令牌并启用门禁」一步完成，或先在这里新建一个。
+            {t(
+              "还没有令牌。用上面的「签发令牌并启用门禁」一步完成，或先在这里新建一个。",
+              "No tokens yet. Use the one-step button above, or create one here first.",
+            )}
           </div>
         ) : (
           <div className="table-wrap">
             <table className="token-table">
               <thead>
                 <tr>
-                  <th>标签</th>
+                  <th>{t("标签", "Label")}</th>
                   <th>ID</th>
-                  <th>状态</th>
-                  <th>创建</th>
-                  <th>过期</th>
-                  <th className="num">使用</th>
-                  <th className="actions">操作</th>
+                  <th>{t("状态", "State")}</th>
+                  <th>{t("创建", "Created")}</th>
+                  <th>{t("过期", "Expires")}</th>
+                  <th className="num">{t("使用", "Uses")}</th>
+                  <th className="actions">{t("操作", "Actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -289,24 +327,32 @@ export function SecurityPage({ settings, act, notify }: Props) {
                         {token.id}
                         <CopyButton
                           value={token.id}
-                          label="复制令牌 ID"
-                          onCopied={() => notify?.("令牌 ID 已复制。")}
+                          label={t("复制令牌 ID", "Copy token ID")}
+                          onCopied={() => notify?.(t("令牌 ID 已复制。", "Token ID copied."))}
                         />
                       </span>
                     </td>
                     <td>{tokenPill(token)}</td>
                     <td className="muted">{fmtDate(token.created_at)}</td>
-                    <td className="muted">{token.expires_at ? fmtDate(token.expires_at) : "永久"}</td>
+                    <td className="muted">{token.expires_at ? fmtDate(token.expires_at) : t("永久", "Never")}</td>
                     <td className="num">{token.use_count}</td>
                     <td className="actions">
                       <span className="row-actions">
                         {!token.revoked && !token.expired && (
                           <>
-                            <button className="small" onClick={() => void act({ command: "rotateToken", id: token.id })}>轮换</button>
-                            <ConfirmButton label="吊销" onConfirm={() => void act({ command: "revokeToken", id: token.id })} />
+                            <button className="small" onClick={() => void act({ command: "rotateToken", id: token.id })}>
+                              {t("轮换", "Rotate")}
+                            </button>
+                            <ConfirmButton
+                              label={t("吊销", "Revoke")}
+                              onConfirm={() => void act({ command: "revokeToken", id: token.id })}
+                            />
                           </>
                         )}
-                        <ConfirmButton label="删除" onConfirm={() => void act({ command: "deleteToken", id: token.id })} />
+                        <ConfirmButton
+                          label={t("删除", "Delete")}
+                          onConfirm={() => void act({ command: "deleteToken", id: token.id })}
+                        />
                       </span>
                     </td>
                   </tr>
@@ -318,17 +364,22 @@ export function SecurityPage({ settings, act, notify }: Props) {
 
         <div className="card-foot">
           <button className="small" disabled={settings.deadCount === 0} onClick={() => void act({ command: "purgeTokens" })}>
-            清理失效令牌
+            {t("清理失效令牌", "Purge dead tokens")}
           </button>
-          <ConfirmButton label="吊销全部" onConfirm={() => void act({ command: "revokeAll" })} />
+          <ConfirmButton label={t("吊销全部", "Revoke all")} onConfirm={() => void act({ command: "revokeAll" })} />
           <span className="spacer" />
-          <span className="section-note" style={{ margin: 0 }}>共 {settings.tokens.length} 条</span>
+          <span className="section-note" style={{ margin: 0 }}>
+            {t(`共 ${settings.tokens.length} 条`, `${settings.tokens.length} total`)}
+          </span>
         </div>
       </Card>
 
       <Card
-        title="OAuth 2.1（可选）"
-        desc="给客户端发它自己的凭据，而不是让所有人共用地址里的路由令牌。"
+        title={t("OAuth 2.1（可选）", "OAuth 2.1 (optional)")}
+        desc={t(
+          "给客户端发它自己的凭据，而不是让所有人共用地址里的路由令牌。",
+          "Give each client credentials of its own instead of everyone sharing the route token in the URL.",
+        )}
       >
         <div className="field">
           <label className="check">
@@ -338,17 +389,25 @@ export function SecurityPage({ settings, act, notify }: Props) {
               checked={cfg["oauth.enabled"]}
               onChange={e => setConfig("oauth.enabled", e.target.checked)}
             />
-            <span className="field-label">启用 OAuth 2.1 授权服务器</span>
+            <span className="field-label">{t("启用 OAuth 2.1 授权服务器", "Enable the OAuth 2.1 authorization server")}</span>
           </label>
           {/* The consequence belongs next to the switch: turning this on is what
               makes the URL stop being enough, and that is a decision, not a bug
               report waiting in a client's logs. */}
           <span className="field-hint">
             {cfg["oauth.enabled"]
-              ? "已开启 — /mcp 需要 OAuth 凭据：能走标准流程的客户端会先收到 401（这不是故障，正是它开始授权的信号），"
-                + "注册后拿到属于它自己的、可单独吊销的凭据。已经持有令牌的客户端不受影响：Authorization: Bearer 或 ?token= 照常通过。"
-              : "默认关闭 — 客户端在地址里带路由令牌即可接入。打开后，只认 URL 的客户端会收到 401 并要求走 OAuth；"
-                + "带不了头的那类客户端可以改用 ?token=<令牌> 的地址，或者不改、继续关着。"}
+              ? t(
+                "已开启 — /mcp 需要 OAuth 凭据：能走标准流程的客户端会先收到 401（这不是故障，正是它开始授权的信号），"
+                  + "注册后拿到属于它自己的、可单独吊销的凭据。已经持有令牌的客户端不受影响：Authorization: Bearer 或 ?token= 照常通过。",
+                "On — /mcp requires OAuth credentials. A client that speaks the standard flow gets a 401 first (not a fault: that is its cue to start authorizing), "
+                  + "then registers and receives its own separately revocable credentials. Clients that already hold a token are unaffected: Authorization: Bearer and ?token= still pass.",
+              )
+              : t(
+                "默认关闭 — 客户端在地址里带路由令牌即可接入。打开后，只认 URL 的客户端会收到 401 并要求走 OAuth；"
+                  + "带不了头的那类客户端可以改用 ?token=<令牌> 的地址，或者不改、继续关着。",
+                "Off by default — the route token in the URL is enough to connect. Turn it on and URL-only clients get a 401 asking them to do OAuth; "
+                  + "clients that cannot send headers can switch to a ?token=<token> address, or you can simply leave this off.",
+              )}
           </span>
         </div>
         {cfg["oauth.enabled"] && <OAuthPanel hosts={cfg["oauth.allowedRedirectHosts"]} setConfig={setConfig} />}
@@ -384,17 +443,20 @@ function OAuthPanel({ hosts, setConfig }: {
   return (
     <>
       <div className="field">
-        <span className="field-label">允许的回调主机</span>
+        <span className="field-label">{t("允许的回调主机", "Allowed redirect hosts")}</span>
         <span className="field-control">
           <DraftField
             multiline
             value={hosts.join("\n")}
-            placeholder={"允许的回调主机，每行一个，如\nchatgpt.com"}
+            placeholder={t("允许的回调主机，每行一个，如\nchatgpt.com", "Allowed redirect hosts, one per line, e.g.\nchatgpt.com")}
             onCommit={raw => setConfig("oauth.allowedRedirectHosts", raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean))}
           />
         </span>
         <span className="field-hint">
-          注册时按主机名精确匹配；localhost / 127.0.0.1 / [::1] 永远放行；留空 = 只用内置名单；失焦时保存
+          {t(
+            "注册时按主机名精确匹配；localhost / 127.0.0.1 / [::1] 永远放行；留空 = 只用内置名单；失焦时保存",
+            "Matched exactly by hostname at registration; localhost / 127.0.0.1 / [::1] always pass; empty = built-in list only; saved on blur",
+          )}
         </span>
       </div>
 
@@ -404,35 +466,43 @@ function OAuthPanel({ hosts, setConfig }: {
         <>
           <div className="props">
             <div className="prop">
-              <span className="prop-label">在用凭据</span>
+              <span className="prop-label">{t("在用凭据", "Credentials in use")}</span>
               <span className="prop-value">
-                已注册客户端 {view.counts.clients} 个 · 在用访问令牌 {view.counts.activeAccessTokens} 个 · 刷新令牌 {view.counts.activeRefreshTokens} 个
+                {t(
+                  `已注册客户端 ${view.counts.clients} 个 · 在用访问令牌 ${view.counts.activeAccessTokens} 个 · 刷新令牌 ${view.counts.activeRefreshTokens} 个`,
+                  `${view.counts.clients} registered clients · ${view.counts.activeAccessTokens} active access tokens · ${view.counts.activeRefreshTokens} refresh tokens`,
+                )}
               </span>
             </div>
             <div className="prop">
-              <span className="prop-label">签发者</span>
+              <span className="prop-label">{t("签发者", "Issuer")}</span>
               <span className="prop-value mono">{view.issuer}</span>
             </div>
             <div className="prop">
-              <span className="prop-label">业主来源</span>
+              <span className="prop-label">{t("业主来源", "Owner source")}</span>
               <span className="prop-value">
-                <Chip tone="idle">{view.ownerSource === "env" ? "环境变量" : "路由令牌"}</Chip>
+                <Chip tone="idle">
+                  {view.ownerSource === "env" ? t("环境变量", "Environment variable") : t("路由令牌", "Route token")}
+                </Chip>
               </span>
             </div>
           </div>
           {note ? <div className="section-note">{note}</div> : null}
           {view.clients.length === 0 ? (
             <div className="section-note" style={{ marginBottom: 0 }}>
-              还没有客户端注册；第一个走标准流程的客户端连上来时会自动注册。
+              {t(
+                "还没有客户端注册；第一个走标准流程的客户端连上来时会自动注册。",
+                "No clients registered yet; the first one that speaks the standard flow registers itself.",
+              )}
             </div>
           ) : (
             <div className="table-wrap">
               <table className="token-table">
                 <thead>
                   <tr>
-                    <th>客户端</th>
-                    <th>回调地址</th>
-                    <th className="num">注册时间</th>
+                    <th>{t("客户端", "Client")}</th>
+                    <th>{t("回调地址", "Redirect URI")}</th>
+                    <th className="num">{t("注册时间", "Registered")}</th>
                   </tr>
                 </thead>
                 <tbody>

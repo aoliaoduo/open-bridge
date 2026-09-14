@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { t } from "../i18n";
 
 /**
  * Two-step confirm: arms on the first click, fires on the second, disarms when
@@ -22,7 +23,7 @@ export function ConfirmButton(
         onBlur={() => setArmed(false)}
         onClick={() => { setArmed(false); onConfirm(); }}
       >
-        确认？
+        {t("确认？", "Confirm?")}
       </button>
     );
   }

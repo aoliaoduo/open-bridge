@@ -246,11 +246,10 @@ describe("App shell", () => {
     expect(screen.queryByText("MCP 端点")).toBeNull();
     expect(window.location.pathname).toBe("/console/settings");
     // Settings sub-pages are real paths now: clicking the rail swaps the card
-    // AND the URL, so the 日志轮转 card is directly linkable and reloadable.
-    fireEvent.click(screen.getByRole("button", { name: "日志轮转" }));
-    expect(await screen.findByText("单文件上限")).toBeTruthy();
-    expect(await screen.findByDisplayValue("10485760")).toBeTruthy();
-    expect(window.location.pathname).toBe("/console/settings/logs");
+    // AND the URL, so the 并发 card is directly linkable and reloadable.
+    fireEvent.click(screen.getByRole("button", { name: "并发" }));
+    expect(await screen.findByText("占用上限")).toBeTruthy();
+    expect(window.location.pathname).toBe("/console/settings/locks");
   });
 
   test("deep-links straight to a page from the URL", async () => {
@@ -649,14 +648,63 @@ describe("App shell: in-page filtering and rails", () => {
     render(<App />);
     await screen.findByText("隧道（ngrok）");
 
-    const item = screen.getByRole("button", { name: "日志轮转" });
+    const item = screen.getByRole("button", { name: "并发" });
     expect(item.getAttribute("aria-current")).toBeNull();
 
     fireEvent.click(item);
 
     expect(item.getAttribute("aria-current")).toBe("true");
     // The target exists: a rail entry that scrolls nowhere is worse than none.
-    expect(document.getElementById("set-logs")).toBeTruthy();
+    expect(document.getElementById("set-locks")).toBeTruthy();
+  });
+
+  test("the header switches the console between 中文 and English", async () => {
+    render(<App />);
+    await screen.findByText("MCP 端点");
+
+    // Starts in 中文 (the suite pins it); one click on the language button is
+    // the whole affordance an English operator needs to find.
+    const button = screen.getByRole("button", { name: "中文" });
+    fireEvent.click(button);
+
+    // Sidebar, breadcrumb and page header all follow, because they read the
+    // same getters rather than holding strings captured at module load.
+    expect(await screen.findByRole("link", { name: "Status" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Settings" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Run health check" })).toBeTruthy();
+    expect(document.documentElement.lang).toBe("en");
+    // The tab name is not React-rendered, so it needs its own dependency.
+    expect(document.title).toBe("Status · Open Bridge Console");
+
+    // And the choice is remembered, so a reload does not drop them back.
+    expect(window.localStorage.getItem("openBridge.console.lang")).toBe("en");
+  });
+
+  test("a setting lives with the thing it governs, not in a settings drawer", async () => {
+    // 工具集 decides what the tool catalog contains and 日志轮转 governs the log
+    // pane, so both now sit on those pages. Asserting their ABSENCE from 设置
+    // as well is the half that catches a copy left behind in two places.
+    window.history.pushState({}, "", "/console/tools");
+    render(<App />);
+
+    const profile = await screen.findByLabelText("工具集");
+    expect((profile as HTMLSelectElement).value).toBe("full");
+    await screen.findByText("工具目录");
+
+    cleanup();
+    window.history.pushState({}, "", "/console/logs");
+    render(<App />);
+
+    expect(await screen.findByLabelText("单文件上限")).toBeTruthy();
+    expect(await screen.findByDisplayValue("10485760")).toBeTruthy();
+
+    cleanup();
+    window.history.pushState({}, "", "/console/settings/shell");
+    render(<App />);
+
+    await screen.findByText("Shell 路径");
+    expect(screen.queryByLabelText("工具集")).toBeNull();
+    expect(screen.queryByLabelText("单文件上限")).toBeNull();
   });
 });
 

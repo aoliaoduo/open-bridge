@@ -1,21 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type HealthCheck, type HealthReport } from "../api";
 import type { RouteId } from "../routes";
+import { t } from "../i18n";
 import { Card } from "./Card";
 import { Chip } from "./Chip";
 import { Skeleton } from "./Skeleton";
 import { Stat } from "./Stat";
 
-const LABELS: Record<string, string> = {
-  instance: "实例",
-  workspace: "工作区",
-  tools: "工具目录",
+const LABELS: Record<string, () => string> = {
+  instance: () => t("实例", "Instance"),
+  workspace: () => t("工作区", "Workspace"),
+  tools: () => t("工具目录", "Tool catalog"),
   // The build check arrived after this map did, so the row rendered the raw
   // English name on a page where every other row is labelled.
-  build: "构建",
-  tunnel: "隧道",
-  public: "公网连通",
-  exposure: "暴露面",
+  build: () => t("构建", "Build"),
+  tunnel: () => t("隧道", "Tunnel"),
+  public: () => t("公网连通", "Public reachability"),
+  exposure: () => t("暴露面", "Exposure"),
 };
 
 
@@ -63,32 +64,56 @@ export function HealthPage(
   // 异常 is a defect; 提醒 is a risk the operator may be choosing on purpose
   // (public-open with no Bearer gate). Both were 异常 before, which made every
   // healthy instance look broken.
-  const summary = failed > 0 ? `${failed} 项异常。` : warned > 0 ? `无异常，${warned} 项提醒。` : "全部通过。";
+  const summary = failed > 0
+    ? t(`${failed} 项异常。`, `${failed} failing.`)
+    : warned > 0 ? t(`无异常，${warned} 项提醒。`, `No failures, ${warned} to look at.`)
+      : t("全部通过。", "All checks passed.");
   const meterTone = failed > 0 ? "err" : warned > 0 ? "warn" : "ok";
 
   return (
     <>
       {report ? (
         <div className="stats three">
-          <Stat label="检查通过" value={passed} hint={`共 ${total} 项检查`} tone="ok" />
-          <Stat label="需要留意" value={warned} hint={warned > 0 ? "风险，未必是故障" : "没有需要留意的项"} tone={warned > 0 ? "warn" : "plain"} />
-          <Stat label="失败项" value={failed} hint={failed > 0 ? "需要处理" : "没有失败项"} tone={failed > 0 ? "err" : "plain"} />
+          <Stat
+            label={t("检查通过", "Passed")}
+            value={passed}
+            hint={t(`共 ${total} 项检查`, `${total} checks in total`)}
+            tone="ok"
+          />
+          <Stat
+            label={t("需要留意", "Worth a look")}
+            value={warned}
+            hint={warned > 0
+              ? t("风险，未必是故障", "A risk, not necessarily a fault")
+              : t("没有需要留意的项", "Nothing to look at")}
+            tone={warned > 0 ? "warn" : "plain"}
+          />
+          <Stat
+            label={t("失败项", "Failing")}
+            value={failed}
+            hint={failed > 0 ? t("需要处理", "Needs attention") : t("没有失败项", "No failures")}
+            tone={failed > 0 ? "err" : "plain"}
+          />
         </div>
       ) : null}
 
       <Card
-        title="体检结果"
+        title={t("体检结果", "Health report")}
         desc={
           <>
-            「公网连通」会用真实请求穿过隧道访问 <span className="mono">/healthz</span>（6 秒超时），
-            所以它比别的项慢；隧道没开时会跳过并标注为仅本机。
+            {t("「公网连通」会用真实请求穿过隧道访问 ", "Public reachability makes a real request through the tunnel to ")}
+            <span className="mono">/healthz</span>
+            {t(
+              "（6 秒超时），所以它比别的项慢；隧道没开时会跳过并标注为仅本机。",
+              " (6s timeout), so it is slower than the rest; with no tunnel it is skipped and marked local-only.",
+            )}
           </>
         }
         actions={
           <div className="btn-group">
             {report && <span className="section-note" style={{ margin: 0 }}>{summary}</span>}
             <button type="button" className="primary small" disabled={busy} onClick={() => void run()}>
-              {busy ? "体检中…" : "重新体检"}
+              {busy ? t("体检中…", "Checking…") : t("重新体检", "Run again")}
             </button>
           </div>
         }
@@ -102,26 +127,26 @@ export function HealthPage(
                   style={{ width: `${total ? Math.round((passed / total) * 100) : 0}%` }}
                 />
               </div>
-              <span className="meter-label">{passed} / {total} 项已通过</span>
+              <span className="meter-label">{t(`${passed} / ${total} 项已通过`, `${passed} / ${total} passed`)}</span>
             </div>
             <div className="table-wrap">
               <table className="token-table">
                 <thead>
                   <tr>
-                    <th>结果</th>
-                    <th>检查项</th>
-                    <th>详情</th>
+                    <th>{t("结果", "Result")}</th>
+                    <th>{t("检查项", "Check")}</th>
+                    <th>{t("详情", "Detail")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {report.checks.map(check => (
                     <tr key={check.name}>
                       <td>
-                        {levelOf(check) === "ok" && <Chip tone="ok">通过</Chip>}
-                        {levelOf(check) === "warn" && <Chip tone="warn">提醒</Chip>}
-                        {levelOf(check) === "fail" && <Chip tone="err">异常</Chip>}
+                        {levelOf(check) === "ok" && <Chip tone="ok">{t("通过", "Pass")}</Chip>}
+                        {levelOf(check) === "warn" && <Chip tone="warn">{t("提醒", "Warn")}</Chip>}
+                        {levelOf(check) === "fail" && <Chip tone="err">{t("异常", "Fail")}</Chip>}
                       </td>
-                      <td className="name">{LABELS[check.name] ?? check.name}</td>
+                      <td className="name">{LABELS[check.name]?.() ?? check.name}</td>
                       <td className="mono wrap">{check.detail}</td>
                     </tr>
                   ))}
@@ -132,9 +157,14 @@ export function HealthPage(
         )}
       </Card>
 
-      <div className="card section-note">暴露面详情与加固去「安全」页。{onOpen ? (
-        <button type="button" className="small" onClick={() => onOpen("security")}>去安全页</button>
-      ) : null}</div>
+      <div className="card section-note">
+        {t("暴露面详情与加固去「安全」页。", "Exposure detail and hardening live on the Security page.")}
+        {onOpen ? (
+          <button type="button" className="small" onClick={() => onOpen("security")}>
+            {t("去安全页", "Open Security")}
+          </button>
+        ) : null}
+      </div>
 
       {note && <div className="card section-note">{note}</div>}
     </>

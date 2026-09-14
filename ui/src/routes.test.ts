@@ -31,7 +31,9 @@ describe("currentRoute", () => {
 describe("currentSettingsSection", () => {
   test("parses a known section tail", () => {
     expect(currentSettingsSection("/console/settings/notify")).toBe("notify");
-    expect(currentSettingsSection("/console/settings/logs/")).toBe("logs");
+    // 日志轮转 moved to the 日志 page, so this tail is no longer a section and
+    // falls back to the first card rather than 404-ing an old bookmark.
+    expect(currentSettingsSection("/console/settings/logs/")).toBe("tunnel");
   });
 
   test("bare settings, foreign paths and junk tails all land on the default", () => {

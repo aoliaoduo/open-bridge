@@ -1,4 +1,5 @@
 import { ROUTES, ROUTE_GROUPS, routePath, type RouteId } from "../routes";
+import { t } from "../i18n";
 import { themePrefLabel, type ThemePref } from "../theme";
 
 interface Props {
@@ -41,14 +42,14 @@ export function Sidebar({ route, collapsed, drawerOpen, themePref, onToggleColla
         </svg>
         <span className="brand-text">
           <span className="brand-name">Open Bridge</span>
-          <span className="brand-sub">控制台</span>
+          <span className="brand-sub">{t("控制台", "Console")}</span>
         </span>
         <button
           type="button"
           className="icon-btn collapse-btn"
           aria-expanded={!collapsed}
-          aria-label={collapsed ? "展开导航" : "收起导航"}
-          title={collapsed ? "展开导航" : "收起导航"}
+          aria-label={collapsed ? t("展开导航", "Expand navigation") : t("收起导航", "Collapse navigation")}
+          title={collapsed ? t("展开导航", "Expand navigation") : t("收起导航", "Collapse navigation")}
           onClick={onToggleCollapsed}
         >
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -63,16 +64,16 @@ export function Sidebar({ route, collapsed, drawerOpen, themePref, onToggleColla
         </button>
       </div>
 
-      <nav className="nav" aria-label="控制台导航">
+      <nav className="nav" aria-label={t("控制台导航", "Console navigation")}>
         {ROUTE_GROUPS.map(group => (
           <div className="nav-group" key={group.id}>
-            <div className="nav-group-label">{group.label}</div>
+            <div className="nav-group-label">{group.label()}</div>
             {ROUTES.filter(item => item.group === group.id).map(item => (
               <a
                 key={item.id}
                 className={`nav-item${route === item.id ? " active" : ""}`}
                 href={routePath(item.id)}
-                title={item.hint}
+                title={item.hint()}
                 aria-current={route === item.id ? "page" : undefined}
                 onClick={event => {
                   // Real links: ctrl/cmd-click and "open in new tab" keep working,
@@ -88,7 +89,7 @@ export function Sidebar({ route, collapsed, drawerOpen, themePref, onToggleColla
                     <path key={index} d={path} stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                   ))}
                 </svg>
-                <span className="nav-label">{item.label}</span>
+                <span className="nav-label">{item.label()}</span>
               </a>
             ))}
           </div>
@@ -99,10 +100,15 @@ export function Sidebar({ route, collapsed, drawerOpen, themePref, onToggleColla
         {/* The topbar hides its theme toggle on narrow screens to keep the
             action row from wrapping; the sidebar foot gives the same control
             a permanent home so 跟随系统 / 浅色 / 深色 is reachable on mobile. */}
-        <button type="button" className="ghost theme-foot" onClick={onCycleTheme} title="在 跟随系统 / 浅色 / 深色 之间切换">
-          主题：{themePrefLabel(themePref)}
+        <button
+          type="button"
+          className="ghost theme-foot"
+          onClick={onCycleTheme}
+          title={t("在 跟随系统 / 浅色 / 深色 之间切换", "Switch between System / Light / Dark")}
+        >
+          {t("主题：", "Theme: ")}{themePrefLabel(themePref)}
         </button>
-        <span className="sidebar-foot-note">独立版 · 本地面板</span>
+        <span className="sidebar-foot-note">{t("独立版 · 本地面板", "Standalone · local panel")}</span>
       </div>
     </aside>
   );

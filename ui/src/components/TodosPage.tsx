@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type TodoBoard, type TodoItem } from "../api";
+import { t } from "../i18n";
 import { Card } from "./Card";
 import { Chip } from "./Chip";
 import { EmptyState } from "./EmptyState";
@@ -19,10 +20,11 @@ import { Skeleton } from "./Skeleton";
  * plan mid-run, and the two would silently disagree about what was done.
  */
 
-const STATUS_LABEL: Record<string, string> = {
-  completed: "已完成",
-  in_progress: "进行中",
-  pending: "待办",
+/** Getter per status so the labels re-read the active language on each render. */
+const STATUS_LABEL: Record<string, () => string> = {
+  completed: () => t("已完成", "Done"),
+  in_progress: () => t("进行中", "In progress"),
+  pending: () => t("待办", "To do"),
 };
 
 function tone(status: string): "ok" | "accent" | "idle" {
@@ -37,10 +39,10 @@ function ago(iso: string | undefined): string {
   const then = new Date(iso).getTime();
   if (!Number.isFinite(then)) return "";
   const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (seconds < 60) return `${seconds} 秒前`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟前`;
-  if (seconds < 86400) return `${Math.round(seconds / 3600)} 小时前`;
-  return `${Math.round(seconds / 86400)} 天前`;
+  if (seconds < 60) return t(`${seconds} 秒前`, `${seconds}s ago`);
+  if (seconds < 3600) return t(`${Math.round(seconds / 60)} 分钟前`, `${Math.round(seconds / 60)}m ago`);
+  if (seconds < 86400) return t(`${Math.round(seconds / 3600)} 小时前`, `${Math.round(seconds / 3600)}h ago`);
+  return t(`${Math.round(seconds / 86400)} 天前`, `${Math.round(seconds / 86400)}d ago`);
 }
 
 function TodoRow({ todo, index }: { todo: TodoItem; index: number }) {
@@ -67,7 +69,7 @@ function TodoRow({ todo, index }: { todo: TodoItem; index: number }) {
       </span>
       <span className="todo-index">{index + 1}</span>
       <span className="todo-title">{todo.title}</span>
-      <Chip tone={tone(todo.status)}>{STATUS_LABEL[todo.status] ?? todo.status}</Chip>
+      <Chip tone={tone(todo.status)}>{STATUS_LABEL[todo.status]?.() ?? todo.status}</Chip>
     </li>
   );
 }
@@ -101,7 +103,7 @@ export function TodosPage() {
 
   if (!board) {
     return (
-      <Card title="任务清单" desc="AI 通过 set_todos 写入的计划">
+      <Card title={t("任务清单", "Task list")} desc={t("AI 通过 set_todos 写入的计划", "The plan the AI wrote with set_todos")}>
         {note ? <p className="muted">{note}</p> : <Skeleton lines={4} />}
       </Card>
     );
@@ -114,17 +116,32 @@ export function TodosPage() {
   return (
     <>
       <Card
-        title="任务清单"
-        desc="AI 通过 set_todos 写入的计划；本页只读，勾选由 AI 那边推进"
+        title={t("任务清单", "Task list")}
+        desc={t(
+          "AI 通过 set_todos 写入的计划；本页只读，勾选由 AI 那边推进",
+          "The plan the AI wrote with set_todos. Read-only here — the AI ticks the boxes.",
+        )}
         actions={
           board.stale
-            ? <Chip tone="warn" title="没有会话在驱动这份清单，它是上一个 AI 断开时留下的">已离线</Chip>
-            : <Chip tone="ok">实时</Chip>
+            ? (
+              <Chip
+                tone="warn"
+                title={t(
+                  "没有会话在驱动这份清单，它是上一个 AI 断开时留下的",
+                  "No session is driving this list; it was left behind when the last AI disconnected",
+                )}
+              >
+                {t("已离线", "Stale")}
+              </Chip>
+            )
+            : <Chip tone="ok">{t("实时", "Live")}</Chip>
         }
       >
         {counts.total === 0 ? (
-          <EmptyState title="还没有任务">
-            连上来的 AI 调用 <code>set_todos</code> 后，它的计划会实时出现在这里。
+          <EmptyState title={t("还没有任务", "No tasks yet")}>
+            {t("连上来的 AI 调用 ", "Once a connected AI calls ")}
+            <code>set_todos</code>
+            {t("后，它的计划会实时出现在这里。", ", its plan appears here live.")}
           </EmptyState>
         ) : (
           <>
@@ -135,15 +152,17 @@ export function TodosPage() {
               </div>
               <div className="todo-legend">
                 <strong>{counts.completed}/{counts.total}</strong>
-                <span className="muted">已完成 {percent}%</span>
-                {counts.in_progress > 0 && <Chip tone="accent">进行中 {counts.in_progress}</Chip>}
-                {counts.pending > 0 && <Chip tone="idle">待办 {counts.pending}</Chip>}
+                <span className="muted">{t(`已完成 ${percent}%`, `${percent}% done`)}</span>
+                {counts.in_progress > 0
+                  && <Chip tone="accent">{t(`进行中 ${counts.in_progress}`, `${counts.in_progress} in progress`)}</Chip>}
+                {counts.pending > 0
+                  && <Chip tone="idle">{t(`待办 ${counts.pending}`, `${counts.pending} to do`)}</Chip>}
               </div>
             </div>
 
             {current && (
               <p className="todo-current">
-                正在做：<strong>{current.title}</strong>
+                {t("正在做：", "Working on: ")}<strong>{current.title}</strong>
               </p>
             )}
 
@@ -152,19 +171,25 @@ export function TodosPage() {
             </ul>
 
             <p className="muted todo-foot">
-              更新于 {ago(board.updated_at) || "刚刚"}
+              {t("更新于 ", "Updated ")}{ago(board.updated_at) || t("刚刚", "just now")}
               {board.idle_ms !== null && board.idle_ms > 60_000
-                && ` · 该会话已空闲 ${Math.round(board.idle_ms / 60_000)} 分钟`}
+                && t(
+                  ` · 该会话已空闲 ${Math.round(board.idle_ms / 60_000)} 分钟`,
+                  ` · session idle for ${Math.round(board.idle_ms / 60_000)} min`,
+                )}
             </p>
           </>
         )}
       </Card>
 
       {board.last_progress && (
-        <Card title="最新进展" desc="AI 通过 report_progress 报的一行">
+        <Card
+          title={t("最新进展", "Latest progress")}
+          desc={t("AI 通过 report_progress 报的一行", "The one-liner the AI sent with report_progress")}
+        >
           <p className="todo-progress-msg">{board.last_progress.message}</p>
           <p className="muted">
-            {board.last_progress.phase && <>阶段 {board.last_progress.phase} · </>}
+            {board.last_progress.phase && <>{t("阶段 ", "Phase ")}{board.last_progress.phase} · </>}
             {typeof board.last_progress.percent === "number" && <>{board.last_progress.percent}% · </>}
             {ago(board.last_progress.at)}
           </p>

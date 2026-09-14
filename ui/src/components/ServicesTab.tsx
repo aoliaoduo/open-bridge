@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type ServiceView } from "../api";
+import { t } from "../i18n";
 import { Card } from "./Card";
 import { Chip } from "./Chip";
 import { CopyButton } from "./CopyButton";
@@ -47,7 +48,8 @@ export function ServicesTab({ notify }: { notify?: (text: string, isError?: bool
       // (fresher) answer.
       pollSeq.current += 1;
       setServices(result.services);
-      setNote(`${name}：${action === "start" ? "已启动" : action === "stop" ? "已停止" : "已重启"}`);
+      setNote(`${name}: ${action === "start" ? t("已启动", "started")
+        : action === "stop" ? t("已停止", "stopped") : t("已重启", "restarted")}`);
     } catch (error) {
       setNote(error instanceof Error ? error.message : String(error));
     }
@@ -59,38 +61,48 @@ export function ServicesTab({ notify }: { notify?: (text: string, isError?: bool
 
   return (
     <Card
-      title="服务"
+      title={t("服务", "Services")}
       desc={
         <>
-          由 MCP 工具 <span className="mono">save_service</span> 定义过的命名进程（例如一个开发服务器）。
-          这里只负责启停；健康检查与按组批量启停仍在 MCP 工具侧。
+          {t("由 MCP 工具 ", "Named processes defined through the MCP tool ")}
+          <span className="mono">save_service</span>
+          {t(
+            " 定义过的命名进程（例如一个开发服务器）。这里只负责启停；健康检查与按组批量启停仍在 MCP 工具侧。",
+            " (a dev server, say). This page only starts and stops them; health checks and group operations stay on the MCP side.",
+          )}
         </>
       }
       actions={
         <div className="btn-group">
-          {services ? <Chip tone={running > 0 ? "ok" : "idle"}>{running} / {services.length} 运行中</Chip> : null}
+          {services
+            ? <Chip tone={running > 0 ? "ok" : "idle"}>{t(`${running} / ${services.length} 运行中`, `${running} / ${services.length} running`)}</Chip>
+            : null}
         </div>
       }
     >
       {services === null ? (
         <Skeleton lines={3} />
       ) : services.length === 0 ? (
-        <EmptyState title="还没有保存过服务。">
-          服务由 MCP 工具 <span className="mono">save_service</span> 定义（例如一个开发服务器），
-          保存后就能在这里启停，不必再让代理代劳。
+        <EmptyState title={t("还没有保存过服务。", "No saved services yet.")}>
+          {t("服务由 MCP 工具 ", "Services are defined through the MCP tool ")}
+          <span className="mono">save_service</span>
+          {t(
+            "定义（例如一个开发服务器），保存后就能在这里启停，不必再让代理代劳。",
+            " (a dev server, say); once saved you can start and stop them here instead of asking the agent.",
+          )}
         </EmptyState>
       ) : (
         <div className="table-wrap">
           <table className="token-table">
             <thead>
               <tr>
-                <th>名称</th>
-                <th>分组</th>
-                <th>状态</th>
-                <th className="num">端口</th>
-                <th>命令</th>
-                <th>日志</th>
-                <th className="actions">操作</th>
+                <th>{t("名称", "Name")}</th>
+                <th>{t("分组", "Group")}</th>
+                <th>{t("状态", "State")}</th>
+                <th className="num">{t("端口", "Port")}</th>
+                <th>{t("命令", "Command")}</th>
+                <th>{t("日志", "Log")}</th>
+                <th className="actions">{t("操作", "Actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -100,8 +112,8 @@ export function ServicesTab({ notify }: { notify?: (text: string, isError?: bool
                   <td>{service.group || "—"}</td>
                   <td>
                     {service.running
-                      ? <Chip tone="ok">运行中</Chip>
-                      : <Chip>已停止</Chip>}
+                      ? <Chip tone="ok">{t("运行中", "Running")}</Chip>
+                      : <Chip>{t("已停止", "Stopped")}</Chip>}
                   </td>
                   <td className="num">{service.port ?? "—"}</td>
                   <td className="mono" title={service.command}>
@@ -113,8 +125,8 @@ export function ServicesTab({ notify }: { notify?: (text: string, isError?: bool
                       {service.log_file ? (
                         <CopyButton
                           value={service.log_file}
-                          label="复制日志路径"
-                          onCopied={() => notify?.("日志路径已复制。")}
+                          label={t("复制日志路径", "Copy log path")}
+                          onCopied={() => notify?.(t("日志路径已复制。", "Log path copied."))}
                         />
                       ) : null}
                     </span>
@@ -126,21 +138,21 @@ export function ServicesTab({ notify }: { notify?: (text: string, isError?: bool
                         disabled={busy === service.name || service.running}
                         onClick={() => void run(service.name, "start")}
                       >
-                        启动
+                        {t("启动", "Start")}
                       </button>
                       <button
                         className="small"
                         disabled={busy === service.name || !service.running}
                         onClick={() => void run(service.name, "stop")}
                       >
-                        停止
+                        {t("停止", "Stop")}
                       </button>
                       <button
                         className="small"
                         disabled={busy === service.name || !service.running}
                         onClick={() => void run(service.name, "restart")}
                       >
-                        重启
+                        {t("重启", "Restart")}
                       </button>
                     </span>
                   </td>
@@ -153,7 +165,9 @@ export function ServicesTab({ notify }: { notify?: (text: string, isError?: bool
       <div className="card-foot">
         {note ? <span className="section-note" style={{ margin: 0 }}>{note}</span> : <span className="spacer" />}
         <span className="spacer" />
-        <span className="section-note" style={{ margin: 0 }}>状态每 5 秒自动刷新。</span>
+        <span className="section-note" style={{ margin: 0 }}>
+          {t("状态每 5 秒自动刷新。", "State refreshes every 5 seconds.")}
+        </span>
       </div>
     </Card>
   );

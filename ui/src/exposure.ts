@@ -7,27 +7,32 @@
  * 安全 page overview.
  */
 export interface ExposureMeta {
-  /** Short chip text on the 状态 page. */
-  label: string;
+  /** Short chip text on the 状态 page; a getter so it follows the language. */
+  label: () => string;
   /** Longer explanation on the 安全 page overview. */
-  text: string;
+  text: () => string;
   tone: "ok" | "warn";
 }
 
+import { t } from "./i18n";
+
 export const EXPOSURE_META: Record<string, ExposureMeta> = {
   local: {
-    label: "仅本机",
+    label: () => t("仅本机", "Local only"),
     tone: "ok",
-    text: "只有这台机器自己能访问，外网连不进来。",
+    text: () => t("只有这台机器自己能访问，外网连不进来。", "Only this machine can reach it; nothing from outside can connect."),
   },
   "public-open": {
-    label: "公网可达 · 无鉴权",
+    label: () => t("公网可达 · 无鉴权", "Public · no auth"),
     tone: "warn",
-    text: "公网可达且未开启鉴权：任何拿到地址的人都能直接调用。用下面的 Bearer 门禁卡一键启用（会自动先签发令牌），或先去个人令牌卡手动签发。",
+    text: () => t(
+      "公网可达且未开启鉴权：任何拿到地址的人都能直接调用。用下面的 Bearer 门禁卡一键启用（会自动先签发令牌），或先去个人令牌卡手动签发。",
+      "Publicly reachable with no auth: anyone who has the address can call it. Use the Bearer gate card below to turn it on in one step (a token is issued automatically), or mint one yourself first.",
+    ),
   },
   "public-authed": {
-    label: "公网可达 · 需令牌",
+    label: () => t("公网可达 · 需令牌", "Public · token required"),
     tone: "ok",
-    text: "公网可达，但必须带 Bearer 令牌才能调用。",
+    text: () => t("公网可达，但必须带 Bearer 令牌才能调用。", "Publicly reachable, but every call must carry a Bearer token."),
   },
 };

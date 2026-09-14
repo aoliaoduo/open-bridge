@@ -13,6 +13,8 @@
  * redesign — nine flat tabs were the most the old top strip could hold, and a
  * flat list of nine said nothing about how the pages relate).
  */
+import { t } from "./i18n";
+
 export type RouteId =
   | "status"
   | "sessions"
@@ -29,14 +31,17 @@ export type RouteGroupId = "instance" | "ops" | "config";
 
 export interface RouteGroupSpec {
   id: RouteGroupId;
-  label: string;
+  /** Getter, not a string: the label has to re-read the active language on
+   *  every render, and a module-level constant would freeze the first one. */
+  label: () => string;
 }
 
 export interface RouteSpec {
   id: RouteId;
-  label: string;
+  /** Getter for the same reason as RouteGroupSpec.label. */
+  label: () => string;
   /** Shown as the link tooltip; also the one-line answer to "what is this page for". */
-  hint: string;
+  hint: () => string;
   group: RouteGroupId;
   /**
    * Icon geometry, 24x24, stroked (never filled) — kept here rather than in the
@@ -52,80 +57,80 @@ export interface RouteSpec {
  * behaves (and is the only group whose pages write config).
  */
 export const ROUTE_GROUPS: RouteGroupSpec[] = [
-  { id: "instance", label: "实例" },
-  { id: "ops", label: "运维" },
-  { id: "config", label: "配置" },
+  { id: "instance", label: () => t("实例", "Instance") },
+  { id: "ops", label: () => t("运维", "Operations") },
+  { id: "config", label: () => t("配置", "Configuration") },
 ];
 
 export const ROUTES: RouteSpec[] = [
   {
     id: "status",
-    label: "状态",
-    hint: "MCP 端点、运行控制与实时状态",
+    label: () => t("状态", "Status"),
+    hint: () => t("MCP 端点、运行控制与实时状态", "MCP endpoint, run controls and live state"),
     group: "instance",
     icon: ["M12 13.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z", "M13.9 9.6 19.5 4", "M4.5 19.5a8.5 8.5 0 0115 0"],
   },
   {
     id: "sessions",
-    label: "会话",
-    hint: "谁连着这个实例",
+    label: () => t("会话", "Sessions"),
+    hint: () => t("谁连着这个实例", "Who is connected to this instance"),
     group: "instance",
     icon: ["M8.5 11a3 3 0 100-6 3 3 0 000 6z", "M3 19.5a5.5 5.5 0 0111 0", "M16 5.6a3 3 0 010 5.8", "M17.2 14.4a5.5 5.5 0 014.3 5.1"],
   },
   {
     id: "todos",
-    label: "任务",
-    hint: "AI 正在做什么：任务清单与最新进展",
+    label: () => t("任务", "Todos"),
+    hint: () => t("AI 正在做什么：任务清单与最新进展", "What the AI is doing: its task list and latest progress"),
     group: "instance",
     // A checklist: a box, a tick inside it, and two list lines beside it.
     icon: ["M3.5 5.5h5v5h-5z", "M4.8 8l1.3 1.3 2.2-2.4", "M11.5 6.5h9", "M11.5 10h6", "M3.5 15.5h5v5h-5z", "M11.5 16.5h9", "M11.5 20h6"],
   },
   {
     id: "tools",
-    label: "工具",
-    hint: "这台实例实际对外公布的 MCP 工具清单",
+    label: () => t("工具", "Tools"),
+    hint: () => t("这台实例实际对外公布的 MCP 工具清单", "The MCP tools this instance actually advertises"),
     group: "instance",
     icon: ["M4 4h7v7H4z", "M13 4h7v7h-7z", "M4 13h7v7H4z", "M13 13h7v7h-7z"],
   },
   {
     id: "health",
-    label: "体检",
-    hint: "逐项检查实例、隧道与公网连通性",
+    label: () => t("体检", "Health"),
+    hint: () => t("逐项检查实例、隧道与公网连通性", "Check the instance, the tunnel and public reachability"),
     group: "instance",
     icon: ["M12 3.2 19 6v6.2c0 4.3-2.9 7.4-7 8.6-4.1-1.2-7-4.3-7-8.6V6z", "M9 12.2l2.2 2.2 4.3-4.4"],
   },
   {
     id: "services",
-    label: "服务",
-    hint: "保存过的命名进程：启动、停止、重启",
+    label: () => t("服务", "Services"),
+    hint: () => t("保存过的命名进程：启动、停止、重启", "Saved named processes: start, stop, restart"),
     group: "ops",
     icon: ["M3.5 4.5h17v6h-17z", "M3.5 13.5h17v6h-17z", "M7 7.5h.01", "M7 16.5h.01"],
   },
   {
     id: "logs",
-    label: "日志",
-    hint: "实时日志流",
+    label: () => t("日志", "Logs"),
+    hint: () => t("实时日志流与轮转设置", "Live log stream and rotation settings"),
     group: "ops",
     icon: ["M5 3.5h14v17H5z", "M8.5 8.5h7", "M8.5 12h7", "M8.5 15.5h4"],
   },
   {
     id: "stats",
-    label: "统计",
-    hint: "调用次数、耗时与工具排行",
+    label: () => t("统计", "Stats"),
+    hint: () => t("调用次数、耗时与工具排行", "Call counts, latency and a tool leaderboard"),
     group: "ops",
     icon: ["M5 20V10.5", "M12 20V4", "M19 20v-6.5"],
   },
   {
     id: "security",
-    label: "安全",
-    hint: "暴露面、Bearer 门禁、令牌与 OAuth",
+    label: () => t("安全", "Security"),
+    hint: () => t("暴露面、Bearer 门禁、令牌与 OAuth", "Exposure, bearer gate, tokens and OAuth"),
     group: "config",
     icon: ["M6.5 11h11v9.5h-11z", "M9.5 11V8a2.5 2.5 0 015 0v3", "M12 15v2"],
   },
   {
     id: "settings",
-    label: "设置",
-    hint: "隧道、端口、目录、Shell、通知、并发与日志轮转",
+    label: () => t("设置", "Settings"),
+    hint: () => t("隧道、端口、目录、Shell、通知与并发", "Tunnel, ports, directories, shell, notifications and locks"),
     group: "config",
     icon: ["M4 7h16", "M4 12h16", "M4 17h16", "M9.5 5v4", "M15.5 10v4", "M9.5 15v4"],
   },
@@ -140,7 +145,7 @@ export function routeSpec(id: RouteId): RouteSpec {
 
 export function routeGroupLabel(id: RouteId): string {
   const spec = routeSpec(id);
-  return ROUTE_GROUPS.find(group => group.id === spec.group)?.label ?? "";
+  return ROUTE_GROUPS.find(group => group.id === spec.group)?.label() ?? "";
 }
 
 /**
@@ -148,24 +153,23 @@ export function routeGroupLabel(id: RouteId): string {
  * path (`/console/settings/<section>`) so a deep link opens exactly the card
  * the operator meant — the anchor-scroll rail only ever faked this.
  */
-export type SettingsSectionId = "tunnel" | "network" | "files" | "shell" | "notify" | "locks" | "logs";
+export type SettingsSectionId = "tunnel" | "network" | "files" | "shell" | "notify" | "locks";
 
 export interface SettingsSectionSpec {
   id: SettingsSectionId;
-  label: string;
+  label: () => string;
   /** One-line answer to "what does this sub-page configure"; drives PageHeader. */
-  hint: string;
+  hint: () => string;
 }
 
 /** Card order matches the operator's mental model: connectivity first, hygiene last. */
 export const SETTINGS_SECTIONS: SettingsSectionSpec[] = [
-  { id: "tunnel", label: "隧道", hint: "ngrok 隧道、预留域名与公网发布" },
-  { id: "network", label: "端口", hint: "本机监听端口与公网健康检查超时" },
-  { id: "files", label: "目录", hint: "文件访问范围与目录白名单" },
-  { id: "shell", label: "Shell", hint: "命令执行的 shell 与对外公布的工具集" },
-  { id: "notify", label: "通知", hint: "手机通知（Bark）：模式、设备密钥与测试发送" },
-  { id: "locks", label: "并发", hint: "并发锁与占用/等待上限" },
-  { id: "logs", label: "日志轮转", hint: "bridge.log 的单文件大小上限与轮转" },
+  { id: "tunnel", label: () => t("隧道", "Tunnel"), hint: () => t("ngrok 隧道、预留域名与公网发布", "ngrok tunnel, reserved domain and public exposure") },
+  { id: "network", label: () => t("端口", "Ports"), hint: () => t("本机监听端口与公网健康检查超时", "Local listen port and public health-check timeout") },
+  { id: "files", label: () => t("目录", "Directories"), hint: () => t("文件访问范围与目录白名单", "File access scope and the directory allowlist") },
+  { id: "shell", label: () => t("Shell", "Shell"), hint: () => t("命令执行使用的 shell", "The shell commands run through") },
+  { id: "notify", label: () => t("通知", "Notifications"), hint: () => t("手机通知（Bark）：模式、设备密钥与测试发送", "Phone push (Bark): mode, device key and a test send") },
+  { id: "locks", label: () => t("并发", "Locks"), hint: () => t("并发锁与占用/等待上限", "Concurrency locks and hold/wait ceilings") },
 ];
 
 export const SETTINGS_DEFAULT_SECTION: SettingsSectionId = "tunnel";

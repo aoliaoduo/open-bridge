@@ -524,16 +524,13 @@ export function finishNoticeVerdict(input: {
   if (!Number.isFinite(input.completedAtMs) || input.completedAtMs <= 0) return false;
   // The model already said it — that is the outcome we wanted, stay quiet.
   if (input.notifiedSinceMs >= input.completedAtMs) return false;
-  // Two endings, two strengths of evidence, two delays.
-  //
-  // A list flipped wholly to completed is an explicit "done": act on it fast
-  // (45s) so someone who walked away hears within the minute. A session with
-  // NO list offers no such statement — the only evidence is silence, which is
-  // also what reading a long answer looks like. Waiting the operator's full
-  // idle threshold is what stops that case from crying "finished" mid-chat.
-  const settleMs = input.hasTodos
-    ? Math.min(FINISH_SETTLE_MS, input.idleMinutes * 60_000)
-    : input.idleMinutes * 60_000;
+  // One settle delay for both endings, by explicit operator choice: getting
+  // told promptly is the whole point of the channel, and a listless
+  // conversation should not have to wait out the idle threshold to be
+  // reported. The cost is accepted and real — 45 s of quiet while someone
+  // reads a long answer will be announced as an ending, then corrected by the
+  // latch as soon as the next call lands.
+  const settleMs = Math.min(FINISH_SETTLE_MS, input.idleMinutes * 60_000);
   if (input.nowMs - input.lastUsedMs < settleMs) return false;
   return input.announcedForMs !== input.completedAtMs;
 }

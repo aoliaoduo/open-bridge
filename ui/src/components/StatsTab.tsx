@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type ActivityEntry, type UsageStats } from "../api";
+import { t } from "../i18n";
 import { Card } from "./Card";
 import { ConfirmButton } from "./ConfirmButton";
 import { EmptyState } from "./EmptyState";
@@ -8,18 +9,21 @@ import { Stat } from "./Stat";
 
 function fmtUptime(ms: number): string {
   const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s} 秒`;
-  if (s < 3600) return `${Math.floor(s / 60)} 分钟`;
-  return `${Math.floor(s / 3600)} 小时 ${Math.floor((s % 3600) / 60)} 分`;
+  if (s < 60) return t(`${s} 秒`, `${s}s`);
+  if (s < 3600) return t(`${Math.floor(s / 60)} 分钟`, `${Math.floor(s / 60)}m`);
+  return t(
+    `${Math.floor(s / 3600)} 小时 ${Math.floor((s % 3600) / 60)} 分`,
+    `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`,
+  );
 }
 
-/** Activity rows carry raw server states; the list reads in Chinese. */
-const ACTIVITY_LABEL: Record<string, string> = {
-  completed: "完成",
-  error: "失败",
-  running: "进行中",
-  progress: "进行中",
-  warning: "警告",
+/** Activity rows carry raw server states; the list reads in the operator's language. */
+const ACTIVITY_LABEL: Record<string, () => string> = {
+  completed: () => t("完成", "Done"),
+  error: () => t("失败", "Failed"),
+  running: () => t("进行中", "Running"),
+  progress: () => t("进行中", "Running"),
+  warning: () => t("警告", "Warning"),
 };
 
 type ActivityView = "all" | "error" | "success";
@@ -48,7 +52,7 @@ export function StatsTab() {
   const clearStats = async () => {
     try {
       const result = await api.settingsAction({ command: "clearStats" });
-      setNote(result.info ?? "已清零");
+      setNote(result.info ?? t("已清零", "Counters cleared"));
       setUsage(await api.usage());
     } catch (error) {
       setNote(error instanceof Error ? error.message : String(error));
@@ -72,33 +76,38 @@ export function StatsTab() {
   return (
     <>
       <div className="stats">
-        <Stat label="总调用" value={usage?.calls ?? "…"} hint="本次运行" />
+        <Stat label={t("总调用", "Calls")} value={usage?.calls ?? "…"} hint={t("本次运行", "This run")} />
         <Stat
-          label="成功"
+          label={t("成功", "Succeeded")}
           value={usage?.successes ?? "…"}
-          hint={usage ? `占比 ${100 - failureRate}%` : "\u00a0"}
+          hint={usage ? t(`占比 ${100 - failureRate}%`, `${100 - failureRate}% of calls`) : "\u00a0"}
           tone="ok"
         />
         <Stat
-          label="失败"
+          label={t("失败", "Failed")}
           value={usage?.failures ?? "…"}
-          hint={usage ? `占比 ${failureRate}%` : "\u00a0"}
+          hint={usage ? t(`占比 ${failureRate}%`, `${failureRate}% of calls`) : "\u00a0"}
           tone={(usage?.failures ?? 0) > 0 ? "err" : "plain"}
         />
         <Stat
-          label="运行时长"
+          label={t("运行时长", "Uptime")}
           value={usage ? fmtUptime(usage.uptime_ms) : "…"}
-          hint={usage ? `自 ${new Date(usage.started_at).toLocaleString()}` : "\u00a0"}
+          hint={usage
+            ? t(`自 ${new Date(usage.started_at).toLocaleString()}`, `since ${new Date(usage.started_at).toLocaleString()}`)
+            : "\u00a0"}
         />
       </div>
 
       <Card
-        title="调用统计"
-        desc="自实例启动起累计；清空只清零计数，不影响正在进行的调用。"
+        title={t("调用统计", "Call statistics")}
+        desc={t(
+          "自实例启动起累计；清空只清零计数，不影响正在进行的调用。",
+          "Accumulated since the instance started; clearing zeroes the counters and does not touch calls in flight.",
+        )}
         actions={
           <div className="btn-group">
             {note ? <span className="section-note" style={{ margin: 0 }}>{note}</span> : null}
-            <ConfirmButton label="清空统计" onConfirm={() => void clearStats()} />
+            <ConfirmButton label={t("清空统计", "Clear stats")} onConfirm={() => void clearStats()} />
           </div>
         }
       >
@@ -107,20 +116,22 @@ export function StatsTab() {
         ) : (
           <div className="props">
             <div className="prop">
-              <span className="prop-label">跟踪命令</span>
+              <span className="prop-label">{t("跟踪命令", "Tracked commands")}</span>
               <span className="prop-value">{usage.tracked_commands}</span>
             </div>
             <div className="prop">
-              <span className="prop-label">进行中命令</span>
+              <span className="prop-label">{t("进行中命令", "Commands in flight")}</span>
               <span className="prop-value">{usage.active_commands}</span>
             </div>
           </div>
         )}
       </Card>
 
-      <Card title="按工具" desc="调用次数排行（前 12 名）。">
+      <Card title={t("按工具", "By tool")} desc={t("调用次数排行（前 12 名）。", "Call-count leaderboard (top 12).")}>
         {topTools.length === 0 ? (
-          <EmptyState title="还没有工具调用。">客户端每调用一次工具，这里就会多一条计数与排行。</EmptyState>
+          <EmptyState title={t("还没有工具调用。", "No tool calls yet.")}>
+            {t("客户端每调用一次工具，这里就会多一条计数与排行。", "Every tool call a client makes adds to this ranking.")}
+          </EmptyState>
         ) : topTools.map(([name, count]) => (
           <div className="bar-row" key={name}>
             <span className="name">{name}</span>
@@ -131,26 +142,37 @@ export function StatsTab() {
       </Card>
 
       <Card
-        title="最近活动"
-        desc="工具调用、服务启停与配置修改都会记在这里。"
+        title={t("最近活动", "Recent activity")}
+        desc={t(
+          "工具调用、服务启停与配置修改都会记在这里。",
+          "Tool calls, service start/stops and config changes all land here.",
+        )}
         actions={
-          <div className="segmented" role="group" aria-label="活动过滤">
-            <button type="button" className={view === "all" ? "active" : ""} onClick={() => setView("all")}>全部</button>
-            <button type="button" className={view === "error" ? "active" : ""} onClick={() => setView("error")}>
-              失败/警告 {failures}
+          <div className="segmented" role="group" aria-label={t("活动过滤", "Activity filter")}>
+            <button type="button" className={view === "all" ? "active" : ""} onClick={() => setView("all")}>
+              {t("全部", "All")}
             </button>
-            <button type="button" className={view === "success" ? "active" : ""} onClick={() => setView("success")}>完成</button>
+            <button type="button" className={view === "error" ? "active" : ""} onClick={() => setView("error")}>
+              {t("失败/警告", "Failed/warned")} {failures}
+            </button>
+            <button type="button" className={view === "success" ? "active" : ""} onClick={() => setView("success")}>
+              {t("完成", "Done")}
+            </button>
           </div>
         }
       >
         {shown.length === 0 ? (
-          <EmptyState title={activity.length === 0 ? "暂无活动。" : "这个筛选下没有记录。"}>
-            {activity.length === 0 ? "工具调用、服务启停与配置修改都会出现在这里。" : "换一个筛选看看。"}
+          <EmptyState title={activity.length === 0
+            ? t("暂无活动。", "No activity yet.")
+            : t("这个筛选下没有记录。", "Nothing matches this filter.")}>
+            {activity.length === 0
+              ? t("工具调用、服务启停与配置修改都会出现在这里。", "Tool calls, service start/stops and config changes appear here.")
+              : t("换一个筛选看看。", "Try a different filter.")}
           </EmptyState>
         ) : shown.map((entry, index) => (
           <div className="act-row" key={index}>
             <span className={`act-status ${entry.status}`} title={entry.status}>
-              {ACTIVITY_LABEL[entry.status] ?? entry.status}
+              {ACTIVITY_LABEL[entry.status]?.() ?? entry.status}
             </span>
             <span className="act-tool">{entry.tool}</span>
             <span className="act-msg">{entry.message}</span>

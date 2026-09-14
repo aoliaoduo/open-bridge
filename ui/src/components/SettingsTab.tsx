@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { type SettingsActionResult, type SettingsState } from "../api";
 import { SETTINGS_SECTIONS, type SettingsSectionId } from "../routes";
+import { t } from "../i18n";
 import { Card } from "./Card";
 import { Field } from "./Field";
 import { SectionNav } from "./SectionNav";
@@ -20,11 +21,10 @@ interface Props {
 /** Bounds mirror the server's CONFIG_SPEC (src/bridge/settings-model.ts) so a
  *  value the UI accepts never comes back as an inscrutable 400. */
 const NUMBER_BOUNDS = {
-  port: { min: 0, max: 65_535, label: "本地端口" },
-  publicHealthTimeoutMs: { min: 3_000, max: 120_000, label: "公网健康检查" },
-  holdTimeoutMs: { min: 0, max: 3_600_000, label: "占用上限" },
-  waitTimeoutMs: { min: 0, max: 3_600_000, label: "等待上限" },
-  logMaxBytes: { min: 0, max: 1_073_741_824, label: "单文件上限" },
+  port: { min: 0, max: 65_535, label: () => t("本地端口", "Local port") },
+  publicHealthTimeoutMs: { min: 3_000, max: 120_000, label: () => t("公网健康检查", "Public health check") },
+  holdTimeoutMs: { min: 0, max: 3_600_000, label: () => t("占用上限", "Hold ceiling") },
+  waitTimeoutMs: { min: 0, max: 3_600_000, label: () => t("等待上限", "Wait ceiling") },
 } as const;
 
 /**
@@ -150,7 +150,10 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
   /** Rejection feedback for a DraftField; the revert is DraftField's own job. */
   const invalidFor = (key: keyof typeof NUMBER_BOUNDS) => (): void => {
     const { label, min, max } = NUMBER_BOUNDS[key];
-    notify?.(`${label} 需要整数 ${min}–${max}，已还原为保存的值。`, true);
+    notify?.(t(
+      `${label()} 需要整数 ${min}–${max}，已还原为保存的值。`,
+      `${label()} must be an integer between ${min} and ${max}; reverted to the saved value.`,
+    ), true);
   };
 
   return (
@@ -158,23 +161,33 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
       {/* One card per sub-page: the strip switches the route, the URL and the
           rendered card move together, and a reload lands where you were. */}
       <SectionNav
-        items={SETTINGS_SECTIONS.map(({ id, label }) => ({ id, label }))}
+        items={SETTINGS_SECTIONS.map(({ id, label }) => ({ id, label: label() }))}
         active={section}
         onSelect={onSectionChange}
       />
 
       {section === "tunnel" && (
-      <Card id="set-tunnel" title="隧道（ngrok）" desc="隧道让公网上的客户端连到这台机器；不开隧道时只有本机能访问。">
+      <Card
+        id="set-tunnel"
+        title={t("隧道（ngrok）", "Tunnel (ngrok)")}
+        desc={t(
+          "隧道让公网上的客户端连到这台机器；不开隧道时只有本机能访问。",
+          "A tunnel lets clients on the internet reach this machine; without one, only this machine can.",
+        )}
+      >
         <div className="form-grid">
-          <Field label="提供商" hint="none 表示只用本机回环地址，适合纯本机客户端。">
+          <Field
+            label={t("提供商", "Provider")}
+            hint={t("none 表示只用本机回环地址，适合纯本机客户端。", "none means loopback only, which suits local-only clients.")}
+          >
             <select value={cfg.tunnelProvider} onChange={e => setConfig("tunnelProvider", e.target.value)}>
               <option value="ngrok">ngrok</option>
-              <option value="none">none（仅本地）</option>
+              <option value="none">{t("none（仅本地）", "none (local only)")}</option>
             </select>
           </Field>
 
           <div className="field">
-            <span className="field-label">预留域名</span>
+            <span className="field-label">{t("预留域名", "Reserved domain")}</span>
             <span className="field-control">
               <input
                 type="text"
@@ -194,13 +207,18 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
                   });
                 }}
               >
-                保存域名
+                {t("保存域名", "Save domain")}
               </button>
             </span>
-            <span className="field-hint">留空则使用 ngrok 分配的随机地址；改动后需要重启隧道。</span>
+            <span className="field-hint">
+              {t("留空则使用 ngrok 分配的随机地址；改动后需要重启隧道。", "Leave empty to use the random address ngrok assigns; a change needs a tunnel restart.")}
+            </span>
           </div>
 
-          <Field label="ngrok 可执行文件" hint="留空则使用 PATH 里的 ngrok。">
+          <Field
+            label={t("ngrok 可执行文件", "ngrok executable")}
+            hint={t("留空则使用 PATH 里的 ngrok。", "Leave empty to use the ngrok on PATH.")}
+          >
             <DraftField
               value={cfg.ngrokExecutable}
               placeholder="ngrok"
@@ -209,14 +227,14 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
           </Field>
 
           <SwitchField
-            label="隧道意外退出时自动重连"
-            hint="伴随进程退出时按退避重试，不需要人工点重新启动。"
+            label={t("隧道意外退出时自动重连", "Reconnect automatically if the tunnel dies")}
+            hint={t("伴随进程退出时按退避重试，不需要人工点重新启动。", "Retries with backoff when the companion process exits, so nobody has to click restart.")}
             checked={cfg.autoReconnect}
             onChange={next => setConfig("autoReconnect", next)}
           />
           <SwitchField
-            label="ngrok 继承系统代理"
-            hint="公司网络需要走代理时打开；直连环境关掉更快。"
+            label={t("ngrok 继承系统代理", "ngrok inherits the system proxy")}
+            hint={t("公司网络需要走代理时打开；直连环境关掉更快。", "Turn on behind a corporate proxy; leave off for a direct connection, which is faster.")}
             checked={cfg.ngrokUseHttpProxy}
             onChange={next => setConfig("ngrokUseHttpProxy", next)}
           />
@@ -225,9 +243,16 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
       )}
 
       {section === "network" && (
-      <Card id="set-network" title="网络" desc="本机监听端口与公网健康检查的超时。">
+      <Card
+        id="set-network"
+        title={t("网络", "Network")}
+        desc={t("本机监听端口与公网健康检查的超时。", "The local listen port and the public health-check timeout.")}
+      >
         <div className="form-grid">
-          <Field label="本地端口" hint="0 = 自动选择空闲端口（重启 Bridge 生效）；失焦时保存。">
+          <Field
+            label={t("本地端口", "Local port")}
+            hint={t("0 = 自动选择空闲端口（重启 Bridge 生效）；失焦时保存。", "0 picks a free port automatically (takes effect after a restart); saved on blur.")}
+          >
             <DraftField
               type="number"
               min={NUMBER_BOUNDS.port.min}
@@ -237,7 +262,10 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
               onInvalid={invalidFor("port")}
             />
           </Field>
-          <Field label="公网健康检查" hint="毫秒（3000–120000）；失焦时保存。">
+          <Field
+            label={t("公网健康检查", "Public health check")}
+            hint={t("毫秒（3000–120000）；失焦时保存。", "Milliseconds (3000–120000); saved on blur.")}
+          >
             <DraftField
               type="number"
               min={NUMBER_BOUNDS.publicHealthTimeoutMs.min}
@@ -253,15 +281,22 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
       )}
 
       {section === "files" && (
-      <Card id="set-files" title="文件访问" desc="默认允许访问项目根之外的路径（个人本机推荐）；关掉之后只有下面列出的目录可读写。">
+      <Card
+        id="set-files"
+        title={t("文件访问", "File access")}
+        desc={t(
+          "默认允许访问项目根之外的路径（个人本机推荐）；关掉之后只有下面列出的目录可读写。",
+          "By default paths outside the project root are allowed (recommended for a personal machine); turn it off and only the directories listed below are readable and writable.",
+        )}
+      >
         <SwitchField
-          label="允许访问项目根之外的路径"
+          label={t("允许访问项目根之外的路径", "Allow paths outside the project root")}
           checked={cfg.unrestrictedFileAccess}
           onChange={next => setConfig("unrestrictedFileAccess", next)}
         />
         {!cfg.unrestrictedFileAccess && (
           <div className="field">
-            <span className="field-label">允许的目录</span>
+            <span className="field-label">{t("允许的目录", "Allowed directories")}</span>
             <span className="field-control">
               {/* A textarea, not an input: HTML value sanitization strips \n from
                   text inputs, so the list silently merged into one bogus path
@@ -269,67 +304,80 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
               <DraftField
                 multiline
                 value={cfg.allowedDirectories.join("\n")}
-                placeholder={"每行一个绝对目录，如\nC:\\projects\\shared"}
+                placeholder={t("每行一个绝对目录，如\nC:\\projects\\shared", "One absolute directory per line, e.g.\nC:\\projects\\shared")}
                 onCommit={raw => setConfig("allowedDirectories", raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean))}
               />
             </span>
-            <span className="field-hint">每行一个绝对目录；失焦时保存</span>
+            <span className="field-hint">{t("每行一个绝对目录；失焦时保存", "One absolute directory per line; saved on blur")}</span>
           </div>
         )}
       </Card>
       )}
 
       {section === "shell" && (
-      <Card id="set-shell" title="Shell 与工具" desc="命令通过哪个 shell 执行，以及这台实例对外公布哪些工具。">
+      <Card
+        id="set-shell"
+        title={t("Shell", "Shell")}
+        desc={t("命令通过哪个 shell 执行。", "Which shell commands run through.")}
+      >
         <div className="form-grid">
-          <Field label="Shell 路径" hint="留空自动探测（Git Bash → pwsh → powershell）。">
+          <Field
+            label={t("Shell 路径", "Shell path")}
+            hint={t("留空自动探测（Git Bash → pwsh → powershell）。", "Leave empty to auto-detect (Git Bash → pwsh → powershell).")}
+          >
             <DraftField
               value={cfg.shellPath}
-              placeholder="留空自动探测（Git Bash → pwsh → powershell）"
+              placeholder={t("留空自动探测（Git Bash → pwsh → powershell）", "Leave empty to auto-detect (Git Bash → pwsh → powershell)")}
               onCommit={raw => setConfig("shellPath", raw)}
             />
           </Field>
-          <Field label="Shell 参数" hint="留空使用默认参数。">
+          <Field label={t("Shell 参数", "Shell arguments")} hint={t("留空使用默认参数。", "Leave empty to use the defaults.")}>
             <DraftField
               value={cfg.shellArgs.join(" ")}
-              placeholder="留空使用默认参数"
+              placeholder={t("留空使用默认参数", "Leave empty for the defaults")}
               onCommit={raw => setConfig("shellArgs", raw.trim() ? raw.trim().split(/\s+/) : [])}
             />
-          </Field>
-          <Field label="工具集" hint="core 只公布常用工具，客户端看到的清单更短。">
-            <select value={cfg.toolProfile} onChange={e => setConfig("toolProfile", e.target.value)}>
-              <option value="full">full（全部工具）</option>
-              <option value="core">core（精简常用）</option>
-            </select>
           </Field>
         </div>
       </Card>
       )}
 
       {section === "notify" && (
-      <Card id="set-notify" title="手机通知（Bark）" desc="网页 AI 干完活不必守着标签页 — 进展与提醒直接推到 iPhone。">
+      <Card
+        id="set-notify"
+        title={t("手机通知（Bark）", "Phone notifications (Bark)")}
+        desc={t(
+          "网页 AI 干完活不必守着标签页 — 进展与提醒直接推到 iPhone。",
+          "No need to sit watching the tab while a web AI works — progress and alerts go straight to your iPhone.",
+        )}
+      >
         <div className="form-grid">
           <SwitchField
-            label="启用手机通知"
-            hint="关掉之后 notify 工具与自动汇报全部静音；设备密钥会留着。"
+            label={t("启用手机通知", "Enable phone notifications")}
+            hint={t("关掉之后 notify 工具与自动汇报全部静音；设备密钥会留着。", "Turning this off mutes the notify tool and every automatic report; the device key is kept.")}
             checked={settings.notify.enabled}
             onChange={next => setConfig("notify.enabled", next)}
           />
-          <Field label="汇报模式" hint={settings.notify.mode === "frequent"
-            ? "任务清单每勾选完一条，手机收到一条完成通知。"
-            : "只在 AI 真的需要你时推送：回来处理、做选择、或这一轮结束了。"}>
+          <Field
+            label={t("汇报模式", "Reporting mode")}
+            hint={settings.notify.mode === "frequent"
+              ? t("任务清单每勾选完一条，手机收到一条完成通知。", "Every item ticked off the task list sends a completion push.")
+              : t("只在 AI 真的需要你时推送：回来处理、做选择、或这一轮结束了。", "Pushes only when the AI genuinely needs you: come back, make a call, or this round is over.")}
+          >
             <select value={settings.notify.mode} onChange={e => setConfig("notify.mode", e.target.value)}>
-              <option value="frequent">频繁 — 每条任务完成都通知</option>
-              <option value="dnd">免打扰 — 只推「需要你回电脑前」的事件</option>
+              <option value="frequent">{t("频繁 — 每条任务完成都通知", "Frequent — every finished task")}</option>
+              <option value="dnd">{t("免打扰 — 只推「需要你回电脑前」的事件", "Do not disturb — only when you are needed")}</option>
             </select>
           </Field>
           <div className="field">
-            <span className="field-label">Bark 设备密钥</span>
+            <span className="field-label">{t("Bark 设备密钥", "Bark device key")}</span>
             <span className="field-control">
               <input
                 type="text"
                 value={barkKeyDraft ?? (settings.notify.configured ? settings.notify.keyMask : "")}
-                placeholder={settings.notify.configured ? "粘贴新密钥可替换（输入框仅显示掩码）" : "https://api.day.app/ 后面的那串专属路径"}
+                placeholder={settings.notify.configured
+                  ? t("粘贴新密钥可替换（输入框仅显示掩码）", "Paste a new key to replace it (the field only shows a mask)")
+                  : t("https://api.day.app/ 后面的那串专属路径", "The unique path that follows https://api.day.app/")}
                 readOnly={settings.notify.configured && barkKeyDraft === null}
                 onChange={e => setBarkKeyDraft(e.target.value)}
               />
@@ -345,51 +393,75 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
                   });
                 }}
               >
-                保存密钥
+                {t("保存密钥", "Save key")}
               </button>
               {settings.notify.configured && barkKeyDraft === null && (
                 <button
                   className="small ghost"
                   onClick={() => setBarkKeyDraft("")}
-                  title="粘贴新密钥整串替换；清空后点保存即撤销"
+                  title={t("粘贴新密钥整串替换；清空后点保存即撤销", "Paste a new key to replace it wholesale; clear the field and save to remove it")}
                 >
-                  更换 / 清除
+                  {t("更换 / 清除", "Replace / clear")}
                 </button>
               )}
             </span>
-            <span className="field-hint">Bark App 首页显示的那串独特路径就是它，整条链接粘贴也行，会自动摘出密钥。</span>
+            <span className="field-hint">
+              {t("Bark App 首页显示的那串独特路径就是它，整条链接粘贴也行，会自动摘出密钥。", "It is the unique path shown on the Bark app's home screen; pasting the whole link works too, the key is extracted.")}
+            </span>
           </div>
-          <Field label="无反应提醒" hint="连接完全静默超过这个分钟数、且任务清单还有未完成项时，推送一次「需要你回来了」。0 = 关闭。">
+          <Field
+            label={t("无反应提醒", "Silence alert")}
+            hint={t(
+              "连接完全静默超过这个分钟数、且任务清单还有未完成项时，推送一次「需要你回来了」。0 = 关闭。",
+              "When the connection goes quiet for this many minutes with work still open, push once to call you back. 0 disables it.",
+            )}
+          >
             <DraftField
               type="number"
               min={0}
               max={1440}
               value={String(settings.notify.idleMinutes)}
               onCommit={raw => setConfig("notify.idleMinutes", Number(raw.trim()))}
-              onInvalid={() => notify?.("无反应提醒需要 0–1440 的整数分钟，已还原。", true)}
+              onInvalid={() => notify?.(t(
+                "无反应提醒需要 0–1440 的整数分钟，已还原。",
+                "The silence alert needs a whole number of minutes from 0 to 1440; reverted.",
+              ), true)}
             />
           </Field>
           <div className="field">
-            <span className="field-label">推送通道</span>
+            <span className="field-label">{t("推送通道", "Push channel")}</span>
             <span className="field-control">
               <button
                 className="small"
                 disabled={!settings.notify.enabled || !settings.notify.configured}
                 onClick={() => { void act({ command: "testNotify" }); }}
               >
-                发送测试通知
+                {t("发送测试通知", "Send a test notification")}
               </button>
             </span>
-            <span className="field-hint">服务器：{settings.notify.serverUrl}。官方通道不通时可自建 Bark，配置文件里改 notify.serverUrl（自建 http 仅限本机回环）。</span>
+            <span className="field-hint">
+              {t("服务器：", "Server: ")}{settings.notify.serverUrl}
+              {t(
+                "。官方通道不通时可自建 Bark，配置文件里改 notify.serverUrl（自建 http 仅限本机回环）。",
+                ". If the official channel is unreachable you can self-host Bark and point notify.serverUrl at it in the config file (self-hosted http is loopback-only).",
+              )}
+            </span>
           </div>
         </div>
       </Card>
       )}
 
       {section === "locks" && (
-      <Card id="set-locks" title="并发锁" desc="并发写同一个目录时让第二个调用者等待，而不是互相覆盖。">
+      <Card
+        id="set-locks"
+        title={t("并发锁", "Concurrency locks")}
+        desc={t(
+          "并发写同一个目录时让第二个调用者等待，而不是互相覆盖。",
+          "When two calls write the same directory, the second waits instead of the two overwriting each other.",
+        )}
+      >
         <SwitchField
-          label="串行化可能产生竞争的工具调用"
+          label={t("串行化可能产生竞争的工具调用", "Serialize tool calls that could race")}
           checked={settings.concurrency.enabled}
           onChange={next => void act({
             command: "setConcurrency",
@@ -400,7 +472,7 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
         />
         {settings.concurrency.enabled && (
           <div className="form-grid">
-            <Field label="占用上限" hint="毫秒，0 = 不限；失焦时保存。">
+            <Field label={t("占用上限", "Hold ceiling")} hint={t("毫秒，0 = 不限；失焦时保存。", "Milliseconds, 0 = unlimited; saved on blur.")}>
               <DraftField
                 type="number"
                 min={NUMBER_BOUNDS.holdTimeoutMs.min}
@@ -415,7 +487,7 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
                 onInvalid={invalidFor("holdTimeoutMs")}
               />
             </Field>
-            <Field label="等待上限" hint="毫秒，0 = 无限等待；失焦时保存。">
+            <Field label={t("等待上限", "Wait ceiling")} hint={t("毫秒，0 = 无限等待；失焦时保存。", "Milliseconds, 0 = wait forever; saved on blur.")}>
               <DraftField
                 type="number"
                 min={NUMBER_BOUNDS.waitTimeoutMs.min}
@@ -432,32 +504,6 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
             </Field>
           </div>
         )}
-      </Card>
-      )}
-
-      {section === "logs" && (
-      <Card
-        id="set-logs"
-        title="日志"
-        desc={
-          <>
-            <span className="mono">bridge.log</span> 长到一个上限就轮转成 <span className="mono">bridge.log.1</span>
-            （只留上一代，和审计日志、服务日志同一套做法），旧的覆盖旧的，磁盘不再只涨不落。0 = 不轮转。重启 Bridge 生效。
-          </>
-        }
-      >
-        <div className="form-grid">
-          <Field label="单文件上限" hint="字节（默认 10485760 = 10 MiB，0 = 不轮转）；失焦时保存。">
-            <DraftField
-              type="number"
-              min={NUMBER_BOUNDS.logMaxBytes.min}
-              max={NUMBER_BOUNDS.logMaxBytes.max}
-              value={String(cfg.logMaxBytes)}
-              onCommit={raw => commitNumber("logMaxBytes", raw)}
-              onInvalid={invalidFor("logMaxBytes")}
-            />
-          </Field>
-        </div>
       </Card>
       )}
 
