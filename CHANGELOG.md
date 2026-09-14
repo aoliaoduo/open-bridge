@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **集成测试断言中文输出，却从不指定语言 —— 于是在 CI 上红了三次。** 双语那轮给 CLI 加了语言检测（`OPEN_BRIDGE_LANG` → `LC_ALL` → `LC_MESSAGES` → `LANG`），UI 测试当时因为 jsdom 报 `en-US` 集体变红，用 `vitest.setup.ts` 把语言钉住修好了；**`test/*.test.mjs` 那一层被漏掉了**。这些套件 spawn `bin/open-bridge.js` 并断言它人读的输出，而那些断言写的是中文串。
+
+  本机 `LANG=zh_CN.UTF-8`，所以本地 `npm run verify` 一直全绿；GitHub 的 Ubuntu runner 是 `LANG=C.UTF-8`，CLI **正确地**答英文，于是 11 条断言失败。测的不是代码，是运行它的那台机器的环境。
+
+  修法是在测试运行器层面钉死一次：`test/setup-lang.mjs` 设 `process.env.OPEN_BRIDGE_LANG = "zh"`，由 `--import` 在任何测试文件加载前挂上，因此**每个子进程都继承它**，不管那个 spawn 点有没有显式传 `env`（10 个断言中文的文件里只有 3 个传了）。没有逐条去改断言：语言应该是一个**写明的前提**，而不是碰巧对的默认值。
+
+  复现过程本身值得记一笔：第一次用 `env -u LANG -u LC_ALL -u LC_MESSAGES` 模拟 CI，**测试照样全绿**，差点得出「修复没必要」的结论。原因是 `detectCliLang()` 把「一个 locale 变量都没有」判定为中文（这是给 Windows 的刻意行为，见 `cli-i18n.ts` 的注释），而 CI 并不是那种情况 —— 它设了 `LANG=C.UTF-8`，`C` 是显式的「没有语言」，判定为英文。**清空环境与 CI 的环境是两回事**；用 `LANG=C.UTF-8` 才复现出来，并先证伪过：摘掉 setup 该文件红 2 条，挂上 7 条全绿。
+
 ## [1.0.0-beta.1] — 2026-09-15
 
 ### Added
