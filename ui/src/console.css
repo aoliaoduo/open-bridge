@@ -53,6 +53,33 @@
   --nav-w: 248px;
   --bar-h: 56px;
 
+  /* --- scale -----------------------------------------------------------
+     Type was eleven sizes, four of them (13 / 12.5 / 12 / 11.5) inside a
+     1.5px band. Differences that small do not read as hierarchy — the eye
+     cannot rank them — they just make a page look unsettled. Five steps,
+     each far enough from the next to mean something:
+
+       --fs-xs   badges, table headers, the smallest metadata
+       --fs-sm   hints, secondary lines, dense table cells
+       --fs-md   body default
+       --fs-lg   card titles
+       --fs-xl   page headings
+
+     Spacing is a 4px grid for the same reason. 37 different padding values
+     were not 37 decisions, they were 37 separate guesses. */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 20px;
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
   color-scheme: light;
 }
 
@@ -115,7 +142,7 @@ body {
 .content {
   width: 100%;
   max-width: 1180px;
-  padding: 22px 24px 80px;
+  padding: 24px 24px 80px;
 }
 
 .page { min-height: 200px; }
@@ -145,7 +172,7 @@ body {
 }
 .logo { width: 24px; height: 24px; flex: none; color: var(--accent); }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
-.brand-name { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.brand-name { font-size: var(--fs-md); font-weight: 600; letter-spacing: -0.01em; }
 .brand .collapse-btn { margin-left: auto; }
 
 /* The rail must stay scrollable -- on a short window the nine links do not all
@@ -167,7 +194,7 @@ body {
 
 .nav-group + .nav-group { margin-top: 14px; }
 .nav-group-label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.09em;
   color: var(--muted);
   padding: 0 8px 6px;
@@ -182,7 +209,7 @@ body {
   border-radius: var(--radius-sm);
   color: var(--text);
   text-decoration: none;
-  font-size: 13.5px;
+  font-size: var(--fs-md);
   transition: background-color .12s, color .12s;
 }
 .nav-item + .nav-item { margin-top: 2px; }
@@ -253,12 +280,12 @@ body {
   gap: 12px;
   min-height: var(--bar-h); /* allow wrap to a second line instead of clipping buttons */
   flex: none;
-  padding: 8px 18px;
+  padding: 8px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 
-.crumbs { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 12.5px; color: var(--muted); }
+.crumbs { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: var(--fs-sm); color: var(--muted); }
 .crumb { white-space: nowrap; }
 .crumb.current { color: var(--text); font-weight: 500; }
 .crumb-sep { opacity: 0.5; }
@@ -268,13 +295,13 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface-2);
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   white-space: nowrap;
 }
 
 .topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
-.version { font-size: 12px; color: var(--muted); }
+.version { font-size: var(--fs-sm); color: var(--muted); }
 /* Matches `button.icon-btn { display: inline-flex }` on specificity (0-1-1).
    As a bare `.menu-btn` this lost to it, so the hamburger stayed visible on
    every width -- and on a wide screen the drawer it toggles is not rendered,
@@ -291,8 +318,8 @@ button.menu-btn { display: none; }
   margin-bottom: 16px;
 }
 .page-head-text { min-width: 0; }
-.page-head h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
-.page-hint { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.page-head h1 { font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+.page-hint { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-md); }
 .page-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 
 /* --- KPI cards ------------------------------------------------------------- */
@@ -310,11 +337,11 @@ button.menu-btn { display: none; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-  padding: 13px 15px 11px;
+  padding: 12px 16px 12px;
 }
-.stat-label { font-size: 12px; color: var(--muted); }
-.stat-value { font-size: 24px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
-.stat-hint { font-size: 11.5px; color: var(--muted); min-height: 17px; }
+.stat-label { font-size: var(--fs-sm); color: var(--muted); }
+.stat-value { font-size: var(--fs-xl); font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.stat-hint { font-size: var(--fs-xs); color: var(--muted); min-height: 17px; }
 .stat.ok .stat-value { color: var(--ok); }
 .stat.warn .stat-value { color: var(--warn); }
 .stat.err .stat-value { color: var(--err); }
@@ -327,14 +354,14 @@ button.menu-btn { display: none; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-  padding: 16px 18px;
+  padding: 16px 16px;
   margin-bottom: 14px;
 }
 
 /* Section headings carry a hairline, the "secondary tab" language of the
    reference dashboards: structure comes from rules, not from more boxes. */
 .card > h2 {
-  font-size: 13px;
+  font-size: var(--fs-md);
   font-weight: 600;
   margin: 0 0 12px;
   padding-bottom: 9px;
@@ -347,9 +374,9 @@ button.menu-btn { display: none; }
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   line-height: 1.7;
-  padding: 1px 9px;
+  padding: 1px 8px;
   border-radius: 999px;
   border: 1px solid transparent;
   white-space: nowrap;
@@ -366,12 +393,12 @@ button.menu-btn { display: none; }
 /* --- rows, definition lists ------------------------------------------------ */
 
 .row { display: flex; align-items: center; gap: 10px; padding: 6px 0; flex-wrap: wrap; }
-.row .label { width: 120px; flex: none; color: var(--muted); font-size: 13px; }
+.row .label { width: 120px; flex: none; color: var(--muted); font-size: var(--fs-md); }
 .row.tight { padding: 3px 0; }
 
-.mono { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.mono { font-family: var(--mono); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 
-.section-note { color: var(--muted); font-size: 12.5px; margin: 4px 0 10px; }
+.section-note { color: var(--muted); font-size: var(--fs-sm); margin: 4px 0 10px; }
 
 /* A warning note must follow the theme. #b45309 was hardcoded here once and the
    dark panel put it at 3.3:1 - half the contrast of the theme's own --warn. */
@@ -383,19 +410,19 @@ button.menu-btn { display: none; }
    inside its card instead of dragging the whole page sideways. */
 .table-wrap { overflow-x: auto; }
 
-.token-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.token-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--fs-md); }
 .token-table th {
   text-align: left;
   color: var(--muted);
   font-weight: 500;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.03em;
   padding: 7px 10px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
   background: var(--surface);
 }
-.token-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.token-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .token-table tbody tr:last-child td { border-bottom: none; }
 
 /* The notify matrix carries two prose columns and two controls. Without
@@ -423,7 +450,7 @@ button.menu-btn { display: none; }
    like part of it. */
 .always-chip {
   flex: none;
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   line-height: 1;
   padding: 3px 6px;
   border-radius: 999px;
@@ -449,7 +476,7 @@ button.menu-btn { display: none; }
   max-width: none;
   overflow: visible;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 /* Table toolbar: search on the left, counts and toggles on the right — the
@@ -469,7 +496,7 @@ button.menu-btn { display: none; }
 .toolbar .search svg { position: absolute; left: 9px; width: 14px; height: 14px; color: var(--muted); }
 .toolbar .search input { padding-left: 30px; width: 260px; }
 .toolbar .grow { flex: 1; }
-.toolbar .count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.toolbar .count { color: var(--muted); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 
 /* Inline form group: label and control on one line, used for the
    "new token" composer on the 安全 page so it does not have to borrow
@@ -490,21 +517,21 @@ button.menu-btn { display: none; }
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius);
   background: var(--surface-2);
-  padding: 24px 18px;
+  padding: 24px 16px;
   text-align: center;
   color: var(--muted);
 }
 .empty-icon { width: 26px; height: 26px; opacity: 0.6; margin-bottom: 6px; }
-.empty-title { color: var(--text); font-size: 13.5px; font-weight: 500; }
-.empty-body { font-size: 12.5px; margin-top: 4px; }
+.empty-title { color: var(--text); font-size: var(--fs-md); font-weight: 500; }
+.empty-body { font-size: var(--fs-sm); margin-top: 4px; }
 .empty-action { margin-top: 12px; }
 
 /* --- buttons and inputs ---------------------------------------------------- */
 
 button {
   font: inherit;
-  font-size: 13px;
-  padding: 6px 13px;
+  font-size: var(--fs-md);
+  padding: 6px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   background: var(--surface);
@@ -521,7 +548,7 @@ button.ghost { background: transparent; border-color: transparent; color: var(--
 button.ghost:not(:disabled):hover { background: var(--hover); color: var(--text); border-color: transparent; }
 button.danger { color: var(--err); border-color: var(--err); background: transparent; }
 button.danger:not(:disabled):hover { background: var(--err-soft); }
-button.small { padding: 3px 10px; font-size: 12px; }
+button.small { padding: 3px 10px; font-size: var(--fs-sm); }
 button.armed { background: var(--err); border-color: var(--err); color: #fff; }
 button.icon-btn {
   display: inline-flex;
@@ -557,7 +584,7 @@ button.icon-btn svg { width: 17px; height: 17px; }
 
 input[type="text"], input[type="number"], select, textarea {
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-md);
   padding: 6px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
@@ -574,12 +601,12 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:foc
 input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; }
 input[type="text"] { width: 260px; max-width: 100%; }
 input[type="number"] { width: 110px; }
-textarea { width: 100%; min-height: 64px; font-family: var(--mono); font-size: 12px; resize: vertical; }
+textarea { width: 100%; min-height: 64px; font-family: var(--mono); font-size: var(--fs-sm); resize: vertical; }
 
-label.check { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: 13px; }
+label.check { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: var(--fs-md); }
 /* Same layout as label.check, but a plain span: the text beside a switch is
    read-only, so the pointer target is the switch and nothing else. */
-.check-row { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
+.check-row { display: inline-flex; align-items: center; gap: 7px; font-size: var(--fs-md); }
 .check-row .field-label { cursor: default; }
 
 /* --- settings section rail ------------------------------------------------- */
@@ -612,8 +639,8 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
   border-radius: 0;
   background: none;
   color: var(--muted);
-  font-size: 13px;
-  padding: 7px 11px;
+  font-size: var(--fs-md);
+  padding: 7px 12px;
   margin-bottom: -1px;
   white-space: nowrap;
 }
@@ -628,7 +655,7 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
   border-radius: var(--radius-sm);
   padding: 12px 14px;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.7;
   height: 460px;
   overflow-y: auto;
@@ -637,10 +664,10 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
 }
 .log-stream .t { color: var(--muted); }
 
-.bar-row { display: flex; align-items: center; gap: 10px; font-size: 12.5px; padding: 3px 0; }
-.bar-row .name { width: 180px; flex: none; font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-row { display: flex; align-items: center; gap: 10px; font-size: var(--fs-sm); padding: 3px 0; }
+.bar-row .name { width: 180px; flex: none; font-family: var(--mono); font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar-row .bar { height: 8px; border-radius: 4px; background: var(--accent); min-width: 2px; }
-.bar-row .n { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.bar-row .n { color: var(--muted); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 
 /* Activity list: status dot, tool, message, right-aligned time — the compact
    "what just happened" list from the reference dashboards, in place of a
@@ -652,19 +679,19 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
   align-items: baseline;
   padding: 6px 0;
   border-bottom: 1px solid var(--border);
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
 }
 .act-row:last-child { border-bottom: none; }
-.act-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.act-status { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); white-space: nowrap; }
 .act-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
 .act-status.completed { color: var(--ok); }
 .act-status.error { color: var(--err); }
 .act-status.running { color: var(--accent); }
 .act-status.progress { color: var(--muted); }
 .act-status.warning { color: var(--warn); }
-.act-tool { width: auto; flex: none; font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.act-msg { flex: 1; min-width: 0; font-size: 12.5px; overflow-wrap: break-word; }
-.act-time { color: var(--muted); font-size: 11.5px; flex: none; font-variant-numeric: tabular-nums; }
+.act-tool { width: auto; flex: none; font-family: var(--mono); font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-msg { flex: 1; min-width: 0; font-size: var(--fs-sm); overflow-wrap: break-word; }
+.act-time { color: var(--muted); font-size: var(--fs-xs); flex: none; font-variant-numeric: tabular-nums; }
 
 /* --- toast + modal --------------------------------------------------------- */
 
@@ -677,7 +704,7 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 8px 16px;
-  font-size: 13px;
+  font-size: var(--fs-md);
   opacity: 0;
   transition: opacity .15s, transform .15s;
   pointer-events: none;
@@ -699,7 +726,7 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
   padding: 16px;
 }
 .mask .card { width: min(500px, 92vw); box-shadow: var(--shadow-md); margin: 0; }
-.mask .card h2 { color: var(--text); font-size: 15px; border-bottom: none; padding-bottom: 0; margin-bottom: 6px; }
+.mask .card h2 { color: var(--text); font-size: var(--fs-lg); border-bottom: none; padding-bottom: 0; margin-bottom: 6px; }
 
 .secret-value {
   background: var(--surface-2);
@@ -707,7 +734,7 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
   border-radius: var(--radius-sm);
   padding: 12px;
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: var(--fs-md);
   word-break: break-all;
   user-select: all;
   margin: 10px 0 14px;
@@ -748,7 +775,7 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
   .sidebar.collapsed .nav-label { position: static; width: auto; height: auto; clip-path: none; margin: 0; }
   .scrim { display: block; }
   button.menu-btn { display: inline-flex; }
-  .content { padding: 18px 16px 64px; }
+  .content { padding: 16px 16px 64px; }
   .act-row { grid-template-columns: 88px minmax(0, 1fr) auto; }
   .act-tool { grid-column: 1 / -1; }
 }
@@ -790,8 +817,8 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
   margin-bottom: 12px;
   border-bottom: 1px solid var(--border);
 }
-.card-head h2 { font-size: 13.5px; font-weight: 600; margin: 0; padding: 0; border-bottom: none; }
-.card-desc { margin: 3px 0 0; color: var(--muted); font-size: 12.5px; max-width: 78ch; }
+.card-head h2 { font-size: var(--fs-md); font-weight: 600; margin: 0; padding: 0; border-bottom: none; }
+.card-desc { margin: 3px 0 0; color: var(--muted); font-size: var(--fs-sm); max-width: 78ch; }
 .card-head-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
 .card-foot { margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
 .card-foot .spacer { flex: 1; }
@@ -802,23 +829,23 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
 .prop { display: flex; align-items: baseline; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .prop:last-child { border-bottom: none; }
 .prop:first-child { padding-top: 2px; }
-.prop-label { width: 132px; flex: none; color: var(--muted); font-size: 12.5px; }
-.prop-value { flex: 1; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
-.prop-value.mono { font-family: var(--mono); font-size: 12.5px; }
+.prop-label { width: 132px; flex: none; color: var(--muted); font-size: var(--fs-sm); }
+.prop-value { flex: 1; min-width: 0; font-size: var(--fs-md); overflow-wrap: anywhere; }
+.prop-value.mono { font-family: var(--mono); font-size: var(--fs-sm); }
 .prop-actions { flex: none; display: inline-flex; gap: 6px; align-items: center; }
 
 /* --- form fields ----------------------------------------------------------- */
 
-.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; min-width: 0; }
-.field-label { font-size: 12.5px; font-weight: 500; color: var(--text); }
-.field-hint { font-size: 11.5px; color: var(--muted); }
+.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; min-width: 0; }
+.field-label { font-size: var(--fs-sm); font-weight: 500; color: var(--text); }
+.field-hint { font-size: var(--fs-xs); color: var(--muted); }
 .field-control { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .field-control > input[type="text"], .field-control > select { width: 100%; max-width: 320px; }
 .field-control > input[type="number"] { width: 140px; }
 .field.row { flex-direction: row; align-items: center; gap: 10px; }
 .field.row .field-label { width: 132px; flex: none; font-weight: 400; color: var(--muted); }
 
-.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 26px; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; }
 .form-grid .span2 { grid-column: 1 / -1; }
 
 /* --- switch ---------------------------------------------------------------- */
@@ -870,12 +897,12 @@ input.switch:disabled { opacity: .5; cursor: not-allowed; }
   align-items: center;
   gap: 8px;
   max-width: 100%;
-  padding: 5px 10px;
+  padding: 4px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   overflow-wrap: anywhere;
 }
 .code-chip .value { min-width: 0; }
@@ -883,9 +910,9 @@ input.switch:disabled { opacity: .5; cursor: not-allowed; }
 button.copy-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   padding: 2px 8px;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   border-color: transparent;
   background: transparent;
   color: var(--muted);
@@ -902,7 +929,7 @@ button.icon-text svg { width: 14px; height: 14px; }
 /* --- segmented control ----------------------------------------------------- */
 
 .segmented { display: inline-flex; gap: 2px; padding: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; }
-.segmented button { border: none; background: none; padding: 4px 10px; font-size: 12px; border-radius: 7px; color: var(--muted); }
+.segmented button { border: none; background: none; padding: 4px 10px; font-size: var(--fs-sm); border-radius: 7px; color: var(--muted); }
 .segmented button:hover { color: var(--text); background: var(--hover); border-color: transparent; }
 .segmented button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); font-weight: 500; }
 
@@ -925,7 +952,7 @@ button.icon-text svg { width: 14px; height: 14px; }
 .meter-fill.ok { background: var(--ok); }
 .meter-fill.warn { background: var(--warn); }
 .meter-fill.err { background: var(--err); }
-.meter-label { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.meter-label { color: var(--muted); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .skeleton {
   height: 12px;
@@ -953,7 +980,7 @@ button.icon-text svg { width: 14px; height: 14px; }
 .log-line.level-error .log-text { color: var(--err); }
 
 .logbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-.live-dot { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.live-dot { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--fs-sm); }
 .live-dot::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
 .live-dot.paused::before { background: var(--warn); }
 .live-dot.offline::before { background: var(--err); }
@@ -1002,12 +1029,12 @@ button.icon-text svg { width: 14px; height: 14px; }
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
 }
 
 .todo-current {
   margin: 0 0 12px;
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--muted);
 }
 .todo-current strong { color: var(--text); }
@@ -1026,7 +1053,7 @@ button.icon-text svg { width: 14px; height: 14px; }
   gap: 10px;
   padding: 7px 8px;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 .todo-row:hover { background: var(--surface-2); }
 /* The one item in flight is the answer to "what is it doing right now". */
@@ -1049,12 +1076,12 @@ button.icon-text svg { width: 14px; height: 14px; }
   flex: none;
   min-width: 18px;
   font-variant-numeric: tabular-nums;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 .todo-title { flex: 1; min-width: 0; word-break: break-word; }
 .todo-row.completed .todo-title { color: var(--muted); text-decoration: line-through; }
 .todo-row.in_progress .todo-title { font-weight: 600; }
 
-.todo-foot { margin: 12px 0 0; font-size: 12px; }
-.todo-progress-msg { margin: 0 0 6px; font-size: 13px; word-break: break-word; }
+.todo-foot { margin: 12px 0 0; font-size: var(--fs-sm); }
+.todo-progress-msg { margin: 0 0 6px; font-size: var(--fs-md); word-break: break-word; }

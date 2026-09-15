@@ -132,3 +132,28 @@ test("the ring toggle belongs to the delivery cell, not the ringtone column", ()
   assert.match(css, /\.notify-table \.delivery-cell[^{]*\{[^}]*flex-direction:\s*column/,
     "the select and the ring toggle stack rather than sharing a line");
 });
+
+/**
+ * Type was eleven sizes, four of them (13 / 12.5 / 12 / 11.5) inside a 1.5px
+ * band. Sizes that close cannot be ranked by eye, so they read as sloppiness
+ * rather than hierarchy — and each one was added by someone solving a local
+ * problem, which is exactly how a scale erodes.
+ *
+ * The guard is not "never write a px": it is that font-size goes through the
+ * scale, so adding a sixth step is a deliberate edit to :root rather than a
+ * number typed into one rule.
+ */
+test("every font-size comes from the type scale", () => {
+  const root = css.slice(css.indexOf(":root {"), css.indexOf("}", css.indexOf(":root {")));
+  const steps = [...root.matchAll(/--fs-(\w+):/g)].map(m => m[1]);
+  assert.deepEqual(steps, ["xs", "sm", "md", "lg", "xl"], "five steps, in order");
+
+  // Usages outside :root must reference the tokens.
+  const body = css.slice(root.length);
+  const literals = [...body.matchAll(/font-size:\s*([\d.]+px)/g)].map(m => m[1]);
+  assert.deepEqual(
+    literals,
+    [],
+    `these font-sizes bypass the scale: ${[...new Set(literals)].join(", ")}`,
+  );
+});
