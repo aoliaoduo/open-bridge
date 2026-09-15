@@ -47,7 +47,7 @@ import * as path from "node:path";
 import { resetUsageStats } from "../bridge/usage-store.js";
 import { host } from "../host/host.js";
 import {
-  start, rotateRouteToken, webAiPrompt, republishAfterRotate,
+  start, rotateRouteToken, webAiPrompt, republishAfterRotate, restartTunnelForProviderChange,
 } from "../bridge/lifecycle.js";
 import { enqueueLifecycle } from "../bridge/lifecycle-queue.js";
 
@@ -255,7 +255,17 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
         action.key === "allowedDirectories" && Array.isArray(action.value)
           ? (action.value as string[]).map(item => path.resolve(item))
           : action.value;
+      const previousProvider = String(cfg.get("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string));
       await cfg.update(action.key, value);
+      // A provider switch must take effect on the RUNNING tunnel, not just on
+      // the next restart: the old behavior left ngrok serving after a switch
+      // to tailscale (and vice versa), with status advertising the URL of a
+      // provider the operator had already left. The new provider was already
+      // persisted above, so the rebuild reads it back.
+      if (action.key === "tunnelProvider" && typeof value === "string" && value !== previousProvider) {
+        void restartTunnelForProviderChange();
+        return done({ info: `隧道提供商已切换为 ${value}，正在按新渠道重建隧道。` });
+      }
       return done({ info: "已保存。" });
     }
 

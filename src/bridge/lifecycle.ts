@@ -17,7 +17,7 @@ import { buildWebAiPrompt } from "./onboarding.js";
 import { workspaceStateSuffix } from "./paths.js";
 import { cancelAllPendingRestarts, terminateProcess } from "./processes.js";
 import { enqueueLifecycle } from "./lifecycle-queue.js";
-import { killTunnelTree, loadNgrokAuthtoken, setInstanceRestart, startTunnelInternal, stopPublicWatch, teardownTailscaleFunnel } from "./tunnel.js";
+import { killTunnelTree, loadNgrokAuthtoken, revertToLocalUrl, setInstanceRestart, startTunnelInternal, stopPublicWatch, teardownTailscaleFunnel } from "./tunnel.js";
 import { publishSelf, stopRepublishLoop, withdrawSelf } from "./peer-registry.js";
 import { startHttpInternal, stopLocalServer } from "./http-listener.js";
 import { stopSessionPruneLoop } from "./session-table.js";
@@ -157,6 +157,46 @@ function isStopped(): boolean {
     && !state.reconnectTimer
     && state.sessions.size === 0
     && ![...state.commands.values()].some(command => !command.done);
+}
+
+/**
+ * Drop ONLY the running tunnel and re-arm it under the (new) provider, keeping
+ * the local server, sessions and managed processes untouched. Called when
+ * tunnelProvider changes in settings: the old behavior just persisted the
+ * value, so a running ngrok kept serving after a switch to tailscale (and vice
+ * versa) until the next full restart - the status page then advertised a URL
+ * of a provider the operator had already left.
+ *
+ * Both tunnel families are torn down explicitly (the provider check in
+ * stopInternal cannot be reused: it reads the NEW provider and would spare the
+ * OLD tunnel exactly when a switch happened).
+ */
+export async function restartTunnelForProviderChange(): Promise<void> {
+  return enqueueLifecycle(async () => {
+    state.tunnelGeneration += 1; // invalidate reconnect timers of the old chain
+    stopPublicWatch();
+    state.tunnelRole = "none";
+    state.missingPublicRounds = 0;
+    if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+    state.reconnectTimer = undefined;
+    state.reconnectAttempt = 0;
+    const oldTunnel = state.tunnel;
+    state.tunnel = undefined;
+    killTunnelTree(oldTunnel);
+    teardownTailscaleFunnel();
+    revertToLocalUrl();
+    let tunnelError: string | undefined;
+    try {
+      await startTunnelInternal(state.tunnelGeneration);
+    } catch (error) {
+      tunnelError = error instanceof Error ? error.message : String(error);
+      record("bridge", "error", `Tunnel switch failed; local Bridge stays up: ${tunnelError}`);
+    }
+    host().ui.refresh();
+    if (tunnelError) {
+      host().notify("warn", `隧道已切换，但新渠道启动失败：${tunnelError} 本地 URL 仍可用；修复后点 Start 重试。`);
+    }
+  });
 }
 
 export async function stop(notify = true): Promise<void> {

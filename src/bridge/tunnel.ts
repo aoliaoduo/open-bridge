@@ -293,7 +293,7 @@ async function watchPublicDomain(domain: string): Promise<boolean> {
  * Failure paths that keep the local server alive must never leave the panel
  * advertising a dead public endpoint.
  */
-function revertToLocalUrl(): void {
+export function revertToLocalUrl(): void {
   state.tunnelUrl = "";
   host().ui.refresh();
 }
