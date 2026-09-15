@@ -39,7 +39,19 @@ export interface CanonicalCall {
   /** Arguments in that tool's vocabulary. */
   args: Record<string, unknown>;
   /** Present only when the caller used a name the catalog no longer advertises. */
-  alias?: { used: string; replaced_by: string; call: string };
+  /**
+   * `ignored` names the arguments the rewrite could not honour: ones it does not
+   * forward at all, and ones whose value the family's discriminator overwrites.
+   * The call still does the right thing — that part is by design — but a caller
+   * that passed `section: "sessions"` to `get_bridge_status` asked a question and
+   * got the overview, and it deserves to be told rather than left to diff.
+   */
+  alias?: {
+    used: string;
+    replaced_by: string;
+    call: string;
+    ignored?: Record<string, { sent: unknown; used?: unknown }>;
+  };
 }
 
 type Args = Record<string, unknown>;
@@ -214,10 +226,44 @@ export function legacyToolNames(): string[] {
 export function normalizeToolCall(name: string, args: Args = {}): CanonicalCall {
   const rewrite = LEGACY_REWRITES[name];
   if (!rewrite) return { tool: name, args: normalizeBooleanArgs(name, args) };
-  const canonical = normalizeBooleanArgs(rewrite.tool, rewrite.map(args));
+  const mapped = rewrite.map(args);
+  const ignored = ignoredArguments(args, mapped);
+  const canonical = normalizeBooleanArgs(rewrite.tool, mapped);
   return {
     tool: rewrite.tool,
     args: canonical,
-    alias: { used: name, replaced_by: rewrite.tool, call: describeCanonicalCall(rewrite.tool, canonical) },
+    alias: {
+      used: name,
+      replaced_by: rewrite.tool,
+      call: describeCanonicalCall(rewrite.tool, canonical),
+      ...(ignored ? { ignored } : {}),
+    },
   };
+}
+
+/**
+ * What the caller sent that the rewrite could not honour.
+ *
+ * Compared against the mapped arguments *before* boolean normalization, because
+ * the question is "did the rewrite keep what I sent", not "did it parse it the
+ * way I meant". A key that is absent from the mapped call was dropped; a key
+ * whose mapped value is a different primitive was overwritten by the rewrite's
+ * own discriminator (`get_bridge_status{section:"sessions"}` becomes
+ * `bridge_status{section:"overview"}`: the legacy name means the overview, and
+ * the caller's value is what gets lost).
+ *
+ * Absent when nothing was lost, so the common case pays nothing and callers can
+ * check one optional field instead of an always-present empty object.
+ */
+function ignoredArguments(args: Args, mapped: Args): Record<string, { sent: unknown; used?: unknown }> | undefined {
+  const ignored: Record<string, { sent: unknown; used?: unknown }> = {};
+  for (const [key, sent] of Object.entries(args)) {
+    if (!(key in mapped)) {
+      ignored[key] = { sent };
+      continue;
+    }
+    const used = mapped[key];
+    if (typeof used !== "object" && used !== sent) ignored[key] = { sent, used };
+  }
+  return Object.keys(ignored).length ? ignored : undefined;
 }

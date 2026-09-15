@@ -140,6 +140,26 @@ test("the discriminator of a rewrite cannot be overridden by the caller", () => 
   assert.equal(call.args.action, "start", "a legacy name must not be a back door to another action");
 });
 
+test("a legacy name reports the arguments it dropped or overrode", () => {
+  // Two ways a legacy call can silently lose information, both real: the caller
+  // sends an argument the rewrite has no use for (it is dropped), or it sends the
+  // family's discriminator itself and the rewrite overwrites the value. The call
+  // still does the right thing — that part is by design — but the caller has to
+  // be able to see that it did not get what it asked for.
+  const overridden = normalizeToolCall("get_bridge_status", { section: "sessions" });
+  assert.deepEqual(overridden.args, { section: "overview" }, "the legacy name keeps meaning overview");
+  assert.deepEqual(overridden.alias?.ignored, { section: { sent: "sessions", used: "overview" } });
+
+  const dropped = normalizeToolCall("list_shells", { shell: "bash" });
+  assert.deepEqual(dropped.alias?.ignored, { shell: { sent: "bash" } });
+
+  const clean = normalizeToolCall("move_file", { source: "a", destination: "b" });
+  assert.equal(clean.alias?.ignored, undefined, "an argument that was forwarded is not reported");
+
+  const matching = normalizeToolCall("get_bridge_status", { section: "overview" });
+  assert.equal(matching.alias?.ignored, undefined, "sending the value the rewrite would use anyway is not a loss");
+});
+
 test("an unknown name is passed through untouched", () => {
   const call = normalizeToolCall("read_fil", { path: "a" });
   assert.equal(call.tool, "read_fil");

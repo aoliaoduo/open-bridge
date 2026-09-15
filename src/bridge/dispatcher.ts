@@ -209,7 +209,8 @@ export async function invoke(
 }
 
 /**
- * Tell a caller that used a legacy name what it became.
+ * Tell a caller that used a legacy name what it became — including which of its
+ * arguments that name could not honour.
  *
  * Only object results are annotated: wrapping an array or a scalar would change
  * the shape a legacy caller is parsing, and a hint is not worth breaking a
@@ -219,7 +220,12 @@ function annotateLegacyResult(result: unknown, alias: NonNullable<CanonicalCall[
   if (!result || typeof result !== "object" || Array.isArray(result)) return result;
   return {
     ...(result as Record<string, unknown>),
-    deprecated: { name: alias.used, replaced_by: alias.replaced_by, call: alias.call },
+    deprecated: {
+      name: alias.used,
+      replaced_by: alias.replaced_by,
+      call: alias.call,
+      ...(alias.ignored ? { ignored: alias.ignored } : {}),
+    },
   };
 }
 
