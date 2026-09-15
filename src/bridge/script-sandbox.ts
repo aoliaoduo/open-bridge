@@ -124,8 +124,31 @@ function post(message) {
   try {
     parentPort.postMessage(message);
   } catch (error) {
-    // The envelope itself could not cross the port; nothing further to do.
+    // The envelope itself could not cross the port — the usual cause is a
+    // return value structured clone cannot carry (BigInt, function, Symbol).
+    // Answer with a plain error envelope; the parent used to receive nothing
+    // here and misreport the run as a timeout after the wall clock ran out.
     done = false;
+    try {
+      parentPort.postMessage({
+        type: "done",
+        ok: false,
+        phase: "return",
+        error: {
+          name: "UnserializableReturn",
+          message: "The script's return value could not be sent back to the bridge ("
+            + (error && error.message ? error.message : "not serializable")
+            + "). Return plain JSON data: objects, arrays, strings, numbers, booleans, null.",
+        },
+        calls: calls,
+        byTool: byTool,
+        console: consoleLines,
+      });
+    } catch (nested) {
+      // Even the plain envelope was refused. Give up; the parent's wall-clock
+      // timer is the backstop.
+      void nested;
+    }
   }
 }
 
@@ -292,6 +315,7 @@ async function main() {
 
 main();
 `;
+
 
 /**
  * The bootstrap's FUNCTION BODY, compiled with `vm.compileFunction` and

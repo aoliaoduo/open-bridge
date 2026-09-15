@@ -116,6 +116,46 @@ export function buildDigestIndex(records: readonly AuthTokenRecord[]): DigestInd
 }
 
 /**
+ * Merge a process's transformed record list with what is on disk, so a
+ * concurrent write from another process (the CLI revoking a token, another
+ * instance minting one) is not clobbered.
+ *
+ * Four cases, by id:
+ * - in `next` → kept, with one settlement: if disk shows a `revokedAt` that
+ *   our read (`basis`) did not, another process revoked it between our read
+ *   and our write, and the write-back must not undo that.
+ * - on disk only, never in `basis` → kept (another process minted it between
+ *   our read and write).
+ * - on disk only, but present in `basis` → dropped: its absence from `next`
+ *   is this write's own deletion (revoke-then-purge).
+ * - in `basis` only → already gone from disk; nothing to do.
+ */
+export function mergeRecordsWithDisk(
+  basis: readonly AuthTokenRecord[],
+  next: readonly AuthTokenRecord[],
+  onDisk: readonly AuthTokenRecord[],
+): AuthTokenRecord[] {
+  const basisIds = new Set(basis.map(record => record.id));
+  const nextById = new Map(next.map(record => [record.id, record]));
+  const merged: AuthTokenRecord[] = [];
+  for (const diskRecord of onDisk) {
+    const local = nextById.get(diskRecord.id);
+    if (!local) {
+      if (!basisIds.has(diskRecord.id)) merged.push(diskRecord);
+      continue;
+    }
+    nextById.delete(local.id);
+    if (local.revokedAt === undefined && diskRecord.revokedAt !== undefined) {
+      merged.push({ ...local, revokedAt: diskRecord.revokedAt });
+    } else {
+      merged.push(local);
+    }
+  }
+  return [...merged, ...nextById.values()];
+}
+
+
+/**
  * Resolve a presented secret against the stored records.
  *
  * Every record sharing the presented digest is examined (no early exit), so the
@@ -262,16 +302,24 @@ export function expiryFrom(ttlSeconds: unknown, now: number): number | null {
 }
 
 /**
- * Best-effort client identity for rate limiting. `x-forwarded-for` is trusted
- * only because a locked-out legitimate client never accumulates failures, and
- * the tracked-key map is capped regardless.
+ * Best-effort client identity for rate limiting.
+ *
+ * The ngrok agent forwards the tunnel's traffic from loopback, so the socket
+ * address is the agent, not the client — and the agent APPENDS the client's IP
+ * to any `x-forwarded-for` the client supplied (ngrok's own docs: "be sure to
+ * use the last value of the header"). The FIRST entry is therefore the one the
+ * client typed in, and keying the limiter on it let an attacker rotate their
+ * identity per request and buy a fresh failure budget each time. Take the LAST
+ * entry: a client can still prepend garbage, but the value nearest the trusted
+ * local agent is the one that agent saw.
  */
 export function remoteKeyOf(headers: Record<string, unknown>, socketAddress?: string): string {
   const raw = headers["x-forwarded-for"];
   const forwarded = Array.isArray(raw) ? raw[0] : raw;
   if (typeof forwarded === "string" && forwarded.trim()) {
-    const first = forwarded.split(",")[0]!.trim();
-    if (first) return first;
+    const entries = forwarded.split(",").map(entry => entry.trim()).filter(Boolean);
+    const last = entries[entries.length - 1];
+    if (last) return last;
   }
   const real = headers["x-real-ip"];
   if (typeof real === "string" && real.trim()) return real.trim();

@@ -89,25 +89,28 @@ export async function patchTargetPaths(
     return [];
   }
   const normalized = text.replace(/^\*\*\* Begin Patch\s*\n?/m, "").replace(/^\*\*\* End Patch\s*$/m, "");
-  const headers: string[] = [];
-  for (const match of normalized.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)) headers.push(match[1]!);
-  // Classic unified diff: the --- side names the file for deletions too, where
-  // +++ is /dev/null.
-  for (const match of normalized.matchAll(/^(?:---|\+\+\+)\s+([^\n]+)$/gm)) headers.push(match[1]!);
   const paths = new Set<string>();
-  for (const header of headers) {
+  const add = async (header: string, mode: "block" | "diff"): Promise<void> => {
     let relative: string;
     try {
-      relative = patchFilePath(header, "diff");
+      relative = patchFilePath(header, mode);
     } catch {
-      continue;
+      return;
     }
     try {
       paths.add(await workspace.resolveSecure(relative, true));
     } catch {
       // Outside the allowed roots: applyPatch raises the policy error itself.
     }
-  }
+  };
+  // Block headers must parse with the SAME mode applyPatch uses ("block", no
+  // a//b/ stripping): the two used to disagree, and for a path that really
+  // starts with b/ the lock landed on a different file than the one edited —
+  // which unguarded a concurrent write_file against the real target.
+  for (const match of normalized.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)) await add(match[1]!, "block");
+  // Classic unified diff: the --- side names the file for deletions too, where
+  // +++ is /dev/null.
+  for (const match of normalized.matchAll(/^(?:---|\+\+\+)\s+([^\n]+)$/gm)) await add(match[1]!, "diff");
   return [...paths];
 }
 

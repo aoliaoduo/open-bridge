@@ -36,6 +36,7 @@ import {
   generateTokenId,
   hashSecret,
   isExpired,
+  mergeRecordsWithDisk,
   publicTokenView,
   remoteKeyOf,
   verifySecret,
@@ -143,10 +144,11 @@ function enqueueRecordWrite<T>(task: () => Promise<T>): Promise<T> {
 
 async function writeMergedRecords(basis: AuthTokenRecord[], next: AuthTokenRecord[]): Promise<void> {
   const onDisk = await readRecords();
-  const basisIds = new Set(basis.map(item => item.id));
-  const nextIds = new Set(next.map(item => item.id));
-  const foreign = onDisk.filter(item => !basisIds.has(item.id) && !nextIds.has(item.id));
-  const merged = [...next, ...foreign];
+  // mergeRecordsWithDisk settles revocation/expiry in favour of disk: a CLI
+  // revoke landing between our read (basis) and write must survive the
+  // write-back. Rows the write itself deleted or purged are absent from
+  // `next` and stay deleted, while foreign mints survive untouched.
+  const merged = mergeRecordsWithDisk(basis, next, onDisk);
   await host().secrets.store(AUTH_STORE_KEY, JSON.stringify(merged));
   host().ui.update();
 }

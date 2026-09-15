@@ -318,6 +318,22 @@ test("a cyclic return value is reported instead of mangled", async () => {
   assert.match(String(envelope.error), /cycle/);
 });
 
+test("a return the worker itself cannot clone is an immediate UnserializableReturn, not a timeout", async () => {
+  // A function in the return used to kill postMessage inside the worker, the
+  // worker then sent NOTHING, and the parent sat out the whole wall clock
+  // before misreporting the run as a timeout. UnserializableReturn existed for
+  // this shape and was dead code for it. (A bare BigInt is fine: structured
+  // clone carries it; the parent's safeJsonText stringifies it.)
+  const h = harness();
+  const startedAt = Date.now();
+  const envelope = await h.run("return { run: () => 1 };", { timeoutMs: 5_000 });
+  const elapsed = Date.now() - startedAt;
+  assert.equal(envelope.ok, false, JSON.stringify(envelope));
+  assert.equal(envelope.error_type, "UnserializableReturn");
+  assert.match(String(envelope.error), /return value/i);
+  assert.ok(elapsed < 3_000, `must fail fast, not after the wall clock (took ${elapsed} ms)`);
+});
+
 test("a Markdown fence is tolerated and CRLF is normalized", () => {
   assert.equal(normalizeScriptSource('```js\nreturn 1;\n```'), "return 1;");
   assert.equal(normalizeScriptSource("```\r\nreturn 2;\r\n```\r\n"), "return 2;");

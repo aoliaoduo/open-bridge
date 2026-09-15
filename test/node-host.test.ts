@@ -5,7 +5,7 @@
 
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, existsSync, statSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, statSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { installNodeHost, nodeHost } from "../src/host/node-host.js";
@@ -114,4 +114,20 @@ test("CONFIG_DEFAULTS is deeply frozen", () => {
   assert.throws(() => {
     (CONFIG_DEFAULTS as Record<string, unknown>).port = 1;
   });
+});
+
+test("an unparsable config.json is reported, not silently defaulted", () => {
+  writeFileSync(path.join(home, "config.json"), "{ this is not json");
+  const captured: string[] = [];
+  const original = console.error;
+  console.error = (line: unknown) => { captured.push(String(line)); };
+  try {
+    installNodeHost({ homeDir: home, version: "0.0.0-test" });
+  } finally {
+    console.error = original;
+  }
+  assert.ok(
+    captured.some(line => line.includes("config.json") && line.includes("could not be parsed")),
+    `expected a parse-failure warning on stderr, got: ${JSON.stringify(captured)}`,
+  );
 });

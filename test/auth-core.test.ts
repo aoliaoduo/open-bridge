@@ -11,6 +11,7 @@ import {
   generateTokenId,
   hashSecret,
   isExpired,
+  mergeRecordsWithDisk,
   publicTokenView,
   remoteKeyOf,
   verifySecret,
@@ -177,8 +178,11 @@ test("limiter forgets failures older than the window and caps tracked keys", () 
   assert.equal(limiter.size(), 0);
 });
 
-test("remoteKeyOf prefers the forwarded client, then real-ip, then the socket", () => {
-  assert.equal(remoteKeyOf({ "x-forwarded-for": "203.0.113.7, 10.0.0.1" }, "127.0.0.1"), "203.0.113.7");
+test("remoteKeyOf takes the last forwarded entry, then real-ip, then the socket", () => {
+  // ngrok APPENDS the client IP to a client-supplied x-forwarded-for, so the
+  // last entry is the one the trusted local agent saw; the first is the one
+  // the client typed in, and keying on it let an attacker rotate identities.
+  assert.equal(remoteKeyOf({ "x-forwarded-for": "6.6.6.6, 203.0.113.7" }, "127.0.0.1"), "203.0.113.7");
   assert.equal(remoteKeyOf({ "x-forwarded-for": ["198.51.100.2"] }, "127.0.0.1"), "198.51.100.2");
   assert.equal(remoteKeyOf({ "x-real-ip": "198.51.100.9" }, "127.0.0.1"), "198.51.100.9");
   assert.equal(remoteKeyOf({}, "127.0.0.1"), "127.0.0.1");
@@ -194,3 +198,47 @@ test("bearerFrom reads the header first and falls back to a query parameter", ()
   assert.deepEqual(bearerFrom(undefined, new URL("http://x/mcp")), { via: "none" });
   assert.deepEqual(bearerFrom("Basic abc", new URL("http://x/mcp")), { via: "none" });
 });
+
+test("mergeRecordsWithDisk keeps a concurrent CLI revoke despite a stale write-back", () => {
+  // The sequence that resurrected revoked tokens: this process read the store
+  // (basis), a CLI process revoked T and wrote it, this process then wrote its
+  // transformed list — which still carried T unrevoked. The merge must settle
+  // revocation in favour of disk.
+  const tokenT = record({ id: "aaaa1111" });
+  const basis = [record({ id: "bbbb2222" }), tokenT];
+  assert.ok(basis.includes(tokenT), "the token was on disk when this process last read");
+  const next = [tokenT, record({ id: "cccc3333" })];
+  const revokedOnDisk: AuthTokenRecord = { ...tokenT, revokedAt: NOW + 5 };
+  const onDisk = [revokedOnDisk, record({ id: "dddd4444" })];
+  const merged = mergeRecordsWithDisk(basis, next, onDisk);
+  const t = merged.find(item => item.id === "aaaa1111");
+  assert.ok(t, "T must survive the merge");
+  assert.equal(t.revokedAt, NOW + 5, "a concurrent revoke must not be undone by the write-back");
+  // Foreign mint survives, purge deletion survives.
+  assert.ok(merged.some(item => item.id === "dddd4444"), "a foreign mint must survive");
+  assert.ok(!merged.some(item => item.id === "bbbb2222"), "a row the write deleted must stay deleted");
+  assert.ok(merged.some(item => item.id === "cccc3333"));
+  // Reordering: disk order is the base, unseen `next` rows append.
+  assert.deepEqual(merged.map(item => item.id), ["aaaa1111", "dddd4444", "cccc3333"]);
+});
+
+test("mergeRecordsWithDisk keeps a purge deleted: rows absent from next but present in basis stay gone", () => {
+  // The purge case: this write removed a row, so its absence from `next` is
+  // intentional. Treating it as "foreign mint" resurrected the very rows the
+  // purge just deleted (caught by test/guards-integration.test.mjs).
+  const doomed = record({ id: "ffff6666" });
+  const live = record({ id: "aaaa7777" });
+  const basis = [live, doomed];
+  const next = [live];
+  const onDisk = [live, { ...doomed, revokedAt: NOW + 2 }];
+  const merged = mergeRecordsWithDisk(basis, next, onDisk);
+  assert.deepEqual(merged.map(item => item.id), ["aaaa7777"],
+    "the purged revoked row must not come back");
+});
+
+test("mergeRecordsWithDisk lets the local write revoke a token disk has not seen", () => {
+  const token = record({ id: "eeee5555" });
+  const merged = mergeRecordsWithDisk([token], [{ ...token, revokedAt: NOW + 9 }], [token]);
+  assert.equal(merged[0]?.revokedAt, NOW + 9, "a local revoke must not be dropped when disk still shows active");
+});
+

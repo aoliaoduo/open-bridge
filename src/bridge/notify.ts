@@ -877,7 +877,14 @@ export function finishNoticeVerdict(input: {
   // reported. The cost is accepted and real — 45 s of quiet while someone
   // reads a long answer will be announced as an ending, then corrected by the
   // latch as soon as the next call lands.
-  const settleMs = Math.min(FINISH_SETTLE_MS, input.idleMinutes * 60_000);
+  // The cap applies only to a POSITIVE idle setting ("this small a knob must
+  // not be outlived by the delay"). idleMinutes 0 switches the silence
+  // watchdog off and must NOT collapse the settle delay to zero - that used
+  // to fire this bell instantly after every last call, undoing the
+  // model's-notify-wins race the settle exists to protect.
+  const settleMs = input.idleMinutes > 0
+    ? Math.min(FINISH_SETTLE_MS, input.idleMinutes * 60_000)
+    : FINISH_SETTLE_MS;
   if (input.nowMs - input.lastUsedMs < settleMs) return false;
   return input.announcedForMs !== input.completedAtMs;
 }

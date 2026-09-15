@@ -331,6 +331,23 @@ test("finish watchdog: the AI's own push silences it", () => {
   );
 });
 
+test("finish watchdog: idleMinutes 0 (silence watchdog off) must not zero the settle delay", () => {
+  // idleMinutes is the SILENCE watchdog's threshold; 0 switches that one off.
+  // The finish watchdog borrows the same number only as an upper bound on its
+  // settle delay — and `Math.min(45s, 0)` collapsed the delay to zero, so the
+  // end-of-exchange bell fired instantly after every last call instead of
+  // letting the model's own notify win the race. 0 must leave the default 45 s
+  // settle intact, not abolish it.
+  const zeroIdle = { ...DONE, idleMinutes: 0 };
+  assert.equal(finishNoticeVerdict(zeroIdle), true,
+    "the finished ending itself is still announced with idle watchdog off");
+  assert.equal(
+    finishNoticeVerdict({ ...zeroIdle, lastUsedMs: DONE.nowMs - 1_000 }),
+    false,
+    "but not instantly: the 45 s settle still guards the model's own notify",
+  );
+});
+
 test("finish watchdog: unfinished work is the idle watchdog's job, not this one", () => {
   assert.equal(finishNoticeVerdict({ ...DONE, allCompleted: false }), false);
   // A list with open items stays the idle watchdog's case even if some other

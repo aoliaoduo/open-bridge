@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **另一进程吊销的令牌会被本进程的写回复活。** 令牌写入是「读基准 → 变换 → 与磁盘合并 → 写回」，旧合并规则只保护「本进程没见过的行」；对两边都有的行，本进程的版本整体胜出。时序：本进程任一记录写（每 30 秒的 useCount 刷盘就够）先读到基准 → CLI 进程吊销令牌 T 并落盘 → 本进程把仍携带 T 未吊销版本的列表写回 —— **吊销静默失效**。这正是合并想防的场景，但它只防「新增行被删」，不防「已有行被外部改了状态」。现在 `mergeRecordsWithDisk` 接收基准做三方判定：磁盘独有的行只有「基准里也从未有过」（真·外来新铸造）才保留；`revokedAt` 按磁盘确立者为准，本进程写回不撤销已确立的吊销。`test/auth-core.test.ts` 钉住三条（含 purge 行不得复活的回归 —— 初版修复就栽在这里，被 `guards-integration` 抓住）。
+
 - **旧世代的「没有会话」把两种失败说成同一句话。** 2025 世代的客户端没带可用会话时，传输层对「从来没握过手」和「握过手、但会话已经不在了（重启、空闲回收、同一个 URL 换了实例）」回的都是 `400 -32000 "Bad Request: Server not initialized"`。这句话读起来像「服务器坏了」，而两种情况的解法都只是**再发一次 `initialize`** —— 于是最自然的结论恰好是唯一没有出路的那个：本轮真付了代价，一轮探测据此写了「引擎握手已坏」的报告，而同一台服务在两条代码之外正好好地服务现代协议请求。现在分开回答：没有 `mcp-session-id` 头 → `400` / `-32000` / `data.reason: "initialize-required"`；带了服务端不认识的 id → `404` / `-32001` / `data.reason: "session-expired"`（404 也是规范对未知会话 id 的要求）。`initialize` 本身从不被拦：带着过期 id 重握手照样成功并拿回新 id —— 容忍是刻意的，重连不该需要特例。新增 `src/bridge/session-guidance.ts`（纯函数，判据在 `test/session-guidance.test.ts`）与 `test/legacy-session-guidance-integration.test.mjs`（真进程上钉住两条响应、握手不受影响、现代世代不被拦）。红先绿后：未修复代码上两条集成用例分别红在「缺 `data.reason`」与「状态是 400 而不是 404」。
 
 - **旧名会静默丢掉调用方的参数。** 旧名对照表是「同一个问题换一种写法」：`get_bridge_status` = `bridge_status{section:"overview"}`。于是同一个键同时带着调用方的值和工具的固定值时，输的总是调用方 —— 实测 `get_bridge_status{section:"sessions"}` 拿到的是 overview，调用方（我）以为自己问了会话表。结果里的 `deprecated` 本来就在说「该换成 bridge_status」，现在它多一个 `ignored`：列出被丢弃的键、以及被固定取值覆盖的键（`{section: {sent: "sessions", used: "overview"}}`）。`test/tool-call-shape.test.ts` 钉住三种情形 —— 覆盖、丢弃、以及原样转发（后者不该出现 `ignored`，否则字段本身就变成噪音）。

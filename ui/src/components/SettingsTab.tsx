@@ -494,11 +494,16 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
               onCommit={next => setConfig("shellPath", next)}
             />
           </Field>
-          <Field label={t("Shell 参数", "Shell arguments")} hint={t("留空使用默认参数。", "Leave empty to use the defaults.")}>
+          <Field label={t("Shell 参数", "Shell arguments")} hint={t("每行一个参数；含空格的参数无需加引号。留空使用默认参数。", "One argument per line; arguments with spaces need no quoting. Leave empty for the defaults.")}>
+            {/* One per line, like allowedDirectories: the old join(" ")/split(/\s+/)
+                round-trip could not express an argument containing a space
+                ("C:\Program Files\...") or an empty one, and saving once
+                permanently split such an argument into two. */}
             <DraftField
-              value={cfg.shellArgs.join(" ")}
+              multiline
+              value={cfg.shellArgs.join("\n")}
               placeholder={t("留空使用默认参数", "Leave empty for the defaults")}
-              onCommit={raw => setConfig("shellArgs", raw.trim() ? raw.trim().split(/\s+/) : [])}
+              onCommit={raw => setConfig("shellArgs", raw.split(/\r?\n/).map(s => s.trim()).filter(s => s.length > 0))}
             />
           </Field>
         </div>

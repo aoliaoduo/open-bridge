@@ -383,6 +383,7 @@ async function descendantPids(rootPid: number): Promise<number[]> {
 export async function terminateProcess(
   commandState: CommandState,
   reason: NonNullable<CommandState["requestedStop"]>,
+  options: { closeTimeoutMs?: number } = {},
 ): Promise<boolean> {
   // Mark first, even when the process already exited: a scheduled auto-restart
   // must never survive a stop/restart/delete request (it would resurrect the
@@ -411,7 +412,7 @@ export async function terminateProcess(
   } catch {
     if (!commandState.child.killed) commandState.child.kill();
   }
-  return await waitForProcessClose(commandState);
+  return await waitForProcessClose(commandState, options.closeTimeoutMs);
 }
 
 export function processSnapshot(s: CommandState): Record<string, unknown> {

@@ -33,7 +33,17 @@ function markerPattern(marker: string, global: boolean): RegExp {
 export function scanMarkerExitCode(text: string, marker: string): number | null {
   const re = markerPattern(marker, true);
   let code: number | null = null;
-  for (const m of text.matchAll(re)) code = Number(m[1]);
+  for (const m of text.matchAll(re)) {
+    // A match that runs to the very end of the window may be TRUNCATED: the
+    // chunked scanner splits markers whose digits straddle a chunk boundary,
+    // and the greedy \d+ then reports the cut-off prefix (-1 for -123). The
+    // sentinel is a full line, so trust a match only when a newline follows.
+    const end = m.index! + m[0].length;
+    const tail = text.slice(end);
+    const isLineEnd = (ch: string | undefined): boolean => ch === "\n" || ch === "\r";
+    if (!isLineEnd(tail[0])) continue;
+    code = Number(m[1]);
+  }
   return code;
 }
 

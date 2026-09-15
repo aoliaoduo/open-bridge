@@ -342,7 +342,12 @@ export function streamReadLines(
 
     const finalize = (): void => {
       if (binary) { fail(new BinaryFileError()); return; }
-      if (pending.length > 0 && !stoppedEarly) {
+      // The pending unterminated tail must be counted whenever EOF was reached
+      // honestly - including the stoppedByEndLine case, where the stream ran
+      // on to EOF precisely so the whole-file numbers stay reportable. The old
+      // `!stoppedEarly` guard skipped it there, and every count below was one
+      // short for a file without a trailing newline.
+      if (pending.length > 0 && (!stoppedEarly || stoppedByEndLine)) {
         try { handleLine(pending); }
         catch (e) { if (e instanceof BinaryFileError) { fail(e); return; } throw e; }
       }

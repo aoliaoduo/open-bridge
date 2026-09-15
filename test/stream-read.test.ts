@@ -210,3 +210,16 @@ test("a file without a trailing newline is read whole with correct totals", asyn
   assert.equal(r.sha256, createHash("sha256").update(body).digest("hex"));
   assert.equal(r.binary, false);
 });
+
+test("end_line + no trailing newline: the unterminated last line is still counted", async () => {
+  // stoppedByEndLine keeps the stream running to EOF for the whole-file hash,
+  // but finalize used to skip the pending unterminated tail (guarded by
+  // `!stoppedEarly`), so lineNo never counted the final line and lines_total
+  // came back one short.
+  const body = "l1\nl2\nl3\nl4\nl5"; // 5 lines, no trailing newline
+  const f = tmpFile("nonl-range.txt", body);
+  const r = await streamReadLines(f, { startLine: 1, endLine: 2, maxBytes: 1 << 20 }, Buffer.byteLength(body));
+  assert.equal(r.content, "l1\nl2\n");
+  assert.equal(r.lines_total, 5, "EOF was reached, so the count must include the unterminated last line");
+  assert.equal(r.sha256, createHash("sha256").update(body).digest("hex"));
+});

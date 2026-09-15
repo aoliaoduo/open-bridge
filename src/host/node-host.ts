@@ -67,7 +67,17 @@ function readJsonSync(file: string): Record<string, unknown> {
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
     return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
-  } catch {
+  } catch (error) {
+    // A present-but-unparsable file must not silently become "no settings":
+    // auth.enabled would flip back to false and, with a live tunnel, a
+    // public-authed endpoint would degrade to public-open with no trace. The
+    // log channel does not exist yet at first load (the log settings come
+    // FROM this file), so the warning goes to stderr, where the console that
+    // owns this process shows it.
+    if (fs.existsSync(file)) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[WARN] ${file} could not be parsed (${message}); its settings are ignored and defaults apply. Fix or delete the file.`);
+    }
     return {};
   }
 }

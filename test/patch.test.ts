@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { applyPatch } from "../src/mcp/patch.js";
+import { applyPatch, patchTargetPaths } from "../src/mcp/patch.js";
 import type { WorkspaceContext } from "../src/workspace/context.js";
 
 /** Minimal unrestricted WorkspaceContext: behaves like the real anchor in unrestricted mode. */
@@ -497,4 +497,44 @@ test("a hunk body line starting with -- is content, not the next file header", (
     ].join("\n");
     await applyPatch(patch, ws);
     assert.equal(await readFile(file, "utf8"), "+ changed\n");
+  }));
+
+test("block headers and applyPatch agree on b/-prefixed paths (lock key regression)", async () =>
+  withSandbox(async (root, ws) => {
+    // A repo that really has a b/ top-level directory. applyPatch edits
+    // b/tools/x.ts (block mode never strips a/ or b/); patchTargetPaths used
+    // to parse the same header in diff mode and lock tools/x.ts instead — the
+    // write lock guarded the wrong file.
+    const dir = path.join(root, "b", "tools");
+    await mkdir(dir, { recursive: true });
+    const file = path.join(dir, "x.ts");
+    await writeFile(file, "old\n", "utf8");
+    const patch = [
+      "*** Begin Patch",
+      "*** Update File: b/tools/x.ts",
+      "@@ -1,1 +1,1 @@",
+      "-old",
+      "+new",
+      "*** End Patch",
+    ].join("\n");
+    const targets = await patchTargetPaths(patch, undefined, ws);
+    assert.deepEqual(targets, [file], `the lock key must name the file applyPatch will edit: ${JSON.stringify(targets)}`);
+    await applyPatch(patch, ws);
+    assert.equal(await readFile(file, "utf8"), "new\n");
+  }));
+
+test("unified diff headers still strip a//b/ prefixes in the lock plan", async () =>
+  withSandbox(async (root, ws) => {
+    const file = path.join(root, "tools", "y.ts");
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, "old\n", "utf8");
+    const patch = [
+      "--- a/tools/y.ts",
+      "+++ b/tools/y.ts",
+      "@@ -1,1 +1,1 @@",
+      "-old",
+      "+new",
+    ].join("\n");
+    const targets = await patchTargetPaths(patch, undefined, ws);
+    assert.deepEqual(targets, [file]);
   }));

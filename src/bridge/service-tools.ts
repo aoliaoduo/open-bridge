@@ -261,6 +261,20 @@ async function stopServiceInner(args: Args): Promise<unknown> {
   const commandId = service.commandId;
   const proc = state.commands.get(commandId);
   const stopped = proc ? await terminateProcess(proc, "stopped") : true;
+  // A terminateProcess that timed out (false) means the process tree may still
+  // be alive. Clearing commandId here used to orphan it: service_status said
+  // "stopped", and start_service spawned a second instance that then fought
+  // the survivor for the port. Keep the handle so a retry or a
+  // process_control terminate can finish the job, and say so honestly.
+  if (!stopped) {
+    return {
+      name: String(args.name),
+      command_id: commandId,
+      stopped: false,
+      status: "running",
+      hint: `The process did not exit within the termination budget. Retry service stop, or run process_control {action: "terminate", command_id: "${commandId}"}.`,
+    };
+  }
   service.commandId = undefined;
   return { name: String(args.name), command_id: commandId, stopped, status: "stopped" };
 }
@@ -296,6 +310,16 @@ async function deleteServiceInner(args: Args): Promise<unknown> {
   if (!service) throw new Error(`Unknown service: "${serviceName}".${availableHint("Saved services", state.services.keys())}`);
   const proc = service.commandId ? state.commands.get(service.commandId) : undefined;
   const stopped = proc ? await terminateProcess(proc, "stopped") : false;
+  if (proc && !stopped) {
+    // The definition survives so the running (unkillable so far) process stays
+    // attributable and stoppable; deleting would have dropped the only handle.
+    return {
+      name: serviceName,
+      deleted: false,
+      stopped: false,
+      hint: `The process did not exit within the termination budget, so the service was not deleted. Retry once it is gone.`,
+    };
+  }
   service.commandId = undefined;
   state.services.delete(serviceName);
   persistServices();

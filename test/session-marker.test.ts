@@ -44,3 +44,19 @@ test("stripMarkerLines removes the sentinel line, LF and CRLF", () => {
   assert.equal(stripMarkerLines(`${m}=0`, m), "");
   assert.equal(stripMarkerLines("no marker", m), "no marker");
 });
+
+test("a truncated digit at the end of the window is not a match", () => {
+  // The chunked scanner in shell-sessions re-examines a carry of the previous
+  // chunk, so a marker whose digits straddle the boundary arrives split:
+  // window 1 ends with "__OB_DONE_x__=-1" (the real code was -123). The scan
+  // must refuse a match that touches the END of the window unless the line is
+  // newline-terminated, or it reports the truncation as the exit code.
+  const m = createMarker();
+  assert.equal(scanMarkerExitCode(`work\n${m}=-1`, m), null,
+    "digits at the very end of the window may be truncated; not a complete marker");
+  assert.equal(scanMarkerExitCode(`work\n${m}=-123`, m), null);
+  // Same prefix, but newline-terminated: now it is complete and must match.
+  assert.equal(scanMarkerExitCode(`work
+${m}=-1
+`, m), -1);
+});

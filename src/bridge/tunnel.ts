@@ -230,12 +230,23 @@ export function stopPublicWatch(): void {
 function startPublicWatch(domain: string): void {
   stopPublicWatch();
   let healthy = true;
+  let chained = false;
   const schedule = (): void => {
+    chained = true;
     state.publicWatchTimer = setTimeout(() => {
+      // Clear the handle when the timer fires, exactly like reconnectTimer
+      // above: the fired handle is spent, and leaving it in the slot made
+      // "is a watch chain pending?" unanswerable. The old `.finally` test
+      // (`!== undefined`) then read a NEW chain's handle as this chain's,
+      // forked a second chain, and stopPublicWatch() — which clears only the
+      // last-written handle — could no longer reach it. Two chains ran
+      // concurrently, and the orphaned one kept claiming free domains even
+      // after the instance was deliberately stopped.
+      state.publicWatchTimer = undefined;
       void watchPublicDomain(domain)
         .then(wasHealthy => { healthy = wasHealthy; })
         .catch(error => { record("ngrok", "error", String(error)); })
-        .finally(() => { if (state.publicWatchTimer !== undefined) schedule(); });
+        .finally(() => { if (chained && state.publicWatchTimer === undefined) { chained = false; schedule(); } });
     }, watchIntervalMs(healthy));
   };
   schedule();
