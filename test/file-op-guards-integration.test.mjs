@@ -344,6 +344,27 @@ async function readFilesEntry(args) {
   return Array.isArray(parsed) ? parsed[0] : parsed;
 }
 
+test("the guard sees through Windows spellings of the workspace root", async t => {
+  if (process.platform !== "win32") return t.skip("the \\?\\ and trailing-dot forms are Windows spellings");
+  // One directory, three spellings. The guard compared resolved strings, so
+  // only the first was refused; the other two reached fs.rm with the guard's
+  // blessing, and both are aliases the filesystem accepts as that directory:
+  // "\\?\\" is the long-path prefix, and Win32 strips a trailing dot or space
+  // from a segment before opening it.
+  writeFileSync(path.join(workspace, "alias-canary.txt"), "still here", "utf8");
+  const spellings = [
+    ["the long-path prefix", "\\\\?\\" + workspace],
+    ["a trailing dot", `${workspace}.`],
+    ["a trailing space", `${workspace} `],
+  ];
+  for (const [label, target] of spellings) {
+    const result = await callTool("file_op", { op: "delete", path: target, recursive: true });
+    assert.equal(result.isError, true, `a delete of the workspace root spelled with ${label} must fail`);
+    assert.match(result.text, /Refusing to delete/);
+  }
+  assert.ok(existsSync(path.join(workspace, "alias-canary.txt")), "the project survived every spelling");
+});
+
 test("a relative path cannot walk out of the workspace, whatever the tool", async () => {
   // The escape that started this: apply_patch with "../../ob-escape.txt" created
   // a file outside the workspace and reported success. The path has to be

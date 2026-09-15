@@ -72,6 +72,54 @@ function isAtOrAbove(candidate: string, other: string): boolean {
 }
 
 /**
+ * The comparison key for the self-destruction guard: one directory, one string.
+ *
+ * Windows accepts more than one spelling for the same path, and a guard that
+ * compares resolved strings is only as strong as the spelling it is handed:
+ *
+ *   - `\\?\C:\dir` (and `\\.\C:\dir`, `//?/C:/dir`) is the long-path prefix
+ *     form. `path.resolve` does not remove it, so it never compared equal to the
+ *     protected path — and `fs` happily acted on it.
+ *   - The Win32 layer strips trailing dots and spaces from each segment before
+ *     opening it, so `C:\dir.` and `C:\dir ` are the same directory on disk
+ *     while comparing as different strings.
+ *
+ * Deleting a path is deleting a path: the guard refuses the call nobody means to
+ * make, and "which spelling did the caller produce" must not be what decides
+ * whether it holds. Case variants were already safe (`path.relative` compares
+ * case-insensitively on win32).
+ *
+ * `..` and `.` are left exactly as they are — they are the segments that carry
+ * meaning, and stripping their dots would silently turn a parent traversal into
+ * the current directory, i.e. break the very case this guard is for.
+ *
+ * Only Windows spellings are normalized, and only on Windows: on POSIX a file may
+ * legitimately be named `current.` or start with `\\?\`, and rewriting those
+ * would merge two real, different directories.
+ *
+ * Deliberately NOT `fs.realpath`: removing a symlink or junction does not remove
+ * what it points at, so a link spelled towards the workspace root is not the
+ * self-destruction this guard exists to refuse.
+ */
+export function normalizeGuardPath(input: string): string {
+  let text = input;
+  if (process.platform === "win32") {
+    // \\?\UNC\server\share must keep its UNC meaning rather than degrading to
+    // a relative "UNC\server\share".
+    if (/^[\\/]{2}\?[\\/]UNC[\\/]/i.test(text)) {
+      text = `\\\\${text.replace(/^[\\/]{2}\?[\\/]UNC[\\/]/i, "")}`;
+    } else if (/^[\\/]{2}[?.][\\/]/.test(text)) {
+      text = text.replace(/^[\\/]{2}[?.][\\/]/, "");
+    }
+    text = text
+      .split(/[\\/]/)
+      .map(segment => (segment === "." || segment === ".." ? segment : segment.replace(/[. ]+$/, "")))
+      .join("\\");
+  }
+  return path.resolve(text);
+}
+
+/**
  * Refuse an operation aimed at the ground the Bridge stands on.
  *
  * `unrestrictedFileAccess` (default on) is deliberate and untouched: absolute
@@ -83,17 +131,20 @@ function isAtOrAbove(candidate: string, other: string): boolean {
  * the deliberate way to do it.
  */
 function refuseSelfDestruction(target: string, verb: string): void {
-  const resolved = path.resolve(target);
+  const resolved = normalizeGuardPath(target);
+  // When the input was an alias, name it: the caller wrote a path the guard read
+  // as something else, and that is the fact worth putting in the error.
+  const spelled = resolved === path.resolve(target) ? "" : ` (spelled "${target}")`;
   if (resolved === path.parse(resolved).root) {
     throw new Error(
-      `Refusing to ${verb} "${resolved}": that is a drive root, not project content. `
+      `Refusing to ${verb} "${resolved}"${spelled}: that is a drive root, not project content. `
       + "File tools never target it; use run_command if you really mean it.",
     );
   }
   const hit = protectedTargets().find(entry => isAtOrAbove(resolved, entry.path));
   if (!hit) return;
   throw new Error(
-    `Refusing to ${verb} "${resolved}": it is ${hit.label} (or a parent of it), so the call would take the whole project with it — unrecoverably. `
+    `Refusing to ${verb} "${resolved}"${spelled}: it is ${hit.label} (or a parent of it), so the call would take the whole project with it — unrecoverably. `
     + "File tools never target that path; use run_command if you really mean it.",
   );
 }
