@@ -25,6 +25,7 @@ import { loadTodoStore } from "./todo-store.js";
 import { createMcp, headerValue, modernNodeHandlerOf, sharedEventStore } from "./mcp-endpoint.js";
 import { currentExtraRouteHandler, notifyLocalServerReady } from "./route-hooks.js";
 import { makeRoomForSession, pruneSessions, startSessionPruneLoop } from "./session-table.js";
+import { legacySessionProblem } from "./session-guidance.js";
 import { publishSelf, readablePeerFiles, startRepublishLoop } from "./peer-registry.js";
 import { selfProbe } from "./self-probe.js";
 import { readJsonBody } from "../http/request-body.js";
@@ -325,6 +326,37 @@ export async function startHttpInternal(): Promise<void> {
           record("bridge", "error", `Modern MCP handler failed: ${message}`);
           if (!res.headersSent) res.writeHead(500, { ...securityHeaders, "content-type": "application/json" });
           if (!res.writableEnded) res.end(JSON.stringify({ error: message }));
+        }
+        return;
+      }
+
+      // Legacy traffic that arrives without a live session: name which of the two
+      // failures this is, instead of handing it to the transport for the one
+      // opaque refusal it gives both. See session-guidance.ts for why that
+      // distinction is the fix and not a nicety.
+      const legacyProblem = legacySessionProblem({
+        method: typeof (parsedBody as { method?: unknown } | undefined)?.method === "string"
+          ? String((parsedBody as { method: string }).method)
+          : undefined,
+        hasSessionId: Boolean(sessionId),
+        known: Boolean(session),
+      });
+      if (legacyProblem) {
+        const requestId = (parsedBody as { id?: unknown } | undefined)?.id;
+        const id = typeof requestId === "string" || typeof requestId === "number" ? requestId : null;
+        if (!res.headersSent) {
+          res.writeHead(legacyProblem.status, { ...securityHeaders, "content-type": "application/json" });
+        }
+        if (!res.writableEnded) {
+          res.end(JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            error: {
+              code: legacyProblem.code,
+              message: legacyProblem.message,
+              data: { reason: legacyProblem.reason, hint: legacyProblem.hint },
+            },
+          }));
         }
         return;
       }
