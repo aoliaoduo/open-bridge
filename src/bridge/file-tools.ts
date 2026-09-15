@@ -4,7 +4,7 @@ import * as fsSync from "node:fs";
 import * as path from "node:path";
 import { assertExpectedHash, sha256 } from "../workspace/file-version.js";
 import { createHash, randomBytes } from "node:crypto";
-import { applyEol, detectEol, toLf } from "../workspace/eol.js";
+import { applyEol, detectEol, toLf, type EolStyle } from "../workspace/eol.js";
 import { persistText, writeFileAtomic } from "../workspace/persist.js";
 import { applyPatch as applyPatchFile, resolvePatchSource } from "../mcp/patch.js";
 import { streamReadLines, truncateToUtf8Bytes } from "../mcp/stream-read.js";
@@ -796,6 +796,40 @@ export async function readFiles(args: Args): Promise<unknown> {
   }));
 }
 
+/** How much of an existing file is sampled to learn its line-ending style. */
+const APPEND_EOL_SAMPLE_BYTES = 64 * 1024;
+
+/**
+ * The line-ending style of a file that is about to be appended to, or null when
+ * there is no file to match.
+ *
+ * Only a bounded tail is read: append targets tend to be logs, the style that
+ * matters is the one used where the new bytes will land, and buffering a 2 GB
+ * log to learn one fact would be absurd. The window can cut a CRLF pair in half,
+ * so one byte of run-up is included when the window does not start at byte 0 —
+ * otherwise a CRLF file could sample as LF-dominant and be appended to with the
+ * wrong style, which is the bug this exists to prevent.
+ */
+async function existingEolStyle(file: string): Promise<EolStyle | null> {
+  let handle: fs.FileHandle;
+  try {
+    handle = await fs.open(file, "r");
+  } catch {
+    return null;
+  }
+  try {
+    const size = (await handle.stat()).size;
+    if (size === 0) return null;
+    const runUp = size > APPEND_EOL_SAMPLE_BYTES ? 1 : 0;
+    const length = Math.min(size, APPEND_EOL_SAMPLE_BYTES) + runUp;
+    const buf = Buffer.allocUnsafe(length);
+    const { bytesRead } = await handle.read(buf, 0, length, size - length);
+    return detectEol(buf.subarray(0, bytesRead).toString("utf8"));
+  } finally {
+    await handle.close();
+  }
+}
+
 export async function writeFile(args: Args): Promise<unknown> {
   const file = await securePath(requiredArg(args, "path"), true);
   // A write with NEITHER payload silently truncated the target to zero bytes
@@ -857,12 +891,21 @@ export async function writeFile(args: Args): Promise<unknown> {
       assertExpectedHash(previous, args.expected_sha256, String(args.path));
     }
     // Same stale-write guard the base64 branch enforces before appending.
-    await fs.appendFile(file, content);
+    //
+    // Match the file's line endings instead of handing the caller's bytes to the
+    // filesystem: appending "p3\n" to "p1\r\np2\r\n" used to leave the file
+    // with two CRLF lines and one LF line, and every later diff of it noise.
+    // `edit_block` and `apply_patch` already work this way. Nothing on disk is
+    // rewritten -- only the appended text is normalized. The base64 branch above
+    // is deliberately exempt: there the caller is writing bytes, not lines.
+    const eol = await existingEolStyle(file);
+    const appended = eol === null ? content : applyEol(content, eol);
+    await fs.appendFile(file, appended);
     // Constant-memory hash of the appended file (streamed, so appending to a
     // large log never buffers the whole file just to report a sha256).
     return {
       path: String(args.path),
-      bytes: Buffer.byteLength(content, "utf8"),
+      bytes: Buffer.byteLength(appended, "utf8"),
       mode: "append" as const,
       sha256: await sha256File(file),
     };
