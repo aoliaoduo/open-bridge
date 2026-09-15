@@ -92,8 +92,19 @@ export interface RipgrepOptions {
 }
 
 /**
- * Run ripgrep and return matches (with optional context). rg handles .gitignore
- * and skips .git by default; node_modules is explicitly excluded.
+ * Run ripgrep and return matches (with optional context).
+ *
+ * ripgrep and the built-in walk must agree on WHICH files exist, or the answer
+ * depends on the syntax of the query: a pattern ripgrep can evaluate searches
+ * one file set, and one it cannot (look-around) hands over to the walk and
+ * searches another. That was a real divergence -- inside a repository,
+ * .gitignore removed files from ripgrep's view and not from the walk's -- so the
+ * ignore-file machinery is switched off explicitly below and both backends skip
+ * exactly .git, node_modules and dist.
+ *
+ * .gitignore is a statement about what to commit. A file listed in it is still
+ * on disk and still part of the workspace a caller asked to search, and it is
+ * not this tool's place to enforce a repository's commit hygiene on a read.
  */
 /** Minimal shape of a ripgrep --json event line (match/context records). */
 type RgEvent = {
@@ -120,6 +131,11 @@ export async function runRipgrep(opts: RipgrepOptions): Promise<{ matches: Searc
     // (which only skips .git/node_modules/dist); ripgrep skips hidden files by
     // default, silently hiding dotfiles/.github from search_files.
     "--hidden",
+    // --no-ignore switches off .gitignore/.ignore/.rgignore (and the parent and
+    // global variants) so this engine sees the same files as the built-in walk.
+    // Without it, the same query answered with a different file set depending on
+    // whether the syntax forced the fallback -- see the module comment above.
+    "--no-ignore",
     "--glob", "!**/.git/**", "--glob", "!**/node_modules/**", "--glob", "!**/dist/**",
   ];
   if (!opts.regex) args.push("--fixed-strings");

@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setHost, type Host } from "../src/host/host.js";
 import { listDirectory, searchFiles } from "../src/bridge/file-tools.js";
+import { ripgrepAvailable } from "../src/mcp/search-ripgrep.js";
 
 let dir: string;
 
@@ -164,4 +165,52 @@ test("a negative max_entries falls back to the default instead of listing nothin
   // A sane cap is still honoured.
   const two = await listDirectory({ path: ".", max_entries: 2 });
   assert.equal(rows(two).length, 2);
+});
+
+/**
+ * The two backends must see the same files.
+ *
+ * docs/tools.md promises that a query ripgrep cannot evaluate is answered by
+ * the built-in walk with the same result ("结果一致，只是慢一些"). It was not:
+ * ripgrep honours .gitignore, the built-in walk has no notion of it, so the
+ * SAME CALL answered differently depending on which engine ran it — and which
+ * engine ran was decided by the syntax of the query, a fact the caller cannot
+ * see. A file named in .gitignore appeared or vanished depending on whether the
+ * pattern happened to contain a look-around.
+ *
+ * Measured on this repo before the fix: `query: "SECRETTOKEN_XYZ"` answered
+ * with one file, and `query: "(?<=S)ECRETTOKEN_XYZ"` with two, over the same
+ * directory and the same bytes.
+ *
+ * .gitignore is a VCS hint about what to commit, not a statement that the text
+ * is absent — and it is not the tool's business to enforce a repository's
+ * commit hygiene on a read. The two backends now skip exactly the same three
+ * directories and nothing else.
+ *
+ * The fixture needs a .git of its own: ripgrep only consults .gitignore inside
+ * a repository (its --require-git default), so an identical fixture in a bare
+ * temp directory makes both engines agree and the test pass without observing
+ * anything. That is what the first draft of this test did.
+ */
+test("both search backends see the same files (.gitignore is not a difference)", async () => {
+  // Without rg on PATH both calls take the built-in walk, and the test would
+  // pass without observing anything — a green that proves nothing.
+  if (!(await ripgrepAvailable("rg"))) return;
+
+  mkdirSync(path.join(dir, ".git"), { recursive: true });
+  writeFileSync(path.join(dir, ".gitignore"), "ignored.txt\n", "utf8");
+  writeFileSync(path.join(dir, "ignored.txt"), "PARITYNEEDLE\n", "utf8");
+  writeFileSync(path.join(dir, "visible.txt"), "PARITYNEEDLE\n", "utf8");
+
+  // The first query is one ripgrep can evaluate, so ripgrep answers it; the
+  // second contains a look-around, which the module routes to the built-in
+  // walk. Same directory, same bytes, two engines.
+  const viaRipgrep = rows<Hit>(await searchFiles({ query: "PARITYNEEDLE" }));
+  const viaBuiltIn = rows<Hit>(await searchFiles({ query: "(?<=PARITY)NEEDLE" }));
+  const files = (hits: Hit[]): string[] => [...new Set(hits.map(h => h.path))].sort();
+
+  assert.deepEqual(files(viaRipgrep), files(viaBuiltIn),
+    "the file set must not depend on which engine answered the query");
+  assert.deepEqual(files(viaRipgrep), ["ignored.txt", "visible.txt"],
+    ".gitignore-ignored files are still part of the workspace and still searchable");
 });

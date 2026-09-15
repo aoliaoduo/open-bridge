@@ -508,7 +508,9 @@ export async function searchFiles(args: Args): Promise<unknown> {
   const withPrefix = (p: string): string =>
     prefix && prefix !== "." ? path.join(prefix, p).replace(/\\/g, "/") : p;
 
-  // Prefer ripgrep when available (fast, .gitignore-aware, regex/globs, context).
+  // Prefer ripgrep when available (fast, regex/globs, context). It is invoked with
+  // --no-ignore so it sees the same file set as the built-in walk below -- the
+  // engines must not disagree about which files exist (see search-ripgrep.ts).
   const rgExe = resolveRipgrepExecutable();
   // A pattern ripgrep's default engine cannot parse (look-around, backreferences)
   // is answered by the built-in JS-regex walk — which is the semantics this tool
