@@ -15,7 +15,7 @@ import {
 
 const KEY = "aaaaaaaaaaaaaaaaaaaaaa"; // obviously fake: a real Bark key must never appear in a repo
 /** Both bells on — the default, and the combination the old enum could not express. */
-const FREQ = { usable: true, enabled: true, onTaskDone: true, onFinish: true, key: KEY, serverUrl: "https://api.day.app", blocker: "", idleMinutes: 10 } as const;
+const FREQ = { usable: true, barkUsable: true, enabled: true, onTaskDone: true, onFinish: true, key: KEY, serverUrl: "https://api.day.app", blocker: "", idleMinutes: 10 } as const;
 /** Both bells off: only the always-on interrupts survive. */
 const DND = { ...FREQ, onTaskDone: false, onFinish: false } as const;
 
@@ -173,7 +173,7 @@ test("instructions state the waiting duty unconditionally, then describe each sw
   const mixed = notifyUsageInstructions({ ...FREQ, onFinish: false });
   assert.match(mixed, /turned ON \u300c每项任务完成时通知\u300d/);
   assert.match(mixed, /turned OFF \u300c对话结束时通知\u300d/);
-  assert.equal(notifyUsageInstructions({ ...FREQ, usable: false }), "",
+  assert.equal(notifyUsageInstructions({ ...FREQ, barkUsable: false }), "",
     "no lecture about machinery the connect cannot reach");
 });
 
@@ -428,4 +428,65 @@ test("a push moments before the call that carried it still silences the watchdog
   );
   // A session that never pushed at all is exactly what the watchdog is for.
   assert.equal(finishNoticeVerdict({ ...base, notifiedSinceMs: 0 }), true);
+});
+
+/**
+ * Reported as "I waited and the computer never made a sound", with
+ * sound.enabled true and both audio files configured.
+ *
+ * The local sound sits ahead of every Bark gate inside pushNotification — but
+ * the watchdogs never reached it: both verdicts open with
+ * `if (!input.usable) return false`, and `usable` meant "Bark can send". So
+ * turning the phone channel off silenced the desktop one, which is precisely
+ * the setup the sound channel exists for.
+ */
+test("a sound-only setup still gets the watchdog", () => {
+  // Phone off, sound on: something can still reach the operator.
+  const soundOnly = { ...DONE, usable: true };
+  assert.equal(
+    finishNoticeVerdict(soundOnly),
+    true,
+    "with a working sound channel the ending must still be announced",
+  );
+
+  // Nothing configured at all is the one case that stays quiet.
+  assert.equal(finishNoticeVerdict({ ...DONE, usable: false }), false);
+});
+
+test("the Bark send path gates on Bark, not on the sound channel", () => {
+  // usable true (sound works) but barkUsable false (no key): the push must
+  // report why rather than POSTing to an empty device key.
+  const settings = { ...FREQ, usable: true, barkUsable: false, key: "", blocker: "no_key" };
+  assert.equal(notifyUsageInstructions(settings), "",
+    "a machine with no Bark key gets no lecture about Bark levels");
+});
+
+/**
+ * The bug lived in resolveNotifySettings, not in the verdicts, so this is the
+ * assertion that would actually have caught it: with the phone switch off and
+ * a sound file set, `usable` must still be true — that flag is what the two
+ * watchdogs consult before they consider announcing anything.
+ */
+test("usable reflects any channel, barkUsable only the phone", async () => {
+  const { resolveNotifySettings } = await import("../src/bridge/notify.js");
+  const { setHost } = await import("../src/host/host.js");
+
+  const config = new Map<string, unknown>([
+    ["notify.enabled", false],       // phone off
+    ["notify.barkKey", ""],
+    ["sound.enabled", true],         // desktop on
+    ["sound.fileWaiting", "C:\\sounds\\alert.wav"],
+    ["sound.fileFinished", ""],
+  ]);
+  setHost({
+    config: {
+      get: <T,>(key: string, fallback: T): T =>
+        (config.has(key) ? config.get(key) : fallback) as T,
+      update: async (): Promise<void> => undefined,
+    },
+  } as never);
+
+  const settings = resolveNotifySettings();
+  assert.equal(settings.barkUsable, false, "no key, no phone");
+  assert.equal(settings.usable, true, "the sound channel can still reach the operator");
 });

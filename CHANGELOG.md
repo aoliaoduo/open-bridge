@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **关掉手机通知后，本机声音也一起哑了。** 本机声音刻意排在所有 Bark 闸门**之前**，就是为了让没配 Bark 的机器也能响 —— 但两个兜底监视根本走不到那一步：`finishNoticeVerdict` 和 `idleNoticeVerdict` 第一行都是 `if (!input.usable) return false`，而 `usable` 的定义是 **`enabled && Boolean(key)`**，也就是「Bark 能发」。于是关掉手机开关，整条链在最外层就断了，`pushNotification` 压根没被调用。
+
+  现场：`sound.enabled: true`、两个音频文件都配了、等了很久没有任何声音，审计日志里连一条 notify 记录都没有 —— **不是响了没听见，是根本没触发**。
+
+  `usable` 的语义改成「**有任何渠道能通知**」，另开 `barkUsable` 保留原义给 Bark 自己的发送门用。每道门现在问自己的问题：Bark 的发送路径问「手机能不能发」，兜底监视问「有没有任何办法说得出话」。
+
+  测试补在**根因那一层**（`resolveNotifySettings`），而不是只测 verdict —— bug 在前者，只钉后者等于没钉。验证过：把 `usable` 改回只看 Bark，这条会红。
+
 ### Changed
 
 - **通知设置页变短：文案精简，三张卡可折叠。** 这一页随着功能增加越滚越长，但量一下就会发现**病因不是控件多，是解释多** —— 4 个开关 + 1 张表，却挂着 **7 段、281 字**说明，最长一段 59 字。

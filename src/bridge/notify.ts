@@ -80,8 +80,14 @@ export const NOTIFY_DEDUPE_MS = 60_000;
 
 /** Settings after every fallible cleanup, ready to use or refuse. */
 export interface NotifySettings {
-  /** Master switch AND a usable key: no push happens when either is missing. */
+  /**
+   * Can the operator be reached AT ALL — by phone or by a sound on this
+   * machine. The watchdogs gate on this; gating them on Bark alone meant
+   * switching the phone off also silenced the desktop.
+   */
   usable: boolean;
+  /** Bark specifically: the master switch AND a usable device key. */
+  barkUsable: boolean;
   enabled: boolean;
   /** 每项任务完成时通知 — the set_todos completion bell. */
   onTaskDone: boolean;
@@ -126,7 +132,33 @@ export function resolveNotifySettings(): NotifySettings {
   }
   const blocker = !enabled ? "disabled" : key ? "" : "no_key";
   const idleMinutes = clampIdleMinutes(cfg.get<unknown>("notify.idleMinutes", CONFIG_DEFAULTS["notify.idleMinutes"]));
-  return { usable: enabled && Boolean(key), enabled, onTaskDone, onFinish, key, serverUrl, blocker, idleMinutes };
+  const barkUsable = enabled && Boolean(key);
+  // `usable` means "some channel can reach the operator", not "Bark can".
+  //
+  // The local sound was deliberately placed ahead of every Bark gate so a
+  // machine with no Bark key still chimes — but the watchdogs never got that
+  // far: finishNoticeVerdict and idleNoticeVerdict both open with
+  // `if (!input.usable) return false`, so turning the phone channel off
+  // silenced the desktop one too. Reported as "I waited and the computer
+  // never made a sound", with sound.enabled true and both files configured.
+  //
+  // Splitting the two keeps each gate asking its own question: Bark's send
+  // path checks barkUsable, the watchdogs check whether anything at all can
+  // be said.
+  const soundUsable = cfg.get<boolean>("sound.enabled", false) === true
+    && Boolean(String(cfg.get<string>("sound.fileWaiting", "") ?? "").trim()
+      || String(cfg.get<string>("sound.fileFinished", "") ?? "").trim());
+  return {
+    usable: barkUsable || soundUsable,
+    barkUsable,
+    enabled,
+    onTaskDone,
+    onFinish,
+    key,
+    serverUrl,
+    blocker,
+    idleMinutes,
+  };
 }
 
 const DEFAULT_IDLE_MINUTES = CONFIG_DEFAULTS["notify.idleMinutes"] as number;
@@ -415,7 +447,10 @@ export async function pushNotification(
     if (soundFile) playAlertSound(soundFile);
   }
 
-  if (!settings.usable) return logged(outcome(false, settings.blocker || "disabled"), title);
+  // barkUsable, not usable: the local sound above has already played, and
+  // this line is the phone's own gate. Using `usable` here would try to POST
+  // to an empty device key whenever only the sound channel is configured.
+  if (!settings.barkUsable) return logged(outcome(false, settings.blocker || "disabled"), title);
   // "switch_off" rather than the old "mode": the reason names a thing the
   // operator can actually find and flip, instead of a vocabulary they no
   // longer have.
@@ -603,6 +638,8 @@ export function newlyCompletedTodos(previous: readonly unknown[], next: readonly
  */
 export function pushTodoCompletions(previous: readonly unknown[], next: readonly unknown[]): void {
   const settings = resolveNotifySettings();
+  // `usable`: pushNotification plays the local sound before it touches Bark,
+  // so a sound-only setup still gets its completion chime.
   if (!settings.usable) return;
   const done = newlyCompletedTodos(previous, next);
   if (done.length === 0) return;
@@ -888,7 +925,10 @@ export function finishNoticeTick(nowMs: number = Date.now()): boolean {
  * changes with the mode so the model knows what the machine will accept.
  */
 export function notifyUsageInstructions(settings: NotifySettings): string {
-  if (!settings.usable) return "";
+  // The text talks about Bark levels and switches, so it is gated on Bark.
+  // A sound-only machine still gets notified; it just has nothing to read
+  // about ringtones and Focus modes.
+  if (!settings.barkUsable) return "";
   // The non-negotiable half comes first, because it is the one that costs the
   // operator real time when it is skipped: a question asked into an empty room
   // stalls until they happen to look at the screen.
