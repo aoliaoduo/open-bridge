@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`close_shell` 把强杀记为退出码 0。** shell 在 150 ms 内没退、被 `taskkill /T /F` 打死时，`exitCode ?? 0` 凭空造出一个 0 —— 在每个读退出码的地方都读作「干净退出」。改为 `null`（未知就是未知）。
 
+- **三个列举类工具被截断时不说。** `list_directory` / `find_files` / `search_files` 命中上限就只是「返回得比实际少」：一个 12 个文件的目录用 `max_entries: 3` 问，答三个、没有 `truncated`、没有总数、也没有继续问的入口 —— 调用方（通常是模型）分不清「这个目录有三个文件」和「有 500 个、你拿到前三个」，而这两者导向相反的动作：收工，还是继续找。`read_files` / `run_command` / `read_process_output` 早就为同一个理由报 `truncated`。现在三者的结果是 `{items, truncated}`，`list_directory` 另给 `total` 与 `next_offset`（平铺目录的总数本来就免费 —— `readdir` 已经返回了全部条目），内部用「多探一条」把「正好到达上限」与「还有更多」分开，而不是靠猜。顺带修掉 `find_files` 的上限在单个目录内根本没生效（20 个命中穿过 `max_results: 3`）。新增 `test/truncation-signals.test.ts`。
+
+- **同一句查询，两套搜索引擎看到不同的文件。** `search_files` 有 ripgrep 就用它、查询语法它不支持时才回落到内置扫描，而两条路的「哪些算文件」并不一致：rg 尊重 `.gitignore`（且只在仓库里尊重它），内置扫描没有这个概念。实测同一目录同一份内容，`SECRETTOKEN_XYZ` 只答一个文件，`(?<=S)SECRETTOKEN_XYZ` 答两个 —— 差别不在查询，而在哪个引擎接了活，那是调用方看不见的事实。`.gitignore` 管的是「提交什么」，不是「文件是否存在」，一次读取不该替仓库执行提交卫生。现在 rg 显式带 `--no-ignore`，两者只跳过 `.git` / `node_modules` / `dist`。新增的测试 fixture 自带 `.git`：rg 的 `--require-git` 默认让它不在无仓库的目录里读 `.gitignore`，否则测试会在临时目录里绿得毫无意义（第一版正是如此）。
+
+- **相对路径可以走出工作区。** `resolveFromWorkspace` 对相对输入就是一句 `path.resolve` —— 它不可能失败，向上走正是它的本职工作。于是 `apply_patch` 里一句 `*** Add File: ../../ob-escape.txt` 真的在上一层创建了文件并报成功，`run_command` 的 `cwd: ".."` 也真的在上一层运行。unrestricted 模式下 `resolveSecurePath` 在 allowed-roots 检查之前就返回，而那里的 allowed root 是整个盘 —— 逃逸的目标舒舒服服地待在里面。现在**相对路径一律不得离开工作区**，检查做在工作区锚点上、且先于模式判断；绝对路径语义不变（显式说出一个位置，是调用方在表态，那该由策略来判）。`test/workspace-path.test.ts` 与 `test/file-op-guards-integration.test.mjs` 各钉一条。
+
+- **自毁护栏对 Windows 的路径别名失效。** `refuseSelfDestruction()` 比的是 `path.resolve` 之后的字符串，于是同一个目录换个写法就过去了：`\\?\C:\...\open-bridge-app`（长路径前缀形式）与 `C:\...\open-bridge-app.`（Win32 在打开前会剥掉尾点）都能直达 `fs.rm`，而 `C:\USERS\...` 这类大小写变体一直是拦住的。护栏存在的理由就是那次没人想发生的调用（`delete "."`、删到工作区根），它的强度不该取决于调用方用了哪种写法。现在先归一化再比较：剥掉 `\\?\` / `\\.\` / `//?/`（`UNC` 保持 UNC 语义）、按 Windows 规则去掉每段尾部的点与空格，`..` 与 `.` 原样保留（它们才是携带含义的段）。只在 Windows 上归一 —— POSIX 上 `current.` 是另一个真实存在的目录名，把它改写掉会让合法路径变成误拒。**没有**改用 `fs.realpath`：删掉一个链接并不删掉它指向的东西，一条链向工作区根的软链接不是这里要拦的那种自杀。新增 `test/guard-path-aliases.test.ts`，集成侧补上三种写法的实拦。
+
+- **`write_file{mode:"append"}` 制造混合换行。** CRLF 文件 `p1\r\np2\r\n` 追加 `"p3\n"` 得到字节 `70 31 0d 0a 70 32 0d 0a 70 33 0a` —— 前两行 CRLF，新行 LF。`edit_block` / `apply_patch` 走 `detectEol` / `applyEol` 是保留风格的，只有追加分支把调用方的字节直接交给了 `fs.appendFile`。持续追加下整个文件漂成混合换行，之后每次 diff 与 lint 都是噪音。现在**追加按目标文件现有的换行风格**写入，只归一追加的这段、磁盘上原有字节不动；风格取自**有界的尾部采样**（追加目标常是日志，为写 5 个字节读 400 KB 说不过去；窗口可能切断一对 CRLF，所以不落在 0 字节的窗口多带一个字节的 run-up，否则 CRLF 文件会被采成 LF 主导）。`content_base64` 那条路**故意不动**：那里调用方写的是字节，不是行。新增 `test/append-eol.test.ts`。
+
+- **`start_process` 的 `timeout_ms` 被静默忽略。** 它没有这个参数（那是 `run_command` 的），传了却被接受、然后什么都不做：实测 `timeout_ms: 4000` 配一个永不出现的 `ready_pattern` 等了 10.1 秒 —— 就绪循环一直用自己的 10 秒默认值，而调用方以为自己已经放宽了，慢启动的 vite/next 首编译正是这样被判成「未就绪」的。现在**点名拒绝**，并告诉它真正管用的是 `ready_timeout_ms`；同时把 `ready_timeout_ms` 写进 schema 描述与 `docs/tools.md`：默认 10000 ms、上限 2147483647、等不到只返回 `ready: false` + `status: "running"`，**不杀进程**。集成测试把两件事都钉住（拒绝在 4.5 ms 内返回；`ready_timeout_ms: 1500` 确实按 1.5 秒等）。
 ### Added
 
 - **补齐四样开源门面**：`CONTRIBUTING.md`、`CODE_OF_CONDUCT.md`、PR 模板、issue 模板（bug / 功能建议）。由子代理完成，我复核。
@@ -97,6 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   顺带核对了两件没问题、因此没改的：焦点样式有 `:where(a, button, [tabindex]):focus-visible` 全局兜底（输入框那处 `outline: none` 是有意的，它用 box-shadow 光环替代）；明暗两套主题的文字对比度全部达标，最低 4.60。
 
+- **列表面工具的返回形状：裸数组 → `{items, truncated}`。** `list_directory`、`find_files`、`search_files` 现在返回对象（`list_directory` 另有 `total` 与 `next_offset`），`outputSchema` 同步声明为对象。这是刻意的破坏性变更：数组里没有地方放「这一页被截断了」这个事实，而少了它，一个被截断的答案读起来就是一句关于世界的陈述。消费方按 `.items` 取值；`docs/tools.md` 的「结果字段约定」写明了截断契约，`test/tool-output-shapes.test.ts` 把「声明与真实返回一致」钉在这一层。
 ## [1.0.0-beta.2] — 2026-09-15
 
 大部分是修的。beta.1 之后这个项目开始被真正用起来，于是一批只有在用的时候才会暴露的问题浮出来了 —— 43 条里 22 条是 bug，其中**有 9 条是这一轮自己引入又自己修掉的**：加本机声音通道时把它接进了每一条推送路径（于是 Bark 的测试按钮会放音乐），修排版时给单元格加了 `nowrap`（于是开关压住了隔壁输入框），以及在窗口里写了一句从没验证过的「按 Ctrl+C 停止」。

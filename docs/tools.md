@@ -13,7 +13,7 @@
 - 返回值是 JSON 对象，**每个工具的字段集是固定的**：缺失的事实表现为 `null` 或空字符串，**不会**靠"某个字段不在"来表达。所以永远**按字段名解析，不要按行数/行是否存在来解析**。
 - 命令类工具（`run_command`、`start_process`、`send_to_shell`、`interact_with_process`）返回**合并输出 `output`**，同时给出**分离的 `stdout` / `stderr`**；分页读取还带 `offset` / `next_offset` / `truncated`。
 - 命令**非零退出码不是调用失败**：调用可以返回 `status: "completed"` 且 `exit_code != 0`，必须自己看 `exit_code`。
-- 声明了 `outputSchema` 的工具同时返回 `structuredContent`（类型化数据）；数组结果会包一层 `{ items: [...] }`。文本块始终保留。
+- 声明了 `outputSchema` 的工具同时返回 `structuredContent`（类型化数据）。**被截断过的结果一定明说**：三个列举类工具（`list_directory`、`find_files`、`search_files`）返回 `{ items: [...], truncated: boolean }`，而不是裸数组。`truncated: true` 的意思是"还有更多，别把这一页当全部"；命中上限既不代表"结果为空"，也不代表"就这些"。`list_directory` 另外给 `total`（只在平铺 `depth: 1` 时是真实总数，其余为 `null`）和 `next_offset`（继续翻页时原样回传的入参）。文本块始终保留。
 - 出错时返回 `isError: true` 与一句话原因；错误信息通常给出下一步（例如"先 `read_files` 再重试"）。
 
 ---
@@ -61,11 +61,11 @@
 
 ### 工作区读取
 
-**list_directory** — 列目录。`depth` 1–3、`include_hidden`、`max_entries`；结果是 `[{name, type}]`。
+**list_directory** — 列目录。`depth` 1–3、`include_hidden`、`max_entries`、`offset`；结果是 `{items: [{name, type}], truncated, total, next_offset}`。`offset` 只对平铺（`depth: 1`）有意义 —— 和 `depth > 1` 一起给会被明确拒绝，而不是悄悄按某一层分页。
 
-**find_files** — 按 glob 找文件（`*`、`**`、`?`、`{a,b}`、`[abc]`）；纯名字/前缀仍按 basename 匹配，`src/**/*.ts` 这种按完整相对路径匹配。
+**find_files** — 按 glob 找文件（`*`、`**`、`?`、`{a,b}`、`[abc]`）；纯名字/前缀仍按 basename 匹配，`src/**/*.ts` 这种按完整相对路径匹配。结果是 `{items, truncated}`；上限只在**已收集到的数量**上生效，所以"正好到达上限"会如实报告 `truncated: true`（内部多探一个，不靠猜）。
 
-**search_files** — 在工作区文件里搜文本：有 ripgrep 就用（快、尊重 `.gitignore`），否则内置扫描。`query` 默认按**正则**解析（`regex: false` 才按字面匹配；非法正则直接报错，不会静默给空）；`include` 限定文件（如 `["*.ts"]`）；`context`（0–20）在每处匹配前后带若干行；`offset` + `max_results` 翻页。`path` 可以是目录或单个文件。
+**search_files** — 在工作区文件里搜文本：有 ripgrep 就用（快），否则内置扫描；两套引擎**看的文件集合完全相同**：`.git`、`node_modules`、`dist` 之外一律都搜，**`.gitignore` 不会让文件消失**（它管的是提交，不是文件是否存在；同一次搜索的结果不该因为正则语法触发哪套引擎而不同）。`query` 默认按**正则**解析（`regex: false` 才按字面匹配；非法正则直接报错，不会静默给空）；`include` 限定文件（如 `["*.ts"]`）；`context`（0–20）在每处匹配前后带若干行；`offset` + `max_results` 翻页。`path` 可以是目录或单个文件。
 
 - 正则语义是 **JavaScript** 的（内置扫描用的就是 `RegExp`）。ripgrep 的默认引擎不支持先行/后顾（`(?=`、`(?!`、`(?<=`、`(?<!`）与反向引用（`\1`），这类查询会由内置扫描回答 —— 结果一致，只是慢一些，不会因此少给或不报错。看到空结果时先确认不是正则写错或 `include` 太窄。
 
@@ -83,7 +83,7 @@
 
 ### 工作区写入
 
-**write_file** — 新建或覆盖。`content` 或 `content_base64`；`mode: "append"` 追加；`expected_sha256` 防止覆盖已变化的文件。
+**write_file** — 新建或覆盖。`content` 或 `content_base64`；`mode: "append"` 追加；`expected_sha256` 防止覆盖已变化的文件。追加**按目标文件现有的换行风格**写入（CRLF 文件里的新行也是 CRLF，LF 文件里就是 LF —— 只有追加的这段被归一，磁盘上原有的字节不动）；`content_base64` 追加**按字节原样**，不做换行归一，因为那条路是给二进制用的。
 
 **edit_block** — 单文件精确替换：`old_text` 必须**恰好匹配一次**（除非用 `expected_replacements` 指定次数）；也可一次给 1–20 个 hunk（`edits`），**全部命中才写**。零匹配时错误里附**最接近的一段文本**与可能的漂移原因。带 `expected_sha256` 防陈旧编辑。
 
@@ -106,7 +106,7 @@
 
 **run_command** — 前台等待最多 `timeout_ms`（默认 120000）。**超时不会杀掉进程**：它继续在监管下运行，返回 `status: "running"` 与 `command_id`，之后用 `read_process_output` / `wait` 继续读，或用 `process_control{action:"terminate"}` 停掉。`background: true` 立刻返回。退出码非零**不是**调用失败。链式命令（`a; b`）的 `exit_code` 取最后一段，要前一段的退出码就以 `echo EXIT=$?` 结尾。
 
-**start_process** — 面向**长驻**进程（服务器、watcher、守护进程）：`ready_pattern` 等启动输出，返回 `command_id` 交给进程工具组。
+**start_process** — 面向**长驻**进程（服务器、watcher、守护进程）：`ready_pattern` 等启动输出，返回 `command_id` 交给进程工具组。就绪等待由 **`ready_timeout_ms`**（毫秒，默认 **10000**，上限 2147483647）控制：等不到就让调用返回 `ready: false` + `status: "running"`，**不会杀进程**（慢启动的构建要放宽，就调这个值）。这里**没有 `timeout_ms`** —— 那是 `run_command` 的（前台运行才有"完成"可限时）；传了会**点名拒绝**，而不是像以前那样被静默忽略。
 
 **read_process_output** — 分页读受监管命令的输出：`offset` / `max_bytes`，`stream` 只读一路，`wait_ms`（最大 60000）阻塞等待**新**输出。默认 128 KiB/次，大输出传更大的 `max_bytes`，用 `next_offset` 翻页，`truncated` 告诉你还有没有。
 
