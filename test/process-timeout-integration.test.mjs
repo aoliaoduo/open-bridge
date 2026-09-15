@@ -218,3 +218,39 @@ function asObject({ text }) {
     return {};
   }
 }
+
+test("start_process refuses timeout_ms and names the knob that does apply", async () => {
+  // start_process has no timeout_ms. Passing one used to be accepted and then
+  // ignored: the caller believed it had widened the wait while the ready loop
+  // kept its own 10 s default -- which is how a slow vite/next first build gets
+  // reported as "not ready". An argument that silently does nothing is worse
+  // than a rejection, and this repo rejects unknown discriminator values for
+  // exactly that reason.
+  const refused = await callTool("start_process", {
+    command: "node forever.mjs",
+    ready_pattern: "this never appears",
+    timeout_ms: 4000,
+  });
+  assert.equal(refused.isError, true, "the argument is refused, not ignored");
+  assert.match(refused.text, /timeout_ms/, "the refusal says which argument it is about");
+  assert.match(refused.text, /ready_timeout_ms/,
+    "and names the argument that actually controls the wait");
+});
+
+test("ready_timeout_ms is the wait, and a process that misses it is reported, not killed", async () => {
+  const startedAt = Date.now();
+  const res = asObject(await callTool("start_process", {
+    command: "node forever.mjs",
+    ready_pattern: "this never appears",
+    ready_timeout_ms: 1500,
+  }));
+  const elapsed = Date.now() - startedAt;
+  assert.ok(elapsed >= 1200, `the wait honoured ready_timeout_ms (${elapsed} ms)`);
+  assert.ok(elapsed < 8000, `and did not fall back to the 10 s default (${elapsed} ms)`);
+  assert.equal(res.ready, false, "the pattern never matched");
+  assert.equal(res.status, "running", "the process is left running for the caller to poll");
+  assert.ok(typeof res.command_id === "string" && res.command_id.length > 0,
+    "a command_id comes back either way");
+  // An endless process is not a nice thing to leave behind on the machine.
+  await callTool("process_control", { action: "terminate", command_id: res.command_id });
+});

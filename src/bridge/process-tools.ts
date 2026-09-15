@@ -122,7 +122,30 @@ export function clampMs(value: unknown, fallback: number, max = MAX_TIMER_MS): n
   return Number.isFinite(n) && n >= 0 ? Math.min(n, max, MAX_TIMER_MS) : Math.min(fallback, MAX_TIMER_MS);
 }
 
+/**
+ * `timeout_ms` belongs to `run_command`; `start_process` has no such argument.
+ *
+ * It used to be accepted there and ignored. A caller that passed
+ * `timeout_ms: 4000` alongside a `ready_pattern` believed it had widened the
+ * wait, while the ready loop kept its own 10 s default — measured: the call
+ * returned after 10.1 s. That is how a slow first build (vite/next) gets
+ * reported as "not ready" by a caller that thinks it already allowed for it.
+ *
+ * So it is refused by name, and the refusal names the argument that does apply.
+ * Nothing that works today is broken by this: the value was never read.
+ */
+function refuseRunCommandOnlyTimeout(args: Args, name: string): void {
+  if (name !== "start_process" || args.timeout_ms === undefined) return;
+  throw new Error(
+    "start_process has no \"timeout_ms\"; a background process has no completion for it to bound"
+    + " (the value was ignored, so a slow start looked like it had a longer budget than it did)."
+    + " To wait longer for ready_pattern, raise ready_timeout_ms (default 10000, milliseconds)."
+    + " Use run_command if you want a bounded foreground run.",
+  );
+}
+
 export async function runOrStartProcess(args: Args, name: string): Promise<unknown> {
+  refuseRunCommandOnlyTimeout(args, name);
   const commandText = typeof args.command === "string" ? args.command.trim() : "";
   if (!commandText) throw new Error("command is required and must be a non-empty string. (expected 'command': string)");
   const patternText = typeof args.ready_pattern === "string" && args.ready_pattern ? args.ready_pattern : undefined;
