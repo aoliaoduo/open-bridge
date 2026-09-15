@@ -52,7 +52,15 @@ export function getBridgeStatus(): Record<string, unknown> {
     mcp_url: clientMcpUrl() || undefined,
     shell: shell.file,
     allowed_directories: allowedRoots(),
+    /**
+     * Legacy sessions only — they are the ones holding a slot and a transport.
+     * Modern-era callers have no session at all, so the count alone used to read
+     * as "nobody is connected" while one was mid-conversation. The clock beside it
+     * is what makes the difference visible in a single object: `active_sessions: 0`
+     * with a recent `modern_last_used` says "stateless traffic", not "idle".
+     */
     active_sessions: state.sessions.size,
+    modern_last_used: state.modernLastUsed > 0 ? new Date(state.modernLastUsed).toISOString() : null,
     active_commands: [...state.commands.values()].filter(command => !command.done).length,
     tool_profile: host().config.get<string>("toolProfile", "full"),
     // Must report what tools/list actually advertises: the toolProfile filter

@@ -481,14 +481,45 @@ export function getProcessSnapshot(args: Args): unknown {
   return [...state.commands.values()].map(processSnapshot);
 }
 
+/**
+ * "Who is connected?" — both eras, in one answer.
+ *
+ * The legacy rows are the real thing: a session id, a transport, a call count,
+ * and something `close_session` can act on. The modern era has none of that, so
+ * it gets one row that is explicitly not a session — because the alternative
+ * (leaving it out) was a lie of omission the server had already told once: an
+ * agent asking this question while driving the Bridge over the stateless path got
+ * an empty list, and the empty list is what a *dead* Bridge looks like.
+ *
+ * The session TABLE is untouched by this: `state.sessions` must not grow entries
+ * that own no transport (see its own comment in state.ts). Only the view says
+ * what the table cannot.
+ */
 export function listSessions(): unknown {
-  return [...state.sessions.entries()].map(([id, s]) => ({
+  const legacy = [...state.sessions.entries()].map(([id, s]) => ({
     session_id: id,
+    era: "legacy",
+    stateless: false,
+    closable: true,
     connected_at: new Date(s.connectedAt ?? s.lastUsed).toISOString(),
     last_used: new Date(s.lastUsed).toISOString(),
     calls: s.calls ?? 0,
     todo_count: s.todos.length,
   }));
+  if (state.modernLastUsed <= 0) return legacy;
+  return [...legacy, {
+    session_id: "modern",
+    era: "modern",
+    stateless: true,
+    // Not an action the Bridge can take: there is no transport to drop and no
+    // state to clear, because every modern request stands alone.
+    closable: false,
+    // No handshake happened, so there is none to report — `first_seen` is the
+    // honest half of the pair.
+    connected_at: null,
+    first_seen: new Date(state.modernSince || state.modernLastUsed).toISOString(),
+    last_used: new Date(state.modernLastUsed).toISOString(),
+  }];
 }
 
 /** Todos live on the MCP session that set them. */

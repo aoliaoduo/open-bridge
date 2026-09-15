@@ -159,6 +159,24 @@ export const state = {
    */
   modernLastUsed: 0,
   /**
+   * When modern-era traffic FIRST arrived in this process, 0 if never.
+   *
+   * `modernLastUsed` answers "is anyone there right now"; this answers "since
+   * when", which is the half of the handshake a stateless era does not have. The
+   * session view needs both to describe a modern caller at all: without a start
+   * time the only honest thing it could print for "connected since" was nothing.
+   */
+  modernSince: 0,
+  /**
+   * Whether the "you are running an older build" note has already gone out.
+   *
+   * Per process, not per session: the fact is about the process, and the modern
+   * era has no session to hang it on. A caller that saw it once has the whole
+   * signal; repeating it on every result would be noise, and noise gets filtered
+   * out exactly like the docs did.
+   */
+  notedStaleBuild: false,
+  /**
    * The published tunnel URL — an https:// address, set only while a tunnel is
    * actually live, and cleared the moment it is not.
    *

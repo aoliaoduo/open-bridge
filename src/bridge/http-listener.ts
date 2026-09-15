@@ -319,6 +319,9 @@ export async function startHttpInternal(): Promise<void> {
         // Stamped on EVERY modern request, not just tool calls: the transport
         // here is the whole conversation from the watchdogs' perspective.
         state.modernLastUsed = Date.now();
+        // The stateless era's nearest thing to a handshake: the session view needs
+        // a start time to describe a modern caller at all (see listSessions).
+        if (!state.modernSince) state.modernSince = state.modernLastUsed;
         try {
           await modernNodeHandlerOf()(req, res, parsedBody);
         } catch (e) {

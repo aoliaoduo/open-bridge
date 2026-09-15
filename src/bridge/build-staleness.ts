@@ -104,6 +104,28 @@ const LOADED_JS_MTIME_MS: number | undefined = (() => {
 let cached: { at: number; value: BuildStaleness } | undefined;
 
 /**
+ * The sentence to hand a caller when this process is running an older build.
+ *
+ * Why the signal needs a sentence at all: `bridge_status.build_stale` is the
+ * honest answer to "is what I am looking at the code that is running?", but a
+ * caller only asks that question once it already suspects the answer. The full
+ * cost of not asking was paid here — an agent spent a probe round reporting the
+ * running instance's behaviour as the behaviour of the code on disk, and the
+ * report was wrong in a way no test could catch, because the code on disk was
+ * fine. So the fact rides along with a call the caller already made.
+ *
+ * `undefined` (dev mode: no build to compare with) and `false` both say nothing:
+ * "no signal" is not "stale", and the ordinary case must cost the caller zero
+ * tokens.
+ */
+export function staleBuildAdvice(stale: boolean | undefined): string | undefined {
+  if (stale !== true) return undefined;
+  return "Note: this Bridge is still running the build it loaded at startup, and dist/ has been "
+    + "rebuilt since — fixes and new tools in the current source are NOT live in this process. "
+    + "Restart it to load them. (bridge_status reports the same fact as build_stale: true.)";
+}
+
+/**
  * Staleness of the running build, or `undefined` when there is nothing to
  * compare with (dev mode, source checkout, unreadable `dist`).
  */

@@ -24,6 +24,7 @@ import { root } from "./paths.js";
 import { discoverWorkspaceSkills, skillsIndexSuffix } from "./skills.js";
 import { invoke } from "./dispatcher.js";
 import { normalizeToolCall } from "./tool-call-shape.js";
+import { buildStaleness, staleBuildAdvice } from "./build-staleness.js";
 import { persistUsageStats } from "./usage-store.js";
 import { notifyUsageInstructions, resolveNotifySettings } from "./notify.js";
 
@@ -286,6 +287,18 @@ async function runToolCall(
       session.runHints ??= freshRunState();
       const hint = noteToolCall(session.runHints, normalizeToolCall(name).tool);
       if (hint) payload.content = [...payload.content, { type: "text", text: hint }];
+    }
+    // The one note that is not about this call: the process is running older code
+    // than the tree on disk. Once per process — it is a fact about the process,
+    // not about the call — and outside the `session` branch on purpose: a
+    // modern-era caller has no session, and it is exactly the caller least likely
+    // to have asked `bridge_status` before trusting what it just observed.
+    if (!state.notedStaleBuild) {
+      const advice = staleBuildAdvice(buildStaleness()?.stale);
+      if (advice) {
+        state.notedStaleBuild = true;
+        payload.content = [...payload.content, { type: "text", text: advice }];
+      }
     }
     return { ok: true, result: payload };
   } catch (e) {

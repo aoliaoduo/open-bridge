@@ -318,3 +318,25 @@ test("the legacy era still mints a session and reports errors as isError", async
   assert.equal(legacyCall.status, 200, "the legacy transport reports failures in-band");
   assert.equal(payload?.result?.isError, true, "legacy keeps the isError result shape");
 });
+
+test("bridge_status reports a modern caller even though it has no session", async () => {
+  // "Who is connected?" has to have one answer for both eras. A modern client
+  // mints no session, so the session view used to answer "nobody" while this
+  // very request was being served — the same two-truths problem that once let a
+  // stale instance look busy to the server and broken to its client.
+  const listed = await modern("tools/call", { name: "bridge_status", arguments: { section: "sessions" } });
+  assert.equal(listed.status, 200, JSON.stringify(listed.payload));
+  const rows = JSON.parse(listed.payload.result.content[0].text);
+  const stateless = rows.find(row => row.era === "modern");
+  assert.ok(stateless, "the stateless era appears in the session view");
+  assert.equal(stateless.stateless, true);
+  assert.equal(stateless.closable, false, "there is nothing to close: no transport is held");
+  assert.equal(stateless.connected_at, null, "and no handshake happened, so none is reported");
+  assert.match(String(stateless.last_used), /^\d{4}-\d\d-\d\dT/, "when it last spoke is a real timestamp");
+
+  // The same fact in the overview, next to the count it explains.
+  const overview = await modern("tools/call", { name: "bridge_status", arguments: {} });
+  const shape = overview.payload.result.structuredContent;
+  assert.match(String(shape.modern_last_used), /^\d{4}-\d\d-\d\dT/,
+    "overview dates the modern-era traffic instead of leaving active_sessions to imply nobody is there");
+});
