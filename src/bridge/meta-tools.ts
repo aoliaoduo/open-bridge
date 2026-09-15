@@ -17,11 +17,14 @@ import { persistProgress, loadTodoStore } from "./todo-store.js";
 import { normalizeCategory, normalizeLevel, normalizePhase } from "./progress-vocabulary.js";
 import { searchActivityLog } from "../mcp/activity-log.js";
 import { shellSpec } from "./processes.js";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { discoverWorkspaceSkills } from "./skills.js";
 import { buildStaleness } from "./build-staleness.js";
 
 type Args = JsonArgs;
+
+const execFileAsync = promisify(execFile);
 
 export function getBridgeStatus(): Record<string, unknown> {
   const shell = shellSpec();
@@ -206,7 +209,7 @@ export function getUsageStats(): Record<string, unknown> {
  * adapted to the workspace-anchored model): everything an agent needs to stop
  * exploring blindly at the start of a session.
  */
-export function workspaceBrief(): Record<string, unknown> {
+export async function workspaceBrief(): Promise<Record<string, unknown>> {
   const rootPath = root();
   const brief: Record<string, unknown> = { workspace: rootPath };
 
@@ -244,14 +247,22 @@ export function workspaceBrief(): Record<string, unknown> {
   });
   brief.instruction_files = instructionFiles;
 
-  // Git snapshot (branch + dirty file count, best-effort). The timeout keeps a
-  // slow git (huge repo, wedged index.lock) from blocking the whole event loop
-  // indefinitely — workspace_brief runs synchronously on the request path.
+  // Git snapshot (branch + dirty file count, best-effort). execFile, never
+  // execFileSync: this runs on the request path, and a synchronous child call
+  // freezes EVERY session for as long as git takes (a wedged index.lock, a
+  // huge repo) — the `timeout` option below only bounds the child's lifetime,
+  // it does not unblock the loop. Async costs nothing here: the two calls
+  // race and the rest of the brief is already assembled.
   try {
     const gitOpts = { cwd: rootPath, windowsHide: true, timeout: 5_000, maxBuffer: 16 * 1024 * 1024 } as const;
-    const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], gitOpts).toString().trim();
-    const dirty = execFileSync("git", ["status", "--porcelain"], gitOpts).toString().split("\n").filter(l => l.trim()).length;
-    brief.git = { branch, dirty_files: dirty };
+    const [branchOut, statusOut] = await Promise.all([
+      execFileAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], gitOpts),
+      execFileAsync("git", ["status", "--porcelain"], gitOpts),
+    ]);
+    brief.git = {
+      branch: branchOut.stdout.trim(),
+      dirty_files: statusOut.stdout.split("\n").filter(l => l.trim()).length,
+    };
   } catch {
     brief.git = { branch: null, dirty_files: null };
   }
