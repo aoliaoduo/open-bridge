@@ -312,6 +312,12 @@ export async function startHttpInternal(): Promise<void> {
       if (classification.kind !== "legacy") era = "modern";
 
       if (era === "modern") {
+        // The modern path mints no session, so this clock is what makes the
+        // request visible to the idle/finish watchdogs (they read
+        // state.sessions otherwise — see notify.ts latestSessionActivity).
+        // Stamped on EVERY modern request, not just tool calls: the transport
+        // here is the whole conversation from the watchdogs' perspective.
+        state.modernLastUsed = Date.now();
         try {
           await modernNodeHandlerOf()(req, res, parsedBody);
         } catch (e) {

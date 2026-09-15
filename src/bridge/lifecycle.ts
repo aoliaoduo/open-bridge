@@ -120,6 +120,10 @@ async function stopInternal(notify = true): Promise<void> {
   await Promise.allSettled(transportCloses);
   state.sessions.clear();
   state.latestSession = undefined;
+  // Same reset the session table gets: a stopped Bridge must not carry a
+  // stale modern-era activity clock into the next start, where it would read
+  // as an ancient "last call" and skew the idle/finish watchdogs' latch.
+  state.modernLastUsed = 0;
   await stopLocalServer();
   state.tunnelUrl = "";
   state.port = 0;

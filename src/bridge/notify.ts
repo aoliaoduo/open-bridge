@@ -726,8 +726,13 @@ export function idleWatchVerdict(input: {
   return input.notifiedForMs !== input.lastUsedMs;
 }
 
-/** One summary across all live sessions: the clock the watchdog reads. */
-function latestSessionActivity(): { lastUsedMs: number; activeRequests: number; hasOpenTodos: boolean } {
+/**
+ * One summary across all live sessions: the clock the watchdog reads.
+ *
+ * Exported for the tests that pin the modern-era fold-in: the stateless
+ * protocol leaves no session, and a watchdog that cannot see it cannot bell.
+ */
+export function latestSessionActivity(): { lastUsedMs: number; activeRequests: number; hasOpenTodos: boolean } {
   let lastUsedMs = 0;
   let activeRequests = 0;
   let hasOpenTodos = false;
@@ -738,6 +743,10 @@ function latestSessionActivity(): { lastUsedMs: number; activeRequests: number; 
       hasOpenTodos = true;
     }
   }
+  // Modern-era (stateless) requests carry no session; their clock is the only
+  // trace they leave. Without it a modern-only client was invisible to both
+  // watchdogs — busy forever, "nobody connected" in every verdict.
+  if (state.modernLastUsed > lastUsedMs) lastUsedMs = state.modernLastUsed;
   return { lastUsedMs, activeRequests, hasOpenTodos };
 }
 
@@ -911,7 +920,8 @@ export function markSelfNotified(atMs: number = Date.now()): void {
  * it, and that call is the session's `lastUsed`. Reading it here keeps this
  * free of extra bookkeeping in the write path.
  */
-function completionSnapshot(): { hasTodos: boolean; allCompleted: boolean; completedAtMs: number } {
+/** Exported for the same reason as latestSessionActivity: the fold-in is the rule. */
+export function completionSnapshot(): { hasTodos: boolean; allCompleted: boolean; completedAtMs: number } {
   let hasTodos = false;
   let allCompleted = true;
   let completedAtMs = 0;
@@ -933,7 +943,11 @@ function completionSnapshot(): { hasTodos: boolean; allCompleted: boolean; compl
   // behaviour a finished list gets — without it, `completedAtMs === 0` would
   // veto every push and a chat that never called set_todos would stay silent,
   // which is the exact coupling this watchdog is meant to break.
-  if (!hasTodos) return { hasTodos, allCompleted, completedAtMs: latestActivityMs };
+  //
+  // A modern-era (stateless) request leaves no session, so its clock is folded
+  // in here too — otherwise a modern-only conversation had no completion time
+  // and could never be announced at all.
+  if (!hasTodos) return { hasTodos, allCompleted, completedAtMs: Math.max(latestActivityMs, state.modernLastUsed) };
   return { hasTodos, allCompleted, completedAtMs };
 }
 

@@ -549,3 +549,66 @@ test("the outcome reports the sound, not just the phone", async () => {
     "announced must be the OR of the channels, never a third opinion",
   );
 });
+
+// --- the modern-era (stateless) activity clock --------------------------------------
+
+/**
+ * 2026-07-28-era requests mint no session, so `state.modernLastUsed` is the
+ * only trace they leave. Before it was folded in, a modern-only client was
+ * invisible to both watchdogs: the idle bell saw "nobody connected" and the
+ * finish bell had no completion clock, so neither could ever ring — the
+ * operator's phone stayed silent through conversations that were plainly
+ * happening. These tests pin the fold-in itself (they run against the global
+ * state the ticks read; the verdict functions above stay pure).
+ */
+import { state } from "../src/bridge/state.js";
+import { completionSnapshot, latestSessionActivity } from "../src/bridge/notify.js";
+
+test("a modern-only conversation is visible to the activity clock", () => {
+  state.sessions.clear();
+  const before = state.modernLastUsed;
+  try {
+    state.modernLastUsed = Date.now();
+    const activity = latestSessionActivity();
+    assert.ok(activity.lastUsedMs > 0, "no sessions + modern traffic must still report activity");
+    assert.equal(activity.hasOpenTodos, false);
+  } finally {
+    state.sessions.clear();
+    state.modernLastUsed = before;
+  }
+});
+
+test("the newer of the two clocks wins when both eras are active", () => {
+  const before = state.modernLastUsed;
+  try {
+    const stale = Date.now() - 60_000;
+    state.sessions.set("t-modern-fold", {
+      transport: {} as never, lastUsed: stale, connectedAt: stale, calls: 0,
+      todos: [], activeRequests: 0,
+    });
+    state.modernLastUsed = Date.now();
+    assert.equal(latestSessionActivity().lastUsedMs, state.modernLastUsed);
+    // And the session-only case still works: the modern clock at 0 never wins.
+    state.modernLastUsed = 0;
+    assert.equal(latestSessionActivity().lastUsedMs, stale);
+  } finally {
+    state.sessions.delete("t-modern-fold");
+    state.modernLastUsed = before;
+  }
+});
+
+test("a listless modern-only conversation gets a completion clock", () => {
+  const before = state.modernLastUsed;
+  try {
+    state.sessions.clear();
+    state.modernLastUsed = 0;
+    assert.equal(completionSnapshot().completedAtMs, 0, "sanity: nothing ever happened");
+    state.modernLastUsed = 1_234_567;
+    assert.equal(
+      completionSnapshot().completedAtMs, 1_234_567,
+      "the finish watchdog latches on this clock; 0 would veto the announcement forever",
+    );
+  } finally {
+    state.modernLastUsed = before;
+  }
+});

@@ -147,6 +147,18 @@ export const state = {
   sessions: new Map<string, SessionState>(),
   latestSession: undefined as SessionState | undefined,
   /**
+   * When a 2026-07-28-era (modern, stateless) request last arrived, 0 if never.
+   *
+   * Modern-era requests mint no session, so without this clock they would be
+   * invisible to every watchdog that reads `state.sessions` (idle and finish
+   * notices in notify.ts): a modern-only client kept the Bridge busy forever
+   * while both watchdogs saw "nobody connected", and neither bell could ring.
+   * A separate field rather than a synthetic session object — the session
+   * table drives transport lifecycle and the console, and must not grow
+   * entries that own no transport.
+   */
+  modernLastUsed: 0,
+  /**
    * The published tunnel URL — an https:// address, set only while a tunnel is
    * actually live, and cleared the moment it is not.
    *
