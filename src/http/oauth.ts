@@ -188,6 +188,26 @@ function pruneCodes(now: number): void {
 /** Bounds consent-page guessing. Separate from the bearer gate's limiter. */
 const ownerLimiter = new AuthFailureLimiter();
 
+/**
+ * Bounds anonymous dynamic registration: 20 registrations per remote key in
+ * five minutes, then a ten-minute cooldown. The endpoint is public by design
+ * (RFC 7591 — a client must be able to register before it has any
+ * credential), and each accepted registration persists a row, so without a
+ * budget a loop could grow the store without bound. Generous for real use —
+ * a client registers once and keeps its client_id — and it is the same
+ * primitive the consent page already uses, with the same forward-for keying
+ * (see remoteKeyOf's own comment for why that key is good enough here).
+ */
+const registerLimiter = new AuthFailureLimiter(20, 5 * 60_000, 10 * 60_000);
+
+/**
+ * Hard ceiling on stored clients. Registration is unauthenticated, so a key
+ * that simply changes between attempts gets a fresh budget each time; the cap
+ * is the bound that cannot be rotated away. 200 is far beyond any real
+ * operator's client list and small enough that the store stays hand-editable.
+ */
+const MAX_REGISTERED_CLIENTS = 200;
+
 // ---------------------------------------------------------------------------
 // Small HTTP helpers (kept local: nothing here belongs in the app-shell path)
 // ---------------------------------------------------------------------------
@@ -283,6 +303,23 @@ function handleMetadata(url: URL, res: ServerResponse): boolean {
 
 /** RFC 7591 dynamic client registration. */
 async function handleRegister(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+  // Budget and cap before touching the store: the refusal must not persist
+  // anything, and the ordering (cap first, then per-key budget) keeps the
+  // cheaper global check from being reached once a key is cooling down.
+  const now = Date.now();
+  const key = remoteKeyOf(req.headers, req.socket?.remoteAddress);
+  const lockedFor = registerLimiter.lockoutRemaining(key, now);
+  if (lockedFor > 0) {
+    json(res, 429, { error: "registration_limit", error_description: "Too many client registrations from this address; retry later." }, {
+      "retry-after": String(Math.ceil(lockedFor / 1000)),
+    });
+    return true;
+  }
+  if ((await listClients()).length >= MAX_REGISTERED_CLIENTS) {
+    oauthError(res, 429, "registration_limit",
+      "The registered client list is full. Revoke unused clients from the Open Bridge console, then register again.");
+    return true;
+  }
   const body = await readBody(req);
   if (body === undefined) {
     oauthError(res, 413, "invalid_client_metadata", "Registration body is too large.");
@@ -320,6 +357,10 @@ async function handleRegister(req: IncomingMessage, res: ServerResponse): Promis
     client_id_issued_at: Math.floor(Date.now() / 1000),
   };
   await registerClient(client);
+  // Consumption, not failure: every accepted registration spends the key's
+  // budget (a rejection above never reaches this line), so a loop is bounded
+  // even though each individual request is legitimate on its own.
+  registerLimiter.recordFailure(key, Date.now());
   record("oauth", "progress", `Registered OAuth client ${client.client_id}.`);
   json(res, 201, client);
   return true;

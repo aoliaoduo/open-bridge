@@ -535,3 +535,54 @@ test("the console can read the OAuth client list without seeing any secret", asy
   assert.equal(/[a-f0-9]{64}/.test(res.body), false, "no digests are exposed");
   assert.equal(res.body.includes(ownerToken), false, "the owner credential never leaves the server");
 });
+
+// --- registration is bounded ---------------------------------------------------------
+
+/**
+ * Dynamic registration is anonymous by design, and every accepted request
+ * persists a row. Without a budget and a cap, a plain loop could grow
+ * secrets.json without bound — the same resource-exhaustion shape the bearer
+ * gate's tracked-key cap exists for. These tests pin both bounds; each uses
+ * its own x-forwarded-for key so the budget it spends cannot starve the
+ * registrations the earlier tests in this file perform.
+ */
+test("registration is rate-limited per remote key after 20 in the window", async () => {
+  const key = { "x-forwarded-for": "198.51.100.77" };
+  let accepted = 0;
+  let last;
+  for (let i = 0; i < 21; i += 1) {
+    last = await rawRequest("POST", "/oauth/register", JSON.stringify({
+      client_name: `rate-probe-${i}`,
+      redirect_uris: [REDIRECT],
+    }), { "content-type": "application/json", ...key });
+    if (last.status === 201) accepted += 1; else break;
+  }
+  assert.equal(accepted, 20, `expected the 21st registration to be the first refused, got status ${last.status} after ${accepted}`);
+  assert.equal(last.status, 429, "the budget-exhausted registration must be refused, not accepted");
+  assert.equal(JSON.parse(last.body).error, "registration_limit");
+  assert.ok(Number(last.headers["retry-after"]) > 0, "a 429 should say how long to wait");
+  // A different key is a different budget: the endpoint stays open for others.
+  const otherKey = await rawRequest("POST", "/oauth/register", JSON.stringify({
+    client_name: "rate-probe-other-key",
+    redirect_uris: [REDIRECT],
+  }), { "content-type": "application/json", "x-forwarded-for": "198.51.100.78" });
+  assert.equal(otherKey.status, 201, "one abusive key must not close the endpoint");
+});
+
+test("the stored client list has a hard ceiling", async () => {
+  // A key that rotates between attempts gets a fresh budget every time — that
+  // is exactly the workload the cap (not the limiter) must stop. Registering
+  // up to the ceiling takes ~200 loopback roundtrips; assertion comes from
+  // the response the server itself computed the cap against.
+  const cap = 200;
+  let last;
+  for (let i = 0; i <= cap + 1; i += 1) {
+    last = await rawRequest("POST", "/oauth/register", JSON.stringify({
+      client_name: `cap-probe-${i}`,
+      redirect_uris: [REDIRECT],
+    }), { "content-type": "application/json", "x-forwarded-for": `203.0.113.${(i % 250) + 1}` });
+    if (last.status !== 201) break;
+  }
+  assert.equal(last.status, 429, "registration past the ceiling must be refused");
+  assert.equal(JSON.parse(last.body).error, "registration_limit");
+});
