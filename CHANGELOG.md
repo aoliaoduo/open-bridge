@@ -6,7 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **通知的「哪个事件走哪些渠道」改成一张显式的表。** 规则原先散在四处：`ALWAYS_EVENTS` 集合、`eventSuppressed()`、两个 verdict 顶部的复合条件、以及 `soundFileForEvent` 里的 switch。**每一处单独看都是对的**，但已经连出两个同形状的 bug —— 一个旋钮关掉了它不拥有的渠道：
+
+  - `notify.enabled`（**手机**开关）决定了 `usable`，而兜底监视第一行就查它 → 关掉手机，本机声音一起哑；
+  - `notify.idleMinutes`（**无反应提醒**的阈值）和「对话结束」的判定写在同一个条件里 → 把它设成 0（页面上写着「0 = 关闭」），连带关掉了另一个有自己开关的通知。
+
+  这两个都不是读某一个函数能看出来的：你得同时记住四个文件，还要注意到某个标志的**名字比它实际检查的东西更宽**。现在 `notify-routing.ts` 用纯数据回答「这个事件，哪些渠道可以说话，各自要满足什么」，而且**只有它能回答**。
+
+  配套的是**穷举测试**：4 个事件 × 16 种渠道状态 = 64 种组合，逐一断言。两个已修的 bug 在表里各对应一条性质 ——「一个就绪的渠道不会因为另一个渠道关着而沉默」「每个开关只管自己的事件」。这类问题正是因为「各部件都对、组合起来断了」，所以验收必须在组合层。
+
+  静态扫描找不到这种问题 —— 我先扫了一轮「`if (!flag) return`」，**两个 bug 都没抓到**，因为它们藏在复合条件里。是手写实测才发现的。
+
 ### Fixed
+
+- **「无反应提醒」设为 0 会连带关掉「对话结束时通知」。** 见上一条。**有一条测试把这个 bug 当成规格钉住了** —— 名字就叫「idleMinutes 0 switches off both watchdogs, not just one」。它让缺陷活了下来：任何人修对了行为，都会被这条测试判定为「改坏了」。已改写成正确的期望。
 
 - **关掉手机通知后，本机声音也一起哑了。** 本机声音刻意排在所有 Bark 闸门**之前**，就是为了让没配 Bark 的机器也能响 —— 但两个兜底监视根本走不到那一步：`finishNoticeVerdict` 和 `idleNoticeVerdict` 第一行都是 `if (!input.usable) return false`，而 `usable` 的定义是 **`enabled && Boolean(key)`**，也就是「Bark 能发」。于是关掉手机开关，整条链在最外层就断了，`pushNotification` 压根没被调用。
 

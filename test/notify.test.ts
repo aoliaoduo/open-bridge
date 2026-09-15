@@ -119,10 +119,10 @@ test("diff reads untrusted lists without tripping (persisted data, hand-edited)"
 
 test("the watchdog needs all of: channel, threshold, silence, no in-flight work", () => {
   // lastUsedMs 7 = "a session exists and went quiet".
-  const ok = { usable: true, idleMinutes: 10, nowMs: 660_007, lastUsedMs: 7,
+  const ok = { canSpeak: true, idleMinutes: 10, nowMs: 660_007, lastUsedMs: 7,
     activeRequests: 0, hasOpenTodos: true, notifiedForMs: 0 };
   assert.equal(idleWatchVerdict(ok), true);
-  assert.equal(idleWatchVerdict({ ...ok, usable: false }), false);
+  assert.equal(idleWatchVerdict({ ...ok, canSpeak: false }), false);
   assert.equal(idleWatchVerdict({ ...ok, idleMinutes: 0 }), false, "0 is off, not always");
   assert.equal(idleWatchVerdict({ ...ok, activeRequests: 1 }), false, "our own slowness does not page anyone");
   assert.equal(idleWatchVerdict({ ...ok, nowMs: 300_007 }), false, "five minutes is not ten");
@@ -133,7 +133,7 @@ test("silence alone is enough: the watchdog no longer depends on a todo list", (
   // watchdog for whole days of real use: 2026-09-13 on this workspace logged
   // 1274 tool calls, 4 of them set_todos, 0 notifications. A safety net tied
   // to a tool the model may forget fails exactly when the model is forgetful.
-  const noList = { usable: true, idleMinutes: 10, nowMs: 660_007, lastUsedMs: 7,
+  const noList = { canSpeak: true, idleMinutes: 10, nowMs: 660_007, lastUsedMs: 7,
     activeRequests: 0, hasOpenTodos: false, notifiedForMs: 0 };
   assert.equal(idleWatchVerdict(noList), true, "a silent session with no list still pages");
 
@@ -143,7 +143,7 @@ test("silence alone is enough: the watchdog no longer depends on a todo list", (
 });
 
 test("the watchdog latches one notice per episode and re-arms when activity moves the clock", () => {
-  const base = { usable: true, idleMinutes: 10, nowMs: 660_007, lastUsedMs: 7,
+  const base = { canSpeak: true, idleMinutes: 10, nowMs: 660_007, lastUsedMs: 7,
     activeRequests: 0, hasOpenTodos: true };
   // First bell: the latch (0) does not match this episode's clock.
   assert.equal(idleWatchVerdict({ ...base, notifiedForMs: 0 }), true);
@@ -294,7 +294,7 @@ test("group defaults to open-bridge so pushes stack predictably", () => {
  */
 
 const DONE = {
-  usable: true,
+  canSpeak: true,
   idleMinutes: 10,
   nowMs: 1_000_000,
   lastUsedMs: 1_000_000 - 60_000, // a minute of quiet: past the settle delay
@@ -377,9 +377,26 @@ test("finish watchdog: one announcement per finished list", () => {
   assert.equal(finishNoticeVerdict({ ...DONE, announcedForMs: DONE.completedAtMs - 5_000 }), true);
 });
 
-test("finish watchdog: idleMinutes 0 switches off both watchdogs, not just one", () => {
-  assert.equal(finishNoticeVerdict({ ...DONE, idleMinutes: 0 }), false);
-  assert.equal(finishNoticeVerdict({ ...DONE, usable: false }), false);
+/**
+ * This test used to assert the opposite, and asserting it is what kept the
+ * bug alive: "idleMinutes 0 switches off both watchdogs, not just one" was
+ * written down as the intended behaviour.
+ *
+ * It is not. The field is labelled 无反应提醒 … 0 = 关闭 on the settings page —
+ * it is the silence alert's threshold. 对话结束时通知 is a separate switch, and
+ * turning one off must not turn off the other. A knob may only govern what it
+ * owns.
+ */
+test("idleMinutes belongs to the silence alert, not to the end-of-exchange one", () => {
+  assert.equal(
+    finishNoticeVerdict({ ...DONE, idleMinutes: 0 }),
+    true,
+    "switching off the silence alert must leave the end-of-exchange announcement alone",
+  );
+  // The end-of-exchange bell has its own switch, and that one does stop it.
+  assert.equal(finishNoticeVerdict({ ...DONE, onFinish: false, canSpeak: false }), false);
+  // Nothing configured anywhere is still the quiet case.
+  assert.equal(finishNoticeVerdict({ ...DONE, canSpeak: false }), false);
 });
 
 test("finish watchdog: a tiny idleMinutes shortens the settle delay instead of outliving it", () => {
@@ -403,7 +420,8 @@ test("finish watchdog: a tiny idleMinutes shortens the settle delay instead of o
 test("a push moments before the call that carried it still silences the watchdog", () => {
   const completedAtMs = 1_757_889_586_676;
   const base = {
-    usable: true,
+    canSpeak: true,
+    onFinish: true,
     idleMinutes: 60,
     lastUsedMs: completedAtMs,
     activeRequests: 0,
@@ -442,7 +460,7 @@ test("a push moments before the call that carried it still silences the watchdog
  */
 test("a sound-only setup still gets the watchdog", () => {
   // Phone off, sound on: something can still reach the operator.
-  const soundOnly = { ...DONE, usable: true };
+  const soundOnly = { ...DONE, canSpeak: true };
   assert.equal(
     finishNoticeVerdict(soundOnly),
     true,
@@ -450,7 +468,7 @@ test("a sound-only setup still gets the watchdog", () => {
   );
 
   // Nothing configured at all is the one case that stays quiet.
-  assert.equal(finishNoticeVerdict({ ...DONE, usable: false }), false);
+  assert.equal(finishNoticeVerdict({ ...DONE, canSpeak: false }), false);
 });
 
 test("the Bark send path gates on Bark, not on the sound channel", () => {

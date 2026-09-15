@@ -144,8 +144,18 @@ test("the Bark test button asks for a silent-locally push", () => {
 
 test("pushNotification honours silentLocally before anything else", () => {
   const notify = readFileSync(path.join(process.cwd(), "src/bridge/notify.ts"), "utf8");
-  // The sound is deliberately ahead of every Bark gate so a key-less machine
-  // still chimes; the opt-out therefore has to wrap it there, not later.
-  const guard = /if \(!options\.silentLocally\) \{[^}]*playAlertSound/s;
-  assert.match(notify, guard, "the local sound must sit behind the silentLocally check");
+  // Asserted on the condition rather than on an exact code shape: this test
+  // broke once when the routing table was introduced and the guard grew a
+  // second clause, even though the behaviour was unchanged. What must hold is
+  // that the only playAlertSound call in the send path is governed by
+  // silentLocally, and that it still sits ahead of the Bark gate so a
+  // key-less machine chimes.
+  const call = notify.indexOf("playAlertSound(soundFile)");
+  assert.ok(call > 0, "the send path must still play a sound");
+  const guardWindow = notify.slice(Math.max(0, call - 400), call);
+  assert.match(guardWindow, /!options\.silentLocally/, "the local sound must be behind silentLocally");
+  assert.ok(
+    call < notify.indexOf("route.bark !== true"),
+    "the sound must be decided before the phone gate, not after it",
+  );
 });

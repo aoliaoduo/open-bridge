@@ -39,6 +39,7 @@
 import { probeHttpHealth } from "../network/safe-probe.js";
 import { host } from "../host/host.js";
 import { playAlertSound, soundFileForEvent } from "./sound-alert.js";
+import { anyChannelSpeaks, routeEvent, type ChannelState } from "./notify-routing.js";
 import { CONFIG_DEFAULTS } from "./config-defaults.js";
 import { canonicalBarkOrigin, parseBarkKeyInput } from "./config-values.js";
 import { record, state } from "./state.js";
@@ -355,6 +356,22 @@ export function parseBarkExtras(args: JsonArgs): { ok: true; extras: BarkPushExt
  * switch; anything else (`progress`) is a courtesy that rides along with the
  * task-completion switch, since both mean "routine forward motion".
  */
+/**
+ * Snapshot the routing inputs for one event.
+ *
+ * `soundReady` is per-event because a file configured for "waiting" says
+ * nothing about "finished" — the two slots are independent, and collapsing
+ * them is how a channel ends up claiming it can speak when it cannot.
+ */
+export function channelStateFor(event: NotifyEvent, settings: NotifySettings): ChannelState {
+  return {
+    barkReady: settings.barkUsable,
+    soundReady: Boolean(soundFileForEvent(event)),
+    onTaskDone: settings.onTaskDone,
+    onFinish: settings.onFinish,
+  };
+}
+
 export function eventSuppressed(
   settings: Pick<NotifySettings, "onTaskDone" | "onFinish">,
   event: NotifyEvent,
@@ -424,37 +441,31 @@ export async function pushNotification(
   const outcome = (delivered: boolean, reason: string, status = 0, error = ""): NotifyOutcome =>
     ({ delivered, event, reason, status, error });
 
-  // The local chime fires BEFORE every Bark gate, and that ordering is the
-  // whole point. The two channels answer different questions -- "I am away
-  // from the desk" versus "I am right here with the tab buried" -- so a
-  // machine with no Bark key, or with the phone switches off, must still be
-  // able to make a noise. Wiring the sound behind `settings.usable` would
-  // have made a local-only setup silent, which is the setup most likely to
-  // want a chime.
-  //
-  // Its own gating lives in soundFileForEvent: disabled, or no file for this
-  // event, means "" and nothing happens. Dedupe and rate limits below are
-  // Bark's; a sound is cheap and local, and suppressing the second of two
-  // identical chimes would hide a real repeat.
-  // `silentLocally` is how a caller says "this push is about ONE channel".
-  // The Bark test button is the case that made it necessary: pressing 发送测试
-  // under 手机（Bark） opened a music player on the desktop, because the test
-  // travels as an `attention` event and every attention event makes a noise.
-  // A button that tests one channel must not exercise the other — the whole
-  // point of pressing it is to find out whether THAT channel works.
-  if (!options.silentLocally) {
+  // Both channels are decided in one place, by the table, instead of by a
+  // chain of ifs whose order encoded policy. The ordering still matters --
+  // the sound plays before the phone is even considered, so a machine with no
+  // Bark key still chimes -- but "may this channel speak" is now a question
+  // asked of notify-routing.ts rather than answered inline.
+  const route = routeEvent(event, channelStateFor(event, settings));
+
+  // `silentLocally` is a caller saying "this push is about ONE channel". The
+  // Bark test button needs it: the test travels as an `attention` event, and
+  // without this pressing 发送测试 under 手机（Bark） also played music.
+  if (route.sound === true && !options.silentLocally) {
     const soundFile = soundFileForEvent(event);
     if (soundFile) playAlertSound(soundFile);
   }
 
-  // barkUsable, not usable: the local sound above has already played, and
-  // this line is the phone's own gate. Using `usable` here would try to POST
-  // to an empty device key whenever only the sound channel is configured.
-  if (!settings.barkUsable) return logged(outcome(false, settings.blocker || "disabled"), title);
-  // "switch_off" rather than the old "mode": the reason names a thing the
-  // operator can actually find and flip, instead of a vocabulary they no
-  // longer have.
-  if (eventSuppressed(settings, event)) return logged(outcome(false, "switch_off"), title);
+  if (route.bark !== true) {
+    // The table's reason is more specific than the old settings.blocker, but
+    // blocker still wins when it has something to say: it distinguishes
+    // "disabled" from "no_key", which the router deliberately does not model.
+    const reason = route.bark === "switch_off" ? "switch_off" : (settings.blocker || route.bark);
+    return logged(outcome(false, reason), title);
+  }
+  // The switch check used to live here as a second gate. It is the table's
+  // job now — keeping both would be two copies of one rule, which is exactly
+  // how the rules drifted apart the first time.
 
   const clippedTitle = title.trim().slice(0, BARK_TITLE_LIMIT);
   const clippedBody = body.replace(/\r\n?/g, "\n").trim().slice(0, BARK_BODY_LIMIT);
@@ -670,7 +681,8 @@ export function pushTodoCompletions(previous: readonly unknown[], next: readonly
  * threshold of silence can bell again.
  */
 export function idleWatchVerdict(input: {
-  usable: boolean;
+  /** Any channel can reach the operator; see notify-routing.ts. */
+  canSpeak: boolean;
   idleMinutes: number;
   nowMs: number;
   lastUsedMs: number;
@@ -678,7 +690,9 @@ export function idleWatchVerdict(input: {
   hasOpenTodos: boolean;
   notifiedForMs: number;
 }): boolean {
-  if (!input.usable || input.idleMinutes <= 0) return false;
+  // This watchdog DOES own idleMinutes -- it is the silence threshold, and 0
+  // is how the operator turns this specific alert off.
+  if (!input.canSpeak || input.idleMinutes <= 0) return false;
   // A request still in flight is the Bridge being slow, not the human being
   // away — do not page anyone over our own processing.
   if (input.activeRequests > 0) return false;
@@ -716,7 +730,16 @@ let idleNotifiedForMs = 0;
 export function idleNoticeTick(nowMs: number = Date.now()): boolean {
   const settings = resolveNotifySettings();
   const activity = latestSessionActivity();
-  const fire = idleWatchVerdict({ ...settings, ...activity, nowMs, notifiedForMs: idleNotifiedForMs });
+  // The silence alert speaks as "attention": it is telling the operator to
+  // come back. Routing it as that event is also what decides whether the
+  // desktop sound is eligible, instead of a separate guess here.
+  const fire = idleWatchVerdict({
+    ...settings,
+    ...activity,
+    nowMs,
+    notifiedForMs: idleNotifiedForMs,
+    canSpeak: anyChannelSpeaks("attention", channelStateFor("attention", settings)),
+  });
   if (!fire) return false;
   idleNotifiedForMs = activity.lastUsedMs;
   const minutes = settings.idleMinutes;
@@ -772,7 +795,8 @@ export function idleNoticeTick(nowMs: number = Date.now()): boolean {
  * there is one announcement per ending: new work advances it and re-arms.
  */
 export function finishNoticeVerdict(input: {
-  usable: boolean;
+  /** Any channel can reach the operator; see notify-routing.ts. */
+  canSpeak: boolean;
   idleMinutes: number;
   nowMs: number;
   lastUsedMs: number;
@@ -785,7 +809,15 @@ export function finishNoticeVerdict(input: {
 }): boolean {
   // idleMinutes === 0 is the operator switching the watchdogs off entirely;
   // this one honours that same switch rather than inventing a second knob.
-  if (!input.usable || input.idleMinutes <= 0) return false;
+  // `canSpeak` comes from the routing table: "can anyone be told" rather than
+  // "is the phone on". The first shipped bug was this line asking the wrong
+  // question — turning the phone off silenced the desktop sound too.
+  //
+  // idleMinutes is NOT checked here any more, and that is the second bug:
+  // it is the silence alert's threshold, and "0 = 关闭" on that field was
+  // quietly disabling the end-of-exchange announcement as well, which has
+  // its own switch. A knob may only govern what it owns.
+  if (!input.canSpeak) return false;
   // An UNFINISHED list is the idle watchdog's territory, not this one's.
   // Staying out of it is what keeps the two from paging for the same silence.
   if (input.hasTodos && !input.allCompleted) return false;
@@ -896,6 +928,7 @@ export function finishNoticeTick(nowMs: number = Date.now()): boolean {
     lastUsedMs: activity.lastUsedMs,
     activeRequests: activity.activeRequests,
     ...completion,
+    canSpeak: anyChannelSpeaks("finished", channelStateFor("finished", settings)),
     notifiedSinceMs: lastSelfNotifyMs,
     announcedForMs: finishAnnouncedForMs,
   });
