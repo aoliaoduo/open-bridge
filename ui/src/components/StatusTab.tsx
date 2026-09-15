@@ -235,13 +235,13 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
             )}
             <div className="btn-group">
               <button type="button" className="small" disabled={!running} onClick={() => onOpen?.("health")}>
-                {t("去体检页", "Open 体检")}
+                {t("去体检页", "Open Health")}
               </button>
             </div>
             <div className="section-note" style={{ marginBottom: 0 }}>
               {t(
                 "体检会真的发请求验证本机端点、公网隧道与鉴权门禁，不影响进程本身。",
-                "体检 sends real requests to verify the local endpoint, the public tunnel and the auth gate. It never touches the process.",
+                "Health sends real requests to verify the local endpoint, the public tunnel and the auth gate. It never touches the process.",
               )}
             </div>
           </Card>

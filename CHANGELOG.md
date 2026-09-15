@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **英文界面里夹着中文。** 「去体检页」的英文是 `Open 体检`，还有一句英文说明以 `体检 sends real requests…` 开头。两处都出自同一个习惯 —— 把页面名当专有名词留着不译 —— 而且**只有把控制台切成英文、逐字读过去才会发现**，在中文桌面上永远碰不到。
+
+  补了测试钉住：**英文那一侧不得含有汉字**。刻意不是「第二个参数不许出现 CJK」——Bark、ngrok、Shell 是产品名，两侧都该保留；中文侧本来就中英混排（「Bearer 门禁」）。范围收窄了，检查才有用。
+
+  测试本身写错过一次：长文案常写成 `"前半 " + "后半"`，而我第一版按「第一个字符串是中文、第二个是英文」去取，于是把中文的续行当成了译文，报了两条**误报**。改成先按顶层逗号切参数、再把每个参数内拼接的字面量合起来。
+
 - **六个工具的 `outputSchema` 在撒谎：声明返回对象，实际返回数组。** `activity_log`、`service_status`、`read_files`、`search_files`、`find_files`、`list_directory` 全都把行数据包在一个**根本不存在的 `items` 字段**里。模型按 schema 写 `result.items.map(...)`，拿到 `undefined`，然后只能靠试错去发现真实形状 —— 而这是它被告知「已经理解了」的工具。
 
   `read_files` 错得更远：它压根**没有** `outputSchema`，而紧邻它的 `get_file_info` 的 schema 描述的是单个文件元数据，看上去像是被当成了 read_files 的。

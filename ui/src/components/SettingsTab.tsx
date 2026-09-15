@@ -143,7 +143,7 @@ const SOUND_ROWS = [
     label: () => t("对话结束", "Exchange finished"),
     hint: () => t(
       "这一轮收尾时响一次。受上面「对话结束时」开关控制。",
-      "One sound when the round wraps up. Follows the 对话结束时 switch above.",
+      "One sound when the round wraps up. Follows the end-of-exchange switch above.",
     ),
   },
 ];
