@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`wait` 与 `run_command` 的 32 位计时器溢出**：`setTimeout` 超过 2147483647 会带警告在 ~1 ms 触发（本仓库在 `timeout_ms: 1e18` 上实测过，`clampMs` 就是为它加的天花板），但 `wait {ms}` 与 `run_command {timeout_ms}` 两个入口恰好都没走它。结果是一个想「等 35 天」的调用在 2 ms 内返回、还如实报告 `waited_ms: 3000000000` —— 调用方的排程静默提前了一个月。两处现在都经过 `clampMs`（诚实报告实际等待值），且 `wait` 的计时器 `unref`：一个等待不该在进程排空时拴住它。新增 `test/wait-tool.test.ts`，其中溢出用例用「300 ms 内不得 settle」探针断言 —— 旧代码 ~1 ms 就 settle，正是它要钉住的红。
+
+- **现代协议（2026-07-28 无会话流）对通知看门狗不可见。** 空闲/结束两个监视器读的都是 `state.sessions` 的 `lastUsed`，而现代协议的请求不建会话：一个纯现代协议的客户端让 Bridge 一直忙，看门狗眼里却是「没人连过」——两个铃都永远不会响。新增 `state.modernLastUsed` 时钟（listener 在现代分支逐请求戳一下），`latestSessionActivity` 与 `completionSnapshot` 把它折叠进来（两时钟取新者）。未修复代码上已验证红。
+
+- **`/oauth/register` 无限流、无数量上限。** 动态注册是匿名的（RFC 7591 要求），每个被接受的请求都往 `secrets.json` 持久化一行 —— 一个循环就能让存储无界增长，而 bearer 门对 tracked keys 的硬上限早已说明这类预算该有。现在按远端 key 限 5 分钟 20 个注册（复用 `AuthFailureLimiter`，429 + `retry-after`），外加 200 个客户端的全局硬上限 —— key 可以轮换，上限不能。集成测试各钉一条，且用独立 `x-forwarded-for` 避免吃掉同文件其他用例的预算。
+
+- **`workspace_brief` 同步阻塞事件循环最长 10 秒。** 两次 `execFileSync("git", …)` 各带 5 秒 timeout，注释声称「timeout 防止阻塞事件循环」——但同步子进程调用期间整个进程冻结，timeout 只封顶不解除。索引被锁的仓库上，每次 `workspace_brief` 都让所有会话硬停最多 10 秒（系统指令还鼓励新会话先调它）。改为 `execFile` 异步并发，注释同步改真。
+
+- **`close_shell` 把强杀记为退出码 0。** shell 在 150 ms 内没退、被 `taskkill /T /F` 打死时，`exitCode ?? 0` 凭空造出一个 0 —— 在每个读退出码的地方都读作「干净退出」。改为 `null`（未知就是未知）。
+
 ### Added
 
 - **补齐四样开源门面**：`CONTRIBUTING.md`、`CODE_OF_CONDUCT.md`、PR 模板、issue 模板（bug / 功能建议）。由子代理完成，我复核。
