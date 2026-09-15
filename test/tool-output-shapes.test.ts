@@ -14,10 +14,17 @@
  * Every individual schema looked plausible in isolation; only running the
  * tools showed the mismatch.
  *
+ * Second pass (the truncation fix): the three LISTING tools moved from a bare
+ * array to an object — `{items, truncated, ...}` — because an array has no
+ * room for the one fact a capped listing must carry. A page that cannot say
+ * it was cut is an answer about the world ("this directory has three files")
+ * that the tool was never in a position to give. So the split is now explicit
+ * and enforced below: array-returning tools declare arrays, page-returning
+ * tools declare an object whose `truncated` field is the whole point.
+ *
  * Kept as a unit test over the declarations rather than a live invocation:
  * spawning a bridge per tool would be slow and platform-bound, and the thing
- * worth pinning is that the DECLARATION says array where the handler returns
- * one.
+ * worth pinning is that the DECLARATION agrees with the handler's shape.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -32,14 +39,21 @@ const ARRAY_RETURNING = new Set([
   "activity_log",
   "service_status",
   "read_files",
+]);
+
+/**
+ * Tools that return a page: `{items, truncated, ...}`. They cannot honestly
+ * declare an array, because the truncation state has nowhere to live in one.
+ */
+const PAGE_RETURNING = new Set([
   "search_files",
   "find_files",
   "list_directory",
 ]);
 
-function schemaOf(name: string): { type?: string } | undefined {
+function schemaOf(name: string): { type?: string; items?: unknown; required?: string[]; properties?: Record<string, unknown> } | undefined {
   const def = TOOL_DEFINITIONS.find(entry => entry.name === name);
-  return def?.outputSchema as { type?: string } | undefined;
+  return def?.outputSchema as ReturnType<typeof schemaOf>;
 }
 
 test("array-returning tools declare an array", () => {
@@ -58,19 +72,48 @@ test("an array schema says what the elements are", () => {
   // "type: array" with no items is barely better than the wrong type: the
   // model still cannot tell what it is iterating over.
   for (const name of ARRAY_RETURNING) {
-    const schema = schemaOf(name) as { items?: unknown } | undefined;
+    const schema = schemaOf(name);
     assert.ok(schema?.items, `${name} declares an array without describing its elements`);
   }
 });
 
-test("no schema nests rows under a key the handler never sends", () => {
-  // The specific shape of the bug: properties.items on an object schema, for
-  // a tool that returns the rows directly.
+test("no array schema nests rows under a key the handler never sends", () => {
+  // The specific shape of the first bug: properties.items on an object schema,
+  // for a tool that returns the rows directly.
   for (const name of ARRAY_RETURNING) {
-    const schema = schemaOf(name) as { type?: string; properties?: Record<string, unknown> } | undefined;
+    const schema = schemaOf(name);
     assert.ok(
       !(schema?.type === "object" && schema.properties && "items" in schema.properties),
       `${name} wraps its rows in a phantom "items" field`,
     );
+  }
+});
+
+test("page-returning tools declare an object that can carry the truncation state", () => {
+  for (const name of PAGE_RETURNING) {
+    const schema = schemaOf(name);
+    assert.ok(schema, `${name} has no outputSchema`);
+    assert.equal(
+      schema.type,
+      "object",
+      `${name} answers with {items, truncated} but its schema promises ${String(schema.type)}`,
+    );
+    assert.equal(schema.properties?.items && schema.type, "object");
+    assert.ok(schema.properties && "items" in schema.properties, `${name} must declare its rows`);
+    assert.ok(schema.properties && "truncated" in schema.properties,
+      `${name} cut a result short without a field to say so — that is the bug this test exists for`);
+    assert.deepEqual(
+      [...(schema.required ?? [])].sort(),
+      ["items", "truncated"],
+      `${name} must require both fields, so a caller can parse without guessing`,
+    );
+  }
+});
+
+test("a page schema describes its rows", () => {
+  for (const name of PAGE_RETURNING) {
+    const items = schemaOf(name)?.properties?.items as { type?: string; items?: unknown } | undefined;
+    assert.equal(items?.type, "array", `${name}.items must say it is an array`);
+    assert.ok(items?.items, `${name}.items must describe the row shape`);
   }
 });

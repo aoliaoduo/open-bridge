@@ -43,6 +43,20 @@ setHost(memoryHost());
 
 type Hit = { path: string; line: number; text: string };
 
+/**
+ * The rows out of a result that now carries its truncation state alongside
+ * them. Read through here rather than casting: a regression back to a bare
+ * array (or to a differently named key) should fail loudly in these tests,
+ * not silently turn every assertion below into "undefined !== expected".
+ */
+function rows<T>(result: unknown): T[] {
+  assert.ok(result && typeof result === "object" && !Array.isArray(result),
+    `expected a result object, got ${Array.isArray(result) ? "an array" : typeof result}`);
+  const items = (result as { items?: unknown }).items;
+  assert.ok(Array.isArray(items), "the result object must carry its rows under items");
+  return items as T[];
+}
+
 beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), "ob-searchdef-"));
   writeFileSync(path.join(dir, "a.txt"), "alpha\nbeta\ngamma\n", "utf8");
@@ -55,7 +69,7 @@ afterEach(() => {
 });
 
 test("query is a regex by default", async () => {
-  const hits = (await searchFiles({ query: "alp|gam" })) as Hit[];
+  const hits = rows<Hit>(await searchFiles({ query: "alp|gam" }));
   assert.deepEqual(
     hits.map(h => `${h.path}:${h.line}`).sort(),
     ["a.txt:1", "a.txt:3", "sub/b.txt:1"],
@@ -63,12 +77,12 @@ test("query is a regex by default", async () => {
 });
 
 test("regex=false restores literal matching", async () => {
-  const hits = (await searchFiles({ query: "alp|gam", regex: false })) as Hit[];
+  const hits = rows<Hit>(await searchFiles({ query: "alp|gam", regex: false }));
   assert.equal(hits.length, 0);
 });
 
 test("a single-file path scans just that file", async () => {
-  const hits = (await searchFiles({ query: "beta", path: "sub/b.txt" })) as Hit[];
+  const hits = rows<Hit>(await searchFiles({ query: "beta", path: "sub/b.txt" }));
   assert.deepEqual(
     hits.map(h => `${h.path}:${h.line}`),
     ["sub/b.txt:1"],
@@ -85,9 +99,9 @@ test("look-around queries are answered, not lost to a backend that cannot parse 
   // it. Whether the call skips ripgrep up front (pattern detected) or falls back
   // after a failed spawn (not detected), the ANSWER must be identical; that is the
   // outcome that actually matters to the caller, so that is what this pins.
-  const ahead = (await searchFiles({ query: "alpha(?= beta)" })) as Hit[];
+  const ahead = rows<Hit>(await searchFiles({ query: "alpha(?= beta)" }));
   assert.deepEqual(ahead.map(h => `${h.path}:${h.line}`), ["sub/b.txt:1"]);
-  const behind = (await searchFiles({ query: "(?<=alpha )beta" })) as Hit[];
+  const behind = rows<Hit>(await searchFiles({ query: "(?<=alpha )beta" }));
   assert.deepEqual(behind.map(h => `${h.path}:${h.line}`), ["sub/b.txt:1"]);
 });
 
@@ -105,8 +119,8 @@ test("a negative max_results falls back to the default instead of meaning all or
     writeFileSync(path.join(dir, `hit-${i}.txt`), "needle here\n");
   }
 
-  const negative = await searchFiles({ path: ".", query: "needle", max_results: -1 });
-  const alsoNegative = await searchFiles({ path: ".", query: "needle", max_results: -1000 });
+  const negative = rows<Hit>(await searchFiles({ path: ".", query: "needle", max_results: -1 }));
+  const alsoNegative = rows<Hit>(await searchFiles({ path: ".", query: "needle", max_results: -1000 }));
 
   // The point is not the exact count but that both negatives agree and that
   // neither collapsed to zero -- the caller asked for matches and there are 12.
@@ -114,11 +128,11 @@ test("a negative max_results falls back to the default instead of meaning all or
   assert.equal(negative.length, 12, "a nonsense limit must not hide real matches");
 
   // Zero stays meaningful: it is a real request for no rows, not a mistake.
-  const zero = await searchFiles({ path: ".", query: "needle", max_results: 0 });
+  const zero = rows<Hit>(await searchFiles({ path: ".", query: "needle", max_results: 0 }));
   assert.equal(zero.length, 0, "0 still means 0");
 
   // And a sane limit is still honoured exactly.
-  const three = await searchFiles({ path: ".", query: "needle", max_results: 3 });
+  const three = rows<Hit>(await searchFiles({ path: ".", query: "needle", max_results: 3 }));
   assert.equal(three.length, 3);
 });
 
@@ -134,20 +148,20 @@ test("a negative max_entries falls back to the default instead of listing nothin
   }
 
   const negative = await listDirectory({ path: ".", max_entries: -5 });
-  assert.ok(Array.isArray(negative), "list_directory returns the rows directly");
+
   // The fixture dir carries files from the beforeEach setup too, so assert the
   // property that matters rather than an exact count: the six just written are
   // all present, i.e. nothing was hidden by the bad argument.
-  const names = (negative as Array<{ name: string }>).map(e => e.name);
+  const names = rows<{ name: string }>(negative).map(e => e.name);
   for (let i = 0; i < 6; i += 1) {
     assert.ok(names.includes("entry-" + i + ".txt"), "entry-" + i + ".txt must survive a nonsense cap");
   }
 
   // 0 is a real request for no rows and stays exactly that.
   const zero = await listDirectory({ path: ".", max_entries: 0 });
-  assert.equal((zero as unknown[]).length, 0, "0 still means 0");
+  assert.equal(rows(zero).length, 0, "0 still means 0");
 
   // A sane cap is still honoured.
   const two = await listDirectory({ path: ".", max_entries: 2 });
-  assert.equal((two as unknown[]).length, 2);
+  assert.equal(rows(two).length, 2);
 });

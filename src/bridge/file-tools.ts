@@ -340,19 +340,60 @@ export async function listDirectory(args: Args): Promise<unknown> {
   }
   const depth = Math.max(Math.floor(rawDepth), 1);
   const includeHidden = args.include_hidden === true;
+  // Paging is offered for the flat listing only, and it is offered at all
+  // because a capped response nobody can continue is just a smaller surprise:
+  // the caller is told there are 500 entries and then has no way to reach 501.
+  // A recursive listing has no defined page boundary (which level would the
+  // offset count?), so asking for one is refused by name rather than ignored.
+  const rawOffset = Number(args.offset);
+  const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
+  if (offset > 0 && depth > 1) {
+    throw new Error("offset is only supported for depth 1: a recursive listing cannot be paged. "
+      + "Narrow the path or raise max_entries instead. (expected 'offset': number, with depth 1)");
+  }
 
   // Shared budget so max_entries bounds the response across the WHOLE tree
   // (children included). Each directory frame reserves one slot for itself
   // before expanding children, so exhausting the budget never causes an
   // already-listed directory to be dropped and the final count is exact.
+  //
+  // Running out of budget is REPORTED rather than merely obeyed. A capped
+  // listing that does not say it was capped is an answer about the world --
+  // "this directory has three files" -- that the tool had no way to know, and
+  // the caller acts on it (stops looking). read_files and run_command have
+  // reported their own truncation all along; the listing tools did not.
   const budget = { remaining: max };
+  let truncated = false;
+  let total: number | null = null;
   async function list(dir: string, level: number): Promise<unknown[]> {
-    if (budget.remaining <= 0) return [];
+    if (budget.remaining <= 0) {
+      truncated = true;
+      return [];
+    }
     const entries = await fs.readdir(dir, { withFileTypes: true });
+    // A flat listing already holds every entry in hand, so its true size is
+    // free to report. For depth > 1 that number would mean walking the whole
+    // tree -- the work max_entries exists to avoid -- so it stays null
+    // ("not computed") instead of becoming a number that looks authoritative.
+    // Only a flat listing owns its numbers: for depth > 1 the top-level frame
+    // holds 13 entries while the tree holds hundreds, and reporting 13 there
+    // would be a number that answers a question nobody asked.
+    if (depth === 1 && level === 1) {
+      total = entries.filter(e => includeHidden || !e.name.startsWith(".")).length;
+    }
     const result: unknown[] = [];
+    let skipped = 0;
     for (const e of entries) {
-      if (budget.remaining <= 0) break;
+      if (budget.remaining <= 0) {
+        // Something in this directory will not be listed.
+        truncated = true;
+        break;
+      }
       if (!includeHidden && e.name.startsWith(".")) continue;
+      if (level === 1 && skipped < offset) {
+        skipped += 1;
+        continue;
+      }
       // Dirent does not follow symlinks: resolve the type once so a link to a
       // directory is not mislabeled "file".
       let type: "directory" | "file" = e.isDirectory() ? "directory" : "file";
@@ -384,10 +425,19 @@ export async function listDirectory(args: Args): Promise<unknown> {
     }
     return result;
   }
-  return list(base, 1);
+  const items = await list(base, 1);
+  return {
+    items,
+    truncated,
+    total,
+    // The offset that would resume this survey, so the cap is recoverable
+    // rather than terminal. Null when there is nothing left to ask for, and
+    // for recursive listings (see the depth-1-only note above).
+    next_offset: truncated && depth === 1 ? offset + items.length : null,
+  };
 }
 
-export async function findFiles(args: Args): Promise<string[]> {
+export async function findFiles(args: Args): Promise<unknown> {
   const out: string[] = [];
   const base = await securePath(args.path);
   const pattern = String(args.pattern ?? "");
@@ -404,9 +454,19 @@ export async function findFiles(args: Args): Promise<string[]> {
     ? Math.floor(Number(args.max_results))
     : DEFAULT_MAX_SEARCH_RESULTS;
 
+  // Walk one match PAST the page: that extra entry is what makes "there were
+  // more" a measured fact instead of an assumption. Without it a capped walk
+  // and a complete walk are indistinguishable, and the caller stops looking.
+  const probe = limit + 1;
   async function walk(dir: string): Promise<void> {
-    if (out.length >= limit) return;
+    if (out.length >= probe) return;
     for (const e of await fs.readdir(dir, { withFileTypes: true })) {
+      // Checked inside the loop as well: the cap used to be enforced only at
+      // recursion entry, so a single directory holding more matches than the
+      // cap returned all of them (20 files in one folder answered
+      // max_results: 3 with 20 matches) -- the one shape where the entry
+      // check never fired.
+      if (out.length >= probe) return;
       if ([".git", "node_modules", "dist"].includes(e.name)) continue;
       const f = path.join(dir, e.name);
       if (e.isDirectory()) {
@@ -418,10 +478,10 @@ export async function findFiles(args: Args): Promise<string[]> {
     }
   }
   await walk(base);
-  return out;
+  return { items: out.slice(0, limit), truncated: out.length > limit };
 }
 
-export async function searchFiles(args: Args): Promise<unknown[]> {
+export async function searchFiles(args: Args): Promise<unknown> {
   const needle = String(args.query ?? "");
   if (!needle) throw new Error("query is required. (expected 'query': string)");
   const base = await securePath(args.path);
@@ -468,7 +528,8 @@ export async function searchFiles(args: Args): Promise<unknown[]> {
         cwd: base,
         regex: useRegex,
         includeGlobs: includes,
-        maxResults: limit + offset,
+        // One past the page (see the probe note on the built-in walk below).
+        maxResults: limit + offset + 1,
         contextLines,
         executable: rgExe,
       });
@@ -476,14 +537,18 @@ export async function searchFiles(args: Args): Promise<unknown[]> {
         // rg exit code 2: unreadable/errored files — the matches are real but incomplete.
         record("search_files", "progress", "ripgrep finished partially (exit code 2); results may be incomplete.");
       }
-      return rgMatches.slice(offset, offset + limit).map(m => ({
-        path: withPrefix(m.path),
-        line: m.line,
-        text: m.text,
-        ...(contextLines > 0
-          ? { context_before: m.context_before ?? [], context_after: m.context_after ?? [] }
-          : {}),
-      }));
+      const page = rgMatches.slice(offset, offset + limit + 1);
+      return {
+        items: page.slice(0, limit).map(m => ({
+          path: withPrefix(m.path),
+          line: m.line,
+          text: m.text,
+          ...(contextLines > 0
+            ? { context_before: m.context_before ?? [], context_after: m.context_after ?? [] }
+            : {}),
+        })),
+        truncated: page.length > limit,
+      };
     } catch (error) {
       // Say WHAT failed, not just that something did. record() redacts and bounds
       // the message itself; ripgrep's own diagnostics are short and name the
@@ -513,10 +578,14 @@ export async function searchFiles(args: Args): Promise<unknown[]> {
 
   const out: unknown[] = [];
   let skipped = 0;
+  // One entry past the page. Requesting exactly the page size makes "there was
+  // more" unobservable: the collector stops on the same condition either way,
+  // and the caller cannot tell a complete answer from a full page.
+  const pageEnd = limit + 1;
   async function walk(dir: string): Promise<void> {
-    if (out.length >= limit) return;
+    if (out.length >= pageEnd) return;
     for (const e of await fs.readdir(dir, { withFileTypes: true })) {
-      if (out.length >= limit) break;
+      if (out.length >= pageEnd) break;
       if ([".git", "node_modules", "dist"].includes(e.name)) continue;
       const f = path.join(dir, e.name);
       if (e.isDirectory()) {
@@ -526,10 +595,10 @@ export async function searchFiles(args: Args): Promise<unknown[]> {
         const includeRel = path.relative(includeBase, f).replace(/\\/g, "/");
         if (!fileAllowed(includeRel)) continue;
         try {
-          await searchFileStream(f, batchMatcher, { limit: limit - out.length + offset, contextLines }, match => {
+          await searchFileStream(f, batchMatcher, { limit: pageEnd - out.length + offset, contextLines }, match => {
             if (skipped < offset) {
               skipped += 1;
-              return out.length < limit;
+              return out.length < pageEnd;
             }
             const item: Record<string, unknown> = { path: rel, line: match.line, text: match.text };
             if (contextLines > 0) {
@@ -537,7 +606,7 @@ export async function searchFiles(args: Args): Promise<unknown[]> {
               item.context_after = match.context_after;
             }
             out.push(item);
-            return out.length < limit;
+            return out.length < pageEnd;
           });
         } catch (error) {
           // Unreadable files are skipped; regex/worker failures surface to the caller.
@@ -550,10 +619,10 @@ export async function searchFiles(args: Args): Promise<unknown[]> {
     const singleIncludeRel = path.relative(includeBase, base).replace(/\\/g, "/");
     if (fileAllowed(singleIncludeRel)) {
       let singleSkipped = 0;
-      await searchFileStream(base, batchMatcher, { limit: limit + offset, contextLines }, match => {
+      await searchFileStream(base, batchMatcher, { limit: pageEnd + offset, contextLines }, match => {
         if (singleSkipped < offset) {
           singleSkipped += 1;
-          return out.length < limit;
+          return out.length < pageEnd;
         }
         const item: Record<string, unknown> = { path: singleRel, line: match.line, text: match.text };
         if (contextLines > 0) {
@@ -561,13 +630,13 @@ export async function searchFiles(args: Args): Promise<unknown[]> {
           item.context_after = match.context_after;
         }
         out.push(item);
-        return out.length < limit;
+        return out.length < pageEnd;
       });
     }
-    return out;
+    return { items: out.slice(0, limit), truncated: out.length > limit };
   }
   await walk(base);
-  return out;
+  return { items: out.slice(0, limit), truncated: out.length > limit };
 }
 
 export async function readFiles(args: Args): Promise<unknown> {
