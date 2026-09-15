@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **六个工具的 `outputSchema` 在撒谎：声明返回对象，实际返回数组。** `activity_log`、`service_status`、`read_files`、`search_files`、`find_files`、`list_directory` 全都把行数据包在一个**根本不存在的 `items` 字段**里。模型按 schema 写 `result.items.map(...)`，拿到 `undefined`，然后只能靠试错去发现真实形状 —— 而这是它被告知「已经理解了」的工具。
+
+  `read_files` 错得更远：它压根**没有** `outputSchema`，而紧邻它的 `get_file_info` 的 schema 描述的是单个文件元数据，看上去像是被当成了 read_files 的。
+
+  **这批错误静态检查抓不到** —— 每个 schema 单独看都像模像样，`required` 和 `properties` 也自洽。是**实跑每个工具、对比声明与实际**才暴露的。补了测试钉住：返回数组的工具必须声明 `type: "array"`、必须描述元素类型、且不得把行包进虚构的 `items`。
+
 - **`notify` 的返回值只说手机，不说本机声音 —— 于是响了也报「没送达」。** 重启后实测发现：手机关着、声音开着时，调用 `notify` **确实弹出了播放窗口**（进程验证过），但返回的是 `delivered:false, reason:"disabled"`。模型读到这个会判定「没能通知到任何人」，然后很可能对着刚听见铃声的人说「通知发送失败」。
 
   `NotifyOutcome` 现在多两个字段：`sounded`（本机是否响了）和 **`announced`（有没有任何渠道通知到）**。`delivered` 保持原义只管手机 —— 日志和既有调用方依赖它 —— 但工具 schema 里写明了「**别拿它当「是否通知到」来判断，看 `announced`**」。测试钉住 `announced === delivered || sounded`，防止它变成第三种说法。
