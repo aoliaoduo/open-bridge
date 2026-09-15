@@ -14,6 +14,7 @@
 - 命令类工具（`run_command`、`start_process`、`send_to_shell`、`interact_with_process`）返回**合并输出 `output`**，同时给出**分离的 `stdout` / `stderr`**；分页读取还带 `offset` / `next_offset` / `truncated`。
 - 命令**非零退出码不是调用失败**：调用可以返回 `status: "completed"` 且 `exit_code != 0`，必须自己看 `exit_code`。
 - 声明了 `outputSchema` 的工具同时返回 `structuredContent`（类型化数据）。**被截断过的结果一定明说**：三个列举类工具（`list_directory`、`find_files`、`search_files`）返回 `{ items: [...], truncated: boolean }`，而不是裸数组。`truncated: true` 的意思是"还有更多，别把这一页当全部"；命中上限既不代表"结果为空"，也不代表"就这些"。`list_directory` 另外给 `total`（只在平铺 `depth: 1` 时是真实总数，其余为 `null`）和 `next_offset`（继续翻页时原样回传的入参）。文本块始终保留。
+- **结果里可能多出一个 `Note:` 文本块**，那是服务端主动说的一句话，不改变字段集：连续同类调用值得合并时、长时间没建任务列表时，以及**本进程跑的是比 `dist/` 更旧的构建**时（每个进程只说一次 —— 那种情况下你观察到的行为不是磁盘上代码的行为，重启实例再看）。`deprecated`（见文末旧名表）走的是同一条路：只进文本块，不进 `structuredContent`。
 - 出错时返回 `isError: true` 与一句话原因；错误信息通常给出下一步（例如"先 `read_files` 再重试"）。
 
 ---
@@ -154,7 +155,7 @@
 
 ### 桥自身状态
 
-**bridge_status** — 一次一个 section：`overview`（健康与计数：`state` / `tool_count` / `build_stale` 等）· `auth`（Bearer 门禁状态、默认有效期、每个令牌的 id/标签/到期/最后使用；**密钥只在创建那一刻显示一次、从不落库**，签发与吊销在控制台「安全」页完成）· `locks`（并发准入表：谁持有什么、等了多久、谁在排队）· `sessions`（当前活着的 MCP 会话）。
+**bridge_status** — 一次一个 section：`overview`（健康与计数：`state` / `tool_count` / `build_stale` 等）· `auth`（Bearer 门禁状态、默认有效期、每个令牌的 id/标签/到期/最后使用；**密钥只在创建那一刻显示一次、从不落库**，签发与吊销在控制台「安全」页完成）· `locks`（并发准入表：谁持有什么、等了多久、谁在排队）· `sessions`（谁在连：legacy 会话逐条给 `session_id` / `connected_at` / `last_used` / `calls` / `todo_count` / `closable`；无会话的现代协议客户端占一行 `era: "modern"`、`stateless: true`、`closable: false`，带 `connected_at: null` 与 `first_seen`，不谎报挂在会话上的 `calls` / `todo_count`）。overview 里的 `active_sessions` **只数 legacy 会话**，旁边的 `modern_last_used`（ISO 时间戳或 `null`）才说明另一端有没有现代客户端在说话 —— 「有没有人连着我」要两个字段一起看。）
 
 **get_config** / **set_config_value** — 读/改运行配置（改完是否需要重启看具体键）。
 
@@ -186,6 +187,8 @@ return { files: [...new Set(hits.items.map(i => i.path))] };
 
 ## 旧工具名对照表
 
+**参数没被采纳时会说出来**：`deprecated.ignored` 列出被丢弃的键，以及被本工具固定取值覆盖的键 —— `get_bridge_status{section:"sessions"}` 仍按旧义返回 overview，但结果里写着 `ignored: {section: {sent: "sessions", used: "overview"}}`。旧名不是通往新参数的后门，但调用方有权知道自己传的东西没被采纳。
+
 旧名仍然可用，互通性由测试保证（每个旧名的参数都被映射到新工具，且新工具一定在对外清单里）。调用旧名时，**对象结果**会多一个 `deprecated` 字段告诉调用方该换成什么；数组/标量结果保持原样，不给解析添麻烦。
 
 | 旧名 | 现在等价于 |
@@ -209,6 +212,23 @@ return { files: [...new Set(hits.items.map(i => i.path))] };
 | `check_port` | `connectivity{target:"port", host, port, timeout_ms?, scope?}` |
 | `check_http` | `connectivity{target:"http", url, timeout_ms?, max_redirects?, scope?}` |
 | `list_shells` | `open_shell{list:true}` |
+
+---
+
+## 两代会话：客户端会遇到的两种「没有会话」
+
+同一个 `/mcp/<token>` 端点吃两种客户端：**2025 世代**（`initialize` 换 `mcp-session-id`，之后每个请求都带它）与 **2026-07-28 世代**（无会话，每个请求自带 `params._meta` 信封与 `mcp-*` 头）。era 由请求自己决定，没有配置开关。
+
+旧世代客户端没带可用会话时，服务端把两种失败**分开回答**（都在 `error.data.reason` 里点名）：
+
+| 情况 | HTTP | `error.code` | `error.data.reason` | 下一步 |
+| --- | --- | --- | --- | --- |
+| 请求完全没有 `mcp-session-id` 头 | `400` | `-32000` | `initialize-required` | 先 `initialize`，把返回的 `mcp-session-id` 带上 |
+| 带了 id，但服务端不认识 | `404` | `-32001` | `session-expired` | 再 `initialize` 一次换个新 id |
+
+会话**只在内存里**：Bridge 重启、空闲回收、或者同一个 URL 后面换了实例，都会让旧 id 消失，而客户端那边还以为连着 —— 上表第二行就是给这种时刻准备的（404 也是规范对未知会话 id 的要求）。
+
+`initialize` 永远不会被这两个错误拦住：带着过期 id 重新握手照样成功，并拿回一个可用的新 id（容忍是刻意的，重连不需要特例）。现代世代的请求不受影响 —— 它们本来就没有会话可丢。
 
 ---
 

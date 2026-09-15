@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **旧世代的「没有会话」把两种失败说成同一句话。** 2025 世代的客户端没带可用会话时，传输层对「从来没握过手」和「握过手、但会话已经不在了（重启、空闲回收、同一个 URL 换了实例）」回的都是 `400 -32000 "Bad Request: Server not initialized"`。这句话读起来像「服务器坏了」，而两种情况的解法都只是**再发一次 `initialize`** —— 于是最自然的结论恰好是唯一没有出路的那个：本轮真付了代价，一轮探测据此写了「引擎握手已坏」的报告，而同一台服务在两条代码之外正好好地服务现代协议请求。现在分开回答：没有 `mcp-session-id` 头 → `400` / `-32000` / `data.reason: "initialize-required"`；带了服务端不认识的 id → `404` / `-32001` / `data.reason: "session-expired"`（404 也是规范对未知会话 id 的要求）。`initialize` 本身从不被拦：带着过期 id 重握手照样成功并拿回新 id —— 容忍是刻意的，重连不该需要特例。新增 `src/bridge/session-guidance.ts`（纯函数，判据在 `test/session-guidance.test.ts`）与 `test/legacy-session-guidance-integration.test.mjs`（真进程上钉住两条响应、握手不受影响、现代世代不被拦）。红先绿后：未修复代码上两条集成用例分别红在「缺 `data.reason`」与「状态是 400 而不是 404」。
+
+- **旧名会静默丢掉调用方的参数。** 旧名对照表是「同一个问题换一种写法」：`get_bridge_status` = `bridge_status{section:"overview"}`。于是同一个键同时带着调用方的值和工具的固定值时，输的总是调用方 —— 实测 `get_bridge_status{section:"sessions"}` 拿到的是 overview，调用方（我）以为自己问了会话表。结果里的 `deprecated` 本来就在说「该换成 bridge_status」，现在它多一个 `ignored`：列出被丢弃的键、以及被固定取值覆盖的键（`{section: {sent: "sessions", used: "overview"}}`）。`test/tool-call-shape.test.ts` 钉住三种情形 —— 覆盖、丢弃、以及原样转发（后者不该出现 `ignored`，否则字段本身就变成噪音）。
+
+- **「谁连着我」在会话视图里只有一半答案。** 现代协议不建会话，于是 `bridge_status{section:"sessions"}` 在纯现代客户端说话时返回空列表 —— 而空列表正是**一个已经死掉的 Bridge** 的样子；`active_sessions: 0` 同理。现在 overview 多一个 `modern_last_used`（ISO 时间戳或 `null`），session 视图在有过现代请求时多一行明确「不是会话」的汇总：`era: "modern"` / `stateless: true` / `closable: false` / `connected_at: null` / `first_seen` / `last_used`，并且**不谎报** `calls` 与 `todo_count`（那两个计数器挂在会话上）。会话**表**本身依旧不掺假条目 —— `state.sessions` 不该长出不持有 transport 的项（它自己的注释写着这条），说实话的是视图。`test/mcp-modern-protocol-integration.test.mjs` 钉住两个字段。
+
+- **进程跑的是旧构建，而唯一的提示待在一个没人会先问的问题里。** `bridge_status.build_stale` 一直如实回答「我看到的代码是不是正在跑的代码」，但只有已经起疑的调用方才问得出这个问题。代价本轮付过了：一轮探测把**旧进程**的行为当成磁盘上代码的行为写进报告，而磁盘上的代码是好的 —— 没有测试能抓住这种错误，因为被冤枉的代码是对的。现在这条事实跟着一次已经发生的调用走：本进程一旦被发现比 `dist/` 旧，就在**一次**成功结果的文本块里说明（每个进程一次；现代与旧世代都给，因为现代世代没有会话，正是最不会先去问 `bridge_status` 的那类调用方）。纯函数 `staleBuildAdvice` 在 `test/build-staleness.test.ts`；接入路径是**手工复现**的 —— 触碰 `dist/*.js` 的 mtime 后第一次调用带提示、第二次不带，新鲜构建下一次都不出现（这一条写在提交信息里，没有自动化用例，因为测试里动 `dist` 会污染同时运行的其它套件）。
+
 - **`wait` 与 `run_command` 的 32 位计时器溢出**：`setTimeout` 超过 2147483647 会带警告在 ~1 ms 触发（本仓库在 `timeout_ms: 1e18` 上实测过，`clampMs` 就是为它加的天花板），但 `wait {ms}` 与 `run_command {timeout_ms}` 两个入口恰好都没走它。结果是一个想「等 35 天」的调用在 2 ms 内返回、还如实报告 `waited_ms: 3000000000` —— 调用方的排程静默提前了一个月。两处现在都经过 `clampMs`（诚实报告实际等待值），且 `wait` 的计时器 `unref`：一个等待不该在进程排空时拴住它。新增 `test/wait-tool.test.ts`，其中溢出用例用「300 ms 内不得 settle」探针断言 —— 旧代码 ~1 ms 就 settle，正是它要钉住的红。
 
 - **现代协议（2026-07-28 无会话流）对通知看门狗不可见。** 空闲/结束两个监视器读的都是 `state.sessions` 的 `lastUsed`，而现代协议的请求不建会话：一个纯现代协议的客户端让 Bridge 一直忙，看门狗眼里却是「没人连过」——两个铃都永远不会响。新增 `state.modernLastUsed` 时钟（listener 在现代分支逐请求戳一下），`latestSessionActivity` 与 `completionSnapshot` 把它折叠进来（两时钟取新者）。未修复代码上已验证红。
