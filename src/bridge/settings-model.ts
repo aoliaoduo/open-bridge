@@ -220,9 +220,10 @@ const CONFIG_SPEC = {
   // has to be an array of non-empty strings.
   "oauth.enabled": { kind: "boolean" },
   "oauth.allowedRedirectHosts": { kind: "stringArray", maxItems: 50, maxLen: 253 },
-  tunnelProvider: { kind: "enum", values: ["none", "ngrok"] },
+  tunnelProvider: { kind: "enum", values: ["none", "ngrok", "tailscale"] },
   toolProfile: { kind: "enum", values: ["full", "core"] },
   ngrokExecutable: { kind: "string", max: 500 },
+  tailscaleDomain: { kind: "string", max: 253 },
   shellPath: { kind: "string", max: 500 },
   allowedDirectories: { kind: "stringArray", maxItems: 50, maxLen: 500 },
   shellArgs: { kind: "stringArray", maxItems: 50, maxLen: 500 },

@@ -276,10 +276,11 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
         <div className="form-grid">
           <Field
             label={t("提供商", "Provider")}
-            hint={t("none 表示只用本机回环地址，适合纯本机客户端。", "none means loopback only, which suits local-only clients.")}
+            hint={t("ngrok 对公网开放（预留域名）；Tailscale Funnel 用本机的 ts.net 域名对公网开放（免费版限 443 端口，需在 login.tailscale.com 启用 Funnel 一次）；none 仅本机回环。", "ngrok serves a reserved domain to the public; Tailscale Funnel serves this machine's ts.net name to the public (free tier: port 443, enable Funnel once at login.tailscale.com); none is loopback only.")}
           >
             <select value={cfg.tunnelProvider} onChange={e => setConfig("tunnelProvider", e.target.value)}>
               <option value="ngrok">ngrok</option>
+              <option value="tailscale">Tailscale Funnel</option>
               <option value="none">{t("none（仅本地）", "none (local only)")}</option>
             </select>
           </Field>

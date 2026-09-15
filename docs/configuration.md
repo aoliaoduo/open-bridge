@@ -13,6 +13,7 @@ this and how do I start it"; this file answers "what are all the knobs".
 - [Commands](#commands)
 - [Web console](#web-console)
 - [Public tunnel (ngrok)](#public-tunnel-ngrok)
+- [Public tunnel (Tailscale Funnel)](#public-tunnel-tailscale-funnel)
 - [Notifications](#phone-notifications-bark)
 - [Data directory](#data-directory)
 - [FAQ](#faq)
@@ -123,6 +124,26 @@ open-bridge serve                 # note: without --no-tunnel; --open is optiona
 - A free ngrok account gets one subdomain, and **one domain can only be held by one instance at a time**. You do not have to stop the instance already holding it: the local instance registry (`bridge-peers.json`) is shared, so the tunnel holder looks up the token digest and forwards to the right instance. A new instance appends its row to the **existing** registry — it never fabricates one in someone else's directory — public requests arrive through that tunnel, `tunnel_role` reads `follower`, and the console notes that this address depends on another instance. When the holder exits, the next probe promotes this instance to `owner`.
 - Claiming a domain is deliberately cautious: **only an explicit "nobody holds this" from ngrok counts as free**. Timeouts and 5xx mean "unknown" and it keeps watching. On `ERR_NGROK_334` (already taken) the instance serves locally, keeps watching that tunnel, and switches to `follower` the moment it sees traffic forwarded to it — it neither wedges itself nor starts a second ngrok to fight the first.
 - A missing or misspelled domain produces a clear error such as `ERR_NGROK_313`; the local service is unaffected.
+
+---
+
+## Public tunnel (Tailscale Funnel)
+
+The other public-tunnel provider. Where ngrok serves a domain you reserved, Tailscale serves **your machine's own stable ts.net hostname** - `https://<machine>.<tailnet>.ts.net/...` - with automatic TLS. Useful when you already run Tailscale and do not want a second account.
+
+One-time setup (per tailnet): open <https://login.tailscale.com/f/funnel> in a browser and enable Funnel. Free-tier limits apply: public traffic only on ports 443/8443/10000 and a small per-machine hostname quota - one Bridge instance fits comfortably.
+
+```bash
+open-bridge config set tunnelProvider tailscale
+open-bridge serve                 # without --no-tunnel
+```
+
+- The machine's ts.net name is discovered from `tailscale status --json` at tunnel start and stored into `tailscaleDomain` (you can set it manually with `open-bridge config set tailscaleDomain <name>`; a stored value that disagrees with what the CLI reports is an error, not a silent mismatch).
+- No authtoken: the CLI talks to the local daemon, which holds your login.
+- The public URL follows the same shape as ngrok's: `https://<machine>.<tailnet>.ts.net/mcp/<route-token>`.
+- Stopping the instance turns the funnel off (`tailscale funnel --https=443 off`); a daemon-side config left behind would keep serving nothing - the local listener is gone - but is cleaned up anyway.
+- Tailscale forwards the client IP in `X-Forwarded-For` (appended, same as ngrok), so the auth failure limiter works the same way.
+- Tailscale not installed or not logged in? The start logs `tailscale status failed` and the instance stays local-only; the error names the cause.
 
 ---
 

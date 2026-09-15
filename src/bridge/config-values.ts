@@ -111,12 +111,24 @@ export function validateConfigValue(key: string, value: unknown): ConfigValidati
   if (value === undefined) return { ok: false, error: SETTING_VALUE_REQUIRED };
 
   if (key === "tunnelProvider" || key === "toolProfile") {
-    const allowed: readonly [string, string] = key === "tunnelProvider" ? ["none", "ngrok"] : ["full", "core"];
+    const allowed: readonly string[] = key === "tunnelProvider"
+      ? ["none", "ngrok", "tailscale"]
+      : ["full", "core"];
     const normalized = typeof value === "string" ? value.trim() : value;
-    if (normalized !== allowed[0] && normalized !== allowed[1]) {
-      return { ok: false, error: `${key} must be '${allowed[0]}' or '${allowed[1]}'.` };
+    if (typeof normalized !== "string" || !allowed.includes(normalized)) {
+      return { ok: false, error: `${key} must be one of: ${allowed.map(a => `'${a}'`).join(", ")}.` };
     }
     return { ok: true, value: normalized };
+  }
+
+  if (key === "tailscaleDomain") {
+    const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
+    if (!raw) return { ok: true, value: "" };
+    // Full ts.net hostname or a bare machine name (resolved via the CLI at start).
+    if (/[\s/\\]/.test(raw) || raw.length > 253) {
+      return { ok: false, error: "tailscaleDomain must be a hostname (e.g. my-machine.tail1234.ts.net)." };
+    }
+    return { ok: true, value: raw };
   }
 
   if (key === "ngrokExecutable" || key === "shellPath") {

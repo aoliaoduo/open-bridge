@@ -22,6 +22,7 @@ import { nextFreeRounds, shouldClaimDomain, watchIntervalMs } from "./tunnel-wat
 import { enqueueLifecycle } from "./lifecycle-queue.js";
 import { publishSelf } from "./peer-registry.js";
 import { detectNgrok } from "./ngrok-locate.js";
+import { probeTailscaleDomain, resolveTailscaleExecutable } from "./tailscale-locate.js";
 
 /** Consecutive deterministic (DNS/refused/TLS) health failures before aborting startup early. */
 const PUBLIC_HEALTH_DETERMINISTIC_FAILURE_LIMIT = 3;
@@ -298,6 +299,75 @@ function revertToLocalUrl(): void {
 }
 
 /**
+ * The tailscale funnel: share the local listener on the internet under the
+ * machine's stable ts.net hostname. Unlike ngrok there is no account token to
+ * pre-register - the CLI talks to the daemon, and the daemon holds the
+ * operator's login. `--bg` keeps the proxy running as a daemon-side config
+ * entry, so the child exits immediately after the backend accepts it; the
+ * health check against the public hostname is therefore the only readiness
+ * signal, and teardown is `funnel off` rather than a process kill (killing a
+ * finished child would leave the funnel serving).
+ */
+async function startTailscaleFunnel(_generation: number): Promise<void> {
+  const exe = resolveTailscaleExecutable(String(host().config.get<string>("tailscaleExecutable", "") ?? ""));
+  let domain: string;
+  try {
+    domain = await probeTailscaleDomain(exe);
+  } catch (error) {
+    state.tunnelRole = "none";
+    record("ngrok", "error", `Tailscale tunnel: ${error instanceof Error ? error.message : String(error)} - is Tailscale installed and logged in?`);
+    return;
+  }
+  const configured = String(host().config.get<string>("tailscaleDomain", "") ?? "").trim().toLowerCase();
+  if (configured && configured !== domain) {
+    state.tunnelRole = "none";
+    record("ngrok", "error", `tailscaleDomain is set to "${configured}" but this machine reports "${domain}". Correct the setting or clear it to use the reported name.`);
+    return;
+  }
+  if (!String(host().config.get<string>("tailscaleDomain", "") ?? "").trim()) {
+    // Remember the discovered name so the console can show what is actually served.
+    void host().config.update("tailscaleDomain", domain).catch(() => undefined);
+  }
+
+  const port = state.port;
+  state.tunnelRole = "owner";
+  const child = spawn(exe, ["funnel", "--bg", String(port)], {
+    windowsHide: windowsHideForChild(),
+  });
+  state.tunnel = child as ChildProcessWithoutNullStreams;
+  const publishedUrl = `https://${domain}/mcp/${state.routeToken}`;
+  try {
+    await waitForPublicHealth(`https://${domain}/healthz/${state.routeToken}`);
+    state.reconnectAttempt = 0;
+    state.tunnelUrl = publishedUrl;
+    host().ui.refresh();
+    record("bridge", "completed", `Public through Tailscale Funnel: ${redactedPublicUrl(publishedUrl)}`);
+  } catch (error) {
+    state.tunnelRole = "none";
+    revertToLocalUrl();
+    const message = error instanceof Error ? error.message : String(error);
+    record("ngrok", "error", `Tailscale funnel did not come up: ${message}. Check that Funnel is enabled for this tailnet (https://login.tailscale.com/f/funnel) and that port 443 is free.`);
+    host().notify("error", `Tailscale funnel failed: ${message}`);
+  }
+}
+
+/**
+ * Remove the funnel config the --bg spawn left in the daemon. The child
+ * process is already gone by teardown time (--bg exits after the backend
+ * accepts), so killing it achieves nothing: the only real undo is this
+ * subcommand. Best-effort - a daemon that is down makes the config moot.
+ */
+export function teardownTailscaleFunnel(): void {
+  if (process.platform !== "win32" && process.platform !== "darwin" && process.platform !== "linux") return;
+  try {
+    const exe = resolveTailscaleExecutable(String(host().config.get<string>("tailscaleExecutable", "") ?? ""));
+    execFileSync(exe, ["funnel", "--https=443", "off"], { stdio: "ignore", timeout: 5_000, windowsHide: true });
+  } catch {
+    // Nothing to take down, or the daemon is not running: either way done.
+  }
+}
+
+/**
  * Owns everything tunnel-shaped. Runs on every start AND on in-place
  * reconnects; the generation guard makes stale invocations no-ops.
  */
@@ -305,6 +375,10 @@ export async function startTunnelInternal(generation: number): Promise<void> {
   if (generation !== state.tunnelGeneration || !state.server) return;
   const provider = host().config.get<string>("tunnelProvider", "ngrok");
   state.tunnelUrl = "";
+  if (provider === "tailscale") {
+    await startTailscaleFunnel(generation);
+    return;
+  }
   if (provider !== "ngrok") {
     state.tunnelRole = "none";
     return;

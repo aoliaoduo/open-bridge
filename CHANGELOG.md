@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Tailscale Funnel 作为第二个公网隧道提供商。** 已装 Tailscale 的机器不必再为 ngrok 注册第二个账号：`open-bridge config set tunnelProvider tailscale` 后，实例用本机固定的 ts.net 域名（从 `tailscale status --json` 自动发现，无需手填）把 `/mcp` 公开到 `https://<机器名>.<tailnet>.ts.net`，自动 TLS。无 authtoken（CLI 直接与本地 daemon 通信）；免费版限 443 端口、需在 login.tailscale.com 一次性启用 Funnel。停机时清理 daemon 侧的 funnel 配置（`--bg` 的子进程瞬间退出，杀进程没用，唯一真正的撤销是这条子命令）。Host 白名单按 provider 选择公网域名（tailscale 用 `tailscaleDomain`，ngrok 用 `ngrokDomain`）；`X-Forwarded-For` 的追加行为与 ngrok 一致，失败限流照常工作。`test/tailscale-locate.test.ts` 与真实 bridge 上的端到端冒烟（healthz + MCP initialize 握手）各钉一条。
+
 ### Fixed
 
 - **另一进程吊销的令牌会被本进程的写回复活。** 令牌写入是「读基准 → 变换 → 与磁盘合并 → 写回」，旧合并规则只保护「本进程没见过的行」；对两边都有的行，本进程的版本整体胜出。时序：本进程任一记录写（每 30 秒的 useCount 刷盘就够）先读到基准 → CLI 进程吊销令牌 T 并落盘 → 本进程把仍携带 T 未吊销版本的列表写回 —— **吊销静默失效**。这正是合并想防的场景，但它只防「新增行被删」，不防「已有行被外部改了状态」。现在 `mergeRecordsWithDisk` 接收基准做三方判定：磁盘独有的行只有「基准里也从未有过」（真·外来新铸造）才保留；`revokedAt` 按磁盘确立者为准，本进程写回不撤销已确立的吊销。`test/auth-core.test.ts` 钉住三条（含 purge 行不得复活的回归 —— 初版修复就栽在这里，被 `guards-integration` 抓住）。

@@ -17,7 +17,7 @@ import { buildWebAiPrompt } from "./onboarding.js";
 import { workspaceStateSuffix } from "./paths.js";
 import { cancelAllPendingRestarts, terminateProcess } from "./processes.js";
 import { enqueueLifecycle } from "./lifecycle-queue.js";
-import { killTunnelTree, loadNgrokAuthtoken, setInstanceRestart, startTunnelInternal, stopPublicWatch } from "./tunnel.js";
+import { killTunnelTree, loadNgrokAuthtoken, setInstanceRestart, startTunnelInternal, stopPublicWatch, teardownTailscaleFunnel } from "./tunnel.js";
 import { publishSelf, stopRepublishLoop, withdrawSelf } from "./peer-registry.js";
 import { startHttpInternal, stopLocalServer } from "./http-listener.js";
 import { stopSessionPruneLoop } from "./session-table.js";
@@ -101,6 +101,13 @@ async function stopInternal(notify = true): Promise<void> {
   // without warning (Ctrl-C, an IDE shutting down, a crash) and an
   // un-terminated ngrok keeps holding the domain.
   killTunnelTree(activeTunnel);
+  // The tailscale funnel lives in the daemon, not in this child: killTunnelTree
+  // cannot reach it. Provider is checked here, not inside teardown, so a
+  // provider switch (tailscale -> ngrok) never erases a funnel that belongs to
+  // a different - still running - bridge configuration.
+  if (host().config.get<string>("tunnelProvider", "ngrok") === "tailscale") {
+    teardownTailscaleFunnel();
+  }
   // A crashed command with autoRestart may still hold a pending restart timer;
   // clear every one of them (not only live commands) so a timer cannot fire
   // after `stopping` resets and resurrect a process on a stopped Bridge or

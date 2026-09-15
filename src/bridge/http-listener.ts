@@ -183,9 +183,14 @@ export async function startHttpInternal(): Promise<void> {
       res.end(JSON.stringify({ error: message }));
     };
     const reqHost = req.headers.host;
-    const configuredDomain = String(host().config.get<string>("ngrokDomain", ""))
-      .trim()
-      .toLowerCase();
+    // The public domain depends on the provider: ngrok takes its reserved
+    // domain from config, tailscale's is the machine's ts.net name (discovered
+    // at tunnel start and persisted into tailscaleDomain).
+    const provider = String(host().config.get<string>("tunnelProvider", "ngrok"));
+    const configuredDomain = (provider === "tailscale"
+      ? String(host().config.get<string>("tailscaleDomain", ""))
+      : String(host().config.get<string>("ngrokDomain", ""))
+    ).trim().toLowerCase();
     const allowedHosts = bridgeAllowedHosts(state.port, configuredDomain);
     if (!isAllowedBridgeHost(reqHost, state.port, configuredDomain)) {
       reject(403, "Host is not allowed.");

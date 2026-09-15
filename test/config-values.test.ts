@@ -22,9 +22,17 @@ test("unknown keys and missing values are refused by name", () => {
 
 test("enums accept their members, trimmed; nothing else", () => {
   assert.equal(ok("tunnelProvider", "ngrok"), "ngrok");
+  assert.equal(ok("tunnelProvider", "tailscale"), "tailscale");
   assert.equal(ok("toolProfile", " core "), "core");
-  assert.match(err("toolProfile", "everything"), /must be 'full' or 'core'/);
-  assert.match(err("tunnelProvider", 42), /must be 'none' or 'ngrok'/);
+  assert.match(err("toolProfile", "everything"), /must be one of/);
+  assert.match(err("tunnelProvider", 42), /must be one of/);
+});
+
+test("tailscaleDomain trims and lowercases; a blank value clears; garbage is refused", () => {
+  assert.equal(ok("tailscaleDomain", "  My-Machine.Tail1234.TS.net  "), "my-machine.tail1234.ts.net");
+  assert.equal(ok("tailscaleDomain", ""), "");
+  assert.match(err("tailscaleDomain", "host with spaces"), /must be a hostname/);
+  assert.match(err("tailscaleDomain", "http://x"), /must be a hostname/);
 });
 
 test("plain strings are trimmed, non-empty, and capped", () => {
