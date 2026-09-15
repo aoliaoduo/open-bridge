@@ -103,3 +103,72 @@ test("rejectSymlinkChain stops at the root even when a non-canonical entry is co
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });
+
+/**
+ * A relative path is a path inside the workspace. `../..` on the front of one
+ * walked straight out of it.
+ *
+ * Reproduced through the tool surface before this was fixed: `apply_patch` with
+ * `*** Add File: ../../ob-escape.txt` created
+ * `C:\Users\aolia\Desktop\ob-escape.txt` -- a level above the workspace,
+ * outside every root the policy knows about. The file was created, the call
+ * reported success, and nothing anywhere said the path had left the workspace.
+ *
+ * Why the existing checks did not catch it: in unrestricted mode
+ * resolveSecurePath returns before the allowed-roots test (`allowedRoots` there
+ * is the drive root, which the escape lands inside anyway), and a bare
+ * path.resolve on a relative input cannot fail -- walking up is exactly what
+ * path.resolve is for. So the check has to be a real containment test against
+ * the workspace anchor, and it has to happen for relative input in every mode,
+ * because "relative to the workspace" is what makes an escape a surprise.
+ *
+ * Absolute paths are deliberately untouched: an explicit outside path is a
+ * caller saying where they mean, and the policy decides that case.
+ */
+test("a relative path cannot walk out of the workspace", () => {
+  const workspace = path.resolve(WORKSPACE);
+  assert.throws(
+    () => resolveFromWorkspace(workspace, "../../ob-escape.txt"),
+    /inside the workspace/,
+    "a relative path above the workspace root must be refused, not silently resolved",
+  );
+  assert.throws(
+    () => resolveFromWorkspace(workspace, "src/../../outside.txt"),
+    /inside the workspace/,
+    "the escape must be caught wherever the .. segments appear",
+  );
+  // Same directory name, one level up: the boundary is the workspace, not a
+  // string prefix of it (C:/projects/currently is not inside C:/projects/current).
+  assert.throws(
+    () => resolveFromWorkspace(workspace, "../currently/data.txt"),
+    /inside the workspace/,
+  );
+});
+
+test("relative paths that stay inside still resolve, including a self-referential ..", () => {
+  const workspace = path.resolve(WORKSPACE);
+  assert.equal(resolveFromWorkspace(workspace, "src/index.ts"), path.join(workspace, "src", "index.ts"));
+  assert.equal(resolveFromWorkspace(workspace, "./src/../README.md"), path.join(workspace, "README.md"));
+  // sub/.. lands ON the root, which is inside it.
+  assert.equal(resolveFromWorkspace(workspace, "sub/.."), workspace);
+  assert.equal(resolveFromWorkspace(workspace, "."), workspace);
+});
+
+test("the escape is refused in unrestricted mode too", async () => {
+  const workspace = path.resolve(WORKSPACE);
+  // unrestricted is the mode the bridge actually runs in, and the one whose
+  // allowedRoots (the drive root) can never catch a workspace escape.
+  await assert.rejects(
+    resolveSecurePath(workspace, "../../ob-escape.txt", {
+      unrestricted: true,
+      allowedRoots: [path.parse(workspace).root],
+      allowMissing: true,
+    }),
+    /inside the workspace/,
+  );
+  // ...while an explicit absolute path outside is still honoured, as documented.
+  assert.equal(
+    await resolveSecurePath(workspace, OTHER_ABS, { unrestricted: true, allowedRoots: [workspace] }),
+    path.resolve(OTHER_ABS),
+  );
+});

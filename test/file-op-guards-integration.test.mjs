@@ -2,6 +2,11 @@
  * File-operation safety, end to end: the three findings of the turn-42 audit,
  * each proved over real HTTP against a real `serve` process.
  *
+ * Two findings were added to this file later, because both are only
+ * observable at this boundary: the same guard against Windows spellings of
+ * the workspace root, and a relative path that walks out of the workspace --
+ * the guard never saw that one, it escaped during path resolution.
+ *
  *  ① a delete aimed at the workspace root (or at a parent of it, or at the
  *    Bridge's own data directory, or at a drive root) is refused and the project
  *    survives — while a path that merely *lives* outside the workspace is still
@@ -75,9 +80,17 @@ test("a delete aimed at the workspace root is refused, and the project is intact
 });
 
 test("a delete aimed at a parent of the workspace is refused too", async () => {
-  const result = await callTool("file_op", { op: "delete", path: "..", recursive: true });
-  assert.equal(result.isError, true, "deleting the workspace's parent must fail");
-  assert.match(result.text, /Refusing to delete/);
+  // Two rules stand in the way here and both have to hold. The relative
+  // spelling is refused as a relative path that leaves the workspace (it used to
+  // escape during resolution, before the guard was ever consulted); the absolute
+  // spelling walks into the guard itself.
+  const relative = await callTool("file_op", { op: "delete", path: "..", recursive: true });
+  assert.equal(relative.isError, true, "deleting the workspace's parent must fail");
+  assert.match(relative.text, /inside the workspace/);
+
+  const absolute = await callTool("file_op", { op: "delete", path: path.dirname(workspace), recursive: true });
+  assert.equal(absolute.isError, true, "the absolute spelling of the parent must fail too");
+  assert.match(absolute.text, /Refusing to delete/);
   assert.ok(existsSync(path.join(workspace, "canary.txt")), "the project survived a parent delete");
 });
 
@@ -330,3 +343,33 @@ async function readFilesEntry(args) {
   const parsed = JSON.parse(payload.result.content?.[0]?.text ?? "[]");
   return Array.isArray(parsed) ? parsed[0] : parsed;
 }
+
+test("a relative path cannot walk out of the workspace, whatever the tool", async () => {
+  // The escape that started this: apply_patch with "../../ob-escape.txt" created
+  // a file outside the workspace and reported success. The path has to be
+  // refused while it is still a path.
+  writeFileSync(path.join(workspace, "escape-canary.txt"), "still here", "utf8");
+  const escaped = path.join(path.dirname(workspace), "ob-escape-relative.txt");
+  assert.equal(existsSync(escaped), false, "the escape target must not exist to begin with");
+
+  const patch = ["*** Begin Patch", "*** Add File: ../ob-escape-relative.txt", "+gone", "*** End Patch", ""].join("\n");
+  const patched = await callTool("apply_patch", { patch });
+  assert.equal(patched.isError, true, "apply_patch must refuse a relative path that leaves the workspace");
+  assert.match(patched.text, /inside the workspace/);
+
+  const written = await callTool("write_file", { path: "../ob-escape-relative.txt", content: "gone\n" });
+  assert.equal(written.isError, true, "write_file must refuse it too");
+  assert.match(written.text, /inside the workspace/);
+
+  const read = await callTool("read_files", { paths: ["../ob-escape-relative.txt"] });
+  assert.equal(read.isError, true, "and reading it is not a way around the rule");
+
+  // A working directory is a path like any other: run_command used to accept
+  // ".." and run there.
+  const ran = await callTool("run_command", { command: "echo escaped", cwd: ".." });
+  assert.equal(ran.isError, true, "run_command must refuse a cwd outside the workspace");
+  assert.match(ran.text, /inside the workspace/);
+
+  assert.equal(existsSync(escaped), false, "nothing outside the workspace was created");
+  assert.ok(existsSync(path.join(workspace, "escape-canary.txt")), "and the project is intact");
+});

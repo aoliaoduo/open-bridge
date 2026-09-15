@@ -1,10 +1,36 @@
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 
-/** Relative input stays anchored to the workspace root; absolute input stays explicit. */
+/**
+ * Relative input stays anchored to the workspace root; absolute input stays explicit.
+ *
+ * A relative input may not leave the workspace. `path.resolve` cannot fail on one
+ * -- walking up is precisely what it does -- so `../../x` used to resolve to a
+ * real path one or more levels above the workspace and be handed straight to the
+ * filesystem. Through the tool surface that meant `apply_patch` with
+ * `*** Add File: ../../ob-escape.txt` created a file outside the workspace and
+ * reported success, and a `cwd` of `../..` ran a command outside it.
+ *
+ * The containment test is deliberately against the WORKSPACE anchor rather than
+ * the allowed roots: in unrestricted mode the single allowed root is the whole
+ * drive, so an escape from the workspace lands comfortably inside it and passes
+ * every policy check on the way out.
+ *
+ * Absolute paths are left alone: naming an absolute location is a caller saying
+ * exactly where it means, and that is the policy's call to make, not this
+ * function's.
+ */
 export function resolveFromWorkspace(workspaceRoot: string, input = "."): string {
   const workspace = path.resolve(workspaceRoot);
-  return path.isAbsolute(input) ? path.resolve(input) : path.resolve(workspace, input || ".");
+  if (path.isAbsolute(input)) return path.resolve(input);
+  const resolved = path.resolve(workspace, input || ".");
+  if (!isWithinAllowedRoots(resolved, [workspace])) {
+    throw new Error(
+      `Relative path "${input}" resolves to ${resolved}, outside the workspace ${workspace}. ` +
+      `Relative paths stay inside the workspace; use an absolute path to name a location outside it.`,
+    );
+  }
+  return resolved;
 }
 
 /** Return true when fullPath is inside one of the configured roots. */
@@ -19,8 +45,11 @@ export function isWithinAllowedRoots(fullPath: string, roots: readonly string[])
 
 /**
  * Resolve a user supplied path and apply the complete file policy in one call.
- * Relative paths remain anchored to the active workspace. In unrestricted mode
- * this intentionally preserves the existing semantics and skips policy checks.
+ * Relative paths remain anchored to the active workspace, and may not leave it
+ * (enforced in resolveFromWorkspace, before this function's mode check). In
+ * unrestricted mode the remaining policy checks are skipped on purpose -- an
+ * explicit absolute path may point anywhere -- but that skip is why the
+ * workspace anchor has to be enforced upstream of it.
  */
 export async function resolveSecurePath(
   workspaceRoot: string,
