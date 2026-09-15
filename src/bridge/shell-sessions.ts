@@ -386,7 +386,11 @@ export async function closeShell(args: Args): Promise<Record<string, unknown>> {
       }
       if (!cmd.done) {
         cmd.done = true;
-        cmd.exitCode = cmd.exitCode ?? 0;
+        // null, never an invented 0: this branch runs only when the shell
+        // survived "exit\n" AND the tree kill — nobody knows its exit code,
+        // and a fabricated 0 reads as "closed cleanly" in every consumer
+        // (get_process_snapshot, wait, the console) that checks it.
+        cmd.exitCode = cmd.exitCode ?? null;
         cmd.lastEvent = "shell_closed";
       }
     }
