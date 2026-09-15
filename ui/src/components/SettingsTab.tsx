@@ -514,37 +514,31 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
           person for, and each channel then answers it in its own way. */}
       <Card
         id="set-notify-events"
+        collapsibleId="notify-events"
+        summary={[
+          settings.notify.onTaskDone ? t("任务完成", "tasks") : null,
+          settings.notify.onFinish ? t("对话结束", "endings") : null,
+          settings.notify.idleMinutes > 0 ? t(`静默 ${settings.notify.idleMinutes} 分钟`, `${settings.notify.idleMinutes}m silence`) : null,
+        ].filter(Boolean).join(" · ") || t("只有必发的两类", "only the unconditional two")}
         title={t("什么时候该打扰你", "When to interrupt you")}
-        desc={t(
-          "先决定哪些事值得被打断 —— 下面两张卡再各自决定用什么方式告诉你。",
-          "Decide what is worth an interruption first; the two cards below each answer it their own way.",
-        )}
+        desc={t("哪些事值得被打断。下面两张卡决定用什么方式告诉你。", "What is worth an interruption. The cards below decide how you hear about it.")}
       >
         <div className="form-grid">
           <SwitchField
             label={t("每项任务完成时", "On each finished task")}
-            hint={t(
-              "任务清单每勾选完一条通知一次。",
-              "One alert per item ticked off the task list.",
-            )}
+            hint={t("清单每勾掉一条通知一次。", "One alert per item ticked off.")}
             checked={settings.notify.onTaskDone}
             onChange={next => setConfig("notify.onTaskDone", next)}
           />
           <SwitchField
             label={t("对话结束时", "When the exchange ends")}
-            hint={t(
-              "这一轮收尾时通知一次；AI 自己忘了发，服务端会代发。",
-              "One alert when the round wraps up; if the AI forgets, the server sends it.",
-            )}
+            hint={t("收尾时通知一次；AI 忘了发则服务端代发。", "One alert when the round ends; the server covers a forgetful AI.")}
             checked={settings.notify.onFinish}
             onChange={next => setConfig("notify.onFinish", next)}
           />
           <Field
             label={t("无反应提醒", "Silence alert")}
-            hint={t(
-              "连接完全静默超过这个分钟数就叫你一次，不要求存在任务清单——AI 忘了写清单的时候，恰恰最需要这条提醒。0 = 关闭。",
-              "Calls you back after this many minutes of total silence. No todo list required: the times the AI forgets to write one are exactly when you most need telling. 0 disables it.",
-            )}
+            hint={t("静默这么多分钟后叫你一次。0 = 关闭。", "Calls you back after this many minutes of silence. 0 disables it.")}
           >
             <DraftField
               type="number"
@@ -560,10 +554,7 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
           </Field>
           <div className="field span2">
             <span className="field-hint" style={{ margin: 0 }}>
-              {t(
-                "「需要你回来」和「等你回答」不在上面的开关里，因为它们不受开关控制：AI 提了问题没人答，对话就无限期停在那儿，那不是设置该吞掉的东西。",
-                "Attention and Waiting are not switches above because they are not optional: when the AI asks something and nobody answers, the exchange stalls indefinitely, and that is not something a setting should swallow.",
-              )}
+              {t("「需要你回来」和「等你回答」始终送达，不受开关影响。", "Attention and Waiting always arrive; the switches above do not apply to them.")}
             </span>
           </div>
         </div>
@@ -571,16 +562,19 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
 
       <Card
         id="set-notify"
+        collapsibleId="notify-bark"
+        summary={!settings.notify.enabled
+          ? t("已关闭", "off")
+          : settings.notify.configured
+            ? t("已配置", "configured")
+            : t("缺设备密钥", "no device key")}
         title={t("手机（Bark）", "Phone (Bark)")}
-        desc={t(
-          "人不在电脑前时用 —— 推送到 iPhone。",
-          "For when you are away from the machine — pushed to your iPhone.",
-        )}
+        desc={t("推送到 iPhone。", "Pushed to your iPhone.")}
       >
         <div className="form-grid">
           <SwitchField
             label={t("启用手机通知", "Enable phone notifications")}
-            hint={t("关掉之后 notify 工具与自动汇报全部静音；设备密钥会留着。", "Turning this off mutes the notify tool and every automatic report; the device key is kept.")}
+            hint={t("关掉后全部静音，密钥保留。", "Mutes everything; the key is kept.")}
             checked={settings.notify.enabled}
             onChange={next => setConfig("notify.enabled", next)}
           />
@@ -685,8 +679,8 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
             </div>
             <span className="field-hint">
               {t(
-                "「穿透专注模式」管的是专注模式，不是静音键：手机按了静音它依然不响。真要响就得用「无视静音」，而那需要你先在 iOS 的 设置 → 通知 → Bark 里打开「重要警告」权限，否则系统会把它降级成普通通知 —— 不报错，只是没那么响。铃声在 Bark App 里按设备设置。",
-                "Time-sensitive pierces Focus modes, not the mute switch: on a silenced phone it stays silent. Only Critical overrides that, and it needs Bark's critical-alert permission under iOS Settings → Notifications → Bark; without it the system quietly downgrades the push rather than failing. Ringtones are set per device in the Bark app.",
+                "「穿透专注模式」不管静音键；「无视静音」需要 iOS 里给 Bark 开「重要警告」权限，否则会被降级。",
+                "Time-sensitive does not pierce the mute switch. Critical does, but needs Bark's critical-alert permission in iOS or it is downgraded.",
               )}
             </span>
           </div>
@@ -695,24 +689,28 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
 
       <Card
         id="set-sound"
+        collapsibleId="notify-sound"
+        summary={settings.config["sound.enabled"] !== true
+          ? t("已关闭", "off")
+          : [settings.config["sound.fileWaiting"], settings.config["sound.fileFinished"]].filter(Boolean).length === 0
+            ? t("已启用，但没设音频", "on, no audio set")
+            : t(`已启用 · ${[settings.config["sound.fileWaiting"], settings.config["sound.fileFinished"]].filter(Boolean).length} 个音频`,
+                `on · ${[settings.config["sound.fileWaiting"], settings.config["sound.fileFinished"]].filter(Boolean).length} file(s)`)}
         title={t("本机声音", "Local sound")}
-        desc={t(
-          "人就在电脑前、但标签页在后台时用 —— 直接在这台机器上放一段音频。不需要 Bark。",
-          "For when you are at the machine with the tab in the background — plays audio on this machine. No Bark required.",
-        )}
+        desc={t("标签页在后台时，在这台机器上放一段音频。不需要 Bark。", "Plays audio on this machine when the tab is in the background. No Bark needed.")}
       >
         <div className="form-grid">
           <SwitchField
             label={t("启用本机声音", "Enable local sound")}
-            hint={t("关掉之后下面的路径会留着。", "The paths below are kept when this is off.")}
+            hint={t("关掉后路径保留。", "Paths are kept.")}
             checked={settings.config["sound.enabled"] === true}
             onChange={next => setConfig("sound.enabled", next)}
           />
           <div className="field span2">
             <span className="field-hint" style={{ margin: "0 0 4px" }}>
               {t(
-                "只有「AI 停下来等你」的两种情况会响：等你回答/需要你回来，以及对话结束。任务进度不会响 —— 每勾掉一条就叮一声，是让人关掉整个功能的最快方式。路径直接粘贴即可，资源管理器「复制文件地址」带的引号会自动去掉。试听只放约 6 秒，随时可以按「停止」。",
-                "Only the two situations where the AI has stopped for you make a noise: waiting on your answer, and the end of an exchange. Task progress does not — a chime per ticked item is the fastest way to make someone switch the whole thing off. Paste the path as-is: the quotes Explorer's \"Copy as path\" adds are stripped for you. A preview plays about 6 seconds and 停止 cuts it short.",
+                "只在 AI 停下来等你、或对话结束时响，任务进度不响。路径直接粘贴，引号会自动去掉。",
+                "Sounds when the AI is waiting on you or an exchange ends; never on task progress. Paste the path as-is — quotes are stripped.",
               )}
             </span>
           </div>

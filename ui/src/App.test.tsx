@@ -646,6 +646,38 @@ describe("App shell: grouped navigation", () => {
     fireEvent.click(themeButton());
     expect(themeButton().getAttribute("aria-label")).toBe("主题：跟随系统");
   });
+
+  /**
+   * 通知 grew to three cards and most visits change one switch, so the cards
+   * fold. Two properties matter and neither is obvious from the markup:
+   *
+   * - a collapsed card still says enough to skip it, otherwise folding just
+   *   trades scrolling for clicking;
+   * - the state survives a reload, otherwise it is a toy.
+   */
+  test("notification cards fold, summarise, and remember", async () => {
+    window.localStorage.clear();
+    window.history.pushState({}, "", "/console/settings/notify");
+
+    const { unmount } = render(<App />);
+    const header = await screen.findByRole("button", { name: /手机（Bark）/ });
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    // Open: the device key field is reachable.
+    expect(screen.getByText("Bark 设备密钥")).toBeTruthy();
+
+    fireEvent.click(header);
+    expect(header.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Bark 设备密钥")).toBeNull();
+    // Collapsed, it still answers "do I need to open this?".
+    expect(header.textContent).toMatch(/已配置|缺设备密钥|已关闭/);
+
+    // A reload must not silently reopen it.
+    unmount();
+    render(<App />);
+    const again = await screen.findByRole("button", { name: /手机（Bark）/ });
+    expect(again.getAttribute("aria-expanded")).toBe("false");
+  });
+
 });
 
 describe("App shell: in-page filtering and rails", () => {

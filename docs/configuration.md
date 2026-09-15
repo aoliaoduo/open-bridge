@@ -126,6 +126,37 @@ open-bridge serve                 # note: without --no-tunnel; --open is optiona
 
 ---
 
+## Notifications: why they behave the way they do
+
+The settings page states what each control does. This section holds the
+reasoning behind the parts that surprise people — it used to live on the page
+itself, where a paragraph you read once cost screen space forever.
+
+**Attention and Waiting are not switches.** Every other notification can be
+turned off; these two cannot. When the AI asks a question and nobody answers,
+the exchange does not fail — it stalls indefinitely, and the operator has no
+way to find out except by looking at the screen, which is the exact thing the
+notification exists to avoid. A setting that can swallow those is a setting
+that can strand you.
+
+**The silence alert does not require a task list.** It used to, and that
+requirement disabled it precisely when it mattered most. Measured in this
+repo's own audit log: 2138 tool calls in one day, `set_todos` called zero
+times. A safety net tied to a tool the model is free to forget fails in
+exactly the situation it exists for. Silence alone is now enough.
+
+**The local sound only fires when the AI has stopped.** Waiting on you, or the
+end of an exchange — not task progress. A chime per ticked todo is the
+fastest way to make someone disable the whole feature, and then the alerts
+that mattered are gone too.
+
+**Critical needs an iOS permission.** `level=critical` overrides the mute
+switch, but only if Bark has been granted critical-alert permission under
+iOS Settings → Notifications → Bark. Without it the system quietly downgrades
+the push rather than failing, so a silent phone is not evidence the bridge
+did anything wrong. `timeSensitive` pierces Focus modes but never the mute
+switch — those are different things.
+
 ## Phone notifications (Bark)
 
 You do not have to watch the tab while a web AI works. Paste the link the Bark app shows (`https://api.day.app/<device key>/…` — the whole thing; the key is extracted) into **Settings → Phone notifications** in the console, and the AI can push to your iPhone.

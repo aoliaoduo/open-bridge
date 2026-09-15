@@ -354,8 +354,46 @@ button.menu-btn { display: none; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-  padding: 16px 16px;
+  padding: var(--sp-4);
   margin-bottom: 14px;
+}
+
+/* --- foldable card --------------------------------------------------------
+   A collapsed card still has to answer "is this the one I want?", so the
+   header carries a summary line rather than shrinking to a bare title. The
+   whole header is the hit area: a chevron-sized target is a target people
+   miss. */
+.card-fold {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.card-fold:hover .card-fold-title { color: var(--accent); }
+.fold-caret {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--muted);
+  transform: rotate(90deg);
+  transition: transform .15s ease;
+}
+.card.collapsed .fold-caret { transform: rotate(0deg); }
+.card-fold-text { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; flex-wrap: wrap; }
+.card-fold-title { font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.01em; }
+.card-fold-summary { font-size: var(--fs-sm); color: var(--muted); }
+/* Collapsed cards sit closer together: the gap between two one-line headers
+   should read as a list, not as three separate panels. */
+.card.card-foldable.collapsed { margin-bottom: var(--sp-2); }
+.card.card-foldable:not(.collapsed) .card-fold { margin-bottom: var(--sp-2); }
+@media (prefers-reduced-motion: reduce) {
+  .fold-caret { transition: none; }
 }
 
 /* Section headings carry a hairline, the "secondary tab" language of the
