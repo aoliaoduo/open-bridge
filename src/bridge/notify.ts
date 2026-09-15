@@ -105,6 +105,10 @@ export interface NotifySettings {
 }
 
 export interface NotifyOutcome {
+  /**
+   * Did the PHONE push go out. Named for history; `announced` is the honest
+   * answer to "was the operator told".
+   */
   delivered: boolean;
   event: NotifyEvent;
   /** The stable verb for suppression bookkeeping; "" when it went out. */
@@ -113,6 +117,21 @@ export interface NotifyOutcome {
   status: number;
   /** Human-readable failure detail; "" when there was none. */
   error: string;
+  /**
+   * Did a sound play on the bridge machine.
+   *
+   * Added because the result was lying by omission: with the phone switched
+   * off and a sound configured, a notify call played audio and still returned
+   * `delivered:false, reason:"disabled"`. A model reading that concludes it
+   * failed to reach anyone and may well say so to the operator who just heard
+   * the chime.
+   */
+  sounded: boolean;
+  /**
+   * Did ANY channel reach the operator. This is the field a caller should
+   * branch on; `delivered` answers a narrower question than its name suggests.
+   */
+  announced: boolean;
 }
 
 export function resolveNotifySettings(): NotifySettings {
@@ -438,8 +457,12 @@ export async function pushNotification(
   nowMs: number = Date.now(),
   options: { bypassLedger?: boolean; silentLocally?: boolean; bark?: BarkPushExtras } = {},
 ): Promise<NotifyOutcome> {
+  // Declared before `outcome` so every return path reports the sound too --
+  // the previous shape let a chime happen and still answer "delivered:false,
+  // reason:disabled", which reads as "nobody was told".
+  let sounded = false;
   const outcome = (delivered: boolean, reason: string, status = 0, error = ""): NotifyOutcome =>
-    ({ delivered, event, reason, status, error });
+    ({ delivered, event, reason, status, error, sounded, announced: delivered || sounded });
 
   // Both channels are decided in one place, by the table, instead of by a
   // chain of ifs whose order encoded policy. The ordering still matters --
@@ -453,7 +476,7 @@ export async function pushNotification(
   // without this pressing 发送测试 under 手机（Bark） also played music.
   if (route.sound === true && !options.silentLocally) {
     const soundFile = soundFileForEvent(event);
-    if (soundFile) playAlertSound(soundFile);
+    if (soundFile) sounded = playAlertSound(soundFile).played;
   }
 
   if (route.bark !== true) {

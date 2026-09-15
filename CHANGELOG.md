@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`notify` 的返回值只说手机，不说本机声音 —— 于是响了也报「没送达」。** 重启后实测发现：手机关着、声音开着时，调用 `notify` **确实弹出了播放窗口**（进程验证过），但返回的是 `delivered:false, reason:"disabled"`。模型读到这个会判定「没能通知到任何人」，然后很可能对着刚听见铃声的人说「通知发送失败」。
+
+  `NotifyOutcome` 现在多两个字段：`sounded`（本机是否响了）和 **`announced`（有没有任何渠道通知到）**。`delivered` 保持原义只管手机 —— 日志和既有调用方依赖它 —— 但工具 schema 里写明了「**别拿它当「是否通知到」来判断，看 `announced`**」。测试钉住 `announced === delivered || sounded`，防止它变成第三种说法。
+
 - **「无反应提醒」设为 0 会连带关掉「对话结束时通知」。** 见上一条。**有一条测试把这个 bug 当成规格钉住了** —— 名字就叫「idleMinutes 0 switches off both watchdogs, not just one」。它让缺陷活了下来：任何人修对了行为，都会被这条测试判定为「改坏了」。已改写成正确的期望。
 
 - **关掉手机通知后，本机声音也一起哑了。** 本机声音刻意排在所有 Bark 闸门**之前**，就是为了让没配 Bark 的机器也能响 —— 但两个兜底监视根本走不到那一步：`finishNoticeVerdict` 和 `idleNoticeVerdict` 第一行都是 `if (!input.usable) return false`，而 `usable` 的定义是 **`enabled && Boolean(key)`**，也就是「Bark 能发」。于是关掉手机开关，整条链在最外层就断了，`pushNotification` 压根没被调用。

@@ -508,3 +508,44 @@ test("usable reflects any channel, barkUsable only the phone", async () => {
   assert.equal(settings.barkUsable, false, "no key, no phone");
   assert.equal(settings.usable, true, "the sound channel can still reach the operator");
 });
+
+/**
+ * The result used to lie by omission. With the phone off and a sound
+ * configured, a notify call played audio on the operator's machine and still
+ * answered `delivered:false, reason:"disabled"` — which a model reads as
+ * "nobody was told", and may well report as a failure to the person who just
+ * heard the chime.
+ *
+ * `delivered` still means the phone specifically, because callers and logs
+ * depend on that. `announced` is the field that answers the question people
+ * actually ask.
+ */
+test("the outcome reports the sound, not just the phone", async () => {
+  const { pushNotification, resolveNotifySettings } = await import("../src/bridge/notify.js");
+  const { setHost } = await import("../src/host/host.js");
+
+  const cfg = new Map<string, unknown>([
+    ["notify.enabled", false],
+    ["notify.barkKey", ""],
+    ["sound.enabled", true],
+    ["sound.fileWaiting", "C:\\sounds\\nope.wav"],
+  ]);
+  setHost({
+    config: {
+      get: <T,>(key: string, fallback: T): T => (cfg.has(key) ? cfg.get(key) : fallback) as T,
+      update: async (): Promise<void> => undefined,
+    },
+  } as never);
+
+  const result = await pushNotification(resolveNotifySettings(), "waiting", "t", "b");
+
+  // The file does not exist, so nothing actually played — but the shape is
+  // what matters here: both fields exist and announced follows from them.
+  assert.equal(typeof result.sounded, "boolean", "the sound channel must be reported");
+  assert.equal(typeof result.announced, "boolean", "callers need one field to branch on");
+  assert.equal(
+    result.announced,
+    result.delivered || result.sounded,
+    "announced must be the OR of the channels, never a third opinion",
+  );
+});
