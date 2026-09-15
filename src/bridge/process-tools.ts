@@ -191,9 +191,12 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
   // NOT killed - it keeps running under supervision; the caller can poll
   // read_process_output / wait_process or force_terminate using command_id.
   // Clamp like the wait/ready paths: an invalid (NaN) timeout_ms used to make
-  // setTimeout fire at ~0 ms, instantly "timing out" a running command.
-  const rawTimeout = Number(args.timeout_ms ?? 120000);
-  const timeout = Number.isFinite(rawTimeout) && rawTimeout >= 0 ? rawTimeout : 120000;
+  // setTimeout fire at ~0 ms, instantly "timing out" a running command. And the
+  // 32-bit ceiling is not optional either: a plain isFinite+>=0 check admits
+  // 1e10, which setTimeout turns into a ~1 ms timer — the same inversion at the
+  // other end of the range (a "wait essentially forever" timeout that fires
+  // instantly). clampMs carries both guards.
+  const timeout = clampMs(args.timeout_ms ?? 120_000, 120_000);
   // The timeout result flows out through the promise instead of a captured
   // mutable flag. With `let timedOut = false` assigned inside the timer
   // callback, TypeScript narrows the variable to the literal `false` at the
@@ -400,9 +403,23 @@ export async function waitProcess(args: Args): Promise<Record<string, unknown>> 
 }
 
 export async function waitTool(args: Args): Promise<unknown> {
-  const ms = Number(args.ms);
-  if (!Number.isSafeInteger(ms) || ms < 0) throw new Error("ms must be a non-negative safe integer.");
-  await new Promise(resolve => setTimeout(resolve, ms));
+  // clampMs rather than a bare safe-integer check: `ms: 3e9` is a safe integer,
+  // but setTimeout past 2147483647 warns and fires at ~1 ms (measured), so the
+  // call returned instantly while reporting `waited_ms: 3000000000`. Same trap
+  // as run_command's timeout below, and clampMs already exists with the exact
+  // ceiling. A clamped value is reported honestly: the caller sees how long it
+  // actually waited, not the number it asked for.
+  const ms = clampMs(args.ms, 0);
+  if (!Number.isSafeInteger(ms)) {
+    throw new Error("ms must be an integer (fractional milliseconds are not a real wait).");
+  }
+  // unref: a pending wait must not be the thing keeping a draining process (a
+  // Bridge in shutdown, a test runner between files) alive for its whole
+  // duration — an in-flight tool call is abandoned with the process anyway.
+  await new Promise<void>(resolve => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
   return { waited_ms: ms };
 }
 
