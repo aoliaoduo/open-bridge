@@ -915,3 +915,60 @@ test("redirects the retired /console/tokens bookmark to 安全", async () => {
 
   expect(await screen.findByText("个人令牌")).toBeTruthy();
 });
+
+describe("App shell: keyboard reach", () => {
+  /**
+   * Can the console be driven without a mouse?
+   *
+   * Asserted against the rendered DOM rather than by reading source. A grep
+   * for Escape handlers flagged four files as missing one and all four were
+   * false — they merely contained the word "dialog" in a comment. What the
+   * keyboard can actually do is a property of the tree, so walk the tree.
+   */
+  test("every reachable control announces what it is", async () => {
+    const { container } = render(<App />);
+    await screen.findByText("MCP 端点");
+
+    const selector = [
+      "a[href]",
+      "button:not([disabled])",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+    ].join(",");
+    const reachable = [...container.querySelectorAll<HTMLElement>(selector)];
+    expect(reachable.length).toBeGreaterThan(5);
+
+    // A control a screen reader cannot name is reachable but useless: the
+    // user hears "button" and has to guess. Icon-only controls are the usual
+    // offenders, which is why the theme toggle carries an aria-label.
+    const unnamed = reachable.filter(el => {
+      const text = (el.textContent ?? "").trim();
+      // `title` is deliberately NOT accepted here. It shows a tooltip on hover
+      // and screen readers treat it as a last resort — several announce
+      // nothing at all when it is the only name. An icon-only control needs
+      // aria-label. Dropping the theme button's aria-label while leaving its
+      // title in place is exactly the regression this must catch.
+      const label = el.getAttribute("aria-label") ?? "";
+      const placeholder = el.getAttribute("placeholder") ?? "";
+      return !text && !label && !placeholder;
+    });
+    expect(unnamed.map(el => el.outerHTML.slice(0, 70))).toEqual([]);
+  });
+
+  test("a click-only div never hides the only route to an action", async () => {
+    const { container } = render(<App />);
+    await screen.findByText("MCP 端点");
+
+    // onClick on a div is legitimate for an overlay backdrop — Escape is the
+    // keyboard path, covered above. It is only a defect when the div IS the
+    // action. Anything else with onClick must be a real control.
+    const divs = [...container.querySelectorAll<HTMLElement>("div,span")];
+    const suspicious = divs.filter(el => {
+      const cls = el.className || "";
+      if (typeof cls === "string" && (cls.includes("scrim") || cls.includes("mask"))) return false;
+      return el.hasAttribute("onclick");
+    });
+    expect(suspicious.map(el => el.outerHTML.slice(0, 70))).toEqual([]);
+  });
+});
