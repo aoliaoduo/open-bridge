@@ -24,7 +24,7 @@ template.
 
 ### Is it a deliberate choice?
 
-Before filing, check [SECURITY.md](../SECURITY.md) — "What is deliberately
+Before filing, check [SECURITY.md](../../SECURITY.md) — "What is deliberately
 not locked down" lists behaviours that look like bugs but are documented
 choices (`unrestrictedFileAccess` defaulting on, non-zero exit codes not
 counting as failures, ...). If your report is about one of those, close this
@@ -57,7 +57,7 @@ a secret that should have been masked: **do not use an issue** — open a
 
 ### 这是不是一个写明的取舍？
 
-提交前先看 [SECURITY.md](../SECURITY.md) 的「What is deliberately not
+提交前先看 [SECURITY.md](../../SECURITY.md) 的「What is deliberately not
 locked down」—— 那里列着看起来像 bug、但其实是写明理由的取舍的行为
 （`unrestrictedFileAccess` 默认开、非零退出码不算失败……）。如果你的报告
 针对的是其中之一，请关掉这个模板，改开一个把论据摆出来的讨论或功能建议。

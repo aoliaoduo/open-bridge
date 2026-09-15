@@ -85,7 +85,7 @@ The frontend router owns these paths (`ui/src/routes.ts`); the server returns th
 - **The bearer gate is off by default**, because URL-only clients such as the ChatGPT connector cannot send custom headers and would all break. Turn it on from the Security page: issue a token and flip the switch, or use **"issue a token and enable the gate"** to do both at once (an existing token is reused; the plaintext is shown once). With the gate on and no valid token, it **fails closed**. The local console can always turn it back off, so you cannot lock yourself out.
 - **Publicly reachable means whoever has the URL can read and write your files and run commands.** The app will not quietly restrict your permissions, but it says this everywhere: `status`, the console, `health`, and the startup banner. To tighten it, enable the bearer gate — or run `--no-tunnel` and stay local.
 
-> The full threat model, the three exposure levels, and **what is deliberately left unlocked** (`unrestrictedFileAccess` defaults on, exit codes are not verdicts, behaviour hints are information rather than limits) are in [`SECURITY.md`](SECURITY.md), which is also where vulnerability reports go.
+> The full threat model, the three exposure levels, and **what is deliberately left unlocked** (`unrestrictedFileAccess` defaults on, exit codes are not verdicts, behaviour hints are information rather than limits) are in [`SECURITY.md`](../SECURITY.md), which is also where vulnerability reports go.
 
 ### OAuth 2.1 (optional, off by default)
 

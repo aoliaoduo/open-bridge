@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **补齐四样开源门面**：`CONTRIBUTING.md`、`CODE_OF_CONDUCT.md`、PR 模板、issue 模板（bug / 功能建议）。由子代理完成，我复核。
+
+  几个决定值得留下来。**CONTRIBUTING 指向 `AGENTS.md` 而不复制它** —— 一条规矩写两份就是两份各自漂移的开始，冲突时以 `AGENTS.md` 为准。**PR 模板只有三个勾选项**（verify 全绿、新测试红过、CHANGELOG 有条目），每个都对应这个仓库真实付过代价的坑，而且每个都写了「不适用时怎么说明」—— 只会被全勾的 checklist 和不会失败的测试是同一种东西。**bug 模板不设「复现步骤」一节**：这个项目的报告天然自带复现物（命令 + 输出），教人粘贴确切输出比通用的「步骤 1、2、3」有用。
+
+  复核时补了两处：**加了 `ISSUE_TEMPLATE/config.yml`** 关掉「开一个空白 issue」的入口 —— 模板竞争的对象就是那条阻力最小的路径；以及**修了 bug 模板里的 `../SECURITY.md`**，它在 `.github/ISSUE_TEMPLATE/` 下只退了一级，实际指向不存在的 `.github/SECURITY.md`。
+
+- **新增 markdown 相对链接检查。** 上面那个坏链是写的时候看不出来的 —— 路径从仓库根目录看是对的，而人就是站在根目录想问题的，偏偏它落在「让贡献者先去读一下」的那句话上。加上检查后立刻又抓到一个：`docs/configuration.md` 里的 `SECURITY.md` 指向了 `docs/SECURITY.md`，那是我上次把章节从 README 搬进 `docs/` 时留下的。
+
 ### Changed
 
 - **通知的「哪个事件走哪些渠道」改成一张显式的表。** 规则原先散在四处：`ALWAYS_EVENTS` 集合、`eventSuppressed()`、两个 verdict 顶部的复合条件、以及 `soundFileForEvent` 里的 switch。**每一处单独看都是对的**，但已经连出两个同形状的 bug —— 一个旋钮关掉了它不拥有的渠道：
