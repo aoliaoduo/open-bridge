@@ -125,6 +125,8 @@ function settingsState(overrides: Partial<SettingsState> = {}): SettingsState {
       ngrokExecutable: "ngrok",
       shellPath: "",
       shellArgs: [],
+  tailscaleDomain: "",
+  tailscaleExecutable: "",
       port: 18080,
       publicHealthTimeoutMs: 20_000,
       autoReconnect: true,
@@ -781,6 +783,9 @@ describe("App shell: in-page filtering and rails", () => {
    * implying the rest was configured.
    */
   test("the ngrok authtoken can be saved from the tunnel page", async () => {
+    // The authtoken field is ngrok-only now; the shared fixture runs provider
+    // "none", so this test resolves settings shaped for ngrok instead.
+    mocks.settings.mockResolvedValue(settingsState({ config: { ...settingsState().config, tunnelProvider: "ngrok" } }));
     render(<App />);
     await screen.findByText("MCP 端点");
     fireEvent.click(tabLink("设置"));
@@ -799,9 +804,13 @@ describe("App shell: in-page filtering and rails", () => {
   });
 
   test("a stored authtoken shows as a mask and is not editable until 替换", async () => {
-    // The field must never render the real token: this page is screen-shared
-    // and pasted into issues. Same discipline as the Bark device key.
-    mocks.settings.mockResolvedValue(settingsState({ ngrokAuthtokenMask: "2abc…••••…45" }));
+    // The field is ngrok-only now, so resolve settings shaped for ngrok with
+    // the mask. The field must never render the real token: this page is
+    // screen-shared and pasted into issues. Same discipline as the Bark key.
+    mocks.settings.mockResolvedValue(settingsState({
+      ngrokAuthtokenMask: "2abc…••••…45",
+      config: { ...settingsState().config, tunnelProvider: "ngrok" },
+    }));
 
     render(<App />);
     await screen.findByText("MCP 端点");
@@ -858,9 +867,11 @@ describe("App shell: card detail layer", () => {
     const { container } = render(<App />);
     await screen.findByText(/隧道让公网上的客户端连到这台机器/);
 
-    // The 隧道 sub-page carries the two boolean switches of this card.
+    // The 隧道 sub-page's switches depend on the provider: autoReconnect is
+    // universal, the ngrok proxy switch is ngrok-only. The fixture runs
+    // provider "none", so exactly the universal one is here.
     const switches = [...container.querySelectorAll("input.switch")] as HTMLInputElement[];
-    expect(switches.length).toBe(2);
+    expect(switches.length).toBe(1);
     expect(switches.every(input => input.type === "checkbox")).toBe(true);
 
     // And they still write the same config key they wrote as a plain checkbox.

@@ -23,6 +23,7 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = deepFreeze({
   tunnelProvider: "ngrok",
   ngrokDomain: "",
   tailscaleDomain: "",
+  tailscaleExecutable: "",
   ngrokExecutable: "ngrok",
   /** Extra/override path to another instance's peer registry ("" = discover). */
   sharedPeerRegistry: "",

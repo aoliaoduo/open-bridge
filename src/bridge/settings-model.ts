@@ -100,6 +100,8 @@ export interface SettingsConfigView {
   ngrokExecutable: string;
   shellPath: string;
   shellArgs: string[];
+  tailscaleDomain: string;
+  tailscaleExecutable: string;
   port: number;
   publicHealthTimeoutMs: number;
   autoReconnect: boolean;
@@ -224,6 +226,7 @@ const CONFIG_SPEC = {
   toolProfile: { kind: "enum", values: ["full", "core"] },
   ngrokExecutable: { kind: "string", max: 500 },
   tailscaleDomain: { kind: "string", max: 253 },
+  tailscaleExecutable: { kind: "string", max: 500 },
   shellPath: { kind: "string", max: 500 },
   allowedDirectories: { kind: "stringArray", maxItems: 50, maxLen: 500 },
   shellArgs: { kind: "stringArray", maxItems: 50, maxLen: 500 },

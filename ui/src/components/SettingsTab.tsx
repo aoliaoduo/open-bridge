@@ -217,6 +217,8 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
   // mask shown vs. replaced stay distinguishable; null means "no edit yet").
   const [barkKeyDraft, setBarkKeyDraft] = useState<string | null>(null);
   const [authtokenDraft, setAuthtokenDraft] = useState<string | null>(null);
+  const [tailscaleDomainDraft, setTailscaleDomainDraft] = useState<string | null>(null);
+  const [tsExeDraft, setTsExeDraft] = useState<string | null>(null);
 
   if (!settings) return <div className="card"><Skeleton lines={4} /></div>;
   const cfg = settings.config;
@@ -285,7 +287,12 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
             </select>
           </Field>
 
-          <div className="field">
+          {/* ngrok-only fields: a Tailscale Funnel has no authtoken, no
+              reserved domain and no second executable setting - showing them
+              under the Tailscale provider invited edits that would be silently
+              ignored by the tunnel it actually runs. */}
+          {cfg.tunnelProvider === "ngrok" && (
+          <>          <div className="field">
             <span className="field-label">{t("Authtoken", "Authtoken")}</span>
             <span className="field-control">
               <input
@@ -378,19 +385,78 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
               onCommit={next => setConfig("ngrokExecutable", next)}
             />
           </Field>
-
+          </>
+          )}
           <SwitchField
             label={t("隧道意外退出时自动重连", "Reconnect automatically if the tunnel dies")}
             hint={t("伴随进程退出时按退避重试，不需要人工点重新启动。", "Retries with backoff when the companion process exits, so nobody has to click restart.")}
             checked={cfg.autoReconnect}
             onChange={next => setConfig("autoReconnect", next)}
           />
+          {cfg.tunnelProvider === "ngrok" && (
+          <>
           <SwitchField
             label={t("ngrok 继承系统代理", "ngrok inherits the system proxy")}
             hint={t("公司网络需要走代理时打开；直连环境关掉更快。", "Turn on behind a corporate proxy; leave off for a direct connection, which is faster.")}
             checked={cfg.ngrokUseHttpProxy}
             onChange={next => setConfig("ngrokUseHttpProxy", next)}
           />
+          </>
+          )}
+          {cfg.tunnelProvider === "tailscale" && (
+          <>
+          <div className="field">
+            <span className="field-label">{t("公网域名", "Public domain")}</span>
+            <span className="field-control">
+              <input
+                type="text"
+                value={tailscaleDomainDraft ?? cfg.tailscaleDomain}
+                placeholder={t("启动时自动从 tailscale CLI 发现", "Discovered from the tailscale CLI at start")}
+                onChange={e => setTailscaleDomainDraft(e.target.value)}
+              />
+              <button
+                className="small"
+                disabled={tailscaleDomainDraft === null}
+                onClick={() => {
+                  void act({ command: "setConfig", key: "tailscaleDomain", value: tailscaleDomainDraft ?? "" }).then(result => {
+                    if ((result as SettingsActionResult | null)?.ok) setTailscaleDomainDraft(null);
+                  });
+                }}
+              >
+                {t("保存域名", "Save domain")}
+              </button>
+            </span>
+            <span className="field-hint">
+              {t("留空则每次启动从 tailscale CLI 自动发现本机的 ts.net 名；手动填写的值若与 CLI 报告的不一致会在启动时报错。", "Leave empty to discover this machine's ts.net name from the tailscale CLI at each start; a manual value that disagrees with the CLI is an error at start, not a silent mismatch.")}
+            </span>
+          </div>
+          <div className="field">
+            <span className="field-label">{t("Tailscale 可执行文件", "Tailscale executable")}</span>
+            <span className="field-control">
+              <input
+                type="text"
+                value={tsExeDraft ?? cfg.tailscaleExecutable}
+                placeholder={t("默认按 PATH 与 C:\\Program Files\\Tailscale 查找", "Found via PATH, then C:\\Program Files\\Tailscale")}
+                onChange={e => setTsExeDraft(e.target.value)}
+              />
+              <button
+                className="small"
+                disabled={tsExeDraft === null}
+                onClick={() => {
+                  void act({ command: "setConfig", key: "tailscaleExecutable", value: tsExeDraft ?? "" }).then(result => {
+                    if ((result as SettingsActionResult | null)?.ok) setTsExeDraft(null);
+                  });
+                }}
+              >
+                {t("保存路径", "Save path")}
+              </button>
+            </span>
+            <span className="field-hint">
+              {t("MSI 安装默认不加入 PATH，找不到时把完整路径填在这里。", "The MSI does not add itself to PATH by default; if the binary is not found, put the full path here.")}
+            </span>
+          </div>
+          </>
+          )}
         </div>
       </Card>
       )}
