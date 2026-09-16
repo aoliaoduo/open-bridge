@@ -22,7 +22,11 @@ import { ProcessOutputBuffer, type ProcessOutputRead } from "../process/output-b
 import { MAX_CAPTURED_OUTPUT } from "./state.js";
 import { windowsHideForChild } from "./child-console.js";
 import { reassertServeConsoleTitle } from "./console-title.js";
-import { createMarker, scanMarkerExitCode, stripMarkerLines } from "../shell/session-marker.js";
+import { createMarker, stripMarkerLines } from "../shell/session-marker.js";
+import {
+  createMarkerScanState, resetMarkerScanCarry, scanForMarker,
+  type MarkerScanState,
+} from "../shell/marker-scan.js";
 import { availableHint } from "./error-hints.js";
 import { maybeStripAnsi } from "../process/ansi.js";
 import { waitForSpawnSettled, clampMs } from "./process-tools.js";
@@ -39,9 +43,6 @@ const execFileAsync = promisify(execFile);
  * background output used to make a finished command look running forever and
  * wedge the session (pendingMarker could never be cleared).
  */
-const MARKER_SCAN_CHUNK_BYTES = 1024 * 1024;
-/** Bytes of the previous scan chunk re-examined by the next one (a marker line is ~50 chars). */
-const MARKER_SCAN_OVERLAP_BYTES = 256;
 
 interface ShellSession {
   name: string;
@@ -52,8 +53,13 @@ interface ShellSession {
   lastCommandAt: number;
   /** Marker of a command that timed out but may still be running; blocks the next send until it completes. */
   pendingMarker: string | null;
-  /** Absolute merged-output offset up to which completion markers have been scanned. */
-  scannedOffset: number;
+  /**
+   * Forward cursor + carry for completion-marker scanning. The carry must live
+   * here, not inside one scan: the 60 ms poll interval splits sentinel lines
+   * just as chunk boundaries do, and only state that survives the call can
+   * rejoin the halves. See ../shell/marker-scan.ts.
+   */
+  scan: MarkerScanState;
 }
 
 const shellSessions = new Map<string, ShellSession>();
@@ -182,7 +188,7 @@ export async function openShell(args: Args): Promise<Record<string, unknown>> {
   const { id, child } = spawnSessionShell(name, cwd);
   const session: ShellSession = {
     name, commandId: id, cwd, output: state.commands.get(id)!.output,
-    startedAt: Date.now(), lastCommandAt: Date.now(), pendingMarker: null, scannedOffset: 0,
+    startedAt: Date.now(), lastCommandAt: Date.now(), pendingMarker: null, scan: createMarkerScanState(),
   };
   shellSessions.set(name, session);
   // Let the spawn settle first: a bad shellPath used to surface only on the
@@ -225,45 +231,17 @@ async function sendToShellInner(args: Args): Promise<Record<string, unknown>> {
   const input = String(args.command ?? "");
   if (!input.trim()) throw new Error("command is required. (expected 'command': string)");
 
-  // Scan a chunk of merged output from the session's forward cursor for a
-  // completion marker, advancing the cursor past whatever was examined. A
-  // cursor (instead of a fixed 64 KiB tail window) is what keeps a marker from
-  // being permanently missed after a burst of background output.
-  const scanForMarker = (marker: string): number | null => {
-    const stateNow = cmd.output.state();
-    let from = Math.max(s.scannedOffset, stateNow.bufferStartOffset);
-    // Each chunk re-examines a tail of the previous one: a marker (or its
-    // "=<code>" digits) straddling the chunk boundary used to be missed
-    // entirely — wedging the session on pendingMarker — or, worse, matched
-    // with TRUNCATED digits, silently reporting a wrong exit code.
-    let carry: Buffer = Buffer.alloc(0);
-    while (from < stateNow.totalBytes) {
-      const read = cmd.output.read(from, Math.min(MARKER_SCAN_CHUNK_BYTES, stateNow.totalBytes - from));
-      if (read.data.length === 0) break;
-      s.scannedOffset = Math.max(s.scannedOffset, read.endOffset);
-      const combined = carry.length > 0 ? Buffer.concat([carry, read.data]) : read.data;
-      carry = combined.subarray(Math.max(0, combined.length - MARKER_SCAN_OVERLAP_BYTES));
-      const code = scanMarkerExitCode(combined.toString("utf8"), marker);
-      if (code !== null) return code;
-      from = read.endOffset;
-    }
-    // When nothing new has arrived, re-scan the retained tail once so a marker
-    // that landed before the cursor ever advanced is still caught.
-    if (s.scannedOffset <= stateNow.bufferStartOffset) {
-      const tail = cmd.output.tail(MARKER_SCAN_CHUNK_BYTES).data.toString("utf8");
-      const code = scanMarkerExitCode(tail, marker);
-      if (code !== null) s.scannedOffset = stateNow.totalBytes;
-      return code;
-    }
-    return null;
-  };
+  // Forward scan from the session's cursor, carrying the examined tail across
+  // calls (see ../shell/marker-scan.ts): the sentinel can be split by the poll
+  // interval as easily as by a chunk boundary.
+  const scan = (marker: string): number | null => scanForMarker(cmd.output, s.scan, marker);
 
   // Concurrency guard: a second command while the previous one is still running
   // would interleave output and completion markers. A timed-out command may have
   // finished since the last call, so give its pending marker a forward scan
   // (self-heal) before refusing.
   if (s.pendingMarker) {
-    if (cmd.done || scanForMarker(s.pendingMarker) !== null) {
+    if (cmd.done || scan(s.pendingMarker) !== null) {
       s.pendingMarker = null;
     } else {
       throw new Error(
@@ -274,6 +252,9 @@ async function sendToShellInner(args: Args): Promise<Record<string, unknown>> {
   }
 
   const marker = createMarker();
+  // Drop the previous command's trailing bytes: they can only ever produce a
+  // spurious match against this command's marker.
+  resetMarkerScanCarry(s.scan);
   const startOffset = cmd.output.state().totalBytes;
   const startStdoutOffset = cmd.stdoutOutput.state().totalBytes;
   const startStderrOffset = cmd.stderrOutput.state().totalBytes;
@@ -310,7 +291,7 @@ async function sendToShellInner(args: Args): Promise<Record<string, unknown>> {
     // Forward scan from the cursor: catches a marker anywhere in the retained
     // output, not only in the trailing window (the old tail-only scan wedged
     // the session when background output pushed the marker out of the window).
-    const code = scanForMarker(marker);
+    const code = scan(marker);
     if (code !== null) { exitCode = code; done = true; break; }
     if (cmd.done) { done = false; break; }
   }
