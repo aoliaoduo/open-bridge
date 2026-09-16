@@ -341,6 +341,16 @@ export async function interactWithProcess(args: Args): Promise<Record<string, un
   if (!["merged", "stdout", "stderr"].includes(stream)) {
     throw new Error('stream must be one of: merged, stdout, stderr.');
   }
+  // Same rule for `offset`. outputRead rejects a malformed one, but it runs
+  // AFTER the write below, so a typo'd offset used to send the input and then
+  // fail the call — a refusal the caller cannot undo. Validate it here, once,
+  // against the same contract outputRead enforces.
+  if (args.offset !== undefined) {
+    const offset = Number(args.offset);
+    if (!Number.isSafeInteger(offset) || offset < 0) {
+      throw new Error("offset must be a non-negative safe integer.");
+    }
+  }
   try {
     s.child.stdin.write(String(args.input) + (args.append_newline === false ? "" : "\n"));
   } catch (error) {
