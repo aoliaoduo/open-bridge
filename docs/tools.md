@@ -105,7 +105,7 @@
 
 ### 命令与进程
 
-**run_command** — 前台等待最多 `timeout_ms`（默认 120000）。**超时不会杀掉进程**：它继续在监管下运行，返回 `status: "running"` 与 `command_id`，之后用 `read_process_output` / `wait` 继续读，或用 `process_control{action:"terminate"}` 停掉。`background: true` 立刻返回。退出码非零**不是**调用失败。链式命令（`a; b`）的 `exit_code` 取最后一段，要前一段的退出码就以 `echo EXIT=$?` 结尾。
+**run_command** — 命令文本由 shell 解释：`shellPath` / `shellArgs` 未配置时自动探测（Windows：Git Bash → PowerShell 7 → Windows PowerShell），连接时下发的 instructions 会点名实际解释器与方言——写错方言不一定报错，`2>nul` 在 bash 下会生成一个名为 `nul` 的文件。前台等待最多 `timeout_ms`（默认 120000）。**超时不会杀掉进程**：它继续在监管下运行，返回 `status: "running"` 与 `command_id`，之后用 `read_process_output` / `wait` 继续读，或用 `process_control{action:"terminate"}` 停掉。`background: true` 立刻返回。退出码非零**不是**调用失败。链式命令（`a; b`）的 `exit_code` 取最后一段，要前一段的退出码就以 `echo EXIT=$?` 结尾。
 
 **start_process** — 面向**长驻**进程（服务器、watcher、守护进程）：`ready_pattern` 等启动输出，返回 `command_id` 交给进程工具组。就绪等待由 **`ready_timeout_ms`**（毫秒，默认 **10000**，上限 2147483647）控制：等不到就让调用返回 `ready: false` + `status: "running"`，**不会杀进程**（慢启动的构建要放宽，就调这个值）。这里**没有 `timeout_ms`** —— 那是 `run_command` 的（前台运行才有"完成"可限时）；传了会**点名拒绝**，而不是像以前那样被静默忽略。
 

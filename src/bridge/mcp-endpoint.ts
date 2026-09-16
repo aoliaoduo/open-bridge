@@ -27,6 +27,8 @@ import { normalizeToolCall } from "./tool-call-shape.js";
 import { buildStaleness, staleBuildAdvice } from "./build-staleness.js";
 import { persistUsageStats } from "./usage-store.js";
 import { notifyUsageInstructions, resolveNotifySettings } from "./notify.js";
+import { resolveShell } from "../shell/shell-provider.js";
+import { shellUsageInstructions } from "../shell/shell-usage.js";
 
 /**
  * The typed payload for one tool result: `asStructuredContent`, minus the
@@ -111,7 +113,21 @@ export const sharedEventStore = new BoundedInMemoryEventStore();
  * long prompt is how the two eras drift apart without anyone noticing.
  */
 function serverInstructions(): string {
-  return SERVER_INSTRUCTIONS_BASE + notifySuffix() + projectInstructionSuffix() + skillsSuffix();
+  return SERVER_INSTRUCTIONS_BASE + shellSuffix() + notifySuffix() + projectInstructionSuffix() + skillsSuffix();
+}
+
+/**
+ * Which interpreter answers run_command / start_process / open_shell, stated
+ * once at connect time: the same resolveShell() the spawner consults, so the
+ * sentence and the spawn can never disagree. Same rule as the other suffixes
+ * — a detection failure must not keep a session from starting.
+ */
+function shellSuffix(): string {
+  try {
+    return shellUsageInstructions(resolveShell());
+  } catch {
+    return "";
+  }
 }
 
 /**
