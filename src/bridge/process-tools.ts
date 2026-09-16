@@ -18,6 +18,7 @@ const READY_PATTERN_OVERLAP_BYTES = 4 * 1024;
 import { workspacePath } from "./paths.js";
 import { availableHint } from "./error-hints.js";
 import { maybeStripAnsi } from "../process/ansi.js";
+import { hasUnreadOutput, resolveReadOffset } from "../process/output-cursor.js";
 import {
   pruneCommands,
   spawnManaged,
@@ -278,7 +279,12 @@ export async function readProcessOutput(args: Args): Promise<Record<string, unkn
   const waitMs = Math.max(0, Math.min(Number(args.wait_ms ?? 0) || 0, 60_000));
   if (waitMs > 0 && !s.done) {
     const buffer = stream === "stdout" ? s.stdoutOutput : stream === "stderr" ? s.stderrOutput : s.output;
-    if (buffer.state().availableBytes === 0) {
+    // Whether THIS caller is caught up, not whether the buffer holds anything.
+    // `availableBytes` is the retained byte count: permanently non-zero once
+    // the process has printed a single line, so it skipped the wait for every
+    // process worth following and turned the long-poll back into a busy-poll.
+    const bufferState = buffer.state();
+    if (!hasUnreadOutput(resolveReadOffset(args.offset, bufferState), bufferState)) {
       await new Promise<void>(resolve => {
         const finish = (): void => {
           s.child.stdout.off("data", onData);
