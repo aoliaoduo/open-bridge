@@ -53,6 +53,30 @@ export function SecurityPage({ settings, act, notify }: Props) {
   const [label, setLabel] = useState("");
   const [ttl, setTtl] = useState(settings.defaultTtlSeconds);
   const [creating, setCreating] = useState(false);
+  /**
+   * One in-flight token mutation at a time.
+   *
+   * The create button already had this, and the comment beside it says why: a
+   * double click minted two tokens and the first one's one-time plaintext was
+   * overwritten, leaving a token nobody could ever use. Rotate, revoke, delete
+   * and the two bulk actions had the same shape and no guard.
+   *
+   * Rotate is the worst of them: it mints a NEW secret and kills the old one,
+   * so a second click invalidates the value the operator has just copied --
+   * breaking a token that was working a second ago, and replacing a plaintext
+   * they may not have finished reading.
+   */
+  const [tokenBusy, setTokenBusy] = useState("");
+
+  const tokenAction = async (id: string, action: Record<string, unknown>) => {
+    if (tokenBusy) return;
+    setTokenBusy(id);
+    try {
+      await act(action);
+    } finally {
+      setTokenBusy("");
+    }
+  };
 
   const exposure = EXPOSURE_META[report?.exposure ?? ""];
 
@@ -70,24 +94,36 @@ export function SecurityPage({ settings, act, notify }: Props) {
     return () => { alive = false; };
   }, []);
 
+  /**
+   * Re-read the exposure. It is derived server-side from auth.enabled
+   * (meta-tools.ts), so anything that moves the gate has to call this or the
+   * overview keeps describing the state we just left -- and 当前状态 is the
+   * line an operator actually acts on.
+   */
+  const rereadExposure = async () => {
+    try {
+      const status = await api.status();
+      setReport({ exposure: String(status.exposure ?? "local") });
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const arm = async () => {
     if (arming) return;
     setArming(true);
     try {
       const result = await act({ command: "armPublicLock" });
-      // The gate flips the exposure public-open → public-authed: re-read it so
-      // the overview above stops describing the state we just left.
-      if (result?.ok) {
-        try {
-          const status = await api.status();
-          setReport({ exposure: String(status.exposure ?? "local") });
-        } catch (error) {
-          setNote(error instanceof Error ? error.message : String(error));
-        }
-      }
+      if (result?.ok) await rereadExposure();
     } finally {
       setArming(false);
     }
+  };
+
+  /** The plain gate switch changes the same fact the one-step button does. */
+  const toggleGate = async (enabled: boolean) => {
+    const result = await act({ command: "setAuthEnabled", enabled });
+    if (result?.ok) await rereadExposure();
   };
 
   const rotate = async () => {
@@ -213,7 +249,7 @@ export function SecurityPage({ settings, act, notify }: Props) {
                   type="checkbox"
                   className="switch"
                   checked={settings.authEnabled}
-                  onChange={e => void act({ command: "setAuthEnabled", enabled: e.target.checked })}
+                  onChange={e => void toggleGate(e.target.checked)}
                   aria-label={t("Bearer 门禁", "Bearer gate")}
                 />
                 <span>{settings.authEnabled ? t("已开启（Bearer）", "On (Bearer)") : t("已关闭", "Off")}</span>
@@ -346,18 +382,24 @@ export function SecurityPage({ settings, act, notify }: Props) {
                       <span className="row-actions">
                         {!token.revoked && !token.expired && (
                           <>
-                            <button className="small" onClick={() => void act({ command: "rotateToken", id: token.id })}>
-                              {t("轮换", "Rotate")}
+                            <button
+                              className="small"
+                              disabled={tokenBusy !== ""}
+                              onClick={() => void tokenAction(token.id, { command: "rotateToken", id: token.id })}
+                            >
+                              {tokenBusy === token.id ? t("轮换中…", "Rotating…") : t("轮换", "Rotate")}
                             </button>
                             <ConfirmButton
                               label={t("吊销", "Revoke")}
-                              onConfirm={() => void act({ command: "revokeToken", id: token.id })}
+                              disabled={tokenBusy !== ""}
+                              onConfirm={() => void tokenAction(token.id, { command: "revokeToken", id: token.id })}
                             />
                           </>
                         )}
                         <ConfirmButton
                           label={t("删除", "Delete")}
-                          onConfirm={() => void act({ command: "deleteToken", id: token.id })}
+                          disabled={tokenBusy !== ""}
+                          onConfirm={() => void tokenAction(token.id, { command: "deleteToken", id: token.id })}
                         />
                       </span>
                     </td>
@@ -369,10 +411,18 @@ export function SecurityPage({ settings, act, notify }: Props) {
         )}
 
         <div className="card-foot">
-          <button className="small" disabled={settings.deadCount === 0} onClick={() => void act({ command: "purgeTokens" })}>
+          <button
+            className="small"
+            disabled={settings.deadCount === 0 || tokenBusy !== ""}
+            onClick={() => void tokenAction("__purge__", { command: "purgeTokens" })}
+          >
             {t("清理失效令牌", "Purge dead tokens")}
           </button>
-          <ConfirmButton label={t("吊销全部", "Revoke all")} onConfirm={() => void act({ command: "revokeAll" })} />
+          <ConfirmButton
+            label={t("吊销全部", "Revoke all")}
+            disabled={tokenBusy !== ""}
+            onConfirm={() => void tokenAction("__revoke_all__", { command: "revokeAll" })}
+          />
           <span className="spacer" />
           <span className="section-note" style={{ margin: 0 }}>
             {t(`共 ${settings.tokens.length} 条`, `${settings.tokens.length} total`)}
