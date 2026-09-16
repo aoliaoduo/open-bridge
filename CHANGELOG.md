@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **公网可达性从命令行搬进卡片。** 「测试公网可达」跑的就是 `open-bridge health` 那几条检查（其中公网那条是**真的**经隧道发一次 `/healthz` 请求），卡片只取决定结论的三行（隧道 / 公网连通 / 暴露面）并给出下一步。检测本身单独走 `GET /api/tunnel` 并有 60 秒缓存（要 spawn 两个 CLI、有 token 时还要调 ngrok 的 API），设置页不因此变慢；响应里没有任何凭据。判据在 `test/tunnel-plan.test.ts`（纯函数：只填空、不覆盖、多域名交给人）与 `test/tunnel-detect.test.ts`（解析与探测全部注入依赖，不 spawn 真 CLI、不联网），控制台一侧在 `ui/src/App.test.tsx` 钉住四条：只读摘要来自探测、一次点击就写、tailscale 是同构的三段且折叠后仍在、公网可达三行如实回报。
 
+### Added
+
+- **Open Bridge Desktop：桌面壳第一阶段（薄壳，Windows 首发）。** `desktop/` 子目录自成一棵依赖（Electron + electron-builder，不混入桥的依赖树）。壳以 `ELECTRON_RUN_AS_NODE` 子进程托管 `open-bridge serve`：自选回环端口显式下传、healthz 等待、崩溃按 1s/2s/5s/15s 退避自愈、托盘常驻（打开控制台 / 重启服务 / 更换工作区 / 退出）、关窗不退服务、退出时优雅 SIGTERM。同工作区已有实例在跑时不打架，直接附着到它的端口。preload 以 contextIsolation 暴露 `obDesktop`（status / restartBridge），为下一阶段 codex 风格的 agent 工作台界面预留插座；窗口本体仍是 dist/ui 控制台。冒烟模式 `npm run smoke` 开窗二十秒自退。栈选型与 Codex Desktop / Claude Desktop / Trae / Qoder 相同（全部 Electron）。
+
 ### Fixed
 
 - **`copy` 目录 + `overwrite:true` 对准工作区根这类目标，是绕过自毁守卫的静默合并覆写。** move 与 delete 都过 `refuseSelfDestruction`，copy 没有——因为 fs.cp 自己会拒「文件压目录」，看上去已经够安全；但**目录压目录** fs.cp 不是拒，是 merge：源树把目标树的同名文件逐个强制改写并应答成功。对准工作区根、Bridge 自己的数据目录或盘符根时，整个项目树被改写且全程无报错——这正是守卫存在的那片地面，落点与 "move onto" 完全相同，只是不带删除语义。现 copy 同样先经守卫（拒绝语 "copy onto"）。集成测试先红后绿：`destination: "." + overwrite:true` 未修时应答成功、canary 被改成源树版本；修复后拒、canary 原样。

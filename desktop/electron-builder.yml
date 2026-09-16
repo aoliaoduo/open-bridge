@@ -1,0 +1,36 @@
+# Open Bridge Desktop 安装包配置（首发：Windows NSIS）。
+# 薄壳原则：壳只收自己的三个文件；桥（bin + dist + 生产依赖）整体作为
+# extraResources 随行，运行时仍是一个被托管的子进程，壳内零业务。
+appId: com.openbridge.desktop
+productName: Open Bridge
+asar: true
+directories:
+  output: dist
+files:
+  - main.mjs
+  - preload.cjs
+  - package.json
+  - icon.png
+extraResources:
+  - from: ../bin
+    to: bridge/bin
+  - from: ../dist
+    to: bridge/dist
+  # dist/cli/version.js 运行时 require ../../package.json 读版本号，
+  # 且 "type": "module" 声明全靠它 —— 缺了它进程 MODULE_NOT_FOUND 直接退。
+  - from: ../package.json
+    to: bridge/package.json
+  # v1 把整棵 node_modules 带进去（含开发依赖，包体偏胖，功能完整）。
+  # 收敛方向：pack 前先 `npm prune --omit=dev` 到暂存目录再指过来。
+  - from: ../node_modules
+    to: bridge/node_modules
+win:
+  target: nsis
+  icon: icon.png
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: Open Bridge
+  createDesktopShortcut: always
+publish: null
