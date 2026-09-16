@@ -9,6 +9,9 @@ start-open-bridge.last-dir
 *.tmp.py
 .DS_Store
 
+# 第三方参考项目（~1GB，只在本机研读用，永远不进仓库）
+参考/
+
 # agent 工作区工具的本地状态（不属于项目本体）
 .claude/
 .openclaw/
