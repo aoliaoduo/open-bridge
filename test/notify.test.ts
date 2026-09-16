@@ -11,7 +11,8 @@ import { test } from "node:test";
 import {
   announcesEnding, buildBarkUrl, clampIdleMinutes, clearNotifyLedger, eventSuppressed,
   finishNoticeVerdict, idleWatchVerdict, markSelfNotified, newlyCompletedTodos,
-  notifyUsageInstructions, parseBarkExtras, selfNotifyAnnouncementMs,
+  notifyUsageInstructions, parseBarkExtras, repeatVerdict, selfNotifyAnnouncementMs,
+  REPEAT_ACK_TAIL_MS, REPEAT_INTERVAL_MS, REPEAT_MAX_PUSHES, REPEAT_WINDOW_MS,
 } from "../src/bridge/notify.js";
 
 const KEY = "aaaaaaaaaaaaaaaaaaaaaa"; // obviously fake: a real Bark key must never appear in a repo
@@ -424,6 +425,62 @@ test("a progress push leaves the ending bell armed", () => {
   assert.equal(selfNotifyAnnouncementMs(), 2_000, "the model's own ending push does");
   clearNotifyLedger();
   assert.equal(selfNotifyAnnouncementMs(), 0, "a restart starts with nothing announced");
+});
+
+// --- 「持续响铃直到点开」, which one Bark request cannot deliver ---------------
+
+/**
+ * The operator asked it himself, quoting the URL the switch produces:
+ * `https://api.day.app/<key>/持续响铃?call=1` — 「这个不就是持续响铃吗？」.
+ *
+ * It is not. Bark's `call` repeats the ringtone for about 30 seconds and then
+ * stops, and it only reaches the speaker at all when the interruption level
+ * allows sound. So the switch's promise has to be kept by the server: after a
+ * push for an event whose 「持续响铃」 switch is on, that same message is pushed
+ * again on the sweep until the operator comes back.
+ */
+
+const ARMED = {
+  nowMs: 100_000,
+  armedAtMs: 100_000,
+  pushedMs: 100_000,
+  count: 1,
+  acknowledgedAtMs: 0,
+  canSpeak: true,
+  switchOn: true,
+} as const;
+
+test("repeat: it rings again until the operator comes back", () => {
+  // The first ring is still going: one request already bought ~30 s of noise.
+  assert.equal(repeatVerdict({ ...ARMED, nowMs: ARMED.armedAtMs + 10_000 }), "wait");
+  assert.equal(repeatVerdict({ ...ARMED, nowMs: ARMED.armedAtMs + REPEAT_INTERVAL_MS }), "repeat");
+});
+
+test("repeat: the arming call's own tail is not a human coming back", () => {
+  // latestSessionActivity is stamped when a request ENDS as well as when it
+  // arrives, and the push that arms a repeat happens inside one — so a stamp a
+  // millisecond after the arm is that same call finishing. Reading it as an
+  // acknowledgement makes the switch ring exactly once, which is the state the
+  // operator was complaining about when he asked why call=1 was not enough.
+  assert.equal(
+    repeatVerdict({ ...ARMED, nowMs: ARMED.armedAtMs + 60_000, acknowledgedAtMs: ARMED.armedAtMs + 1 }),
+    "repeat",
+    "the arming call finishing is not the operator coming back",
+  );
+  assert.equal(
+    repeatVerdict({ ...ARMED, nowMs: ARMED.armedAtMs + 60_000, acknowledgedAtMs: ARMED.armedAtMs + REPEAT_ACK_TAIL_MS + 1 }),
+    "stop",
+    "a call that starts later means the AI is running again: someone is there",
+  );
+});
+
+test("repeat: caps, switches and the channel all end it", () => {
+  const later = ARMED.armedAtMs + 60_000;
+  assert.equal(repeatVerdict({ ...ARMED, nowMs: later, count: REPEAT_MAX_PUSHES }), "stop");
+  assert.equal(repeatVerdict({ ...ARMED, nowMs: ARMED.armedAtMs + REPEAT_WINDOW_MS }), "stop");
+  assert.equal(repeatVerdict({ ...ARMED, nowMs: later, switchOn: false }), "stop",
+    "turning the switch off must stop the ringing, not leave a loop behind");
+  assert.equal(repeatVerdict({ ...ARMED, nowMs: later, canSpeak: false }), "stop");
 });
 
 /**

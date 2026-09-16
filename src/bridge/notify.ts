@@ -418,6 +418,23 @@ const ledger: NotifyLedger = { attempts: [], last: undefined };
  * re-pressing a test because they did not hear the first one is precisely
  * the case dedupe would wrongly silence. The mode and the switch still gate.
  */
+/** The config-key infix of one event: `notify.call<Infix>`, `notify.level<Infix>`. */
+function eventSuffix(event: NotifyEvent): "Attention" | "Waiting" | "Finished" | "Progress" {
+  return event === "attention" ? "Attention"
+    : event === "waiting" ? "Waiting"
+      : event === "finished" ? "Finished"
+        : "Progress";
+}
+
+/**
+ * Is 「持续响铃」 on for this event? Read once per push and again on every
+ * repeat tick, so turning the switch off stops a ringing phone without a
+ * restart.
+ */
+function callEnabledFor(event: NotifyEvent): boolean {
+  return host().config.get<boolean>(`notify.call${eventSuffix(event)}`, false) === true;
+}
+
 /**
  * Fill in the operator's per-event preferences where the caller said nothing.
  *
@@ -428,10 +445,7 @@ const ledger: NotifyLedger = { attempts: [], last: undefined };
  */
 export function withEventDefaults(event: NotifyEvent, bark?: BarkPushExtras): BarkPushExtras | undefined {
   const cfg = host().config;
-  const suffix = event === "attention" ? "Attention"
-    : event === "waiting" ? "Waiting"
-      : event === "finished" ? "Finished"
-        : "Progress";
+  const suffix = eventSuffix(event);
   const level = String(cfg.get<string>(`notify.level${suffix}`, "") ?? "").trim();
   // Every event can ring. Offering it on only two was a judgement about which
   // events "deserve" it, and the page had no room to explain the distinction —
@@ -455,7 +469,7 @@ export async function pushNotification(
   title: string,
   body: string,
   nowMs: number = Date.now(),
-  options: { bypassLedger?: boolean; silentLocally?: boolean; bark?: BarkPushExtras } = {},
+  options: { bypassLedger?: boolean; silentLocally?: boolean; bark?: BarkPushExtras; repeat?: boolean } = {},
 ): Promise<NotifyOutcome> {
   // Declared before `outcome` so every return path reports the sound too --
   // the previous shape let a chime happen and still answer "delivered:false,
@@ -540,6 +554,9 @@ export async function pushNotification(
       // frequent, they land seconds before the exchange ends, and a message
       // about one ticked box answered for an ending it never mentioned.
       markSelfNotified(nowMs, event);
+      // 「持续响铃」 is a promise one Bark request cannot keep (~30 s of ring,
+      // and only where the level lets it through); see repeatTick.
+      armRepeat(clippedTitle, clippedBody, nowMs, event, options.repeat === true);
       return logged(outcome(true, "", probe.status), clippedTitle);
     }
     const detail = probe.error || `Bark responded with HTTP ${probe.status}`;
@@ -1028,6 +1045,148 @@ export function finishNoticeTick(nowMs: number = Date.now()): boolean {
 }
 
 /**
+ * 「持续响铃直到点开」, which a single Bark request cannot deliver.
+ *
+ * The operator asked the question himself, quoting the URL this switch
+ * produces: `https://api.day.app/<key>/持续响铃?call=1` — 「这个不就是持续响铃吗？」.
+ * Measured against Bark's own documentation, it is not: `call=1` repeats the
+ * ringtone for about 30 seconds and then stops, and it reaches the speaker at
+ * all only when the interruption level allows sound (critical, to beat the mute
+ * switch). The switch therefore promised something no single request can keep,
+ * and the server is the only side able to keep it — because the server, unlike
+ * the phone, can tell whether the human came back.
+ *
+ * One episode = one armed message: the push that opened it, then repeats of the
+ * same text on the shared sweep until someone answers (any request the AI makes
+ * afterwards means a human asked it to), until the cap is reached, or until the
+ * switch or the channel goes away under it.
+ */
+export interface RepeatArm {
+  event: NotifyEvent;
+  title: string;
+  body: string;
+  /** When the episode's first push landed; acknowledgements compare to this. */
+  armedAtMs: number;
+  /** When the most recent push of this episode landed. */
+  pushedMs: number;
+  /** Pushes sent in this episode, the first one included. */
+  count: number;
+}
+
+/** How long one ring lasts before the server arms the phone again. */
+export const REPEAT_INTERVAL_MS = 45_000;
+/** Pushes per episode, so a phone left on a desk does not ring all afternoon. */
+export const REPEAT_MAX_PUSHES = 10;
+/** Hard stop for one episode, independent of the cap. */
+export const REPEAT_WINDOW_MS = 15 * 60_000;
+
+/**
+ * How long after `armedAtMs` a stamp may still belong to the arming call.
+ *
+ * `latestSessionActivity()` is stamped when a request FINISHES as well as when
+ * it arrives, and the push that arms an episode happens inside a request — so
+ * the arming call's own tail lands a few hundred milliseconds after the arm,
+ * and reading that as an acknowledgement is what would make the switch ring
+ * exactly once (the state the operator complained about). The window is several
+ * times the longest plausible tail (a Bark push round trip); a real
+ * acknowledgement cannot be that fast, since a human has to read the
+ * notification and reply.
+ */
+export const REPEAT_ACK_TAIL_MS = 5_000;
+
+let repeatArm: RepeatArm | null = null;
+
+/**
+ * Repeat, wait, or give up. Pure, so the policy is testable without a phone.
+ *
+ * `acknowledgedAtMs` is the bridge's own activity clock: a request that started
+ * after the episode began cannot have been caused by anything but a human,
+ * because the AI only runs when one has asked it to. That is the closest thing
+ * to 「点开」 this protocol offers — Bark has no callback for a tapped
+ * notification, so "the operator is here" is inferred from work resuming.
+ */
+export function repeatVerdict(input: {
+  nowMs: number;
+  armedAtMs: number;
+  pushedMs: number;
+  count: number;
+  acknowledgedAtMs: number;
+  /** The per-event 「持续响铃」 switch is still on. */
+  switchOn: boolean;
+  /** Anyone can still be reached at all (see notify-routing.ts). */
+  canSpeak: boolean;
+}): "wait" | "repeat" | "stop" {
+  if (!input.switchOn || !input.canSpeak) return "stop";
+  if (input.acknowledgedAtMs > input.armedAtMs + REPEAT_ACK_TAIL_MS) return "stop";
+  if (input.count >= REPEAT_MAX_PUSHES) return "stop";
+  if (input.nowMs - input.armedAtMs >= REPEAT_WINDOW_MS) return "stop";
+  if (input.nowMs - input.pushedMs < REPEAT_INTERVAL_MS) return "wait";
+  return "repeat";
+}
+
+/**
+ * Remember — or extend — the episode a delivered push just opened.
+ *
+ * `isRepeat` is the whole difference between the two ways a push arrives here:
+ * the server ringing again extends the episode it is already in, while anything
+ * the AI says starts a new one — including for a different event, which is how
+ * a stale ring is dropped the moment newer news arrives.
+ */
+function armRepeat(title: string, body: string, atMs: number, event: NotifyEvent, isRepeat: boolean): void {
+  if (!callEnabledFor(event)) {
+    repeatArm = null;
+    return;
+  }
+  if (isRepeat && repeatArm && repeatArm.event === event) {
+    repeatArm = { ...repeatArm, pushedMs: atMs, count: repeatArm.count + 1 };
+    return;
+  }
+  repeatArm = { event, title, body, armedAtMs: atMs, pushedMs: atMs, count: 1 };
+}
+
+/** The running episode; exported so a test (or a view) can see it. */
+export function currentRepeatArm(): RepeatArm | null {
+  return repeatArm;
+}
+
+/** Forget the running episode (restart, teardown, or a newer message). */
+export function clearRepeat(): void {
+  repeatArm = null;
+}
+
+/**
+ * One pass of the repeat sweep, riding the same 60 s tick as the two watchdogs
+ * — which is also why REPEAT_INTERVAL_MS sits a little under a minute: a ring
+ * lasts ~30 s, and the point is to have the next one already going.
+ */
+export function repeatTick(nowMs: number = Date.now()): boolean {
+  const armed = repeatArm;
+  if (!armed) return false;
+  const settings = resolveNotifySettings();
+  const verdict = repeatVerdict({
+    nowMs,
+    armedAtMs: armed.armedAtMs,
+    pushedMs: armed.pushedMs,
+    count: armed.count,
+    acknowledgedAtMs: latestSessionActivity().lastUsedMs,
+    switchOn: callEnabledFor(armed.event),
+    canSpeak: anyChannelSpeaks(armed.event, channelStateFor(armed.event, settings)),
+  });
+  if (verdict !== "repeat") {
+    if (verdict === "stop") repeatArm = null;
+    return false;
+  }
+  // Both flags on purpose: `repeat` keeps armRepeat from starting this episode
+  // over (it is the same one), and the ledger is bypassed because its window
+  // exists to stop the AI repeating itself — this push is the server deciding
+  // to ring again, and the cap above is what bounds it.
+  void pushNotification(settings, armed.event, armed.title, armed.body, nowMs, {
+    repeat: true, bypassLedger: true,
+  }).then(outcome => { if (!outcome.delivered) repeatArm = null; }).catch(() => { repeatArm = null; });
+  return true;
+}
+
+/**
  * What a connect-time AI is told about notifications. Pure; a real
  * suffix only appears while the channel is actually usable (so a connect
  * never carries a lecture about machinery it cannot reach), and the text
@@ -1078,4 +1237,7 @@ export function clearNotifyLedger(): void {
   // in-process restart must not inherit a mark that silences the new run's
   // first ending.
   lastEndingSelfNotifyMs = 0;
+  // Same for a ring in progress: a stopped bridge must not come back up
+  // ringing about something that happened before the restart.
+  repeatArm = null;
 }

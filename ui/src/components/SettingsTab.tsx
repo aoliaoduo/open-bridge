@@ -974,9 +974,9 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
                             className="switch"
                             checked={settings.config[`notify.call${row.key}`] === true}
                             onChange={e => setConfig(`notify.call${row.key}`, e.target.checked)}
-                            aria-label={`${row.label()}：${t("持续响铃直到点开", "Ring until opened")}`}
+                            aria-label={`${row.label()}：${t("持续响铃：不在就每分钟再响一次，直到你回来", "Persistent ring: repeats every minute until you are back")}`}
                           />
-                          <span className="field-hint">{t("持续响铃直到点开", "Ring until opened")}</span>
+                          <span className="field-hint">{t("持续响铃：单次约 30 秒；你不在就每分钟再响一次，直到你回来（最多 10 次）", "Persistent ring: ~30 s each, then again every minute until you are back (max 10)")}</span>
                         </span>
                         </div>
                       </td>
@@ -987,8 +987,8 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
             </div>
             <span className="field-hint">
               {t(
-                "「穿透专注模式」不管静音键；「无视静音」需要 iOS 里给 Bark 开「重要警告」权限，否则会被降级。",
-                "Time-sensitive does not pierce the mute switch. Critical does, but needs Bark's critical-alert permission in iOS or it is downgraded.",
+                "「穿透专注模式」不管静音键；「无视静音」需要 iOS 里给 Bark 开「重要警告」权限，否则会被降级。「持续响铃」由 Bridge 续推：Bark 自己的 call=1 只响约 30 秒，不会响到你点开。",
+                "Time-sensitive does not pierce the mute switch. Critical does, but needs Bark's critical-alert permission in iOS or it is downgraded. Persistent ring is kept by the Bridge: Bark's own call=1 rings for ~30 s, not until you open it.",
               )}
             </span>
           </div>

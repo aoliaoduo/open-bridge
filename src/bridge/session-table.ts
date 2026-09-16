@@ -8,7 +8,7 @@
 import { host } from "../host/host.js";
 import { MAX_SESSIONS, state } from "./state.js";
 import { pruneCommands } from "./processes.js";
-import { finishNoticeTick, idleNoticeTick } from "./notify.js";
+import { finishNoticeTick, idleNoticeTick, repeatTick } from "./notify.js";
 
 /** Idle MCP sessions are reclaimed after this long without activity. */
 const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
@@ -68,6 +68,10 @@ export function startSessionPruneLoop(): void {
     // Same sweep, opposite case: idle warns about work that stalled, this one
     // announces work that finished without the AI saying so.
     try { finishNoticeTick(); } catch { /* best-effort sweep */ }
+    // And the third case: a 「持续响铃」 episode nobody has answered yet rings
+    // again here. Same heartbeat on purpose — the ringing then stops with the
+    // sweeps that started it instead of owning a timer of its own.
+    try { repeatTick(); } catch { /* best-effort sweep */ }
   }, SESSION_PRUNE_INTERVAL_MS);
 }
 
