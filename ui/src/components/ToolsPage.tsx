@@ -31,13 +31,19 @@ export function ToolsPage({ notify, settings, act }: {
   const [query, setQuery] = useState("");
   const [onlyCore, setOnlyCore] = useState(false);
 
+  // Keyed on the profile, not mounted once: the selector below writes
+  // toolProfile, and the server filters this very catalog by it. With an empty
+  // dependency list the page kept showing the pre-switch list -- the one screen
+  // built to make the setting's effect visible was the screen that hid it, and
+  // a list that did not move reads as "the switch did nothing".
+  const profileSetting = settings?.config.toolProfile;
   useEffect(() => {
     let alive = true;
     void api.tools()
       .then(value => { if (alive) setCatalog(value); })
       .catch(error => { if (alive) setNote(error instanceof Error ? error.message : String(error)); });
     return () => { alive = false; };
-  }, []);
+  }, [profileSetting]);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
