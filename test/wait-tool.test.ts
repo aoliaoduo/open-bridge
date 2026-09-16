@@ -3,6 +3,26 @@ import assert from "node:assert/strict";
 import { waitTool } from "../src/bridge/process-tools.js";
 
 /**
+ * Await a wait with one ref'd handle of our own in the event loop.
+ *
+ * `waitTool` unrefs its timer on purpose — a pending wait must not be the thing
+ * keeping a draining process alive, since `open-bridge serve` has to be able to
+ * exit during one — so the timer a test is waiting on holds nothing open. On
+ * CI's ubuntu 22.x job that is precisely the state node's runner reads as "the
+ * loop resolved": it drained the loop mid-test, cancelled the whole file
+ *   cancelledByParent · "Promise resolution is still pending but the event loop
+ *   has already resolved"
+ * and took all five cases with it, while the 24.x job passed. The production
+ * code is not the wrong part, so the gap is closed here: a ref'd interval lives
+ * exactly as long as the call being asserted, standing in for the server and
+ * its connections, which is what keeps a real Bridge's loop non-empty.
+ */
+function holdWhile<T>(call: Promise<T>): Promise<T> {
+  const keepAlive = setInterval(() => { /* see above: the loop must not drain mid-assertion */ }, 1_000);
+  return call.finally(() => clearInterval(keepAlive));
+}
+
+/**
  * waitTool used to accept any safe integer, but setTimeout past 2147483647
  * warns and fires at ~1 ms (measured in this repo's own investigation of
  * timeout_ms: 1e18 — see clamp-ms.test.ts). A caller asking to wait 3e9 ms
@@ -25,7 +45,7 @@ function unsettledWithin(ms: number, call: Promise<unknown>): Promise<boolean> {
 
 test("a normal wait returns the ms it actually waited", async () => {
   const startedAt = Date.now();
-  const result = await waitTool({ ms: 120 }) as { waited_ms: number };
+  const result = await holdWhile(waitTool({ ms: 120 })) as { waited_ms: number };
   assert.equal(result.waited_ms, 120);
   const elapsed = Date.now() - startedAt;
   assert.ok(elapsed >= 100, `elapsed ${elapsed} ms — the wait did not happen`);
@@ -44,14 +64,14 @@ test("an overflowing ms is capped to the timer limit, not fired at ~1 ms", async
 });
 
 test("garbage ms falls back to 0 (a no-op wait), never a NaN timer", async () => {
-  assert.equal((await waitTool({ ms: "abc" }) as { waited_ms: number }).waited_ms, 0);
-  assert.equal((await waitTool({ ms: null }) as { waited_ms: number }).waited_ms, 0);
+  assert.equal((await holdWhile(waitTool({ ms: "abc" })) as { waited_ms: number }).waited_ms, 0);
+  assert.equal((await holdWhile(waitTool({ ms: null })) as { waited_ms: number }).waited_ms, 0);
 });
 
 test("negative ms falls back to 0 rather than a negative timer", async () => {
-  assert.equal((await waitTool({ ms: -5 }) as { waited_ms: number }).waited_ms, 0);
+  assert.equal((await holdWhile(waitTool({ ms: -5 })) as { waited_ms: number }).waited_ms, 0);
 });
 
 test("fractional ms is refused (an integer number of milliseconds or nothing)", async () => {
-  await assert.rejects(() => waitTool({ ms: 1.5 }), /ms must be an integer/);
+  await assert.rejects(() => holdWhile(waitTool({ ms: 1.5 })), /ms must be an integer/);
 });

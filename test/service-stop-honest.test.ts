@@ -37,7 +37,24 @@ afterEach(() => {
 function stuckCommand(id: string): CommandState {
   return {
     id,
-    child: { pid: 1, killed: false, off() {}, once() {} } as unknown as CommandState["child"],
+    child: {
+      pid: 1,
+      killed: false,
+      /**
+       * The refusal this test is about: called, ignored, no `close` follows.
+       *
+       * It has to exist AND do nothing, which is the scenario itself, not a
+       * detail of the stand-in. The missing method was the whole of this test's
+       * ubuntu failure — "commandState.child.kill is not a function"
+       * (processes.ts:413): Windows never calls it (the win32 branch goes
+       * through `taskkill.exe`, and that loop swallows its refusals), so a
+       * stand-in shaped only by the platform it was written on passed on one
+       * platform and failed on the other.
+       */
+      kill() {},
+      off() {},
+      once() {},
+    } as unknown as CommandState["child"],
     output: { state: () => ({ bufferStartOffset: 0, totalBytes: 0 }) },
     stdoutOutput: { state: () => ({ bufferStartOffset: 0, totalBytes: 0 }) },
     stderrOutput: { state: () => ({ bufferStartOffset: 0, totalBytes: 0 }) },
@@ -69,15 +86,11 @@ test("stop_service keeps the handle and reports stopped:false when the process r
     commandId: "stuck-1",
   } as ServiceDefinition & { commandId: string });
 
-  // terminateProcess resolves false only after waitForProcessClose's 5 s
-  // timeout; the stubbed child never fires close, so the real call would wait
-  // out the budget. That wait is the production behaviour — but 5 s in a unit
-  // test buys nothing, so pin the contract via the delete path's cheaper
-  // variant: the no-process and surviving-process branches.
-  //
-  // Instead of stubbing internals, drive the real stopService against a
-  // command that exits instantly (the honest stopped:true path) to prove the
-  // wiring, and pin the timeout contract through the record shape below.
+  // timeout: 30_000 above, because terminateProcess resolves false only after
+  // waitForProcessClose's 5 s budget and this stand-in never fires close. That
+  // wait is the point — a shorter budget would be testing a timeout that does
+  // not exist — and it is what the production path costs when a process
+  // ignores the signal.
   const result = await stopService({ name: "web" });
   assert.equal((result as { stopped: boolean }).stopped, false,
     "an unconfirmed termination must not claim stopped:true");

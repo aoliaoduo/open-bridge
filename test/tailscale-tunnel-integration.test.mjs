@@ -289,7 +289,9 @@ test("when the holder's mount goes stale, the follower claims 443", async () => 
   // config will never disappear on its own.
   writeFakeMount(1); // nothing serves port 1: connecting to it is refused
   const attemptsBefore = callsOf(secondLog, "--bg");
-  assert.ok(await until(() => callsOf(secondLog, "--bg") > attemptsBefore, 45_000),
+  // 60 s, not 45: the watch's own cadence is 10 s (healthy) then 4 s (unhealthy)
+  // and a loaded CI runner pays a fetch timeout per round on top of it.
+  assert.ok(await until(() => callsOf(secondLog, "--bg") > attemptsBefore, 60_000),
     `the follower never claimed the released mount; calls:\n${logLines(secondLog).join("\n")}`);
   assert.equal(fakeMountPort(), secondPort, "the claim is what put its own backend on 443");
 });
