@@ -51,3 +51,5 @@ npm run verify            # 提交前硬门槛，必须全绿
 - `参考/` 三个第三方研读项目已于 2026-09-16 删除（链接留在 `docs/reference-projects.md`）；.gitignore 仍挡着它，防止哪天拷回来又跟着 `git add -A` 上车。
 - `desktop/node_modules` 与 `desktop/dist` 已清理；恢复开发时先 `cd desktop && npm install`（桥本体不受影响）。
 - 单实例锁已存在；`setAppUserModelId` 已对齐 electron-builder 的 `appId`（通知图标教训，HippoBuddy 记载）。
+- CI 已知一个抖动测试：`logs --follow exits when the pipe it writes to closes` 在 Ubuntu 上偶发断言失败
+  （本地全绿、同一提交重跑即绿）。看到它红，先 rerun，别先怀疑代码。
