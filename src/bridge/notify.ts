@@ -532,13 +532,14 @@ export async function pushNotification(
   try {
     const probe = await probeHttpHealth(url, { timeoutMs: BARK_TIMEOUT_MS });
     if (probe.ok) {
-      // Any push that actually landed disarms the finish watchdog. This is the
-      // hinge that makes the fallback respect the switches for free: with
-      // onTaskDone on, the completion bell has already rung by the time a list
-      // is fully ticked, so the watchdog stays quiet; with it off the bell is
-      // suppressed, the mark is never set, and the watchdog is the only thing
-      // that speaks.
-      markSelfNotified(nowMs);
+      // Only a push that SAID something about the ending disarms the finish
+      // watchdog — see announcesEnding. That is the hinge which makes the
+      // fallback respect the switches for free: a model that announces its own
+      // ending is not second-guessed. It used to be EVERY delivered push, and
+      // that is where the ending bell went: todo-completion pushes are
+      // frequent, they land seconds before the exchange ends, and a message
+      // about one ticked box answered for an ending it never mentioned.
+      markSelfNotified(nowMs, event);
       return logged(outcome(true, "", probe.status), clippedTitle);
     }
     const detail = probe.error || `Bark responded with HTTP ${probe.status}`;
@@ -913,12 +914,41 @@ const SELF_NOTIFY_TOLERANCE_MS = 60_000;
 /** Latch: the completion clock we have already announced. */
 let finishAnnouncedForMs = 0;
 
-/** Set whenever the AI pushes anything itself; silences the finish watchdog. */
-let lastSelfNotifyMs = 0;
+/**
+ * Which pushes count as having told the operator about an ENDING.
+ *
+ * The three ending-shaped events all mean "come back": `finished` says the
+ * exchange is over, `waiting` that a question is holding everything up, and
+ * `attention` that a decision is needed. `progress` is the one that does not —
+ * it reports that a step completed, which is just as true in the middle of an
+ * hour of continued work. Letting it answer for the ending is how the fallback
+ * bell went unheard: a todo ticked 30 s before the model went quiet silenced
+ * the watchdog for that whole episode, so the operator got a "2 项完成" ping
+ * and then nothing at all when the exchange actually ended.
+ */
+export function announcesEnding(event: NotifyEvent): boolean {
+  return event === "finished" || event === "waiting" || event === "attention";
+}
 
-/** Called on every successful push so a model's own notify disarms the fallback. */
-export function markSelfNotified(atMs: number = Date.now()): void {
-  if (atMs > lastSelfNotifyMs) lastSelfNotifyMs = atMs;
+/** Set when the AI announced an ending itself; silences the finish watchdog. */
+let lastEndingSelfNotifyMs = 0;
+
+/**
+ * The clock the finish watchdog compares against, exported so a test can watch
+ * it: this is the state the bug lived in, and asserting on the verdict alone
+ * would not have caught it.
+ */
+export function selfNotifyAnnouncementMs(): number {
+  return lastEndingSelfNotifyMs;
+}
+
+/**
+ * Called on every successful push; only an ending-shaped event moves the clock,
+ * so a progress push leaves the fallback armed.
+ */
+export function markSelfNotified(atMs: number = Date.now(), event: NotifyEvent = "finished"): void {
+  if (!announcesEnding(event)) return;
+  if (atMs > lastEndingSelfNotifyMs) lastEndingSelfNotifyMs = atMs;
 }
 
 /**
@@ -975,7 +1005,7 @@ export function finishNoticeTick(nowMs: number = Date.now()): boolean {
     activeRequests: activity.activeRequests,
     ...completion,
     canSpeak: anyChannelSpeaks("finished", channelStateFor("finished", settings)),
-    notifiedSinceMs: lastSelfNotifyMs,
+    notifiedSinceMs: selfNotifyAnnouncementMs(),
     announcedForMs: finishAnnouncedForMs,
   });
   if (!fire) return false;
@@ -1044,4 +1074,8 @@ export function clearNotifyLedger(): void {
   ledger.attempts = [];
   ledger.last = undefined;
   idleNotifiedForMs = 0;
+  // A previous run's ending announcement is as stale as its rate budget: an
+  // in-process restart must not inherit a mark that silences the new run's
+  // first ending.
+  lastEndingSelfNotifyMs = 0;
 }

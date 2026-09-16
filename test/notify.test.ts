@@ -9,8 +9,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  buildBarkUrl, clampIdleMinutes, eventSuppressed, finishNoticeVerdict, idleWatchVerdict,
-  newlyCompletedTodos, notifyUsageInstructions, parseBarkExtras,
+  announcesEnding, buildBarkUrl, clampIdleMinutes, clearNotifyLedger, eventSuppressed,
+  finishNoticeVerdict, idleWatchVerdict, markSelfNotified, newlyCompletedTodos,
+  notifyUsageInstructions, parseBarkExtras, selfNotifyAnnouncementMs,
 } from "../src/bridge/notify.js";
 
 const KEY = "aaaaaaaaaaaaaaaaaaaaaa"; // obviously fake: a real Bark key must never appear in a repo
@@ -392,6 +393,37 @@ test("finish watchdog: one announcement per finished list", () => {
   assert.equal(finishNoticeVerdict({ ...DONE, announcedForMs: DONE.completedAtMs }), false);
   // ...while a later completion (new work, finished again) re-arms it.
   assert.equal(finishNoticeVerdict({ ...DONE, announcedForMs: DONE.completedAtMs - 5_000 }), true);
+});
+
+// --- what counts as announcing an ending -------------------------------------
+
+/**
+ * The complaint this exists for: 「对话结束通知好像没了」, with a todo push
+ * landing seconds before the model went quiet. The fallback bell reads one
+ * clock — the last push that said something about an ENDING — and that clock
+ * used to be moved by every delivered push, including the 「2 项完成」 progress
+ * messages that are ordinary in the middle of work. A todo ticked 30 s before
+ * the exchange ended therefore answered for the ending and the operator got a
+ * "step done" ping followed by silence.
+ */
+
+test("announcesEnding: only the events that say \"come back\" count", () => {
+  assert.equal(announcesEnding("progress"), false,
+    "a ticked todo says nothing about the exchange being over");
+  assert.equal(announcesEnding("finished"), true);
+  assert.equal(announcesEnding("waiting"), true,
+    "a question nobody answered is exactly what the operator must come back for");
+  assert.equal(announcesEnding("attention"), true);
+});
+
+test("a progress push leaves the ending bell armed", () => {
+  clearNotifyLedger();
+  markSelfNotified(1_000, "progress");
+  assert.equal(selfNotifyAnnouncementMs(), 0, "progress must not answer for the ending");
+  markSelfNotified(2_000, "finished");
+  assert.equal(selfNotifyAnnouncementMs(), 2_000, "the model's own ending push does");
+  clearNotifyLedger();
+  assert.equal(selfNotifyAnnouncementMs(), 0, "a restart starts with nothing announced");
 });
 
 /**
