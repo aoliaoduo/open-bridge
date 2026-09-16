@@ -64,9 +64,36 @@ export function readablePeerFiles(): string[] {
 function publishablePeerFiles(): string[] {
   const own = peersFile();
   if (!own) return [];
-  const wantsTunnel = host().config.get<string>("tunnelProvider", "ngrok") === "ngrok"
-    && Boolean(host().config.get<string>("ngrokDomain", "").trim());
-  return wantsTunnel ? [own, ...sharedPeerFiles()] : [own];
+  const cfg = host().config;
+  const publishes = tunnelInPlay(
+    String(cfg.get<string>("tunnelProvider", "ngrok")),
+    String(cfg.get<string>("ngrokDomain", "") ?? ""),
+    String(cfg.get<string>("tailscaleDomain", "") ?? ""),
+  );
+  return publishes ? [own, ...sharedPeerFiles()] : [own];
+}
+
+/**
+ * Is a public tunnel actually in play for this configuration?
+ *
+ * The one question that decides whether this instance advertises into OTHER
+ * builds' registries — and therefore whether their tunnel can route our token
+ * here. It used to be asked with ngrok in mind only, so an instance serving the
+ * Tailscale funnel published itself into its own file and nowhere else. On a
+ * machine where two instances share the single 443 funnel — tailscale's version
+ * of ngrok Free's one-domain budget, i.e. exactly the case the sharing exists
+ * for — neither could see the other, and the failure was silent: nothing in the
+ * log says "I did not publish".
+ *
+ * Each provider is asked about its own address: `--no-tunnel` with a leftover
+ * ngrok domain still stored publishes nothing, and a tailscale instance is
+ * published once discovery has filled its domain in (before that there is no
+ * address to serve, which is the same state as ngrok with no domain).
+ */
+export function tunnelInPlay(provider: string, ngrokDomain: string, tailscaleDomain: string): boolean {
+  if (provider === "ngrok") return Boolean(ngrokDomain.trim());
+  if (provider === "tailscale") return Boolean(tailscaleDomain.trim());
+  return false;
 }
 
 export async function publishSelf(): Promise<void> {
