@@ -55,7 +55,7 @@ import { apiRouteHandler, setShutdownHook } from "./server/api-router.js";
 import { fail, parseArgs, type ParsedArgs } from "./cli/args.js";
 import { padLabel } from "./cli/format.js";
 import {
-  legacyRuntimePath, pidAlive, portAvailable, readOneRuntime, readRuntime,
+  holderOfPort, legacyRuntimePath, pidAlive, portAvailable, readOneRuntime, readRuntime,
   runtimePath, serveLockPath, setDefaultHome, type RuntimeInfo,
 } from "./cli/registry.js";
 import { cmdPrompt, cmdStatus, cmdStop, cmdUrl } from "./cli/query-commands.js";
@@ -71,7 +71,7 @@ const HELP = (): string => t(`open-bridge ${VERSION} — standalone MCP bridge f
 
 用法:
   open-bridge serve [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]
-  open-bridge stop | status | url | instances | health | prompt
+  open-bridge stop [--pid N] | status | url | instances | health | prompt
   open-bridge logs [--tail N] [--follow] [--clear]
   open-bridge config [list] [get KEY] [set KEY VALUE] [path]
   open-bridge token create [--label L] [--ttl SEC] | list | revoke ID | delete ID | rotate ID
@@ -80,7 +80,7 @@ const HELP = (): string => t(`open-bridge ${VERSION} — standalone MCP bridge f
 
 说明:
   serve     前台启动 Bridge；控制台地址打印在终端
-  stop      停止「当前目录」那个实例（没有则按唯一运行中的实例）
+  stop      停止「当前目录」那个实例（没有则按唯一运行中的实例；--pid N 指定别的实例）
             由该实例自己启动的命令（例如走它的 MCP 工具执行）会被拒绝——那等于立刻断掉
             自己正在用的连接；要真停，由人在终端里加 --force
   status    同上，打印状态、项目根、MCP URL 与暴露情况
@@ -99,7 +99,7 @@ const HELP = (): string => t(`open-bridge ${VERSION} — standalone MCP bridge f
 
 Usage:
   open-bridge serve [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]
-  open-bridge stop | status | url | instances | health | prompt
+  open-bridge stop [--pid N] | status | url | instances | health | prompt
   open-bridge logs [--tail N] [--follow] [--clear]
   open-bridge config [list] [get KEY] [set KEY VALUE] [path]
   open-bridge token create [--label L] [--ttl SEC] | list | revoke ID | delete ID | rotate ID
@@ -108,7 +108,7 @@ Usage:
 
 Commands:
   serve     Start the Bridge in the foreground; the console URL is printed here
-  stop      Stop the instance for THIS directory (or the only running one)
+  stop      Stop the instance for THIS directory (or the only running one); --pid N picks another
             Commands the instance itself started (through its own MCP tools) are
             refused: that would cut the connection being used to ask. To really
             stop it, a human adds --force in a terminal
@@ -261,10 +261,21 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   // it, so we say what is wrong instead of quietly serving somewhere else.
   const desiredPort = nodeHost.config.get<number>("port", 0);
   if (desiredPort > 0 && !(await portAvailable(desiredPort))) {
-    if (port !== undefined) {
-      fail(t(`端口 ${desiredPort} 已被占用（可能是另一个实例）。改用其他端口：open-bridge serve --port ${desiredPort + 1}；open-bridge instances 可查看谁在跑。`, `Port ${desiredPort} is already in use (possibly another instance). Try another: open-bridge serve --port ${desiredPort + 1}; open-bridge instances shows who is running.`));
-    }
-    console.log(t(`[open-bridge] 配置端口 ${desiredPort} 已被占用，本次改用系统分配的端口。`, `[open-bridge] Configured port ${desiredPort} is in use; falling back to a system-assigned port for this run.`));
+    // Who holds it decides what the operator can do next, so say it rather than
+    // leaving them to guess. A Bridge instance is addressable (`stop --pid`); a
+    // foreign program is not, and gets the platform's own owner check instead.
+    const holder = holderOfPort(nodeHost.storageDir(), desiredPort);
+    const occupied = holder
+      ? t(
+        `端口 ${desiredPort} 已被占用：pid ${holder.pid} 正在 ${holder.root} 上运行。停止它：open-bridge stop --pid ${holder.pid}；或改用其他端口：open-bridge serve --port ${desiredPort + 1}。`,
+        `Port ${desiredPort} is in use by pid ${holder.pid}, serving ${holder.root}. Stop it with open-bridge stop --pid ${holder.pid}, or use another port: open-bridge serve --port ${desiredPort + 1}.`,
+      )
+      : t(
+        `端口 ${desiredPort} 已被占用，且不是本机任何一个 Bridge 实例（占用者是别的程序，${process.platform === "win32" ? `netstat -ano | findstr :${desiredPort}` : `lsof -i :${desiredPort}`} 可查）。改用其他端口：open-bridge serve --port ${desiredPort + 1}。`,
+        `Port ${desiredPort} is in use, and no Bridge instance on this machine claims it, so another program holds it (${process.platform === "win32" ? `netstat -ano | findstr :${desiredPort}` : `lsof -i :${desiredPort}`} names it). Use another port: open-bridge serve --port ${desiredPort + 1}.`,
+      );
+    if (port !== undefined) fail(occupied);
+    console.log(`[open-bridge] ${occupied}` + t(" 本次改用系统分配的端口。", " Falling back to a system-assigned port for this run."));
     port = 0;
   }
 

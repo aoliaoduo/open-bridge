@@ -112,6 +112,20 @@ export function resolveInstance(home: string, root: string): { runtime?: Runtime
   return { live };
 }
 
+/**
+ * The live instance holding `port`, when this machine's registry knows one.
+ *
+ * Two copies of a project share one config file, so the copy that starts second
+ * asks for the very port the first copy is already serving on. Reported as
+ * "possibly another instance", that refusal is a dead end: the operator is
+ * standing in the new directory and cannot see the old one. Naming the holder
+ * (pid + root) and the command that frees the port turns it into a next step.
+ */
+export function holderOfPort(home: string, port: number): RuntimeInfo | undefined {
+  if (!(port > 0)) return undefined;
+  return readAllRuntimes(home).find(info => info.port === port);
+}
+
 export function pidAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }

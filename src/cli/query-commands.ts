@@ -14,14 +14,35 @@ import { selfStopRefusal } from "../bridge/stop-guard.js";
 import { fail, type ParsedArgs } from "./args.js";
 import { padLabel } from "./format.js";
 import {
-  consoleTokenFor, consoleTokenOrUndefined, cwdRoot, httpJson, pidAlive, resolveHome,
-  resolveInstance, runtimePath, serveLockPath, type HttpJsonResult,
+  consoleTokenFor, consoleTokenOrUndefined, cwdRoot, httpJson, pidAlive, readAllRuntimes,
+  resolveHome, resolveInstance, runtimePath, serveLockPath, type HttpJsonResult, type RuntimeInfo,
 } from "./registry.js";
 
 export async function cmdStop(parsed: ParsedArgs): Promise<void> {
   const home = resolveHome(parsed);
   const root = cwdRoot();
-  const { runtime, note } = resolveInstance(home, root);
+  // `--pid` answers the one case the directory rule cannot: the instance to stop
+  // lives in a directory the operator is no longer in (a folder that moved, a
+  // second copy, a refusal that named a pid). Everything else keeps meaning
+  // "this directory's instance", so the flag stays opt-in.
+  const requestedPid = parsed.flags.get("pid");
+  let runtime: RuntimeInfo | undefined;
+  let note: string | undefined;
+  if (typeof requestedPid === "string") {
+    const pid = Number(requestedPid);
+    if (!Number.isInteger(pid) || pid <= 0) {
+      fail(t(`--pid 需要一个进程号（收到 "${requestedPid}"）。`, `--pid expects a process id (got "${requestedPid}").`));
+    }
+    runtime = readAllRuntimes(home).find(info => info.pid === pid);
+    if (!runtime) {
+      fail(t(`本机没有 pid ${pid} 的实例记录。open-bridge instances 列出正在运行的实例。`, `No instance on this machine is recorded as pid ${pid}. open-bridge instances lists what is running.`));
+    }
+    note = t(`按 --pid ${pid} 指定：${runtime.root}（不是当前目录 ${root}）。`, `Targeted by --pid ${pid}: ${runtime.root} (not the current directory, ${root}).`);
+  } else {
+    const resolved = resolveInstance(home, root);
+    runtime = resolved.runtime;
+    note = resolved.note;
+  }
   if (note) console.log(`${t("注", "Note")}: ${note}`);
   if (!runtime || !pidAlive(runtime.pid)) {
     console.log(t("没有正在运行的实例。", "No instance is running."));

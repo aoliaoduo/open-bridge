@@ -16,6 +16,7 @@ import { test, before, after } from "node:test";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import http from "node:http";
+import net from "node:net";
 import { mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import { tmpdir } from "node:os";
@@ -30,6 +31,10 @@ const CLI = path.join(ROOT, "bin", "open-bridge.js");
 let home;
 let dirA;
 let dirB;
+let dirC;
+let dirD;
+/** The port one shared config file names, claimed by whichever copy starts first. */
+let sharedPort;
 const instances = {};
 
 function suffixFor(root) {
@@ -78,8 +83,9 @@ function getJson(port, pathname, token) {
   });
 }
 
-function boot(label, dir) {
-  const child = spawn(process.execPath, [CLI, "serve", "--no-tunnel", "--port", "0", "--root", dir, "--home", home], {
+/** Boot a copy of the app in `dir`; the default asks for an arbitrary port. */
+function boot(label, dir, args = ["--port", "0"]) {
+  const child = spawn(process.execPath, [CLI, "serve", "--no-tunnel", "--root", dir, "--home", home, ...args], {
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
@@ -112,6 +118,8 @@ after(async () => {
   removeTempDir(home);
   removeTempDir(dirA);
   removeTempDir(dirB);
+  removeTempDir(dirC);
+  removeTempDir(dirD);
 });
 
 test("two directories run two Bridges against one shared data dir", async () => {
@@ -190,6 +198,18 @@ test("a second serve in the same directory is refused with a clear message", asy
   assert.match(again.stderr + (again.stdout ?? ""), /该目录已有实例在运行/, `expected the per-directory refusal, got: ${again.stderr}`);
 });
 
+/** An unused loopback port, so the suite can name the port it refills. */
+async function freePort() {
+  return await new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
 test("the startup lock dies with its instance, and a stale one is reclaimed", async () => {
   const lockFor = root => path.join(home, `serve-${suffixFor(root)}.lock`);
   // A was stopped by the previous test: its graceful shutdown takes the lock
@@ -214,4 +234,62 @@ test("the startup lock dies with its instance, and a stale one is reclaimed", as
   assert.match(stopped.stdout, /已发送停止指令/);
   await waitFor(() => !existsSync(lockFor(dirA)), "the lock to disappear with its instance");
   assert.equal(existsSync(runtimeFileFor(dirA)), false, "and the runtime record with it");
+});
+
+test("a serve refused for a taken port names the holder, its directory, and how to free it", async () => {
+  // The moved-folder case, exactly: one shared config file names port N, and the
+  // copy that is already up owns N. The copy that starts second must be told who
+  // holds the port, because "possibly another instance" is a dead end when the
+  // other instance sits in a directory the operator no longer has open.
+  sharedPort = await freePort();
+  writeFileSync(path.join(home, "config.json"), JSON.stringify({ port: sharedPort }, null, 2));
+  boot("C", dirA, []);
+  const holder = await waitFor(() => {
+    try {
+      const info = JSON.parse(readFileSync(runtimeFileFor(dirA), "utf8"));
+      return info.port === sharedPort ? info : undefined;
+    } catch { return undefined; }
+  }, "the copy that owns the configured port");
+
+  // A directory with no instance of its own - the copy that was just moved
+  // here, which is the position the operator is actually in.
+  dirD = mkdtempSync(path.join(tmpdir(), "ob-multi-D-"));
+  const refused = await run(process.execPath, [CLI, "serve", "--no-tunnel", "--port", String(sharedPort), "--root", dirD, "--home", home], { cwd: dirD })
+    .then(() => ({ code: 0, text: "" }))
+    .catch(error => ({ code: error.code, text: String(error.stderr ?? "") + String(error.stdout ?? "") }));
+
+  assert.notEqual(refused.code, 0, "the second copy must not start");
+  assert.ok(refused.text.includes(`pid ${holder.pid}`), `the refusal must name the holder's pid:\n${refused.text}`);
+  assert.ok(refused.text.includes(path.resolve(dirA)), `and the directory it serves:\n${refused.text}`);
+  assert.ok(refused.text.includes(`stop --pid ${holder.pid}`), `and the command that frees the port:\n${refused.text}`);
+});
+
+test("`open-bridge stop --pid` stops that instance from any directory, and nothing else", async () => {
+  const holder = JSON.parse(readFileSync(runtimeFileFor(dirA), "utf8"));
+  const bBefore = await statusFor("B");
+
+  const stopped = await run(process.execPath, [CLI, "stop", "--pid", String(holder.pid), "--home", home], { cwd: dirB });
+  assert.match(stopped.stdout, /已发送停止指令/, `the named pid is the one to stop:\n${stopped.stdout}${stopped.stderr ?? ""}`);
+
+  const gone = await waitFor(async () => {
+    try { await getJson(holder.port, "/healthz/none"); return false; } catch { return true; }
+  }, "the pid-named instance to stop");
+  assert.ok(gone, "the named instance is gone");
+  assert.equal(existsSync(runtimeFileFor(dirA)), false, "and its runtime record with it");
+
+  const bAfter = await getJson(bBefore.runtime.port, "/api/status", routeTokenFor(dirB));
+  assert.equal(bAfter.status, 200, "the instance in the directory the command was typed in must be untouched");
+});
+
+test("with the port freed, the copy in the new directory serves on the configured port", async () => {
+  dirC = mkdtempSync(path.join(tmpdir(), "ob-multi-C-"));
+  boot("D", dirC, []);
+  const info = await waitFor(() => {
+    try {
+      const record = JSON.parse(readFileSync(runtimeFileFor(dirC), "utf8"));
+      return record.port === sharedPort ? record : undefined;
+    } catch { return undefined; }
+  }, "the new copy to bind the configured port");
+  const res = await getJson(info.port, "/api/status", routeTokenFor(dirC));
+  assert.equal(res.status, 200, "stop the holder, serve again: that recovery path has to work");
 });

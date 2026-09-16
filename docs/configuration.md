@@ -52,7 +52,7 @@ open-bridge serve                     # a second instance, serving project-b, in
 | `open-bridge url` | Print the current MCP URL |
 | `open-bridge prompt` | Print the connection prompt to paste into an AI client |
 | `open-bridge logs [--tail N] [--follow] [--clear]` | Read, follow or clear the log |
-| `open-bridge stop` | Stop the instance for the current directory |
+| `open-bridge stop [--pid N]` | Stop the instance for the current directory — or, with `--pid`, exactly the instance that pid names, from any directory |
 | `open-bridge config list / get KEY / set KEY VALUE / path` | Read and write configuration |
 | `open-bridge token create / list / revoke / delete / rotate` | Manage bearer tokens |
 | `open-bridge doctor` | Diagnose the environment, including every running instance |
@@ -226,7 +226,7 @@ Instances sharing a data directory share **configuration, tokens and the registr
 ## FAQ
 
 **Port already in use?**
-`open-bridge instances` shows whether one is already running. Use `--port 18081`, or `open-bridge stop` first.
+The refusal names the holder — pid and the directory it serves — and offers the way out: `open-bridge stop --pid <pid>` stops exactly that instance (from any directory), or `--port 18081` starts this one elsewhere. `open-bridge instances` lists every running instance. When no Bridge instance holds the port, the refusal points at the platform's own owner check (`netstat -ano | findstr :<port>` on Windows, `lsof -i :<port>` elsewhere) instead of sending you to `stop` for something that is not a Bridge.
 
 **The public address does not respond?**
 `open-bridge health` makes a real request over the public URL and reports status and timing. `tunnel_role: follower` means the address is borrowed from another instance; it will change when that instance exits, and this one takes over when it can.
