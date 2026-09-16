@@ -401,6 +401,24 @@ test("two insertion hunks anchored at the same coordinate keep body order", () =
     assert.equal(await readFile(file, "utf8"), "x\nA\nB\n");
   }));
 
+test("two bare @@ insertion hunks append in body order (ShunCode EOF regression)", () =>
+  withSandbox(async (root, ws) => {
+    const file = path.join(root, "bare.txt");
+    await writeFile(file, "keep\n", "utf8");
+    const patch = [
+      "*** Begin Patch",
+      "*** Update File: bare.txt",
+      "@@",
+      "+A",
+      "@@",
+      "+B",
+      "*** End Patch",
+      "",
+    ].join("\n");
+    await applyPatch(patch, ws);
+    assert.equal(await readFile(file, "utf8"), "keep\nA\nB\n");
+  }));
+
 test("Add File over an existing file is rejected (no silent overwrite)", () =>
   withSandbox(async (root, ws) => {
     const file = path.join(root, "existing.txt");

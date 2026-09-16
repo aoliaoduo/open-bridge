@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **同一个更新块里两个裸 `@@` 纯插入 hunk，会按相反顺序落到文件末尾。** hunk 应用顺序的 tie-break 是「排序键相同就逆 body 序」——对**有限锚点**这恰好是对的：两个插入锚在同一行，后应用的插进同一个位置、把先应用的挤到下方，文档里因此保持 body 序（既有测试钉着这条）。但裸 `@@` 的排序键是 `+Infinity`，它的插入点不是某个固定行，而是**文件末尾——且每次追加后末尾都会移动**：先应用的 hunk 永远占住更靠前的位置，逆序应用就成了逆序落盘。AI 按顺序写的两段内容（先 A 后 B），写进文件变成先 B 后 A，补丁照常报成功，没有任何一行报错提示顺序反了。修复把「键相同」按含义拆开：有限锚点维持逆 body 序，裸 `@@`（EOF 追加）回到正 body 序。顺带拆掉一个暗雷：旧写法靠 `Infinity - Infinity` 得到 NaN、再靠 NaN 是 falsy 才走进 tie-break——比较器离「随机排序」只差一次重构，现在是显式判断。`test/patch.test.ts` 新增用例先跑红（断言落盘 `keep\nA\nB\n`，实际写出 `keep\nB\nA\n`），修后全绿；原有「同一坐标两个插入保持 body 序」用例继续通过——两种语义的边界划对了。
+
 - **吊销 OAuth 令牌只吊销了递上来的那一个，客户端刷新一下就回来了。** `revokeToken` 把 access token 标记 revoked、把 refresh token 删掉——但只处理**与递上来的密钥哈希相同的那一行**。于是吊销 access token 之后，同一次授权发出的 refresh token 还活着：客户端拿它换一个新的 access token 就继续用，而操作者以为自己刚刚已经把这个凭据销毁了。**一个客户端自己就能撤销掉的「吊销」不叫吊销。** RFC 7009 §2.1 明写了反方向（吊销 refresh token 时 SHOULD 一并作废同一 grant 下的所有 access token），而正方向正是按下那个按钮的人所理解的语义。
 
   改为按 grant 吊销：本服务器每次授权只发一对 access/refresh，两者都带 `client_id` 与 `resource`，所以用这两个字段认定同一 grant，两半一起作废。只影响被点名的那个客户端，别的客户端照常工作——这正是 per-client 凭据的意义。`test/oauth-integration.test.mjs` 新增两向用例；原有的「refresh 轮换后旧的失效」用例继续通过（轮换写入的是新一对，不会自我吊销）。

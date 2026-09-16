@@ -239,10 +239,28 @@ function applyHunksTracked(current: string, body: string, relative: string): { t
   });
   // Bottom-up: lower hunks first so their coordinates are unaffected by edits
   // made above them (and upper hunks still find their original context).
-  // Equal coordinates (e.g. two pure insertions at the same anchor) apply in
-  // reverse body order: each one anchors at the same original position, so the
-  // later body hunk lands first and the earlier one ends up before it.
-  hunkData.sort((a, b) => ((b.oldStart ?? Number.POSITIVE_INFINITY) - (a.oldStart ?? Number.POSITIVE_INFINITY)) || (b.order - a.order));
+  hunkData.sort((a, b) => {
+    const aKey = a.oldStart ?? Number.POSITIVE_INFINITY;
+    const bKey = b.oldStart ?? Number.POSITIVE_INFINITY;
+    if (bKey !== aKey) return bKey - aKey;
+    // Applications tied on one sort key do NOT share a correct order — it
+    // depends on what the key means:
+    //
+    // - Finite anchor (e.g. two pure insertions after the same line): REVERSE
+    //   body order. Every insertion lands AT the same original position, so
+    //   the hunk applied last ends up ahead of the one applied first;
+    //   reversing keeps the document in body order.
+    // - Bare "@@" hunks (key +Infinity): FORWARD body order. They append at
+    //   the end of the file and the end MOVES with every append, so the
+    //   first-applied hunk keeps the earlier position — applying in reverse
+    //   used to emit the later body hunk's lines above the earlier one's,
+    //   silently reversing content the client wrote in order.
+    //
+    // Keys are compared explicitly: Infinity - Infinity is NaN, and relying
+    // on NaN being falsy to reach the tie-break made this comparator one
+    // refactor away from sorting tied hunks arbitrarily.
+    return a.oldStart === undefined ? a.order - b.order : b.order - a.order;
+  });
   for (const { oldStart, remove, add } of hunkData) {
     if (!remove) {
       // Pure-insertion hunk (@@ -N,0 +M,K @@): insert AFTER old line N. Bare
