@@ -12,6 +12,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Start` 只重试 ngrok 隧道，而失败提示正让人去点它。** 隧道起不来时唯一的恢复手段是那次重试（`state.server` 已在、`tunnelRole` 为 `none`、没有待触发的重连），而它的判断写成 `tunnelProvider === "ngrok"` —— tailscale 下点 Start 只会回「已在运行」，funnel 一直躺到整实例重启；更糟的是失败路径本身在提示「修复后点 Start 重试」（provider 切换警告里那句），等于把操作者指向一个空按钮。同一条链上还有第二处：`funnel --bg` 的子进程按设计立即退出（代理是 daemon 侧的配置项），而它被留在了 `state.tunnel` 里 —— 那个槽位被当作「隧道还在」的凭据，于是即便把判断改成 provider 无关，`!state.tunnel` 依旧会拦住重试。现在两个 provider 都走同一次重试，`--bg` 的子进程退出时清掉槽位（仅当槽位仍指向自己），`state.tunnel` 只代表「真的还活着的隧道」。新增 `test/tailscale-tunnel-integration.test.mjs`：以 Node 自身充当 tailscale CLI（fixture 目录里无扩展名的 `status` / `funnel` 两个脚本，与 ngrok 那份 fixture 同一手法），先让 funnel 起不来，再点 Start —— 未修复代码上红在「attempts stayed at 1」。
+
+- **tailscale 实例不往别的实例的 peer 注册表发布自己。** 「要不要对外发布」的那个判断只认 ngrok，于是 funnel 模式的实例只写自己的注册表文件：在一台机器上两个实例共享唯一的 443 funnel 时（这正是 peer 共享存在的理由，等价于 ngrok 免费版一个域名），谁也看不见谁，follower 永远不会发生 —— 而且这个失败是无声的，日志里没有一句「我没有发布」。「是否真的有隧道在跑」现在提取成 `tunnelInPlay(provider, ngrokDomain, tailscaleDomain)` 并逐 provider 读各自的域名：`--no-tunnel` 残留着 ngrok 域名照样不发布，tailscale 实例在域名发现之前也不发布（那时确实没有可服务的地址）。判据在 `test/tunnel-in-play.test.ts`。
+
+- **`set_config_value` 不认识 `tailscaleExecutable`。** 能写设置的入口有两个（控制台设置页与 MCP 的 `set_config_value`），而新键只加进了一个：设置清单（`settings-model.ts`）认它、控制台输入框在写它、`docs/configuration.md` 在讲它，MCP 那条路却回 `Unsupported Open Bridge setting: tailscaleExecutable` —— 对一个刚从 `get_config` 里读到这个键的客户端来说，这句话等于在说「这个键不存在」。现在两条路共用同一条校验，且**允许空串**：`ngrokExecutable` 的自动值是字面量 `"ngrok"`，而这里空串本身就是合法值（让解析器决定：先 PATH，再 MSI 默认安装目录），控制台把输入框清空时写的正是它。`test/config-values.test.ts` 钉住三条（可写、空串合法、超长拒绝）。
+
+- **`open-bridge doctor` 的隧道行在 tailscale 下显示 ngrok 可执行文件。** 那一行写死了 `(${ngrokExe})`，于是 funnel 安装显示成 `tailscale (ngrok)` —— 操作者本来就是因为别处不对劲才来看这一行的。域名行同样跟着 provider 走：ngrok 下报 `ngrokDomain`，tailscale 下报 `tailscaleDomain`（未配置时说明它会在 serve 时从 CLI 发现，这是正常状态）。
+
+- **`get_config` 的声明里没有 tailscale 的两个键。** 声明的输出形状是刻意裁剪过的子集（这份 schema 随每次 `tools/list` 一起发给客户端，真正的编辑器是控制台），但**一个功能区内必须完整** —— `tailscaleDomain` / `tailscaleExecutable` 进了配置、控制台和文档，schema 却只有两个 ngrok 名字：照声明做计划的客户端，恰好看不到它正在运行的那个 provider 的设置。`test/tool-output-shapes.test.ts` 新增一条：隧道族的五个键都必须声明，且类型与真实值一致。
+
+- **切换隧道提供商只写配置、不重建运行中的隧道。** 切换原来只把值落盘：运行中的旧 provider 继续服务到下次重启，而状态页如实播报着一个操作者已经离开的 provider 的 URL（实测：控制台把 ngrok 切成 tailscale，配置文件写着 `tailscale`，状态页仍发 ngrok 地址）。`setConfig` 现在识别这个变化并重建隧道（先拆掉两族隧道 —— 不能复用 `stopInternal` 里的 provider 判断，那里读的是**新**值，恰好会在切换时放过**旧**隧道），会话、托管进程、本地监听都不受影响。`test/tailscale-tunnel-integration.test.mjs` 双向钉住（切到 `none` 必须撤下隧道，切回来必须产生一次新的 funnel 尝试）。
+
+- **隧道设置卡片不分提供商。** 选 Tailscale Funnel 后页面仍摆着整套 ngrok 专用字段（authtoken、预留域名、可执行文件、系统代理开关），提示去改会被静默忽略的值，而它真正服务的 ts.net 域名既看不到也改不了。卡片现在按 provider 渲染：ngrok 保持原样；tailscale 只有公网域名（从发现结果预填，若与 CLI 报告的不一致会在启动时报错）与可执行文件路径；none 只剩 provider 与自动重连开关。
+
+- **同一轮五路审计里的另外十项修复（明细见 `1c22366` 的提交信息；第十一项令牌吊销见下条）：** 失败限流改用 `X-Forwarded-For` 的**最后**一项（ngrok/Tailscale 都追加真实 IP，取第一项等于让客户端自选预算）；`config.json` 解析失败不再静默回落默认值（会把 public-authed 降级成 public-open）；公网域名监视链可分裂出第二条（已停机的实例被重新拉活）；`run_script` 返回结构化克隆装不下的值（如函数）时不再静默变成超时，而是快速失败并给出 `UnserializableReturn`；`read_files` 的 `end_line` 在无尾换行文件上少报一行；`stop_service` 超时后不再谎报已停止（句柄保留，`delete_service` 在进程存活时拒绝）；`apply_patch` 的锁按 block 模式而非 diff 模式解析头部（仓库里真有 `b/` 目录时锁错了文件）；shell 会话的退出码不再从跨扫描块边界的标记里读出（曾把 `-123` 读成 `-1`）；`notify.idleMinutes: 0` 不再把结束通知的静默延迟压成 0（那个 0 是关掉空闲看门狗，不是让铃声立刻响）；控制台 Shell 参数改成一参数一行（含空格的参数曾被永久拆开）。
+
 - **另一进程吊销的令牌会被本进程的写回复活。** 令牌写入是「读基准 → 变换 → 与磁盘合并 → 写回」，旧合并规则只保护「本进程没见过的行」；对两边都有的行，本进程的版本整体胜出。时序：本进程任一记录写（每 30 秒的 useCount 刷盘就够）先读到基准 → CLI 进程吊销令牌 T 并落盘 → 本进程把仍携带 T 未吊销版本的列表写回 —— **吊销静默失效**。这正是合并想防的场景，但它只防「新增行被删」，不防「已有行被外部改了状态」。现在 `mergeRecordsWithDisk` 接收基准做三方判定：磁盘独有的行只有「基准里也从未有过」（真·外来新铸造）才保留；`revokedAt` 按磁盘确立者为准，本进程写回不撤销已确立的吊销。`test/auth-core.test.ts` 钉住三条（含 purge 行不得复活的回归 —— 初版修复就栽在这里，被 `guards-integration` 抓住）。
 
 - **旧世代的「没有会话」把两种失败说成同一句话。** 2025 世代的客户端没带可用会话时，传输层对「从来没握过手」和「握过手、但会话已经不在了（重启、空闲回收、同一个 URL 换了实例）」回的都是 `400 -32000 "Bad Request: Server not initialized"`。这句话读起来像「服务器坏了」，而两种情况的解法都只是**再发一次 `initialize`** —— 于是最自然的结论恰好是唯一没有出路的那个：本轮真付了代价，一轮探测据此写了「引擎握手已坏」的报告，而同一台服务在两条代码之外正好好地服务现代协议请求。现在分开回答：没有 `mcp-session-id` 头 → `400` / `-32000` / `data.reason: "initialize-required"`；带了服务端不认识的 id → `404` / `-32001` / `data.reason: "session-expired"`（404 也是规范对未知会话 id 的要求）。`initialize` 本身从不被拦：带着过期 id 重握手照样成功并拿回新 id —— 容忍是刻意的，重连不该需要特例。新增 `src/bridge/session-guidance.ts`（纯函数，判据在 `test/session-guidance.test.ts`）与 `test/legacy-session-guidance-integration.test.mjs`（真进程上钉住两条响应、握手不受影响、现代世代不被拦）。红先绿后：未修复代码上两条集成用例分别红在「缺 `data.reason`」与「状态是 400 而不是 404」。

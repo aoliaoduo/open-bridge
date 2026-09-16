@@ -143,6 +143,8 @@ open-bridge serve                 # without --no-tunnel
 - The public URL follows the same shape as ngrok's: `https://<machine>.<tailnet>.ts.net/mcp/<route-token>`.
 - Stopping the instance turns the funnel off (`tailscale funnel --https=443 off`); a daemon-side config left behind would keep serving nothing - the local listener is gone - but is cleaned up anyway.
 - Tailscale forwards the client IP in `X-Forwarded-For` (appended, same as ngrok), so the auth failure limiter works the same way.
+- The CLI is found the way ngrok's is: `tailscaleExecutable` wins when set, otherwise PATH, otherwise the MSI's default install dir (`C:\Program Files\Tailscale\tailscale.exe` — the MSI does not put `tailscale` on PATH, so on Windows this fallback is the common case, not a curiosity). Leave the setting empty to let the resolver decide.
+- **One funnel per machine.** 443 is a single port, so two instances in tailscale mode both run `funnel --bg` and the one that started (or rebuilt) last holds it. The two addresses still both work: the holder's listener looks the other instance's token up in the shared registry (`bridge-peers.json`) and forwards to it — the same mechanism the ngrok section describes, and the reason that registry is shared. What is missing compared with ngrok: there is no domain watch and no promote-on-release. A holder that stops turns the funnel off, and another instance's public URL goes dead with it — its status page keeps showing that URL until it rebuilds the tunnel (Start, or a provider switch). Treat a machine-wide funnel as belonging to the instance you want holding it.
 - Tailscale not installed or not logged in? The start logs `tailscale status failed` and the instance stays local-only; the error names the cause.
 
 ---
