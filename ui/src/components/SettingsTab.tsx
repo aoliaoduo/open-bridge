@@ -22,6 +22,23 @@ interface Props {
 
 /** Bounds mirror the server's CONFIG_SPEC (src/bridge/settings-model.ts) so a
  *  value the UI accepts never comes back as an inscrutable 400. */
+/**
+ * Mirrors the sound-path rule in the server's CONFIG_SPEC
+ * (src/bridge/config-values.ts: absolute path + audio extension) for the same
+ * reason NUMBER_BOUNDS mirrors the numeric ones -- so the field can revert a
+ * value the server is about to refuse, instead of leaving the box showing
+ * something the config does not hold.
+ */
+const SOUND_EXTENSIONS = [".wav", ".mp3", ".m4a", ".aac", ".wma", ".flac"];
+
+function isSoundPath(raw: string): boolean {
+  // Quotes stripped to match the hint under the field ("paste the path as-is
+  // -- quotes are stripped"), and the server, which trims them too.
+  const value = raw.trim().replace(/^"|"$/g, "");
+  const absolute = value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
+  return absolute && SOUND_EXTENSIONS.some(extension => value.toLowerCase().endsWith(extension));
+}
+
 const NUMBER_BOUNDS = {
   port: { min: 0, max: 65_535, label: () => t("本地端口", "Local port") },
   publicHealthTimeoutMs: { min: 3_000, max: 120_000, label: () => t("公网健康检查", "Public health check") },
@@ -35,15 +52,23 @@ const NUMBER_BOUNDS = {
  * and intermediate values (a half-typed port, a health timeout below its
  * minimum) fired error toasts on every key.
  *
- * Number fields validate on commit against the server's bounds: an invalid
- * value is REVERTED to the saved one with a toast, never silently kept — the
- * old behaviour left the input showing a value the config did not hold, and
- * the operator only found out on the next reload.
+ * Fields validate on commit: an invalid value is REVERTED to the saved one
+ * with a toast, never silently kept — the old behaviour left the input showing
+ * a value the config did not hold, and the operator only found out on the next
+ * reload.
+ *
+ * Number fields check the server's bounds. Text fields check `validate` when
+ * one is given: that hook exists because the two sound-path fields already
+ * passed an onInvalid promising "needs an absolute path to an audio file",
+ * and nothing ever called it — the check ran for numbers only, so any string
+ * was committed. A mistyped path then failed silently at play time, which is
+ * indistinguishable from the feature being switched off.
  */
 export function DraftField({
   value,
   onCommit,
   onInvalid,
+  validate,
   type = "text",
   min,
   max,
@@ -54,6 +79,12 @@ export function DraftField({
   value: string;
   onCommit: (raw: string) => void;
   onInvalid?: () => void;
+  /**
+   * Accept/reject a non-empty text value. Empty is always allowed and never
+   * asked about: clearing a field is how an optional setting is unset, and
+   * running a "must be an audio file" check over "" would make it impossible.
+   */
+  validate?: (raw: string) => boolean;
   type?: "text" | "number";
   min?: number;
   max?: number;
@@ -79,6 +110,10 @@ export function DraftField({
         setDraft(value);
         return;
       }
+    } else if (validate && draft.trim() !== "" && !validate(draft.trim())) {
+      onInvalid?.();
+      setDraft(value);
+      return;
     }
     onCommit(draft);
   };
@@ -113,10 +148,16 @@ export function DraftField({
  * The four notify events, in the order an operator meets them: the two that
  * block them first, then the two that merely report.
  *
- * `always` and `canRing` are properties of the event, not preferences:
- * attention and waiting bypass the on/off switches because an unanswered
- * question stalls the exchange, and only those two are worth a phone that
- * rings until opened.
+ * `always` is a property of the event, not a preference: attention and waiting
+ * bypass the on/off switches because an unanswered question stalls the
+ * exchange.
+ *
+ * There is deliberately no equivalent for ringing. Every event can ring, and
+ * whether it should is the operator's call -- deciding on their behalf which
+ * events "deserve" it left the page with a distinction it had no room to
+ * explain, so it read as a bug. (A `canRing` flag encoding the old rule
+ * survived here for a while after the rule went, set on every row and read by
+ * nothing.)
  */
 /**
  * The two local-sound slots.
@@ -165,28 +206,24 @@ const NOTIFY_EVENT_ROWS = [
     label: () => t("需要你回来", "Attention"),
     when: () => t("AI 明确需要你回到电脑前", "The AI explicitly needs you back"),
     always: true,
-    canRing: true,
   },
   {
     key: "Waiting" as const,
     label: () => t("等你回答", "Waiting"),
     when: () => t("AI 提了问题，在等你选择", "The AI asked something and is blocked"),
     always: true,
-    canRing: true,
   },
   {
     key: "Finished" as const,
     label: () => t("对话结束", "Finished"),
     when: () => t("这一轮收尾；AI 忘了发则服务端代发", "The round wraps up; the server covers a forgetful AI"),
     always: false,
-    canRing: false,
   },
   {
     key: "Progress" as const,
     label: () => t("进展", "Progress"),
     when: () => t("勾掉一项任务，或 AI 汇报一行进展", "An item is ticked off, or progress is reported"),
     always: false,
-    canRing: false,
   },
 ];
 
@@ -1029,6 +1066,7 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
                 <DraftField
                   value={settings.config[row.configKey] as string}
                   placeholder={t("音频文件的完整路径，留空则不响", "Full path to an audio file; empty means silent")}
+                  validate={isSoundPath}
                   onCommit={raw => setConfig(row.configKey, raw.trim())}
                   onInvalid={() => notify?.(t(
                     "需要一个绝对路径，且是音频文件（.wav .mp3 .m4a .aac .wma .flac）。",

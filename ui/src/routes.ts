@@ -149,7 +149,7 @@ export function routeGroupLabel(id: RouteId): string {
 }
 
 /**
- * 设置 is one sidebar page but seven real sub-pages: each card lives at its own
+ * 设置 is one sidebar page but six real sub-pages: each card lives at its own
  * path (`/console/settings/<section>`) so a deep link opens exactly the card
  * the operator meant — the anchor-scroll rail only ever faked this.
  */
