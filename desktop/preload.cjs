@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld("obDesktop", {
   activity: () => ipcRenderer.invoke("ob:activity"),
   /** 剪贴板兜底：渲染层 navigator.clipboard 不可达时走主进程。 */
   copyText: (text) => ipcRenderer.invoke("ob:copy-text", text),
+  /** 在资源管理器中打开工作区 / 定位日志文件（kind: "workspace" | "log"）。 */
+  revealPath: (kind) => ipcRenderer.invoke("ob:reveal-path", kind),
   /** （B 阶段预留）经壳转发到本地桥 MCP 的工具面。 */
   mcp: {
     tools: () => ipcRenderer.invoke("mcp:tools"),

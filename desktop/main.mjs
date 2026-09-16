@@ -11,7 +11,7 @@
  * 而是附着（attach）过去 —— 同一片地面，一盏灯亮着就不要再点一盏。
  */
 
-import { app, BrowserWindow, Tray, Menu, dialog, nativeImage, clipboard, ipcMain } from "electron";
+import { app, BrowserWindow, Tray, Menu, dialog, nativeImage, clipboard, ipcMain, shell } from "electron";
 import { fork } from "node:child_process";
 import * as fs from "node:fs";
 import * as http from "node:http";
@@ -290,7 +290,9 @@ async function openWindow() {
     },
   });
   mainWindow.on("closed", () => { mainWindow = null; });
-  await mainWindow.loadFile(path.join(DESKTOP_DIR, "workbench", "index.html"));
+  // --smoke-view=<name> 把视图名当 hash 传给渲染层：冒烟与证据回流时能直开任意视图截图。
+  const smokeView = (process.argv.find((a) => typeof a === "string" && a.startsWith("--smoke-view=")) || "").split("=")[1];
+  await mainWindow.loadFile(path.join(DESKTOP_DIR, "workbench", "index.html"), smokeView ? { hash: smokeView } : undefined);
 }
 
 // ---- 旧版监控控制台（/console，桥自己 host 的那个）与它是两扇窗 --------
@@ -522,7 +524,11 @@ function registerWorkbenchIpc() {
   ipcMain.handle("ob:open-console", () => { void openConsoleWindow(); });
   ipcMain.handle("mcp:tools", async () => {
     await ensureMcp();
-    return mcpState.tools;
+    // 内部存储是旧 agent 循环的 OpenAI 工具壳；渲染层只认扁平的 {name, description}。
+    return mcpState.tools.map((tool) => ({
+      name: (tool.function && tool.function.name) || tool.name || "?",
+      description: (tool.function && tool.function.description) || tool.description || "",
+    }));
   });
   ipcMain.handle("mcp:call", async (_event, name, args) => {
     if (typeof name !== "string" || !name.trim()) throw new Error("mcp:call：需要工具名。");
@@ -532,11 +538,25 @@ function registerWorkbenchIpc() {
   ipcMain.handle("ob:copy-text", (_event, text) => {
     if (typeof text === "string" && text) clipboard.writeText(text);
   });
+  ipcMain.handle("ob:reveal-path", async (_event, kind) => {
+    if (kind === "workspace") {
+      if (!currentWorkspace) throw new Error("工作区未设置。");
+      return shell.openPath(currentWorkspace);
+    }
+    if (kind === "log") {
+      shell.showItemInFolder(path.join(logDir(), "bridge.log"));
+      return "";
+    }
+    throw new Error(`ob:reveal-path：未知 kind ${String(kind)}`);
+  });
 }
 
 // ---- 生命周期 ----------------------------------------------------------------
 
 let currentWorkspace = os.homedir();
+// 打包版 Windows 通知的图标与应用名从 AppUserModelId 解析；它必须与 electron-builder 的
+// appId 完全一致，否则通知读不到图标（HippoBuddy electron/main.js 注释里血泪记载的坑）。
+if (process.platform === "win32") app.setAppUserModelId("com.openbridge.desktop");
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
