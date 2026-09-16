@@ -274,7 +274,13 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
         `端口 ${desiredPort} 已被占用，且不是本机任何一个 Bridge 实例（占用者是别的程序，${process.platform === "win32" ? `netstat -ano | findstr :${desiredPort}` : `lsof -i :${desiredPort}`} 可查）。改用其他端口：open-bridge serve --port ${desiredPort + 1}。`,
         `Port ${desiredPort} is in use, and no Bridge instance on this machine claims it, so another program holds it (${process.platform === "win32" ? `netstat -ano | findstr :${desiredPort}` : `lsof -i :${desiredPort}`} names it). Use another port: open-bridge serve --port ${desiredPort + 1}.`,
       );
-    if (port !== undefined) fail(occupied);
+    if (port !== undefined) {
+      // A refusal is still a start that ended, and this start claimed the lock
+      // above: take it with us, or the next serve in this directory inherits a
+      // claim from a process that is already gone.
+      try { fs.rmSync(serveLock, { force: true }); } catch { /* best-effort */ }
+      fail(occupied);
+    }
     console.log(`[open-bridge] ${occupied}` + t(" 本次改用系统分配的端口。", " Falling back to a system-assigned port for this run."));
     port = 0;
   }

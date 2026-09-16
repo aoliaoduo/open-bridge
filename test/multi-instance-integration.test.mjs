@@ -262,6 +262,10 @@ test("a serve refused for a taken port names the holder, its directory, and how 
   assert.ok(refused.text.includes(`pid ${holder.pid}`), `the refusal must name the holder's pid:\n${refused.text}`);
   assert.ok(refused.text.includes(path.resolve(dirA)), `and the directory it serves:\n${refused.text}`);
   assert.ok(refused.text.includes(`stop --pid ${holder.pid}`), `and the command that frees the port:\n${refused.text}`);
+  // A refusal is still a start that ended: the startup lock must go with it, or
+  // the next serve in this directory inherits a claim from a process that is gone.
+  assert.equal(existsSync(path.join(home, `serve-${suffixFor(dirD)}.lock`)), false,
+    "a refused serve must not leave its startup lock behind");
 });
 
 test("`open-bridge stop --pid` stops that instance from any directory, and nothing else", async () => {
