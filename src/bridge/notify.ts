@@ -199,9 +199,10 @@ export function clampIdleMinutes(value: unknown): number {
 /**
  * Bark GET url: `origin/<key>/<title>/<body>?group=…`, title and body
  * percent-encoded (the same shape as every Bark client and the public docs).
- * `extras` appends the operator-visible knobs the AI chose (sound/level/call/
- * badge/url) as query parameters in a fixed order; absent fields are omitted,
- * so the plain push URL shape is unchanged.
+ * `extras` appends presentation parameters in a fixed order; absent fields
+ * are omitted, so the plain push URL shape is unchanged. These come from the
+ * operator's per-event settings (or, for the server's own pushes, from the
+ * call site) -- never from a tool call.
  */
 export function buildBarkUrl(serverUrl: string, key: string, title: string, body: string, extras?: BarkPushExtras): string {
   const origin = serverUrl.replace(/\/+$/u, "");
@@ -225,14 +226,19 @@ export function buildBarkUrl(serverUrl: string, key: string, title: string, body
   return `${origin}/${encodeURIComponent(key)}${segments.join("")}?${query.toString()}`;
 }
 
-/** The per-call knobs Bark itself supports, as the notify tool exposes them. */
+/**
+ * The presentation parameters Bark supports. Filled from the operator's
+ * settings for the event, plus the handful the server sets for its own pushes.
+ * Not reachable from a tool call: see withEventDefaults.
+ */
 export interface BarkPushExtras {
   /** Ringtone name from the Bark app's sound list (alphanumeric/underscore). */
   sound?: string;
   /**
    * iOS delivery style. `critical` breaks through silent mode and Focus
-   * outright, which is why it is the one level the server never picks on the
-   * model's behalf without being asked.
+   * outright -- which is exactly why choosing it is the operator's call, made
+   * once in settings, and not a judgement made per-push by a caller who cannot
+   * see what they chose.
    */
   level?: "active" | "timeSensitive" | "passive" | "critical";
   /** Critical-alert volume 0-10. Bark ignores it unless level is critical. */
@@ -262,111 +268,6 @@ export interface BarkPushExtras {
   autoCopy?: number;
 }
 
-/**
- * Validate the model's optional Bark knobs BEFORE anything leaves. Returns a
- * refusal that names the parameter and the expectation (the tool-guard rule:
- * the caller must be able to fix the call from the error alone), or the clean
- * extras object. Absent and empty mean "not provided" and stay absent.
- */
-export function parseBarkExtras(args: JsonArgs): { ok: true; extras: BarkPushExtras } | { ok: false; error: string } {
-  const extras: BarkPushExtras = {};
-
-  const rawSound = typeof args.sound === "string" ? args.sound.trim() : "";
-  if (rawSound) {
-    if (!/^[A-Za-z0-9_]{1,64}$/.test(rawSound)) {
-      return { ok: false, error: "sound must be a ringtone name from the Bark app (letters, digits, _; max 64 chars). (expected 'sound': string)" };
-    }
-    extras.sound = rawSound;
-  }
-
-  const rawLevel = typeof args.level === "string" ? args.level.trim() : "";
-  if (rawLevel) {
-    if (rawLevel !== "active" && rawLevel !== "timeSensitive" && rawLevel !== "passive" && rawLevel !== "critical") {
-      return { ok: false, error: "level must be one of: active, timeSensitive, passive, critical. (expected 'level': string)" };
-    }
-    extras.level = rawLevel;
-  }
-
-  if (args.volume !== undefined && args.volume !== null && args.volume !== "") {
-    const volume = typeof args.volume === "number" ? args.volume : Number(args.volume);
-    if (!Number.isInteger(volume) || volume < 0 || volume > 10) {
-      return { ok: false, error: "volume must be an integer between 0 and 10 (critical alerts only). (expected 'volume': number)" };
-    }
-    // Say so rather than dropping it: a caller who set volume believed it
-    // would be loud, and silently ignoring that is how a "critical" alert
-    // turns out to have been a normal one.
-    if (extras.level !== "critical") {
-      return { ok: false, error: "volume only applies to level \"critical\"; set level to critical or drop volume. (expected 'volume': number)" };
-    }
-    extras.volume = volume;
-  }
-
-  if (args.call !== undefined && args.call !== null && args.call !== "") {
-    const call = typeof args.call === "number" ? args.call : Number(args.call);
-    if (!Number.isInteger(call) || call < 1 || call > 10) {
-      return { ok: false, error: "call must be an integer between 1 and 10 (1 = ring until opened). (expected 'call': number)" };
-    }
-    extras.call = call;
-  }
-
-  if (args.badge !== undefined && args.badge !== null && args.badge !== "") {
-    const badge = typeof args.badge === "number" ? args.badge : Number(args.badge);
-    if (!Number.isInteger(badge) || badge < 0 || badge > 9999) {
-      return { ok: false, error: "badge must be an integer between 0 and 9999. (expected 'badge': number)" };
-    }
-    extras.badge = badge;
-  }
-
-  const rawUrl = typeof args.url === "string" ? args.url.trim() : "";
-  if (rawUrl) {
-    if (!/^https?:\/\//i.test(rawUrl) || rawUrl.length > 500) {
-      return { ok: false, error: "url must be an http(s) link of at most 500 chars — where tapping the notification goes. (expected 'url': string)" };
-    }
-    extras.url = rawUrl;
-  }
-
-  const rawGroup = typeof args.group === "string" ? args.group.trim() : "";
-  if (rawGroup) {
-    if (rawGroup.length > 64) {
-      return { ok: false, error: "group must be at most 64 chars — the notification stack this push joins. (expected 'group': string)" };
-    }
-    extras.group = rawGroup;
-  }
-
-  const rawIcon = typeof args.icon === "string" ? args.icon.trim() : "";
-  if (rawIcon) {
-    if (!/^https?:\/\//i.test(rawIcon) || rawIcon.length > 500) {
-      return { ok: false, error: "icon must be an http(s) image link of at most 500 chars (iOS 15+). (expected 'icon': string)" };
-    }
-    extras.icon = rawIcon;
-  }
-
-  if (args.isArchive !== undefined && args.isArchive !== null && args.isArchive !== "") {
-    const flag = typeof args.isArchive === "number" ? args.isArchive : Number(args.isArchive);
-    if (flag !== 0 && flag !== 1) {
-      return { ok: false, error: "isArchive must be 0 or 1 (1 = keep this push in Bark's history). (expected 'isArchive': number)" };
-    }
-    extras.isArchive = flag;
-  }
-
-  const rawCopy = typeof args.copy === "string" ? args.copy.trim() : "";
-  if (rawCopy) {
-    if (rawCopy.length > 500) {
-      return { ok: false, error: "copy must be at most 500 chars — the text the copy action puts on the clipboard. (expected 'copy': string)" };
-    }
-    extras.copy = rawCopy;
-  }
-
-  if (args.autoCopy !== undefined && args.autoCopy !== null && args.autoCopy !== "") {
-    const flag = typeof args.autoCopy === "number" ? args.autoCopy : Number(args.autoCopy);
-    if (flag !== 0 && flag !== 1) {
-      return { ok: false, error: "autoCopy must be 0 or 1 (1 = copy without asking). (expected 'autoCopy': number)" };
-    }
-    extras.autoCopy = flag;
-  }
-
-  return { ok: true, extras };
-}
 
 /**
  * The switch gate — one decision point for every push producer.
@@ -443,7 +344,11 @@ function callEnabledFor(event: NotifyEvent): boolean {
  * fields through the settings struct would make every caller carry knobs it
  * has no opinion about.
  */
-export function withEventDefaults(event: NotifyEvent, bark?: BarkPushExtras): BarkPushExtras | undefined {
+export function withEventDefaults(
+  event: NotifyEvent,
+  bark?: BarkPushExtras,
+  options: { trusted?: boolean } = {},
+): BarkPushExtras | undefined {
   const cfg = host().config;
   const suffix = eventSuffix(event);
   const level = String(cfg.get<string>(`notify.level${suffix}`, "") ?? "").trim();
@@ -453,11 +358,36 @@ export function withEventDefaults(event: NotifyEvent, bark?: BarkPushExtras): Ba
   // acknowledge a finished run is not making a mistake.
   const call = cfg.get<boolean>(`notify.call${suffix}`, false) === true;
 
-  const merged: BarkPushExtras = { ...(bark ?? {}) };
+  // How loud a notification is belongs to the operator, who said so once on
+  // the settings page. This used to merge the other way round — config filled
+  // only what the caller left blank — so anything a caller DID say won, and a
+  // model answering `level: "critical"` pierced a silent mode the operator had
+  // chosen, or `call: 1` started a ring they never enabled. The model cannot
+  // read those settings, so it was overruling a preference it could not see.
+  //
+  // `trusted` is for the server's own pushes (the idle watchdog, the settings
+  // page's test button), which are deliberate local decisions rather than a
+  // guess made elsewhere — and are the reason this parameter still exists.
+  const merged: BarkPushExtras = options.trusted === true ? { ...(bark ?? {}) } : {};
   if (merged.level === undefined && isNotifyLevel(level)) merged.level = level;
   if (merged.call === undefined && call) merged.call = 1;
   return Object.keys(merged).length ? merged : undefined;
 }
+
+/**
+ * The arguments the notify tool accepts, and the whole of what a model may
+ * decide: what happened, and what to say about it.
+ *
+ * Exported so the tool definition and its contract test read the same list —
+ * a knob re-added to the schema without appearing here is a test failure, not
+ * a silent return of the override.
+ */
+export function notifyToolArgKeys(): readonly string[] {
+  return ["event", "title", "message"];
+}
+
+/** Stated once, so the rest of the system can be read against it. */
+export const presentationIsOperatorOwned = true;
 
 function isNotifyLevel(value: string): value is NonNullable<BarkPushExtras["level"]> {
   return value === "active" || value === "timeSensitive" || value === "passive" || value === "critical";
@@ -531,17 +461,18 @@ export async function pushNotification(
     ledger.attempts = [...ledger.attempts.filter(atMs => nowMs - atMs < NOTIFY_WINDOW_MS), nowMs];
   }
 
-  // Per-event defaults from the console, under anything the caller asked for
-  // explicitly. The AI knows what happened; the operator knows how they want
-  // to be told about it, and only one of those two is sitting next to the
-  // phone. An explicit `level` in a notify call still wins -- a model that has
-  // judged something genuinely urgent should be able to say so.
+  // Per-event presentation from the console. The AI knows what happened; the
+  // operator knows how they want to be told about it, and only one of those
+  // two is sitting next to the phone. `options.bark` reaches this function
+  // only from inside the server (the idle watchdog, the settings-page test
+  // button) -- it is no longer anything a tool call can set, so honouring it
+  // here is honouring a local decision, not a remote guess.
   const url = buildBarkUrl(
     settings.serverUrl,
     settings.key,
     clippedTitle,
     clippedBody,
-    withEventDefaults(event, options.bark),
+    withEventDefaults(event, options.bark, { trusted: true }),
   );
   try {
     const probe = await probeHttpHealth(url, { timeoutMs: BARK_TIMEOUT_MS });
@@ -624,10 +555,6 @@ export async function notifyTool(args: JsonArgs): Promise<NotifyOutcome> {
   if (!(NOTIFY_EVENT_VALUES as readonly string[]).includes(rawEvent)) {
     throw new Error(`Unknown event "${rawEvent}". Pass one of: ${NOTIFY_EVENT_VALUES.join(", ")}.`);
   }
-  // Optional Bark knobs are validated before any settings read: a bad value is
-  // the model's to fix, and the error must name the parameter to fix.
-  const extras = parseBarkExtras(args);
-  if (!extras.ok) throw new Error(extras.error);
   const event = rawEvent as NotifyEvent;
   const rawTitle = typeof args.title === "string" ? args.title.trim() : "";
   const rawMessage = typeof args.message === "string" ? args.message.trim() : "";
@@ -635,7 +562,9 @@ export async function notifyTool(args: JsonArgs): Promise<NotifyOutcome> {
   const body = rawMessage || NOTIFY_PHRASES[event];
   // `record` for the tool call itself happens in the dispatcher's invoke();
   // this just answers with the structured outcome the schema promises.
-  return await pushNotification(resolveNotifySettings(), event, title, body, Date.now(), { bark: extras.extras });
+  // No presentation options: level and ring come from the operator's settings
+  // for this event, which is the only place that knowledge exists.
+  return await pushNotification(resolveNotifySettings(), event, title, body, Date.now());
 }
 
 /** A completed item, as a previous list can express it. */

@@ -11,7 +11,7 @@ import { test } from "node:test";
 import {
   announcesEnding, buildBarkUrl, clampIdleMinutes, clearNotifyLedger, eventSuppressed,
   finishNoticeVerdict, idleWatchVerdict, markSelfNotified, newlyCompletedTodos,
-  notifyUsageInstructions, parseBarkExtras, repeatVerdict, selfNotifyAnnouncementMs,
+  notifyUsageInstructions, repeatVerdict, selfNotifyAnnouncementMs,
   REPEAT_ACK_TAIL_MS, REPEAT_INTERVAL_MS, REPEAT_MAX_PUSHES, REPEAT_WINDOW_MS,
 } from "../src/bridge/notify.js";
 
@@ -205,80 +205,26 @@ test("buildBarkUrl: no extras means the plain push URL, unchanged shape", () => 
   );
 });
 
-test("parseBarkExtras: absent and empty mean not-provided, not an error", () => {
-  assert.deepEqual(parseBarkExtras({}).extras, {});
-  assert.deepEqual(parseBarkExtras({ sound: "  ", level: "", call: "", badge: null }).extras, {});
+test("presentation is built from settings, never from a tool call", async () => {
+  // These knobs used to be notify() parameters, validated and then merged
+  // OVER the operator's per-event settings -- so a model answering
+  // level:"critical" pierced a silent mode the operator had chosen, and
+  // call:1 started a ring they had switched off. The model cannot read those
+  // settings, so it was overruling a preference it could not see.
+  //
+  // The parser is gone along with the parameters. What is left to pin here is
+  // that the tool surface offers no way back in; test/notify-knobs.test.ts
+  // covers the merge itself.
+  const { notifyToolArgKeys } = await import("../src/bridge/notify.js");
+  assert.deepEqual([...notifyToolArgKeys()].sort(), ["event", "message", "title"]);
 });
 
-test("parseBarkExtras: legal values pass through typed", () => {
-  const ok = parseBarkExtras({ sound: "bell", level: "passive", call: 1, badge: 0, url: "http://127.0.0.1:18080/x" });
-  assert.equal(ok.ok, true);
-  if (ok.ok) {
-    assert.deepEqual(ok.extras, {
-      sound: "bell", level: "passive", call: 1, badge: 0, url: "http://127.0.0.1:18080/x",
-    });
-  }
-});
-
-test("parseBarkExtras: every knob refuses junk by name (the model fixes the call)", () => {
-  const cases: Array<[Record<string, unknown>, RegExp]> = [
-    [{ sound: "bad name!" }, /sound/],
-    [{ sound: "x".repeat(65) }, /sound/],
-    [{ level: "shout" }, /level must be one of/],
-    [{ volume: 5 }, /volume only applies/],
-    [{ level: "critical", volume: 11 }, /volume/],
-    [{ level: "critical", volume: -1 }, /volume/],
-    [{ group: "g".repeat(65) }, /group/],
-    [{ icon: "javascript:alert(1)" }, /icon/],
-    [{ icon: "ftp://x/i.png" }, /icon/],
-    [{ isArchive: 2 }, /isArchive/],
-    [{ autoCopy: "yes" }, /autoCopy/],
-    [{ copy: "c".repeat(501) }, /copy/],
-    [{ call: 0 }, /call/],
-    [{ call: 11 }, /call/],
-    [{ call: "loud" }, /call/],
-    [{ badge: -1 }, /badge/],
-    [{ badge: 10000 }, /badge/],
-    [{ badge: "many" }, /badge/],
-    [{ url: "javascript:alert(1)" }, /url/],
-    [{ url: "ftp://x" }, /url/],
-    [{ url: `https://e.com/${"x".repeat(600)}` }, /url/],
-  ];
-  for (const [args, pattern] of cases) {
-    const result = parseBarkExtras(args as never);
-    assert.equal(result.ok, false, `expected refusal for ${JSON.stringify(args)}`);
-    if (!result.ok) assert.match(result.error, pattern);
-  }
-});
-
-test("parseBarkExtras: the new knobs are accepted and reach the URL", () => {
-  const parsed = parseBarkExtras({
-    level: "critical", volume: 7, group: "my-project", icon: "https://e.com/i.png",
-    isArchive: 1, copy: "npm run verify", autoCopy: 1,
-  } as never);
-  assert.equal(parsed.ok, true);
-  if (!parsed.ok) return;
-
-  const url = buildBarkUrl("https://api.day.app", KEY, "t", "b", parsed.extras);
-  assert.match(url, /level=critical/);
-  assert.match(url, /volume=7/);
-  assert.match(url, /group=my-project/, "an explicit group beats the default");
-  assert.match(url, /isArchive=1/);
-  assert.match(url, /autoCopy=1/);
-  assert.match(url, /copy=npm\+run\+verify/);
-  assert.match(url, /icon=https%3A%2F%2Fe.com%2Fi.png/);
-});
-
-test("volume is only sent for critical, and only after level says so", () => {
+test("volume rides along only with a critical level", () => {
   // Bark ignores volume unless the level is critical, so sending it otherwise
-  // is noise in the URL and in the audit line. parseBarkExtras refuses that
-  // combination outright rather than dropping the value, because a caller who
-  // set volume believed it would be loud.
-  const quiet = parseBarkExtras({ level: "timeSensitive" } as never);
-  assert.equal(quiet.ok, true);
-  if (quiet.ok) {
-    assert.equal(buildBarkUrl("https://api.day.app", KEY, "t", "b", quiet.extras).includes("volume="), false);
-  }
+  // is noise in the URL and in the audit line.
+  const quiet = buildBarkUrl("https://api.day.app", KEY, "t", "b", { level: "timeSensitive", volume: 7 });
+  assert.equal(quiet.includes("volume="), false);
+  assert.match(buildBarkUrl("https://api.day.app", KEY, "t", "b", { level: "critical", volume: 7 }), /volume=7/);
 });
 
 test("group defaults to open-bridge so pushes stack predictably", () => {

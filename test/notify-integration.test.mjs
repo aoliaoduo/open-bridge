@@ -291,50 +291,40 @@ test("the audit line reports what actually happened, including the silences", as
   await callTool(sessionId, "set_config_value", { key: "notify.onFinish", value: true });
 });
 
-test("the AI picks Bark knobs per call; junk knobs are refused by name", async () => {
-  const knobsBefore = pushes.length;
-  const fancy = toolJson((await callTool(sessionId, "notify", {
-    event: "attention", title: "灵活通知", message: "带铃声与时效等级",
-    sound: "minuet", level: "timeSensitive", badge: 2,
-  })).text);
-  assert.equal(fancy.delivered, true, `attention passes every switch (reason: ${fancy.reason})`);
-  assert.ok(await waitForPushes(knobsBefore + 1));
-  const query = new URL(`https://bark.test${pushes[knobsBefore].url}`).searchParams;
-  assert.equal(query.get("sound"), "minuet");
-  assert.equal(query.get("level"), "timeSensitive");
-  assert.equal(query.get("badge"), "2");
-  assert.equal(query.get("group"), "open-bridge");
-  // critical is a real Bark level (documented alongside volume), so it is now
-  // accepted rather than refused. Whether the phone actually overrides silent
-  // mode still depends on the user allowing critical alerts for Bark in iOS
-  // settings -- the app's business, not a reason to reject the parameter.
+test("the operator's settings decide presentation; caller knobs do nothing", async () => {
+  // This used to assert the opposite: the AI passed sound/level/badge and they
+  // appeared on the push verbatim. That was the bug. Those knobs were merged
+  // OVER the operator's per-event settings, so a model could answer
+  // level:"critical" and pierce a silent mode the operator had chosen, or
+  // call:1 and start a ring they had switched off -- decisions made blind,
+  // since the model cannot read the settings page.
   //
-  // Asserted through the guard rather than by sending: a second real push here
-  // spends the per-minute budget this suite also tests, and `rate_limited` on
-  // an unrelated case is a confusing way to fail. The URL construction for
-  // critical/volume is covered in test/notify.test.ts.
-  const criticalAccepted = await callTool(sessionId, "notify", {
-    event: "attention", message: "真的紧急", level: "critical", volume: 7,
-  });
-  // The distinction that matters is "the guard let it through", not "it was
-  // delivered": whether this particular push goes out depends on the ledger,
-  // which other cases in this file deliberately exhaust.
-  assert.ok(!criticalAccepted.isError, `critical must not be refused as junk: ${criticalAccepted.text}`);
-  assert.doesNotMatch(criticalAccepted.text, /level must be one of/);
+  // The knobs are gone from the tool schema. This pins the end-to-end result:
+  // config supplies the level, and leftover knobs from an old prompt or a
+  // stale client change nothing.
+  await callTool(sessionId, "set_config_value", { key: "notify.levelAttention", value: "timeSensitive" });
 
-  const junk = await callTool(sessionId, "notify", {
-    event: "finished", message: "x", level: "shout",
-  });
-  assert.equal(junk.isError, true, "an unknown level is still refused by name");
-  assert.match(junk.text, /level must be one of/);
+  const knobsBefore = pushes.length;
+  const sent = toolJson((await callTool(sessionId, "notify", {
+    event: "attention", title: "灵活通知", message: "等级来自设置",
+    // Not in the schema any more. Sending them must be harmless, not obeyed.
+    sound: "minuet", level: "critical", badge: 2, call: 1,
+  })).text);
+  assert.equal(sent.delivered, true, `attention passes every switch (reason: ${sent.reason})`);
+  assert.ok(await waitForPushes(knobsBefore + 1));
 
-  // volume without critical is refused rather than dropped: a caller who set
-  // it believed the push would be loud.
-  const orphanVolume = await callTool(sessionId, "notify", {
-    event: "finished", message: "x", volume: 5,
-  });
-  assert.equal(orphanVolume.isError, true, "volume alone is a mistake worth naming");
-  assert.match(orphanVolume.text, /volume only applies/);
+  const query = new URL(`https://bark.test${pushes[knobsBefore].url}`).searchParams;
+  assert.equal(query.get("level"), "timeSensitive", "the operator's level, not the caller's");
+  assert.equal(query.get("call"), null, "a caller cannot start a ring");
+  assert.equal(query.get("sound"), null, "no caller-chosen ringtone");
+  assert.equal(query.get("badge"), null, "no caller-chosen badge");
+  assert.equal(query.get("group"), "open-bridge");
+
+  // That the level tracks the setting rather than being a constant is covered
+  // in test/notify-knobs.test.ts, against withEventDefaults directly. Proving it a
+  // second time here would cost a second real push, and this suite also tests
+  // the per-minute budget -- a `rate_limited` in an unrelated case is a
+  // confusing way to fail.
 });
 
 
