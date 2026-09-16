@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Desktop 工作台阶段二：Codex 形态的 agent 界面与真 agent 循环。** 主窗改载自研工作台（`desktop/workbench/`，file:// 本地页面，零新增运行时依赖）：左侧栏「工作 / 项目分组会话 / 最近会话 / 底部模型署名」、空状态大标题、底部 composer（项目 chip、自动伸缩输入框、权限 chip、模型 chip、发送键），布局对齐 Codex 桌面形态。agent 两条腿都在主进程：LLM 走 **OpenAI 兼容端点**（baseUrl/key/模型可配、限本机保存、连接测试在线、SSE 流式解析含 tool_calls 归并）；工具走**壳转 MCP**——握手本地桥、抓路由令牌、tools/list 映射成 function schema（描述截 400 字符）、tools/call 直通 structuredContent，附着实例拿不到令牌时明说怎么接管。agent 循环封顶 25 步、单工具结果截 12000 字符；权限 chip「完全访问 / 只读」切换工具面（只读模式只暴露读类工具）。项目 = 桥的工作区，切换即重启服务并自动播种当前工作区。`--smoke` 新增第 4 秒渲染截图（userData/smoke-shot.png），无人值守时界面结构有图可证。旧版监控控制台移到托盘「打开控制台（监控）」独立窗。**注意：LLM/MCP 端到端链路需配置真实 key 后首次实测**，此前验证到流式解析与渲染层为止。
+
 - **Open Bridge Desktop：桌面壳第一阶段（薄壳，Windows 首发）。** `desktop/` 子目录自成一棵依赖（Electron + electron-builder，不混入桥的依赖树）。壳以 `ELECTRON_RUN_AS_NODE` 子进程托管 `open-bridge serve`：自选回环端口显式下传、healthz 等待、崩溃按 1s/2s/5s/15s 退避自愈、托盘常驻（打开控制台 / 重启服务 / 更换工作区 / 退出）、关窗不退服务、退出时优雅 SIGTERM。同工作区已有实例在跑时不打架，直接附着到它的端口。preload 以 contextIsolation 暴露 `obDesktop`（status / restartBridge），为下一阶段 codex 风格的 agent 工作台界面预留插座；窗口本体仍是 dist/ui 控制台。冒烟模式 `npm run smoke` 开窗二十秒自退。栈选型与 Codex Desktop / Claude Desktop / Trae / Qoder 相同（全部 Electron）。
 
 ### Fixed

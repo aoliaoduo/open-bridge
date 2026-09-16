@@ -1,0 +1,139 @@
+/* Open Bridge 工作台 —— 布局对齐 Codex 桌面形态：左侧栏 + 主区 + 底部 composer */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --sb-w: 300px;
+  --sb-bg: #f6f7f9;
+  --line: #e8eaee;
+  --text: #1b1f24;
+  --text-2: #6b7280;
+  --accent: #0d9488;
+  --danger: #c2410c;
+  --card: #ffffff;
+}
+html, body, #app { height: 100%; }
+body { font: 14px/1.55 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; color: var(--text); }
+#app { display: flex; overflow: hidden; }
+
+/* ---- 左侧栏 ---- */
+#sidebar {
+  width: var(--sb-w); flex: none; background: var(--sb-bg);
+  border-right: 1px solid var(--line); display: flex; flex-direction: column;
+}
+.sb-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 8px; }
+.work-toggle { font-size: 15px; font-weight: 600; background: none; border: 0; cursor: pointer; }
+.work-toggle .caret { font-size: 11px; color: var(--text-2); }
+.sb-icons { display: flex; gap: 12px; color: var(--text-2); }
+.icon-btn { cursor: pointer; user-select: none; }
+.sb-actions { padding: 4px 10px 10px; display: flex; flex-direction: column; gap: 2px; }
+.sb-actions button {
+  text-align: left; padding: 7px 10px; border: 0; background: none; border-radius: 8px;
+  cursor: pointer; font-size: 13.5px; color: var(--text);
+}
+.sb-actions button:hover { background: #eceef2; }
+.sb-actions .ghost { color: var(--text-2); cursor: not-allowed; }
+.sb-sec { padding: 12px 16px 6px; font-size: 12px; color: var(--text-2); }
+#projectList, #recentList { overflow-y: auto; padding: 0 8px; }
+#projectList { flex: 1 1 auto; }
+#recentList { max-height: 30%; flex: none; padding-bottom: 8px; }
+.proj-head {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.proj-head:hover { background: #eceef2; }
+.proj-head .mono { color: var(--text-2); font-weight: 400; }
+.conv-item {
+  margin-left: 20px; padding: 5px 8px; border-radius: 7px; font-size: 13px; color: #3f4650;
+  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.conv-item:hover { background: #eceef2; }
+.conv-item.active { background: #e3e6eb; font-weight: 600; }
+.recent-item {
+  padding: 5px 8px; border-radius: 7px; font-size: 13px; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.recent-item:hover { background: #eceef2; }
+.sb-empty { padding: 2px 12px 8px; font-size: 12px; color: var(--text-2); }
+.sb-foot {
+  border-top: 1px solid var(--line); padding: 12px 16px; display: flex;
+  align-items: center; justify-content: space-between; font-size: 13px; color: var(--text-2);
+}
+.sb-foot a { text-decoration: none; color: var(--text-2); cursor: pointer; }
+
+/* ---- 主区 ---- */
+#main { flex: 1; display: flex; flex-direction: column; background: #fff; position: relative; }
+#emptyState { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+#emptyState .cloud { font-size: 44px; filter: grayscale(1) opacity(.55); }
+#emptyState h1 { font-size: 24px; font-weight: 600; letter-spacing: .02em; }
+#emptyState .hint { color: var(--text-2); font-size: 13px; }
+
+#messages { flex: 1; overflow-y: auto; padding: 28px 32px 12px; }
+.msg { max-width: 780px; margin: 0 auto 18px; }
+.msg.user { display: flex; justify-content: flex-end; }
+.msg.user .bubble {
+  background: #f0f1f4; border-radius: 14px; padding: 9px 14px; max-width: 80%;
+  white-space: pre-wrap; word-break: break-word;
+}
+.msg.assistant .bubble { white-space: pre-wrap; word-break: break-word; }
+.msg.tool .bubble {
+  background: #f8f9fb; border: 1px solid var(--line); border-radius: 10px;
+  font: 12px/1.5 ui-monospace, Consolas, monospace; color: #3f4650; padding: 8px 12px;
+}
+.msg.tool .bubble summary { cursor: pointer; font-weight: 600; }
+.msg.tool .bubble pre { margin-top: 6px; white-space: pre-wrap; word-break: break-all;
+  max-height: 220px; overflow-y: auto; }
+.msg.error .bubble { color: var(--danger); }
+.msg .role-tag { font-size: 11px; color: var(--text-2); margin-bottom: 4px; }
+
+/* ---- composer ---- */
+#composer {
+  margin: 0 auto 16px; width: min(860px, calc(100% - 48px));
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 10px 12px 8px; box-shadow: 0 1px 2px rgba(20,20,40,.04);
+}
+.composer-top { margin-bottom: 6px; }
+#input {
+  width: 100%; border: 0; outline: none; resize: none; font: inherit;
+  max-height: 160px; line-height: 1.5; padding: 2px 2px 6px;
+}
+.composer-row { display: flex; align-items: center; gap: 8px; }
+.composer-row .spacer, .dlg-actions .spacer { flex: 1; }
+.chip {
+  border: 1px solid var(--line); background: #fafbfc; border-radius: 999px;
+  font-size: 12.5px; padding: 3px 10px; cursor: pointer; color: #3f4650;
+}
+.chip.warn { color: var(--danger); border-color: #f1d3c0; background: #fff7f2; }
+.send {
+  width: 30px; height: 30px; border-radius: 50%; border: 0; cursor: pointer;
+  background: #111827; color: #fff; font-size: 16px; line-height: 1;
+}
+.send:disabled { background: #d1d5db; cursor: default; }
+
+/* ---- 项目选择弹层 ---- */
+#projectPicker {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 92px;
+  width: min(520px, 80%); background: #fff; border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(20,20,40,.14); padding: 8px; z-index: 10;
+}
+.pp-item { padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.pp-item:hover { background: #f0f1f4; }
+.pp-item .pp-path { display: block; color: var(--text-2); font-size: 11.5px; }
+.pp-add { color: var(--accent); font-weight: 600; }
+.pp-note { font-size: 11.5px; color: var(--text-2); padding: 4px 10px 2px; }
+
+/* ---- 设置对话框 ---- */
+dialog { border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; width: 460px; }
+dialog::backdrop { background: rgba(15,23,42,.35); }
+dialog h3 { margin-bottom: 8px; }
+.dlg-note { font-size: 12.5px; color: var(--text-2); margin-bottom: 12px; }
+dialog label { display: block; font-size: 12.5px; color: var(--text-2); margin-bottom: 10px; }
+dialog input {
+  display: block; width: 100%; margin-top: 4px; padding: 7px 10px; font: inherit;
+  border: 1px solid var(--line); border-radius: 8px; color: var(--text);
+}
+.dlg-row { min-height: 20px; }
+.dlg-status { font-size: 12.5px; }
+.dlg-status.ok { color: var(--accent); }
+.dlg-status.bad { color: var(--danger); }
+.dlg-actions { display: flex; gap: 8px; margin-top: 6px; }
+dialog button { padding: 6px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; cursor: pointer; }
+dialog button.primary { background: #111827; color: #fff; border-color: #111827; }

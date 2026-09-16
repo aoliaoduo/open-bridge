@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>Open Bridge</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="sb-head">
+      <button class="work-toggle" id="workTitle">工作 <span class="caret">▾</span></button>
+      <div class="sb-icons"><span title="搜索会话" class="icon-btn" id="searchBtn">⌕</span><span class="icon-btn" title="通知">🔔</span></div>
+    </div>
+    <nav class="sb-actions">
+      <button id="newChat">✎ 新对话</button>
+      <button class="ghost" id="schedBtn" title="规划中">⏲ 定时任务</button>
+      <button id="consoleBtn">🧩 控制台</button>
+    </nav>
+    <div class="sb-sec">项目</div>
+    <div id="projectList"></div>
+    <div class="sb-sec">最近</div>
+    <div id="recentList"></div>
+    <div class="sb-foot"><span id="profile">Open Bridge</span><a id="helpBtn" title="关于">?</a></div>
+  </aside>
+
+  <main id="main">
+    <div id="emptyState">
+      <div class="cloud">⛅</div>
+      <h1>我们要构建什么？</h1>
+      <p class="hint" id="noProjectHint" hidden>先在输入框上方选择一个项目文件夹</p>
+    </div>
+    <div id="messages" hidden></div>
+    <div id="composer">
+      <div class="composer-top">
+        <button id="projectChip" class="chip">▤ 选择项目</button>
+      </div>
+      <textarea id="input" rows="1" placeholder="随心输入" autofocus></textarea>
+      <div class="composer-row">
+        <button id="plusBtn" class="icon-btn" title="添加（规划中）">＋</button>
+        <button id="permChip" class="chip warn" title="点击切换权限模式">⚠ 完全访问</button>
+        <span class="spacer"></span>
+        <button id="modelChip" class="chip" title="模型与端点设置">未配置模型</button>
+        <button id="sendBtn" class="send" title="发送">↑</button>
+      </div>
+    </div>
+    <div id="projectPicker" hidden></div>
+  </main>
+</div>
+
+<dialog id="settingsDlg">
+  <h3>模型设置</h3>
+  <p class="dlg-note">OpenAI 兼容端点（DeepSeek、Qwen、GLM、Kimi 或自建的 Claude/OpenAI 兼容网关均可）。密钥只保存在本机。</p>
+  <label>Base URL <input id="cfgBase" placeholder="https://api.deepseek.com"></label>
+  <label>API Key <input id="cfgKey" type="password" placeholder="sk-…"></label>
+  <label>模型 <input id="cfgModel" placeholder="deepseek-chat"></label>
+  <div class="dlg-row"><span id="cfgStatus" class="dlg-status"></span></div>
+  <div class="dlg-actions">
+    <button id="cfgTest">连接测试</button>
+    <span class="spacer"></span>
+    <button id="cfgCancel">取消</button>
+    <button id="cfgSave" class="primary">保存</button>
+  </div>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

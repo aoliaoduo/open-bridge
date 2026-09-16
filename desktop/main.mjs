@@ -154,6 +154,8 @@ const bridge = {
   child: null,          // 自管子进程；附着已有实例时为 null
   attachedPort: 0,      // 附着到的端口（child 为 null 时有意义）
   port: 0,
+  routeToken: "",       // 从子进程横幅捕获的 MCP 路由令牌；附着模式永远拿不到
+
   restarting: false,
   crashCount: 0,
   intentionalStop: false,
@@ -174,6 +176,7 @@ async function startBridge(workspace) {
   }
   if (!bridgeDistExists()) return; // 由 openWindow 前的守卫提示构建
   bridge.logStream = openLogStream();
+  bridge.routeToken = ""; // 新实例的横幅会给新令牌，别让上一个活着时的留在壳里
   const port = await pickPort();
   bridge.port = port;
   const child = fork(bridgeBinPath(), ["serve", "--port", String(port)], {
@@ -182,7 +185,14 @@ async function startBridge(workspace) {
     stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
   bridge.child = child;
-  child.stdout?.on("data", chunk => bridge.logStream?.write(chunk));
+  child.stdout?.on("data", chunk => {
+    bridge.logStream?.write(chunk);
+    // 路由令牌只在桥自报的启动横幅里出现一次，壳要替工作台看住它。
+    if (!bridge.routeToken) {
+      const hit = chunk.toString("utf8").match(/mcp\/([0-9a-fA-F]{16,})/);
+      if (hit) bridge.routeToken = hit[1];
+    }
+  });
   child.stderr?.on("data", chunk => bridge.logStream?.write(chunk));
   // 必须先挂退出监听再等健康：子进程若在等待期内死掉，后挂的 once("exit")
   // 永远不会补发，bridge.child 会卡在非空 —— 重启永远排不上、stop 也等空。
@@ -257,14 +267,7 @@ async function openWindow() {
     );
     return;
   }
-  const port = currentPort();
-  if (!port) {
-    dialog.showErrorBox(
-      "桥服务未运行",
-      "本地服务还没起来。查看日志：" + path.join(logDir(), "bridge.log"),
-    );
-    return;
-  }
+  // 工作台先开、桥后到也行：渲染层自己会拉状态/工具，失败显化成错误泡。
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 840,
@@ -280,7 +283,33 @@ async function openWindow() {
     },
   });
   mainWindow.on("closed", () => { mainWindow = null; });
-  await mainWindow.loadURL(`http://127.0.0.1:${port}/console`);
+  await mainWindow.loadFile(path.join(DESKTOP_DIR, "workbench", "index.html"));
+}
+
+// ---- 旧版监控控制台（/console，桥自己 host 的那个）与它是两扇窗 --------
+
+let consoleWindow = null;
+
+function openConsoleWindow() {
+  const port = currentPort();
+  if (!port) {
+    dialog.showErrorBox("桥服务未运行", "本地服务还没起来，控制台无源可接。");
+    return;
+  }
+  if (consoleWindow && !consoleWindow.isDestroyed()) {
+    consoleWindow.show();
+    consoleWindow.focus();
+    return;
+  }
+  consoleWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    autoHideMenuBar: true,
+    backgroundColor: "#ffffff",
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  consoleWindow.on("closed", () => { consoleWindow = null; });
+  void consoleWindow.loadURL(`http://127.0.0.1:${port}/console`);
 }
 
 // ---- 托盘 -------------------------------------------------------------------
@@ -298,7 +327,8 @@ function buildTrayMenu(workspace) {
   return Menu.buildFromTemplate([
     { label: statusLine(), enabled: false },
     { type: "separator" },
-    { label: "打开控制台", click: () => { void openWindow(); } },
+    { label: "打开工作台", click: () => { void openWindow(); } },
+    { label: "打开控制台（监控）", click: () => { void openConsoleWindow(); } },
     { label: "重启服务", click: () => { void restartBridge(workspace); } },
     {
       label: "更换工作区文件夹…",
@@ -330,6 +360,274 @@ function trayIcon() {
   return nativeImage.createEmpty();
 }
 
+// ---- 工作台 IPC：本地商店、项目、LLM、经壳转发的 MCP -----------------------------
+
+function workbenchStorePath() {
+  return path.join(app.getPath("userData"), "workbench.json");
+}
+
+function joinUrl(base, tail) {
+  return `${String(base || "").replace(/\/+$/, "")}${tail}`;
+}
+
+/** 本地桥 MCP 会话：惰性握手，会话失效重握一次。 */
+const mcpState = { sessionId: "", tools: [], ready: false };
+
+function bridgeMcpUrl() {
+  const targetPort = currentPort();
+  if (!targetPort) throw new Error("本地桥服务未运行。");
+  if (!bridge.routeToken) {
+    throw new Error("拿不到路由令牌：此实例不是壳启动的（附着模式）。托盘「重启服务」让壳接管后再用工具。");
+  }
+  return `http://127.0.0.1:${targetPort}/mcp/${bridge.routeToken}`;
+}
+
+async function parseMcpBody(resp) {
+  const ctype = resp.headers.get("content-type") || "";
+  const body = await resp.text();
+  if (ctype.includes("text/event-stream")) {
+    const out = [];
+    for (const line of body.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const payload = trimmed.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      try { out.push(JSON.parse(payload)); } catch { /* 非整行，忽略 */ }
+    }
+    return out;
+  }
+  try { return [JSON.parse(body)]; } catch { return []; }
+}
+
+function mcpPost(payload) {
+  const headers = {
+    "Content-Type": "application/json",
+    Accept: "application/json, text/event-stream",
+  };
+  if (mcpState.sessionId) headers["Mcp-Session-Id"] = mcpState.sessionId;
+  return fetch(bridgeMcpUrl(), {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(300000),
+  });
+}
+
+async function ensureMcp() {
+  if (mcpState.ready && mcpState.sessionId) return;
+  const initResp = await mcpPost({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-03-26",
+      capabilities: {},
+      clientInfo: { name: "open-bridge-desktop", version: "0.1.0" },
+    },
+  });
+  const sid = initResp.headers.get("mcp-session-id");
+  if (!sid) throw new Error(`MCP 握手失败（HTTP ${initResp.status}）`);
+  mcpState.sessionId = sid;
+  await mcpPost({ jsonrpc: "2.0", method: "notifications/initialized" });
+  const listResp = await mcpPost({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+  const msgs = await parseMcpBody(listResp);
+  const listed = msgs.flatMap(msg => (msg.result && Array.isArray(msg.result.tools)) ? msg.result.tools : []);
+  if (!listed.length) throw new Error("MCP 工具列表为空：桥可能还在启动。再试一次。");
+  // 描述截到 400 字符：桥的工具文档详尽，整本喂给模型不划算。
+  mcpState.tools = listed.map(tool => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: String(tool.description || "").slice(0, 400),
+      parameters: tool.inputSchema && typeof tool.inputSchema === "object" ? tool.inputSchema : { type: "object" },
+    },
+  }));
+  mcpState.ready = true;
+}
+
+function mcpReset() {
+  mcpState.sessionId = "";
+  mcpState.tools = [];
+  mcpState.ready = false;
+}
+
+async function mcpCallRemote(name, args) {
+  await ensureMcp();
+  const call = {
+    jsonrpc: "2.0",
+    id: Date.now(),
+    method: "tools/call",
+    params: { name, arguments: args && typeof args === "object" && args !== null ? args : {} },
+  };
+  let resp = await mcpPost(call);
+  if (resp.status === 400 || resp.status === 404) {
+    // 桥重启/会话被逐出：重握一次再发；再错就是真错。
+    mcpReset();
+    await ensureMcp();
+    resp = await mcpPost(call);
+  }
+  const msgs = await parseMcpBody(resp);
+  const result = msgs.flatMap(msg => (msg.result ? [msg.result] : []))[0];
+  if (!result) {
+    const rpcError = msgs.flatMap(msg => (msg.error ? [msg.error.message] : []))[0];
+    throw new Error(rpcError || `MCP 调用 ${name} 无结果（HTTP ${resp.status}）`);
+  }
+  if (result.structuredContent && typeof result.structuredContent === "object") {
+    return result.structuredContent;
+  }
+  const textBits = (Array.isArray(result.content) ? result.content : [])
+    .filter(item => item && item.type === "text")
+    .map(item => item.text || "");
+  if (result.isError) {
+    throw new Error(textBits.join("\n").slice(0, 500) || `工具 ${name} 报错`);
+  }
+  return textBits.join("\n");
+}
+
+// ---- LLM：OpenAI 兼容端点的流式对话，SSE 在主进程解析，增量经频道回渲染层 -------
+
+function llmEndpoint(baseUrl, tail) {
+  return joinUrl(baseUrl || "https://api.deepseek.com", tail);
+}
+
+function notifyLlm(event, channel, msg) {
+  try { event.sender.send("llm:event", { channel, ...msg }); } catch { /* 窗口已关 */ }
+}
+
+async function llmChatStream(event, channel, req) {
+  const cfg = req && typeof req === "object" && req.settings ? req.settings : {};
+  const apiKey = String(cfg.apiKey || "").trim();
+  if (!apiKey) throw new Error("未配置 API Key：点输入框下方的模型名，先完成模型设置。");
+  const body = {
+    model: String(cfg.model || "deepseek-chat"),
+    messages: Array.isArray(req.messages) ? req.messages : [],
+    stream: true,
+  };
+  if (Array.isArray(req.tools) && req.tools.length) body.tools = req.tools;
+  let resp;
+  try {
+    resp = await fetch(llmEndpoint(cfg.baseUrl, "/chat/completions"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(300000),
+    });
+  } catch (error) {
+    throw new Error(`模型请求失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!resp.ok || !resp.body) {
+    const detail = (await resp.text().catch(() => "")).slice(0, 300);
+    throw new Error(`模型端点 HTTP ${resp.status}${detail ? `：${detail}` : ""}`);
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let carry = "";
+  let text = "";
+  /** 流式 tool_calls 按 index 归并：id/name 来历只来一次，arguments 逐片追加。 */
+  const toolAcc = new Map();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    carry += decoder.decode(value, { stream: true });
+    let cut = carry.indexOf("\n\n");
+    while (cut >= 0) {
+      const rawEvent = carry.slice(0, cut);
+      carry = carry.slice(cut + 2);
+      const dataLine = rawEvent.split("\n").find(line => line.startsWith("data:"));
+      if (dataLine) {
+        const data = dataLine.slice(5).trim();
+        if (data && data !== "[DONE]") {
+          let chunk;
+          try { chunk = JSON.parse(data); } catch { chunk = null; }
+          const choice = chunk && Array.isArray(chunk.choices) ? chunk.choices[0] : null;
+          const delta = choice && choice.delta ? choice.delta : {};
+          if (typeof delta.content === "string" && delta.content) {
+            text += delta.content;
+            notifyLlm(event, channel, { type: "delta", text: delta.content });
+          }
+          for (const piece of Array.isArray(delta.tool_calls) ? delta.tool_calls : []) {
+            const index = typeof piece.index === "number" ? piece.index : 0;
+            const acc = toolAcc.get(index) || { id: "", name: "", arguments: "" };
+            if (piece.id) acc.id = piece.id;
+            if (piece.function && piece.function.name) acc.name = piece.function.name;
+            if (piece.function && typeof piece.function.arguments === "string") acc.arguments += piece.function.arguments;
+            toolAcc.set(index, acc);
+          }
+        }
+      }
+      cut = carry.indexOf("\n\n");
+    }
+  }
+  const toolCalls = [...toolAcc.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([index, val]) => ({
+      id: val.id || `call_${index}`,
+      type: "function",
+      function: { name: val.name, arguments: val.arguments },
+    }));
+  return { text, toolCalls };
+}
+
+function registerWorkbenchIpc() {
+  ipcMain.handle("wb:load", () => {
+    try { return JSON.parse(fs.readFileSync(workbenchStorePath(), "utf8")); } catch { return null; }
+  });
+  ipcMain.handle("wb:save", (_event, data) => {
+    try {
+      fs.writeFileSync(workbenchStorePath(), JSON.stringify(data && typeof data === "object" ? data : {}, null, 2), "utf8");
+    } catch { /* 本地商店写不进：会话还在，下次再试 */ }
+  });
+  ipcMain.handle("ob:choose-workspace", async () => {
+    const picked = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
+    return picked.canceled ? null : (picked.filePaths[0] || null);
+  });
+  ipcMain.handle("ob:set-workspace", async (_event, dirPath) => {
+    if (typeof dirPath !== "string" || !dirPath.trim()) {
+      throw new Error("set-workspace：需要非空目录路径。");
+    }
+    currentWorkspace = dirPath;
+    saveConfig({ workspace: currentWorkspace });
+    bridge.routeToken = "";
+    mcpReset();
+    await restartBridge(currentWorkspace);
+    publishStatus();
+    return { workspace: currentWorkspace, port: currentPort() };
+  });
+  ipcMain.handle("ob:open-console", () => { void openConsoleWindow(); });
+  ipcMain.handle("mcp:tools", async () => {
+    await ensureMcp();
+    return mcpState.tools;
+  });
+  ipcMain.handle("mcp:call", async (_event, name, args) => {
+    if (typeof name !== "string" || !name.trim()) throw new Error("mcp:call：需要工具名。");
+    return mcpCallRemote(name.trim(), args);
+  });
+  ipcMain.handle("llm:chat", async (event, channel, req) => {
+    try {
+      const result = await llmChatStream(event, channel, req);
+      notifyLlm(event, channel, { type: "done", result });
+    } catch (error) {
+      notifyLlm(event, channel, { type: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+    return null;
+  });
+  ipcMain.handle("llm:test", async (_event, cfg) => {
+    const key = String(cfg && cfg.apiKey || "").trim();
+    if (!key) throw new Error("先填 API Key 再测。");
+    const resp = await fetch(llmEndpoint(cfg && cfg.baseUrl, "/models"), {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) {
+      const detail = (await resp.text().catch(() => "")).slice(0, 200);
+      throw new Error(`HTTP ${resp.status}${detail ? `：${detail}` : ""}`);
+    }
+    const data = await resp.json().catch(() => null);
+    const count = data && Array.isArray(data.data) ? data.data.length : 0;
+    return `连通正常${count ? `：端点列出 ${count} 个模型` : "（端点未返回模型清单，但鉴权通过）"}`;
+  });
+}
+
 // ---- 生命周期 ----------------------------------------------------------------
 
 let currentWorkspace = os.homedir();
@@ -353,11 +651,24 @@ if (!gotLock) {
       versions: { electron: process.versions.electron, node: process.versions.node },
     }));
 
+    registerWorkbenchIpc();
     await startBridge(currentWorkspace);
     publishStatus();
     await openWindow();
     if (process.argv.includes("--smoke")) {
       // 冒烟模式：窗口开 20 秒后自行退出，供首验/CI 证明「起得来、连得上」。
+      // 第 4 秒抓一帧渲染进 userData/smoke-shot.png —— 界面结构对不对，
+      // 无人值守时唯一的证据就是这张图。
+      setTimeout(() => {
+        void (async () => {
+          try {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              const shot = await mainWindow.webContents.capturePage();
+              fs.writeFileSync(path.join(app.getPath("userData"), "smoke-shot.png"), shot.toPNG());
+            }
+          } catch { /* 截图失败不影响冒烟结论 */ }
+        })();
+      }, 4000);
       setTimeout(() => { app.isQuitting = true; app.quit(); }, 20000);
     }
   });

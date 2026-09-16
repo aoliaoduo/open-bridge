@@ -11,6 +11,8 @@ files:
   - preload.cjs
   - package.json
   - icon.png
+  # 工作台页面（阶段二主窗就载它）：漏收的话打包态开窗即白屏。
+  - workbench/**
 extraResources:
   - from: ../bin
     to: bridge/bin

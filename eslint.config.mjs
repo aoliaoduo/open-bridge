@@ -31,6 +31,13 @@ export default tseslint.config(
     },
   },
   {
+    // 工作台渲染层跑在 Chromium 里：window/document/TextDecoder 们是空气。
+    files: ["desktop/workbench/**/*.js"],
+    languageOptions: {
+      globals: { ...globals.browser, obDesktop: "readonly" },
+    },
+  },
+  {
     rules: {
       "@typescript-eslint/no-explicit-any": "warn",
       // `_`-prefixed args/locals are the codebase's explicit "kept for shape"
