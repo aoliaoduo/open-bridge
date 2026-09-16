@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { state } from "../bridge/state.js";
 import { getBridgeStatus, getUsageStats } from "../bridge/meta-tools.js";
-import { buildSettingsState, handleSettingsAction } from "./settings-handler.js";
+import { buildSettingsState, buildTunnelView, handleSettingsAction } from "./settings-handler.js";
 import { controlService, listServiceViews } from "../bridge/service-tools.js";
 import { start, stop, webAiPrompt } from "../bridge/lifecycle.js";
 import { buildStaleness } from "../bridge/build-staleness.js";
@@ -527,6 +527,11 @@ export async function apiRouteHandler(
       // secrets (tokens are stored hashed and never leave the store).
       case "/oauth": sendJson(res, 200, { ok: true, oauth: await oauthConsoleView() }); return true;
       case "/settings": sendJson(res, 200, { ok: true, state: await buildSettingsState() }); return true;
+      // Read-only tunnel reconnaissance, its own endpoint because producing it
+      // spawns the tailscale CLI and may call ngrok's API: the settings page must
+      // not wait on that to render. Carries no credential — the authtoken is used
+      // server-side and reported only as its source.
+      case "/tunnel": sendJson(res, 200, { ok: true, tunnel: await buildTunnelView() }); return true;
       case "/prompt": sendJson(res, 200, { ok: true, prompt: webAiPrompt() }); return true;
       case "/logs/stream": {
         ensureLogStreamWired();

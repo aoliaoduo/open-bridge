@@ -2,15 +2,22 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   authToggleVerdict,
+  configControlShape,
   normalizeSettingsMessage,
   ttlLabel,
+  TUNNEL_CONFIG_KEYS,
   TTL_CHOICES,
 } from "../src/bridge/settings-model.js";
 
 // --- message normalization -------------------------------------------------
 
 test("normalize passes through every command the page can send", () => {
-  const simple = ["copyPrompt", "start", "stop", "rotateEndpoint", "purgeTokens", "revokeAll"];
+  const simple = [
+    "copyPrompt", "start", "stop", "rotateEndpoint", "purgeTokens", "revokeAll",
+    // The tunnel card's two buttons: one writes what detection found into the
+    // fields that are still empty, the other re-runs the reconnaissance.
+    "autoConfigureTunnel", "refreshTunnelDetect",
+  ];
   for (const command of simple) {
     assert.deepEqual(normalizeSettingsMessage({ command }), { command }, command);
   }
@@ -185,6 +192,51 @@ test("every notify setting the console renders survives normalizeSettingsMessage
     const level = normalizeSettingsMessage({ command: "setConfig", key: `notify.level${event}`, value: "passive" });
     assert.ok(level, `notify.level${event} is rejected by the console gate`);
   }
+});
+
+// --- the tunnel card ---------------------------------------------------------
+
+/**
+ * The tunnel card is built out of these keys and sends them through the same
+ * gate as every other setting. A key the card renders but this gate refuses is
+ * a control that answers 无法识别的操作 the moment it is clicked, so the two
+ * lists are pinned against each other — the same failure the notify switches
+ * had when their keys were missing from CONFIG_SPEC.
+ */
+test("every tunnel key the card writes survives the console gate", () => {
+  const samples: Record<string, unknown> = {
+    tunnelProvider: "ngrok",
+    ngrokExecutable: "C:\\tools\\ngrok.exe",
+    tailscaleExecutable: "C:\\Program Files\\Tailscale\\tailscale.exe",
+    tailscaleDomain: "host.tail1.ts.net",
+    autoReconnect: true,
+    ngrokUseHttpProxy: false,
+  };
+  assert.deepEqual(
+    Object.keys(samples).sort(),
+    [...TUNNEL_CONFIG_KEYS].sort(),
+    "the card's key list and the keys this test pins have drifted apart",
+  );
+  for (const [key, value] of Object.entries(samples)) {
+    assert.ok(normalizeSettingsMessage({ command: "setConfig", key, value }), `${key} is rejected by the console gate`);
+  }
+});
+
+/**
+ * The rule the tunnel card follows — choose, do not type — lives in the key
+ * declaration, not in the component that renders it: a key whose value the
+ * machine can find must not reach the page as a blank box just because its kind
+ * is "string". Everything else keeps the control its kind already implies
+ * (boolean → switch, enum → select, int → number), which is why only the
+ * exceptions are declared.
+ */
+test("the keys the machine can find or discover declare that control", () => {
+  assert.equal(configControlShape("ngrokExecutable"), "detected-executable");
+  assert.equal(configControlShape("tailscaleExecutable"), "detected-executable");
+  // The ts.net name is discovered at every start: shown, never typed.
+  assert.equal(configControlShape("tailscaleDomain"), "discovered");
+  assert.equal(configControlShape("tunnelProvider"), undefined);
+  assert.equal(configControlShape("autoReconnect"), undefined);
 });
 
 test("a key that is not a real setting is still refused", () => {

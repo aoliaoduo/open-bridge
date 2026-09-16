@@ -18,6 +18,7 @@
  */
 
 import { validateConfigValue } from "./config-values.js";
+import type { AutoConfigPlan, TunnelFacts } from "./tunnel-plan.js";
 // Type-only, so the dependency-free rule above still holds: this is erased at
 // compile time and the React console can import this file without dragging
 // node:fs in behind it.
@@ -162,6 +163,20 @@ export interface SettingsDetectedView {
   ngrok: ExecutableChoice[];
 }
 
+/**
+ * What `GET /api/tunnel` answers with: what this machine has for each provider,
+ * and what 「自动配置」 would write given that.
+ *
+ * Its own endpoint rather than a field of the settings state, because producing
+ * it means spawning two CLIs and (when a token exists) asking ngrok's API. The
+ * settings page must not wait on a probe to render; the tunnel card fills in
+ * when the answer lands, and the operator can re-run it with 「重新检测」.
+ */
+export interface SettingsTunnelView {
+  facts: TunnelFacts;
+  plan: AutoConfigPlan;
+}
+
 /** Everything the settings page shows, pushed by the host as one `state` message. */
 export interface SettingsState {
   running: boolean;
@@ -186,6 +201,13 @@ export interface SettingsState {
 
 export type SettingsAction =
   | { command: "copyPrompt" | "start" | "stop" | "rotateEndpoint" | "purgeTokens" | "revokeAll" }
+  /**
+   * 「一键自动配置」 and "look again": the first writes what detection found into
+   * the fields that are still EMPTY (never over an operator's own value), the
+   * second forces a re-probe when the operator has just installed something.
+   */
+  | { command: "autoConfigureTunnel" }
+  | { command: "refreshTunnelDetect" }
   | { command: "clearStats" }
   | { command: "saveDomain"; domain: string }
   /** Device key as pasted (bare or full URL — the host parses and validates). */
@@ -256,6 +278,50 @@ const CONFIG_SPEC = {
 
 export type SettingsConfigKey = keyof typeof CONFIG_SPEC;
 
+/**
+ * Which CONTROL a key gets in the console, where its kind does not already say.
+ *
+ * The rule the settings page is being simplified under: choose, do not type.
+ * A key whose value the machine can find is a pick-list, a key whose value only
+ * the network knows is a choice out of what it returned, and a key that is
+ * discovered on every start is read-only. Everything else keeps the control its
+ * kind implies (boolean → a switch, enum → a select, int → a number…).
+ *
+ * Declared here, next to the key allowlist rather than in the component that
+ * renders it, so a key cannot arrive on the page with an input shape nobody
+ * declared — the same reason CONFIG_SPEC is not restated in the console.
+ */
+const CONFIG_CONTROL_SHAPES = {
+  /** A path the machine can find: a list of what was found, plus "auto". */
+  ngrokExecutable: "detected-executable",
+  tailscaleExecutable: "detected-executable",
+  // The ts.net name is filled in from the CLI when the tunnel starts: the card
+  // shows it read-only, and the manual override lives in 高级设置.
+  tailscaleDomain: "discovered",
+} as const;
+
+export type ConfigControlShape = (typeof CONFIG_CONTROL_SHAPES)[keyof typeof CONFIG_CONTROL_SHAPES];
+
+/** The declared control for a key, or undefined when its kind already says. */
+export function configControlShape(key: SettingsConfigKey): ConfigControlShape | undefined {
+  return (CONFIG_CONTROL_SHAPES as Partial<Record<SettingsConfigKey, ConfigControlShape>>)[key];
+}
+
+/** The keys the tunnel card owns, in the order an operator meets them. */
+export const TUNNEL_CONFIG_KEYS: readonly SettingsConfigKey[] = [
+  "tunnelProvider",
+  "ngrokExecutable",
+  "tailscaleExecutable",
+  "tailscaleDomain",
+  "autoReconnect",
+  "ngrokUseHttpProxy",
+];
+// The ngrok domain is NOT in this list on purpose: it is not a generic config
+// key at all (validateNgrokDomain owns its grammar, so CONFIG_SPEC excludes it),
+// and the card writes it through the dedicated saveDomain flow. Its control is
+// still 选择-over-填空 — a list of the account's reserved domains, read from the
+// same detection the rest of the card uses.
+
 
 /**
  * Validate an inbound console action against a strict allowlist. Anything
@@ -279,6 +345,7 @@ export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
     "setConcurrency", "setConfig", "copyText",
     "clearStats", "saveNotifyKey", "testNotify",
     "saveNgrokAuthtoken", "testSound", "stopSound",
+    "autoConfigureTunnel", "refreshTunnelDetect",
   ]);
   if (!allowed.has(command)) return null;
 

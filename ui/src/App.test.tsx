@@ -10,9 +10,14 @@ import type {
   OAuthConsoleView,
   SettingsActionResult,
   SettingsState,
+  SettingsTunnelView,
   ToolCatalog,
   UsageStats,
 } from "./api";
+// Straight from the shared declaration, not restated here: the fixtures below
+// run the SAME planner the server executes, which is also how this file proves
+// the module bundles for the browser at all.
+import { planTunnelAutoConfig, type TunnelFacts } from "../../src/bridge/tunnel-plan.js";
 
 const mocks = vi.hoisted(() => ({
   status: vi.fn(),
@@ -20,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   usage: vi.fn(),
   settings: vi.fn(),
   settingsAction: vi.fn(),
+  tunnel: vi.fn(),
   bridgeRotate: vi.fn(),
   services: vi.fn(),
   serviceAction: vi.fn(),
@@ -39,6 +45,7 @@ vi.mock("./api", () => ({
     usage: mocks.usage,
     settings: mocks.settings,
     settingsAction: mocks.settingsAction,
+    tunnel: mocks.tunnel,
     bridgeRotate: mocks.bridgeRotate,
     services: mocks.services,
     serviceAction: mocks.serviceAction,
@@ -71,6 +78,7 @@ beforeEach(() => {
   mocks.usage.mockResolvedValue(usageStats());
   mocks.settings.mockResolvedValue(settingsState());
   mocks.settingsAction.mockResolvedValue({ ok: true, state: settingsState() });
+  mocks.tunnel.mockResolvedValue(tunnelView());
   mocks.services.mockResolvedValue([]);
   mocks.sessions.mockResolvedValue({ sessions: [sessionView()], locks: lockSnapshot() });
   mocks.closeSession.mockResolvedValue({ closed: "session-1", sessions: [] });
@@ -241,6 +249,51 @@ function healthReport(): HealthReport {
       { name: "exposure", level: "warn", ok: false, detail: "public-open" },
     ],
   };
+}
+
+/**
+ * Detection fixtures. The provider is what the card describes, so the same
+ * facts are reused for both halves of every test.
+ */
+function tunnelFactsFixture(): TunnelFacts {
+  return {
+    ngrok: {
+      installed: true,
+      executable: "C:\\tools\\ngrok.exe",
+      executableLabel: "PATH",
+      authtokenSource: "ngrok-config",
+      domains: ["demo.ngrok-free.app"],
+      domainsError: null,
+    },
+    tailscale: {
+      installed: true,
+      executable: "C:\\Program Files\\Tailscale\\tailscale.exe",
+      executableLabel: "默认安装目录",
+      loggedIn: true,
+      domain: "demo.tail170424.ts.net",
+      online: true,
+      mountPort: null,
+      mountPublic: false,
+    },
+  };
+}
+
+/** /api/tunnel: the facts plus the plan the button would run for that provider. */
+function tunnelView(provider = "ngrok", facts: TunnelFacts = tunnelFactsFixture()): SettingsTunnelView {
+  return {
+    facts,
+    plan: planTunnelAutoConfig({
+      provider,
+      current: { ngrokExecutable: "", ngrokDomain: "", tailscaleExecutable: "" },
+      authtokenStored: false,
+      facts,
+    }),
+  };
+}
+
+/** Settings pinned to one tunnel provider — the card only renders that one. */
+function withProvider(provider: string): SettingsState {
+  return settingsState({ config: { ...settingsState().config, tunnelProvider: provider } });
 }
 
 const tabLink = (label: string): HTMLAnchorElement =>
@@ -790,8 +843,10 @@ describe("App shell: in-page filtering and rails", () => {
     await screen.findByText("MCP 端点");
     fireEvent.click(tabLink("设置"));
     await screen.findByText(/隧道让公网上的客户端连到这台机器/);
+    // The authtoken is a manual knob now: the fold is where manual knobs live.
+    fireEvent.click(screen.getByRole("button", { name: "高级设置（可执行文件、手动填写的值）" }));
 
-    const field = screen.getByPlaceholderText(/Your Authtoken/);
+    const field = screen.getByLabelText("Authtoken");
     fireEvent.change(field, { target: { value: "test-ngrok-authtoken" } });
     fireEvent.click(screen.getByRole("button", { name: "保存 Authtoken" }));
 
@@ -817,12 +872,97 @@ describe("App shell: in-page filtering and rails", () => {
     fireEvent.click(tabLink("设置"));
     await screen.findByText(/隧道让公网上的客户端连到这台机器/);
 
+    fireEvent.click(screen.getByRole("button", { name: "高级设置（可执行文件、手动填写的值）" }));
     const field = screen.getByDisplayValue("2abc…••••…45") as HTMLInputElement;
     expect(field.readOnly).toBe(true);
     expect(screen.getByRole("button", { name: "保存 Authtoken" }).hasAttribute("disabled")).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "替换" }));
     expect((screen.getByPlaceholderText(/粘贴新的 authtoken/) as HTMLInputElement).readOnly).toBe(false);
+  });
+
+  /**
+   * The tunnel card, reworked around one rule (choose, do not type) and one
+   * shape (both providers render the same three parts). These tests pin the
+   * three promises that rule makes: detection is shown before it is trusted,
+   * the button is one click, and folding hides knobs without removing them.
+   */
+  test("the tunnel card shows what the machine has, and says what 自动配置 will write", async () => {
+    mocks.settings.mockResolvedValue(withProvider("ngrok"));
+    render(<App />);
+    await screen.findByText("MCP 端点");
+    fireEvent.click(tabLink("设置"));
+    await screen.findByText(/隧道让公网上的客户端连到这台机器/);
+
+    // Read-only reconnaissance, named by its source rather than a bland "ok".
+    expect(await screen.findByText("ngrok：已安装（PATH）")).toBeTruthy();
+    expect(screen.getByText("authtoken：可以从本机 ngrok 配置导入")).toBeTruthy();
+    expect(screen.getByText("保留域名：1 个（可在上面选）")).toBeTruthy();
+
+    // The reserved domain is a CHOICE, and its options are the account's.
+    const domain = await screen.findByLabelText("公网地址") as HTMLSelectElement;
+    expect([...domain.options].map(option => option.value)).toEqual(["", "demo.ngrok-free.app", "__manual__"]);
+
+    // Nothing is written before it is announced: the plan is on the page.
+    expect(screen.getByText(/将写入：ngrokExecutable=C:\\tools\\ngrok.exe/)).toBeTruthy();
+  });
+
+  test("一键自动配置 writes on one click and re-reads detection afterwards", async () => {
+    mocks.settings.mockResolvedValue(withProvider("ngrok"));
+    mocks.settingsAction.mockResolvedValue({
+      ok: true,
+      state: withProvider("ngrok"),
+      info: "已写入：ngrok 可执行文件 = C:\\tools\\ngrok.exe。",
+    });
+    render(<App />);
+    await screen.findByText("MCP 端点");
+    fireEvent.click(tabLink("设置"));
+    const button = await screen.findByRole("button", { name: "一键自动配置" });
+    const before = mocks.tunnel.mock.calls.length;
+    fireEvent.click(button);
+
+    await waitFor(() => expect(mocks.settingsAction).toHaveBeenCalledWith({ command: "autoConfigureTunnel" }));
+    // The outcome is reported, not silently applied.
+    expect(await screen.findByText(/已写入：ngrok 可执行文件/)).toBeTruthy();
+    // …and the card asks the machine again instead of showing a stale summary.
+    await waitFor(() => expect(mocks.tunnel.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  test("tailscale renders the same three parts, and the fold holds every manual knob", async () => {
+    mocks.settings.mockResolvedValue(withProvider("tailscale"));
+    mocks.tunnel.mockResolvedValue(tunnelView("tailscale"));
+    render(<App />);
+    await screen.findByText("MCP 端点");
+    fireEvent.click(tabLink("设置"));
+    await screen.findByText(/隧道让公网上的客户端连到这台机器/);
+
+    // Same shape as ngrok's card: a status chip, the action row, the fold.
+    expect(await screen.findByText("已登录 · demo.tail170424.ts.net")).toBeTruthy();
+    expect(screen.getByText("443：还没有挂载任何服务")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "一键自动配置" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "测试公网可达" })).toBeTruthy();
+
+    // Folded means folded: no manual field is on screen until it is opened…
+    expect(screen.queryByText("Tailscale 可执行文件")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "高级设置（可执行文件、手动填写的值）" }));
+    // …but every one of them is still there, which is what "folded" promises.
+    expect(screen.getByText("Tailscale 可执行文件")).toBeTruthy();
+    expect(screen.getByText("公网域名")).toBeTruthy();
+    expect(screen.getByText("隧道意外退出时自动重连")).toBeTruthy();
+  });
+
+  test("测试公网可达 runs the real checks and reports them in the card", async () => {
+    mocks.settings.mockResolvedValue(withProvider("tailscale"));
+    mocks.tunnel.mockResolvedValue(tunnelView("tailscale"));
+    render(<App />);
+    await screen.findByText("MCP 端点");
+    fireEvent.click(tabLink("设置"));
+    fireEvent.click(await screen.findByRole("button", { name: "测试公网可达" }));
+
+    // The public leg is an actual request through the tunnel, so the card shows
+    // that check's own verdict rather than the instance's opinion of itself.
+    expect(await screen.findByText(/公网连通：HTTP 200/)).toBeTruthy();
+    expect(screen.getByText(/公网上的客户端现在可以连到这个地址。/)).toBeTruthy();
   });
 });
 
@@ -862,21 +1002,24 @@ describe("App shell: card detail layer", () => {
   });
 
   test("renders booleans as switches that are still checkboxes", async () => {
+    mocks.settings.mockResolvedValue(withProvider("ngrok"));
     window.history.pushState({}, "", "/console/settings");
 
     const { container } = render(<App />);
     await screen.findByText(/隧道让公网上的客户端连到这台机器/);
+    // The tunnel switches moved behind 高级设置: folded, not gone.
+    fireEvent.click(await screen.findByRole("button", { name: "高级设置（可执行文件、手动填写的值）" }));
 
-    // The 隧道 sub-page's switches depend on the provider: autoReconnect is
-    // universal, the ngrok proxy switch is ngrok-only. The fixture runs
-    // provider "none", so exactly the universal one is here.
+    // Provider ngrok: autoReconnect plus the ngrok proxy switch.
     const switches = [...container.querySelectorAll("input.switch")] as HTMLInputElement[];
-    expect(switches.length).toBe(1);
+    expect(switches.length).toBe(2);
     expect(switches.every(input => input.type === "checkbox")).toBe(true);
 
     // And they still write the same config key they wrote as a plain checkbox.
-    const autoReconnect = switches.find(input => input.checked);
-    expect(autoReconnect).toBeTruthy();
+    // Found by name, not by DOM order: which switch comes first is a layout
+    // detail, which key a switch writes is the contract.
+    const autoReconnect = switches.find(input => input.getAttribute("aria-label") === "隧道意外退出时自动重连");
+    expect(autoReconnect?.checked).toBe(true);
     fireEvent.click(autoReconnect!);
     expect(mocks.settingsAction).toHaveBeenCalledWith({ command: "setConfig", key: "autoReconnect", value: false });
   });
@@ -891,10 +1034,12 @@ describe("App shell: card detail layer", () => {
    * smaller pointer target, not a less usable control.
    */
   test("a switch is toggled by the control, not by its caption", async () => {
+    mocks.settings.mockResolvedValue(withProvider("ngrok"));
     window.history.pushState({}, "", "/console/settings");
 
     const { container } = render(<App />);
     await screen.findByText(/隧道让公网上的客户端连到这台机器/);
+    fireEvent.click(await screen.findByRole("button", { name: "高级设置（可执行文件、手动填写的值）" }));
 
     const input = container.querySelector("input.switch") as HTMLInputElement;
     expect(input).toBeTruthy();

@@ -33,11 +33,14 @@ import {
   type SettingsActionResult,
   type SettingsDetectedView,
   type SettingsState,
+  type SettingsTunnelView,
   type SettingsTokenRow,
 } from "../bridge/settings-model.js";
 import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
 import { detectShells } from "../shell/shell-provider.js";
 import { detectNgrok } from "../bridge/ngrok-locate.js";
+import { detectTunnelFacts, readNgrokConfigAuthtoken } from "../bridge/tunnel-detect.js";
+import { planTunnelAutoConfig } from "../bridge/tunnel-plan.js";
 import { NGROK_AUTHTOKEN_KEY, setCachedAuthtoken } from "../bridge/tunnel.js";
 import { playAlertSound, stopAlertSound } from "../bridge/sound-alert.js";
 import { existsSync } from "node:fs";
@@ -130,6 +133,62 @@ function detectedView(): SettingsDetectedView {
   } catch {
     return { shells: [], ngrok: [] };
   }
+}
+
+/**
+ * Tunnel facts, cached for a minute.
+ *
+ * Producing them spawns two tailscale CLI calls and, when a token exists, asks
+ * ngrok's API — far too much work for every page read, and none of it goes
+ * stale fast enough to matter. The cache is what keeps the tunnel card cheap:
+ * the page itself renders from config (no probe), the card fills in from
+ * GET /api/tunnel, and only 「重新检测」 and the auto-config click force a fresh
+ * probe. A failed probe is cached as its own empty answer rather than retried
+ * in a loop — the card says "未检测到" and the free-text fallback still works.
+ */
+const TUNNEL_FACTS_TTL_MS = 60_000;
+let tunnelFactsCache: { at: number; facts: Awaited<ReturnType<typeof detectTunnelFacts>> } | null = null;
+
+/** The saved ngrok authtoken, or "". Never returned to the console. */
+async function storedAuthtoken(): Promise<string> {
+  return ((await host().secrets.get(NGROK_AUTHTOKEN_KEY).catch(() => "")) ?? "").trim();
+}
+
+async function tunnelFacts(force = false) {
+  if (!force && tunnelFactsCache && Date.now() - tunnelFactsCache.at < TUNNEL_FACTS_TTL_MS) {
+    return tunnelFactsCache.facts;
+  }
+  const cfg = host().config;
+  const facts = await detectTunnelFacts({
+    ngrokExecutable: String(cfg.get("ngrokExecutable", CONFIG_DEFAULTS.ngrokExecutable as string) ?? ""),
+    tailscaleExecutable: String(cfg.get("tailscaleExecutable", CONFIG_DEFAULTS.tailscaleExecutable as string) ?? ""),
+    storedAuthtoken: await storedAuthtoken(),
+  });
+  tunnelFactsCache = { at: Date.now(), facts };
+  return facts;
+}
+
+/**
+ * What `GET /api/tunnel` answers with — and the exact plan the 「自动配置」
+ * button executes: one function, so what the page promises before the click and
+ * what the server does after it cannot drift apart.
+ */
+export async function buildTunnelView(force = false): Promise<SettingsTunnelView> {
+  const cfg = host().config;
+  const facts = await tunnelFacts(force);
+  return {
+    facts,
+    plan: planTunnelAutoConfig({
+      provider: String(cfg.get("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string) ?? ""),
+      current: {
+        ngrokExecutable: String(cfg.get("ngrokExecutable", "") ?? ""),
+        ngrokDomain: String(cfg.get("ngrokDomain", "") ?? ""),
+        tailscaleExecutable: String(cfg.get("tailscaleExecutable", "") ?? ""),
+      },
+      authtokenStored: Boolean(await storedAuthtoken()),
+      facts,
+    }),
+  };
 }
 
 /**
@@ -460,6 +519,52 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
         // so that is the honest instruction.
         info: `Authtoken 已保存（${maskBarkKey(raw)}）。下次启动隧道时生效：关掉承载本实例的终端窗口再重新启动（一键启动脚本双击一次即可）。`,
       });
+    }
+
+    case "autoConfigureTunnel": {
+      // The one action that writes several values at once, so it writes exactly
+      // what the page showed: buildTunnelView re-reads the LIVE config and the
+      // plan only ever fills fields that are still empty, which is what makes
+      // the button safe to press for someone who already typed a path.
+      const view = await buildTunnelView(true);
+      const written: string[] = [];
+      for (const write of view.plan.writes) {
+        if (write.kind === "secret") {
+          // Imported here rather than carried in the plan: the plan is rendered
+          // in a browser, and an authtoken must not travel to one.
+          const imported = readNgrokConfigAuthtoken()?.token ?? "";
+          if (!imported) continue;
+          await host().secrets.store(NGROK_AUTHTOKEN_KEY, imported);
+          setCachedAuthtoken(imported);
+          written.push(write.label);
+          continue;
+        }
+        await cfg.update(write.key, write.value);
+        written.push(write.label);
+      }
+      // A running tunnel has to pick the new values up now, not at the next
+      // restart — the same rebuild a provider switch performs.
+      if (written.length && state.tunnel) void restartTunnelForProviderChange();
+
+      const detail = [
+        written.length ? `已写入：${written.join("；")}。` : "",
+        view.plan.keep.length ? `保持不变：${view.plan.keep.join("；")}。` : "",
+        ...view.plan.notes,
+      ].filter(Boolean).join(" ");
+      if (!written.length) {
+        // Nothing to write is only a success when there is also nothing to fix.
+        return view.plan.blocked
+          ? { ok: false, state: await buildSettingsState(), error: view.plan.blocked }
+          : done({ info: detail || "没有需要写入的值：这一项已经配好了。" });
+      }
+      return done({ info: view.plan.blocked ? `${detail} 还差一步：${view.plan.blocked}` : detail });
+    }
+
+    case "refreshTunnelDetect": {
+      // The operator installed ngrok (or enabled Funnel) and does not want to
+      // wait out the cache, let alone restart the instance.
+      await buildTunnelView(true);
+      return done({ info: "已重新检测本机的隧道环境。" });
     }
 
     case "testNotify": {

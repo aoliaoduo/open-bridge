@@ -12,11 +12,12 @@ import type {
   SettingsActionResult,
   SettingsState,
   SettingsTokenRow,
+  SettingsTunnelView,
 } from "../../src/bridge/settings-model.js";
 import type { ServiceView } from "../../src/bridge/service-tools.js";
 
 export type {
-  ExecutableChoice, SecretPayload, ServiceView, SettingsActionResult, SettingsState, SettingsTokenRow,
+  ExecutableChoice, SecretPayload, ServiceView, SettingsActionResult, SettingsState, SettingsTokenRow, SettingsTunnelView,
 };
 
 /**
@@ -202,6 +203,8 @@ export const api = {
   activity: () => getJson<{ activity: ActivityEntry[] }>("/api/activity").then(r => r.activity),
   usage: () => getJson<{ usage: UsageStats }>("/api/usage").then(r => r.usage),
   settings: () => getJson<{ state: SettingsState }>("/api/settings").then(r => r.state),
+  /** Read-only tunnel reconnaissance + the plan 「自动配置」 would run. */
+  tunnel: () => getJson<{ tunnel: SettingsTunnelView }>("/api/tunnel").then(r => r.tunnel),
   bridgeRotate: () => postJson<{ status: BridgeStatus }>("/api/bridge/rotate").then(r => r.status),
   settingsAction: (action: Record<string, unknown>) =>
     postJson<SettingsActionResult>("/api/settings/action", action),

@@ -12,6 +12,7 @@ this and how do I start it"; this file answers "what are all the knobs".
 - [The workspace is the directory you started in](#the-workspace-is-the-directory-you-started-in)
 - [Commands](#commands)
 - [Web console](#web-console)
+- [Choosing a tunnel](#choosing-a-tunnel-the-settings-page-does-the-choosing-for-you)
 - [Public tunnel (ngrok)](#public-tunnel-ngrok)
 - [Public tunnel (Tailscale Funnel)](#public-tunnel-tailscale-funnel)
 - [Notifications](#phone-notifications-bark)
@@ -107,6 +108,54 @@ The settings page does the same thing. Once on, a client discovers the server at
 - The authorize, register and token endpoints are the only paths this exposes publicly. `/api` and `/console` remain loopback-only, and what the console reads (`/api/oauth`) contains **no secrets or digests**.
 
 ---
+
+---
+
+## Choosing a tunnel (the settings page does the choosing for you)
+
+Both providers publish the same thing — `https://<host>/mcp/<route-token>` — and
+the console renders them as **one card with three parts**, in the same order,
+whichever provider is selected:
+
+```
+[1] 提供商        ▾ ngrok / Tailscale Funnel / none
+[2] 状态与操作     ● 公网地址已发布 https://…      [一键自动配置] [重新检测] [测试公网可达]
+                   └ 只读摘要：装了没有、登录没有、域名/保留域名几个、443 现在归谁
+[3] 高级设置       可执行文件 ▾ / 手填的公网地址 / Authtoken / 系统代理 / 自动重连   （默认收起）
+```
+
+| 你想让谁访问 | 选哪个 | 你需要准备什么 |
+| --- | --- | --- |
+| 只有这台机器 | `none` | 什么都不用；不做隧道 |
+| 公网、有自己的域名 | ngrok | 一个 ngrok 账号 + authtoken（本机跑过一次 `ngrok config add-authtoken` 就够） |
+| 公网、已经有 Tailscale | Tailscale Funnel | 装好并登录 Tailscale；在 login.tailscale.com 打开一次 Funnel（免费版只能用 443） |
+
+- **一键自动配置** is one click and it says what it will do *before* you press it:
+  the line under the button lists the exact writes (`ngrokExecutable=…`,
+  `公网地址=…`, `ngrok authtoken（从本机 ngrok 配置导入）`). It only ever fills
+  fields that are still **empty** — a value you typed is reported as 保持不变 and
+  left alone. After writing, a running tunnel is rebuilt so the new values take
+  effect now rather than at the next restart.
+- **重新检测** re-runs the reconnaissance (install / login / reserved domains /
+  who holds 443). The page caches it for a minute, because producing it spawns
+  the provider CLIs and, with a token, calls ngrok's API.
+- **测试公网可达** runs the same checks as `open-bridge health`, including a real
+  `/healthz` request **through the tunnel**, and shows the three rows that decide
+  a verdict (隧道 / 公网连通 / 暴露面) plus the next step when something fails.
+- **Reconnaissance is read-only.** It never writes ngrok's or tailscale's own
+  configuration, and it never turns a funnel on: everything that changes this
+  machine happens through the buttons above, which write Open Bridge's config
+  only. The authtoken is the one value that never travels to the page — it is
+  reported as its source ("已保存在凭据库" / "可以从本机 ngrok 配置导入") and, when
+  imported, read server-side.
+- **Nothing was removed, only folded.** The executable pickers, the hand-typed
+  domain, the authtoken field, the proxy switch and auto-reconnect are all in
+  高级设置. The card also keeps `ngrokDomain` in a dropdown of the account's
+  reserved domains when that list can be read, falling back to typing when it
+  cannot.
+- The card is backed by `GET /api/tunnel` (facts + the plan 「自动配置」 would run,
+  in one object, so the promise and the write cannot drift). It carries no
+  credential. `/api` stays loopback-only.
 
 ## Public tunnel (ngrok)
 
