@@ -46,6 +46,37 @@ test("a real budget still keeps both ends and reports truncation", () => {
   assert.match(bounded.text, /\[truncated\]/);
 });
 
+test("removing the trailing newline renders the change, not a phantom empty line", () => {
+  // One-sided termination: before ends with "\n", after does not. The file
+  // never contained an empty last line — but split("\n") leaves a phantom ""
+  // element on the terminated side only, which used to surface as a bare "-"
+  // line and an invented deletion.
+  const diff = unifiedDiff("a\n", "a");
+  assert.ok(diff !== undefined);
+  const body = diff.split("\n").slice(1);
+  assert.equal(body.some(line => line === "-"), false, "no phantom empty removal");
+  assert.equal(body.some(line => line === "+"), false, "no phantom empty addition");
+  assert.ok(body.includes("-a") && body.includes("+a"), "the last line is shown as replaced");
+  assert.match(diff, /^\\ No newline at end of file$/m, "the newline loss is named, like git names it");
+  assert.deepEqual(countDiffLines(diff), { additions: 1, deletions: 1 }, "statistics describe the real replacement, not an invented deletion");
+});
+
+test("adding the trailing newline renders the change, not a phantom empty line", () => {
+  const diff = unifiedDiff("a", "a\n");
+  assert.ok(diff !== undefined);
+  const body = diff.split("\n").slice(1);
+  assert.equal(body.some(line => line === "-"), false);
+  assert.equal(body.some(line => line === "+"), false);
+  assert.match(diff, /^\\ No newline at end of file$/m);
+  assert.deepEqual(countDiffLines(diff), { additions: 1, deletions: 1 });
+});
+
+test("a content edit in a newline-less file keeps both-side diffs marker-free", () => {
+  const diff = unifiedDiff("a\nb\nc\n", "a\nc\n");
+  assert.ok(diff !== undefined);
+  assert.ok(!diff.includes("\\ No newline"), "no marker when termination never changed");
+});
+
 test("a newline-terminated file gets no phantom context line", () => {
   // The reported shape: one line removed from a file that ends with a newline.
   const diff = unifiedDiff("a\nb\nc\n", "a\nc\n");

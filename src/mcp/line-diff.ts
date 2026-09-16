@@ -17,13 +17,16 @@ export function unifiedDiff(before: string, after: string, contextLines = 3): st
   const b = after.split("\n");
   // `split("\n")` appends an empty element for text that ends with a newline.
   // That element is not a line of the file — it is the absence of one — and
-  // including it as a context line emitted a phantom `" "` body line for every
-  // newline-terminated file (the normal case). Dropping it changes nothing when
-  // both sides have one, and fixes the count when only one side does.
-  if (a.length > 1 && a[a.length - 1] === "" && b.length > 1 && b[b.length - 1] === "") {
-    a.pop();
-    b.pop();
-  }
+  // including it emitted a phantom `" "` body line for every newline-terminated
+  // file. Each side drops its own phantom INDEPENDENTLY: popping only when
+  // both sides had one left the ONE-SIDED case broken — a trailing-newline
+  // change ("a\n" → "a") rendered a phantom "-" empty line and counted an
+  // invented deletion, while the real change (the last line's terminator)
+  // stayed invisible. The marker below names it the way git does.
+  const aHadTerminator = a.length > 1 && a[a.length - 1] === "";
+  const bHadTerminator = b.length > 1 && b[b.length - 1] === "";
+  if (aHadTerminator) a.pop();
+  if (bHadTerminator) b.pop();
   let prefix = 0;
   while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix += 1;
   let suffix = 0;
@@ -34,6 +37,15 @@ export function unifiedDiff(before: string, after: string, contextLines = 3): st
   ) {
     suffix += 1;
   }
+  if (aHadTerminator !== bHadTerminator) {
+    // The last content line is NOT identical across sides even when its text
+    // matches (its terminator differs), so it may not be trimmed into the
+    // common region: back one shared pair out of it so the change renders as
+    // -/+ plus the marker, not as untouched context. When both prefix and
+    // suffix are zero the pair is already inside the change region.
+    if (suffix > 0) suffix -= 1;
+    else if (prefix > 0) prefix -= 1;
+  }
   const removed = a.slice(prefix, a.length - suffix);
   const added = b.slice(prefix, b.length - suffix);
   const contextStart = Math.max(0, prefix - contextLines);
@@ -43,6 +55,8 @@ export function unifiedDiff(before: string, after: string, contextLines = 3): st
   for (const line of removed) lines.push(`-${line}`);
   for (const line of added) lines.push(`+${line}`);
   for (let index = a.length - suffix; index < contextEnd; index += 1) lines.push(` ${a[index]}`);
+  // The marker is banner text, never counted in the header's old/new tallies.
+  if (aHadTerminator !== bHadTerminator) lines.push("\\ No newline at end of file");
   const oldCount = contextEnd - contextStart;
   const newCount = oldCount - removed.length + added.length;
   const header = `@@ -${contextStart + 1},${oldCount} +${contextStart + 1},${newCount} @@`;
