@@ -434,6 +434,60 @@ test("a revoked access token stops authenticating", async () => {
 });
 
 /**
+ * Revocation has to END the client's access, not pause it.
+ *
+ * RFC 7009 §2.1: "If the particular token is a refresh token and the
+ * authorization server supports the revocation of access tokens, then the
+ * authorization server SHOULD also invalidate all access tokens based on the
+ * same authorization grant" -- and the reverse direction is what an operator
+ * means when they press revoke. Only the presented token was being dropped, so
+ * revoking the access token left the refresh token alive: the client simply
+ * refreshed and was back in, with a credential the operator believed they had
+ * just destroyed. Revocation that a client can undo by itself is not
+ * revocation.
+ */
+test("revoking one token of a grant ends the whole grant", async () => {
+  const clientId = (await registerClient()).body.client_id;
+  const consent = await authorize(clientId);
+  const code = new URL(consent.location).searchParams.get("code");
+  const resource = `http://127.0.0.1:${port}/mcp/${routeToken}`;
+  const issued = await token({ grant_type: "authorization_code", code, client_id: clientId, redirect_uri: REDIRECT, code_verifier: VERIFIER, resource });
+  assert.equal(issued.status, 200);
+
+  // Revoke the ACCESS token; say nothing about the refresh token.
+  const revoked = await rawRequest("POST", "/oauth/revoke", form({ token: issued.body.access_token, client_id: clientId }), formHeaders());
+  assert.equal(revoked.status, 200);
+  assert.equal((await listToolsWith(issued.body.access_token)).status, 401, "the access token is dead");
+
+  // The refresh token from the same grant must not resurrect it.
+  const resurrect = await token({
+    grant_type: "refresh_token",
+    refresh_token: issued.body.refresh_token,
+    client_id: clientId,
+    resource,
+  });
+  assert.equal(resurrect.status, 400, `a revoked grant must not refresh: ${JSON.stringify(resurrect.body)}`);
+  assert.equal(resurrect.body.error, "invalid_grant");
+});
+
+/** The same rule in the direction the RFC states outright. */
+test("revoking the refresh token also kills the access token it came with", async () => {
+  const clientId = (await registerClient()).body.client_id;
+  const consent = await authorize(clientId);
+  const code = new URL(consent.location).searchParams.get("code");
+  const resource = `http://127.0.0.1:${port}/mcp/${routeToken}`;
+  const issued = await token({ grant_type: "authorization_code", code, client_id: clientId, redirect_uri: REDIRECT, code_verifier: VERIFIER, resource });
+  assert.equal(issued.status, 200);
+  assert.equal((await listToolsWith(issued.body.access_token)).status, 200);
+
+  const revoked = await rawRequest("POST", "/oauth/revoke", form({ token: issued.body.refresh_token, client_id: clientId }), formHeaders());
+  assert.equal(revoked.status, 200);
+
+  assert.equal((await listToolsWith(issued.body.access_token)).status, 401,
+    "an access token whose grant was revoked must stop working");
+});
+
+/**
  * OAuth is additive for anything that presents a credential: the audit that
  * added this test found the opposite — with the personal gate still off (the
  * default), the OAuth rejection was returned before the presented token was

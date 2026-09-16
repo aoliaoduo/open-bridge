@@ -254,22 +254,44 @@ export async function verifyAccessToken(
   return matched;
 }
 
-/** Revoke whatever the presented token is: an access token or a refresh token. */
+/**
+ * Revoke whatever the presented token is, and the rest of its grant with it.
+ *
+ * Dropping only the presented token is not revocation. An operator who revokes
+ * an access token means "this client is done"; leaving the refresh token from
+ * the same grant alive let the client mint a fresh access token immediately and
+ * carry on, with the credential its owner believed they had just destroyed.
+ * RFC 7009 2.1 states the other direction outright ("SHOULD also invalidate all
+ * access tokens based on the same authorization grant"), and the reverse is
+ * what the word means to the person pressing the button.
+ *
+ * A grant is identified by client_id + resource: this server issues exactly one
+ * access/refresh pair per grant, and both carry those two fields. Revoking by
+ * grant therefore takes down the pair the caller named and nothing belonging to
+ * another client -- a second client keeps working, which is the point of
+ * per-client credentials.
+ */
 export async function revokeToken(presentedSecret: string): Promise<boolean> {
   const digest = hashSecret(presentedSecret);
   return mutate(doc => {
-    let found = false;
-    const accessTokens = doc.accessTokens.map(token => {
-      if (!digestEquals(token.hash, digest) || token.revokedAt !== undefined) return token;
-      found = true;
-      return { ...token, revokedAt: Date.now() };
-    });
-    const remainingRefresh = doc.refreshTokens.filter(token => {
-      if (!digestEquals(token.hash, digest)) return true;
-      found = true;
-      return false;
-    });
-    return { doc: { ...doc, accessTokens, refreshTokens: remainingRefresh }, result: found };
+    // Find the grant the presented secret belongs to, whichever half it is.
+    const hit = doc.accessTokens.find(token => digestEquals(token.hash, digest))
+      ?? doc.refreshTokens.find(token => digestEquals(token.hash, digest));
+    if (!hit) return { doc, result: false };
+
+    const sameGrant = (token: { client_id: string; resource: string }): boolean =>
+      token.client_id === hit.client_id && token.resource === hit.resource;
+
+    const now = Date.now();
+    return {
+      doc: {
+        ...doc,
+        accessTokens: doc.accessTokens.map(token =>
+          sameGrant(token) && token.revokedAt === undefined ? { ...token, revokedAt: now } : token),
+        refreshTokens: doc.refreshTokens.filter(token => !sameGrant(token)),
+      },
+      result: true,
+    };
   });
 }
 

@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **吊销 OAuth 令牌只吊销了递上来的那一个，客户端刷新一下就回来了。** `revokeToken` 把 access token 标记 revoked、把 refresh token 删掉——但只处理**与递上来的密钥哈希相同的那一行**。于是吊销 access token 之后，同一次授权发出的 refresh token 还活着：客户端拿它换一个新的 access token 就继续用，而操作者以为自己刚刚已经把这个凭据销毁了。**一个客户端自己就能撤销掉的「吊销」不叫吊销。** RFC 7009 §2.1 明写了反方向（吊销 refresh token 时 SHOULD 一并作废同一 grant 下的所有 access token），而正方向正是按下那个按钮的人所理解的语义。
+
+  改为按 grant 吊销：本服务器每次授权只发一对 access/refresh，两者都带 `client_id` 与 `resource`，所以用这两个字段认定同一 grant，两半一起作废。只影响被点名的那个客户端，别的客户端照常工作——这正是 per-client 凭据的意义。`test/oauth-integration.test.mjs` 新增两向用例；原有的「refresh 轮换后旧的失效」用例继续通过（轮换写入的是新一对，不会自我吊销）。
+
 - **AI 传的展示参数会盖掉操作者的通知设置。** 设置页为每类事件提供了 level 与「持续响铃」开关，那是操作者一次性表态：每种消息允许打扰到什么程度。但 `notify` 工具同时把同一批参数开放给调用方，且 `withEventDefaults` 的合并方向是「调用方没说，才用操作者的」——**反过来就是调用方说了就赢**。于是模型回一个 `level:"critical"` 就能穿透操作者亲手设的静音，回一个 `call:1` 就能让一台被明确关掉响铃的手机响到有人去按。而模型读不到设置页，它是在**推翻一个自己根本看不见的偏好**，纯靠猜。这也是 notify 对模型要求过高的根源：14 个参数里 11 个是 Bark 展示旋钮，每一个都要求模型判断它没有信息去判断的事。
 
   修法是把决定权还给唯一知情的一方：11 个旋钮（`sound/level/volume/call/badge/url/icon/group/isArchive/copy/autoCopy`）从工具 schema 整体移除，模型只剩 `event/title/message`——说清楚发生了什么，多响由设置决定。`withEventDefaults` 改为默认只从 config 取值，新增 `trusted` 开关给服务器自己的推送（idle 看门狗、设置页测试按钮刻意用 `timeSensitive`：那是本地的主动决定，不是远端的猜测），`parseBarkExtras` 随参数一并删除。代价是模型不能再为某条特别紧要的消息临时提级；换来的是操作者设了静音就真的静音。`test/notify-knobs.test.ts` 与改写后的集成用例覆盖：旧集成用例断言的正是「AI 传 sound=minuet 就出现在推送上」，它现在断言相反的事。
