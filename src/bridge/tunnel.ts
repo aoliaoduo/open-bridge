@@ -335,6 +335,15 @@ async function startTailscaleFunnel(_generation: number): Promise<void> {
     windowsHide: windowsHideForChild(),
   });
   state.tunnel = child as ChildProcessWithoutNullStreams;
+  // `--bg` hands the proxy to the daemon and the child exits, so this process is
+  // a LAUNCHER, not the tunnel. Holding it in `state.tunnel` (which the ngrok
+  // path legitimately does with its long-lived child) made a dead handle look
+  // like a live tunnel, and the Start-retry branch reads `!state.tunnel` as
+  // "nothing to re-arm" — so a funnel that never came up could not be retried
+  // without a full restart. Cleared on exit, and only if the slot is still ours.
+  child.once("exit", () => {
+    if (state.tunnel === child) state.tunnel = undefined;
+  });
   const publishedUrl = `https://${domain}/mcp/${state.routeToken}`;
   try {
     await waitForPublicHealth(`https://${domain}/healthz/${state.routeToken}`);

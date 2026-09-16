@@ -30,7 +30,14 @@ async function startInternal(): Promise<void> {
     // good), a Start click should RETRY the tunnel instead of answering
     // "already running" while the public URL stays dead and unreachable —
     // previously the only recovery was Stop + Start.
-    const wantsTunnel = host().config.get<string>("tunnelProvider", "ngrok") === "ngrok";
+    // Both tunnel providers, not just ngrok: the retry below is the only
+    // recovery a failed tunnel has, and the failure path itself tells the
+    // operator to use it (「修复后点 Start 重试」 in the provider-switch warning,
+    // and the console's Start button generally). With the tailscale check
+    // missing, that instruction was unfollowable — Start answered 「already
+    // running」 and the funnel stayed down until a full restart.
+    const provider = host().config.get<string>("tunnelProvider", "ngrok");
+    const wantsTunnel = provider === "ngrok" || provider === "tailscale";
     if (wantsTunnel && state.tunnelRole === "none" && !state.tunnel && !state.reconnectTimer) {
       state.tunnelGeneration += 1; // invalidate anything stale from the failed chain
       await startTunnelInternal(state.tunnelGeneration);
