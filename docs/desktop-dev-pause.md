@@ -48,5 +48,6 @@ npm run verify            # 提交前硬门槛，必须全绿
 
 - 桌面 dev 与打包产物**共用** `%APPDATA%/open-bridge-desktop` userData（含同一套配置/日志）；
   烟图写在其下 `smoke-shot.png`。
-- `参考/` 三个第三方项目只在本机研读用（991MB），已被 .gitignore 永久挡在仓库外。
+- `参考/` 三个第三方研读项目已于 2026-09-16 删除（链接留在 `docs/reference-projects.md`）；.gitignore 仍挡着它，防止哪天拷回来又跟着 `git add -A` 上车。
+- `desktop/node_modules` 与 `desktop/dist` 已清理；恢复开发时先 `cd desktop && npm install`（桥本体不受影响）。
 - 单实例锁已存在；`setAppUserModelId` 已对齐 electron-builder 的 `appId`（通知图标教训，HippoBuddy 记载）。
