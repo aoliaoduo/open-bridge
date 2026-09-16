@@ -8,7 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **桌面壳第二跳收敛为「网页 AI 的客户端」：总览 + 活动实况。** 本地 agent 循环撤掉（网页 AI 才是驾驶员），壳回到独有价值：常驻、托盘、状态可视、连接器 URL 一键复制（公网优先、回环兜底、令牌遮罩显隐、隧道未启提示去控制台）、桥活动日志滚动直播（壳内 /api/activity 轮询，2s 心跳、暂停/清空/自动滚动）。mcp.* IPC 保留为 B 阶段窗格（diff/终端/审批）的插座。
+
 - **Tailscale Funnel 作为第二个公网隧道提供商。** 已装 Tailscale 的机器不必再为 ngrok 注册第二个账号：`open-bridge config set tunnelProvider tailscale` 后，实例用本机固定的 ts.net 域名（从 `tailscale status --json` 自动发现，无需手填）把 `/mcp` 公开到 `https://<机器名>.<tailnet>.ts.net`，自动 TLS。无 authtoken（CLI 直接与本地 daemon 通信）；免费版限 443 端口、需在 login.tailscale.com 一次性启用 Funnel。停机时清理 daemon 侧的 funnel 配置（`--bg` 的子进程瞬间退出，杀进程没用，唯一真正的撤销是这条子命令）。Host 白名单按 provider 选择公网域名（tailscale 用 `tailscaleDomain`，ngrok 用 `ngrokDomain`）；`X-Forwarded-For` 的追加行为与 ngrok 一致，失败限流照常工作。`test/tailscale-locate.test.ts` 与真实 bridge 上的端到端冒烟（healthz + MCP initialize 握手）各钉一条。
+
+### Removed
+
+- **删除桌面端本地 LLM 对话面（llm:chat / llm:test / llm.event / 设置对话框 / 工作台 store）。** 方向是把本机能力经公网 MCP 交给网页 AI 使用，不在桌面端重复造一个竞品 agent；壳的价值是常驻与可视化，模型能力交给网页端。另：第三方参考项目目录 `参考/`（拷来研读的外部代码）加入 eslint 忽略列表——不忽略时全仓 lint 在其上倒出 7.4 万条错误，verify 被拖死。
 
 ### Changed
 

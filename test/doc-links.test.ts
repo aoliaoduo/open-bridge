@@ -18,7 +18,8 @@ import path from "node:path";
 
 /** Every tracked markdown file, excluding dependency and build output. */
 function markdownFiles(dir: string, out: string[] = []): string[] {
-  const skip = new Set(["node_modules", "dist", ".git", "coverage", "vendor"]);
+  const skip = new Set(["node_modules", "dist", ".git", "coverage", "vendor", "参考", "desktop"]);
+  // 参考/ 是拷来研读的第三方项目，其内部文档链接不作为本仓库的链接健康承诺；desktop 无文档。
   for (const name of readdirSync(dir)) {
     if (skip.has(name)) continue;
     const full = path.join(dir, name);

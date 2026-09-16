@@ -9,7 +9,7 @@ import tseslint from "typescript-eslint";
 export default tseslint.config(
   // desktop/dist is the electron-builder output tree (hundreds of MB of
   // minified bundles); root-anchored patterns do not reach into desktop/.
-  { ignores: ["dist/**", "build/**", "ui/dist/**", "desktop/dist/**", "node_modules/**", ".cluster/**"] },
+  { ignores: ["dist/**", "build/**", "ui/dist/**", "desktop/dist/**", "node_modules/**", ".cluster/**", "参考/**"] }, // 参考/ 是拷来的第三方项目，不进入我们的质量门
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

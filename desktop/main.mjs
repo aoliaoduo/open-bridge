@@ -11,7 +11,7 @@
  * 而是附着（attach）过去 —— 同一片地面，一盏灯亮着就不要再点一盏。
  */
 
-import { app, BrowserWindow, Tray, Menu, dialog, nativeImage, ipcMain } from "electron";
+import { app, BrowserWindow, Tray, Menu, dialog, nativeImage, clipboard, ipcMain } from "electron";
 import { fork } from "node:child_process";
 import * as fs from "node:fs";
 import * as http from "node:http";
@@ -155,6 +155,7 @@ const bridge = {
   attachedPort: 0,      // 附着到的端口（child 为 null 时有意义）
   port: 0,
   routeToken: "",       // 从子进程横幅捕获的 MCP 路由令牌；附着模式永远拿不到
+  publicMcpUrl: "",     // 横幅里的公网 MCP URL（隧道起来才有）；配对网页 AI 就靠它
 
   restarting: false,
   crashCount: 0,
@@ -177,6 +178,7 @@ async function startBridge(workspace) {
   if (!bridgeDistExists()) return; // 由 openWindow 前的守卫提示构建
   bridge.logStream = openLogStream();
   bridge.routeToken = ""; // 新实例的横幅会给新令牌，别让上一个活着时的留在壳里
+  bridge.publicMcpUrl = "";
   const port = await pickPort();
   bridge.port = port;
   const child = fork(bridgeBinPath(), ["serve", "--port", String(port)], {
@@ -188,9 +190,14 @@ async function startBridge(workspace) {
   child.stdout?.on("data", chunk => {
     bridge.logStream?.write(chunk);
     // 路由令牌只在桥自报的启动横幅里出现一次，壳要替工作台看住它。
+    const line = chunk.toString("utf8");
     if (!bridge.routeToken) {
-      const hit = chunk.toString("utf8").match(/mcp\/([0-9a-fA-F]{16,})/);
+      const hit = line.match(/mcp\/([0-9a-fA-F]{16,})/);
       if (hit) bridge.routeToken = hit[1];
+    }
+    if (!bridge.publicMcpUrl) {
+      const pub = line.match(/公网 MCP URL:\s*(https:\/\/\S+\/mcp\/[0-9a-fA-F]+)/);
+      if (pub) bridge.publicMcpUrl = pub[1];
     }
   });
   child.stderr?.on("data", chunk => bridge.logStream?.write(chunk));
@@ -362,14 +369,6 @@ function trayIcon() {
 
 // ---- 工作台 IPC：本地商店、项目、LLM、经壳转发的 MCP -----------------------------
 
-function workbenchStorePath() {
-  return path.join(app.getPath("userData"), "workbench.json");
-}
-
-function joinUrl(base, tail) {
-  return `${String(base || "").replace(/\/+$/, "")}${tail}`;
-}
-
 /** 本地桥 MCP 会话：惰性握手，会话失效重握一次。 */
 const mcpState = { sessionId: "", tools: [], ready: false };
 
@@ -451,6 +450,22 @@ function mcpReset() {
   mcpState.ready = false;
 }
 
+/** 桥的活动日志直取（/api/activity 是 loopback 门，不走 MCP 会话，轮询成本低）。 */
+async function fetchActivity() {
+  const targetPort = currentPort();
+  if (!targetPort) return [];
+  try {
+    const resp = await fetch(`http://127.0.0.1:${targetPort}/api/activity`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return Array.isArray(data.activity) ? data.activity : [];
+  } catch {
+    return [];
+  }
+}
+
 async function mcpCallRemote(name, args) {
   await ensureMcp();
   const call = {
@@ -484,99 +499,10 @@ async function mcpCallRemote(name, args) {
   return textBits.join("\n");
 }
 
-// ---- LLM：OpenAI 兼容端点的流式对话，SSE 在主进程解析，增量经频道回渲染层 -------
-
-function llmEndpoint(baseUrl, tail) {
-  return joinUrl(baseUrl || "https://api.deepseek.com", tail);
-}
-
-function notifyLlm(event, channel, msg) {
-  try { event.sender.send("llm:event", { channel, ...msg }); } catch { /* 窗口已关 */ }
-}
-
-async function llmChatStream(event, channel, req) {
-  const cfg = req && typeof req === "object" && req.settings ? req.settings : {};
-  const apiKey = String(cfg.apiKey || "").trim();
-  if (!apiKey) throw new Error("未配置 API Key：点输入框下方的模型名，先完成模型设置。");
-  const body = {
-    model: String(cfg.model || "deepseek-chat"),
-    messages: Array.isArray(req.messages) ? req.messages : [],
-    stream: true,
-  };
-  if (Array.isArray(req.tools) && req.tools.length) body.tools = req.tools;
-  let resp;
-  try {
-    resp = await fetch(llmEndpoint(cfg.baseUrl, "/chat/completions"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(300000),
-    });
-  } catch (error) {
-    throw new Error(`模型请求失败：${error instanceof Error ? error.message : String(error)}`);
-  }
-  if (!resp.ok || !resp.body) {
-    const detail = (await resp.text().catch(() => "")).slice(0, 300);
-    throw new Error(`模型端点 HTTP ${resp.status}${detail ? `：${detail}` : ""}`);
-  }
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let carry = "";
-  let text = "";
-  /** 流式 tool_calls 按 index 归并：id/name 来历只来一次，arguments 逐片追加。 */
-  const toolAcc = new Map();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    carry += decoder.decode(value, { stream: true });
-    let cut = carry.indexOf("\n\n");
-    while (cut >= 0) {
-      const rawEvent = carry.slice(0, cut);
-      carry = carry.slice(cut + 2);
-      const dataLine = rawEvent.split("\n").find(line => line.startsWith("data:"));
-      if (dataLine) {
-        const data = dataLine.slice(5).trim();
-        if (data && data !== "[DONE]") {
-          let chunk;
-          try { chunk = JSON.parse(data); } catch { chunk = null; }
-          const choice = chunk && Array.isArray(chunk.choices) ? chunk.choices[0] : null;
-          const delta = choice && choice.delta ? choice.delta : {};
-          if (typeof delta.content === "string" && delta.content) {
-            text += delta.content;
-            notifyLlm(event, channel, { type: "delta", text: delta.content });
-          }
-          for (const piece of Array.isArray(delta.tool_calls) ? delta.tool_calls : []) {
-            const index = typeof piece.index === "number" ? piece.index : 0;
-            const acc = toolAcc.get(index) || { id: "", name: "", arguments: "" };
-            if (piece.id) acc.id = piece.id;
-            if (piece.function && piece.function.name) acc.name = piece.function.name;
-            if (piece.function && typeof piece.function.arguments === "string") acc.arguments += piece.function.arguments;
-            toolAcc.set(index, acc);
-          }
-        }
-      }
-      cut = carry.indexOf("\n\n");
-    }
-  }
-  const toolCalls = [...toolAcc.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([index, val]) => ({
-      id: val.id || `call_${index}`,
-      type: "function",
-      function: { name: val.name, arguments: val.arguments },
-    }));
-  return { text, toolCalls };
-}
+/* LLM 段已移除：agent 由网页 AI 经 MCP 驱动，桌面端不做本地 API 循环（聚焦）。 */
 
 function registerWorkbenchIpc() {
-  ipcMain.handle("wb:load", () => {
-    try { return JSON.parse(fs.readFileSync(workbenchStorePath(), "utf8")); } catch { return null; }
-  });
-  ipcMain.handle("wb:save", (_event, data) => {
-    try {
-      fs.writeFileSync(workbenchStorePath(), JSON.stringify(data && typeof data === "object" ? data : {}, null, 2), "utf8");
-    } catch { /* 本地商店写不进：会话还在，下次再试 */ }
-  });
+
   ipcMain.handle("ob:choose-workspace", async () => {
     const picked = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
     return picked.canceled ? null : (picked.filePaths[0] || null);
@@ -602,29 +528,9 @@ function registerWorkbenchIpc() {
     if (typeof name !== "string" || !name.trim()) throw new Error("mcp:call：需要工具名。");
     return mcpCallRemote(name.trim(), args);
   });
-  ipcMain.handle("llm:chat", async (event, channel, req) => {
-    try {
-      const result = await llmChatStream(event, channel, req);
-      notifyLlm(event, channel, { type: "done", result });
-    } catch (error) {
-      notifyLlm(event, channel, { type: "error", message: error instanceof Error ? error.message : String(error) });
-    }
-    return null;
-  });
-  ipcMain.handle("llm:test", async (_event, cfg) => {
-    const key = String(cfg && cfg.apiKey || "").trim();
-    if (!key) throw new Error("先填 API Key 再测。");
-    const resp = await fetch(llmEndpoint(cfg && cfg.baseUrl, "/models"), {
-      headers: { Authorization: `Bearer ${key}` },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!resp.ok) {
-      const detail = (await resp.text().catch(() => "")).slice(0, 200);
-      throw new Error(`HTTP ${resp.status}${detail ? `：${detail}` : ""}`);
-    }
-    const data = await resp.json().catch(() => null);
-    const count = data && Array.isArray(data.data) ? data.data.length : 0;
-    return `连通正常${count ? `：端点列出 ${count} 个模型` : "（端点未返回模型清单，但鉴权通过）"}`;
+  ipcMain.handle("ob:activity", () => fetchActivity());
+  ipcMain.handle("ob:copy-text", (_event, text) => {
+    if (typeof text === "string" && text) clipboard.writeText(text);
   });
 }
 
@@ -643,13 +549,22 @@ if (!gotLock) {
     tray.on("double-click", () => { void openWindow(); });
 
     ipcMain.handle("ob:restart", () => restartBridge(currentWorkspace));
-    ipcMain.handle("ob:status", () => ({
-      port: currentPort(),
-      attached: !bridge.child && Boolean(bridge.attachedPort),
-      workspace: currentWorkspace,
-      logFile: path.join(logDir(), "bridge.log"),
-      versions: { electron: process.versions.electron, node: process.versions.node },
-    }));
+    ipcMain.handle("ob:status", () => {
+      const loopPort = currentPort();
+      return {
+        port: loopPort,
+        attached: !bridge.child && Boolean(bridge.attachedPort),
+        workspace: currentWorkspace,
+        logFile: path.join(logDir(), "bridge.log"),
+        versions: { electron: process.versions.electron, node: process.versions.node },
+        routeTokenKnown: Boolean(bridge.routeToken),
+        /** 配对网页 AI 的连接器 URL：公网优先，回环兜底（仅本机客户端可用）。 */
+        publicMcpUrl: bridge.publicMcpUrl,
+        loopbackMcpUrl: loopPort && bridge.routeToken
+          ? `http://127.0.0.1:${loopPort}/mcp/${bridge.routeToken}`
+          : "",
+      };
+    });
 
     registerWorkbenchIpc();
     await startBridge(currentWorkspace);

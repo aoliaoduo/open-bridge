@@ -9,61 +9,75 @@
 <body>
 <div id="app">
   <aside id="sidebar">
-    <div class="sb-head">
-      <button class="work-toggle" id="workTitle">工作 <span class="caret">▾</span></button>
-      <div class="sb-icons"><span title="搜索会话" class="icon-btn" id="searchBtn">⌕</span><span class="icon-btn" title="通知">🔔</span></div>
-    </div>
+    <div class="sb-head"><span class="brand">Open Bridge</span></div>
     <nav class="sb-actions">
-      <button id="newChat">✎ 新对话</button>
-      <button class="ghost" id="schedBtn" title="规划中">⏲ 定时任务</button>
-      <button id="consoleBtn">🧩 控制台</button>
+      <button id="navHome" class="nav-item active">⌂ 总览</button>
+      <button id="navActivity" class="nav-item">📈 活动实况</button>
+      <button id="navConsole" class="nav-item">🧩 控制台</button>
     </nav>
-    <div class="sb-sec">项目</div>
-    <div id="projectList"></div>
-    <div class="sb-sec">最近</div>
-    <div id="recentList"></div>
-    <div class="sb-foot"><span id="profile">Open Bridge</span><a id="helpBtn" title="关于">?</a></div>
+    <div class="sb-sec">当前工作区</div>
+    <div class="ws-card">
+      <div class="ws-path" id="wsPath">…</div>
+      <button id="wsChange" class="ws-btn">更换…</button>
+    </div>
+    <div class="sb-spacer"></div>
+    <div class="sb-foot" id="footVersion">Open Bridge 桌面端</div>
   </aside>
 
   <main id="main">
-    <div id="emptyState">
-      <div class="cloud">⛅</div>
-      <h1>我们要构建什么？</h1>
-      <p class="hint" id="noProjectHint" hidden>先在输入框上方选择一个项目文件夹</p>
-    </div>
-    <div id="messages" hidden></div>
-    <div id="composer">
-      <div class="composer-top">
-        <button id="projectChip" class="chip">▤ 选择项目</button>
+    <section id="viewHome" class="view">
+      <h1 class="page-title">把本机能力接到网页 AI</h1>
+      <p class="page-sub">桥正在本机提供 MCP 服务。把下面的连接器 URL 交给任意支持 MCP 的网页 AI，它就能读写此工作区的文件、运行命令。</p>
+
+      <div class="card" id="svcCard">
+        <div class="card-title">本地服务</div>
+        <div class="svc-grid">
+          <div class="svc-row"><span class="k">状态</span><span id="svcState" class="v dot-ok">检查中…</span></div>
+          <div class="svc-row"><span class="k">端口</span><span id="svcPort" class="v">—</span></div>
+          <div class="svc-row"><span class="k">工作区</span><span id="svcWs" class="v mono">—</span></div>
+          <div class="svc-row"><span class="k">模式</span><span id="svcMode" class="v">—</span></div>
+          <div class="svc-row"><span class="k">日志</span><span id="svcLog" class="v mono small">—</span></div>
+        </div>
       </div>
-      <textarea id="input" rows="1" placeholder="随心输入" autofocus></textarea>
-      <div class="composer-row">
-        <button id="plusBtn" class="icon-btn" title="添加（规划中）">＋</button>
-        <button id="permChip" class="chip warn" title="点击切换权限模式">⚠ 完全访问</button>
+
+      <div class="card" id="urlCard">
+        <div class="card-title">连接器 URL <span class="card-sub">含路由令牌，等同账号密码</span>
+          <button id="maskToggle" class="mini-btn">显示</button>
+        </div>
+        <div class="url-row" id="rowPublic" hidden>
+          <div class="url-label">公网（网页 AI 用）</div>
+          <div class="url-value mono masked" id="urlPublic">—</div>
+          <button class="copy-btn" data-target="urlPublic">复制</button>
+        </div>
+        <div class="url-row" id="rowLoop">
+          <div class="url-label">本机回环（同机客户端用）</div>
+          <div class="url-value mono masked" id="urlLoop">—</div>
+          <button class="copy-btn" data-target="urlLoop">复制</button>
+        </div>
+        <div class="url-note" id="tunnelNote" hidden>
+          公网隧道未启动：网页 AI 暂时到不了本机。<button id="openConsoleFromNote" class="link-btn">打开控制台配置隧道 →</button>
+        </div>
+      </div>
+
+      <div class="card subtle">
+        <div class="card-title">怎么接</div>
+        <p class="howto">到网页 AI 的「连接器 / MCP / 开发者模式」设置里，新建一个连接器并粘贴上面的 URL；之后的对话里它就能直接调用桥的四十个工具。活动实况页可以看到它每一次动手。</p>
+      </div>
+    </section>
+
+    <section id="viewActivity" class="view" hidden>
+      <div class="feed-toolbar">
+        <h1 class="page-title">活动实况</h1>
+        <span id="feedCount" class="feed-count"></span>
         <span class="spacer"></span>
-        <button id="modelChip" class="chip" title="模型与端点设置">未配置模型</button>
-        <button id="sendBtn" class="send" title="发送">↑</button>
+        <label class="auto-scroll"><input type="checkbox" id="autoScroll" checked> 自动滚动</label>
+        <button id="feedPause" class="mini-btn">暂停</button>
+        <button id="feedClear" class="mini-btn">清空视图</button>
       </div>
-    </div>
-    <div id="projectPicker" hidden></div>
+      <div id="feed"></div>
+    </section>
   </main>
 </div>
-
-<dialog id="settingsDlg">
-  <h3>模型设置</h3>
-  <p class="dlg-note">OpenAI 兼容端点（DeepSeek、Qwen、GLM、Kimi 或自建的 Claude/OpenAI 兼容网关均可）。密钥只保存在本机。</p>
-  <label>Base URL <input id="cfgBase" placeholder="https://api.deepseek.com"></label>
-  <label>API Key <input id="cfgKey" type="password" placeholder="sk-…"></label>
-  <label>模型 <input id="cfgModel" placeholder="deepseek-chat"></label>
-  <div class="dlg-row"><span id="cfgStatus" class="dlg-status"></span></div>
-  <div class="dlg-actions">
-    <button id="cfgTest">连接测试</button>
-    <span class="spacer"></span>
-    <button id="cfgCancel">取消</button>
-    <button id="cfgSave" class="primary">保存</button>
-  </div>
-</dialog>
-
 <script src="app.js"></script>
 </body>
 </html>
