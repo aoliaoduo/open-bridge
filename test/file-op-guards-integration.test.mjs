@@ -105,6 +105,26 @@ test("the Bridge's own data directory and a drive root are refused", async () =>
   assert.match(drive.text, /drive root/);
 });
 
+test("an overwrite copy aimed at the workspace root is refused, like the move that lands there", async () => {
+  // fs.cp with {recursive, force:true} MERGES a directory source onto an
+  // existing directory: aimed at ".", every same-named project file is
+  // silently overwritten with the source's version and the call answers
+  // success. Nothing is deleted — so this shape slips past fs.cp's own
+  // non-dir-over-dir refusal — yet it is aimed at exactly the ground the
+  // self-destruction guard exists for, and "move onto" / "delete" already
+  // pass through it. A copy lands "onto" the same targets with overwrite
+  // semantics instead of delete semantics.
+  mkdirSync(path.join(workspace, "clobber-source"));
+  writeFileSync(path.join(workspace, "clobber-source", "canary.txt"), "CLOBBERED", "utf8");
+
+  const result = await callTool("file_op", { op: "copy", source: "clobber-source", destination: ".", overwrite: true });
+  assert.equal(result.isError, true, "copying onto the workspace root must fail the way a move onto it does");
+  assert.match(result.text, /Refusing to copy onto/, "the refusal names itself");
+  assert.equal(readFileSync(path.join(workspace, "canary.txt"), "utf8"), "keep me",
+    "the project file was NOT silently overwritten with the source's version");
+  assert.equal(readFileSync(path.join(workspace, "d", "inside.txt"), "utf8"), "inside", "nor was the subtree merged over");
+});
+
 test("a path outside the workspace is still reachable: the guard is not a sandbox", async () => {
   const outside = path.join(path.dirname(workspace), "outside.txt");
   assert.ok(existsSync(outside), "the outside file is there to begin with");

@@ -1121,6 +1121,13 @@ export async function moveFile(args: Args): Promise<unknown> {
 export async function copyFile(args: Args): Promise<unknown> {
   const source = await securePath(requiredArg(args, "source"));
   const destination = await securePath(requiredArg(args, "destination"), true);
+  // A file copied onto a directory is refused by fs.cp itself (see the move
+  // guard above), but a DIRECTORY copied onto one is not: fs.cp merges the
+  // source tree over it, force-overwriting same names. Aimed at the workspace
+  // root, the data directory or a drive root, overwrite:true therefore
+  // silences and answers success — the deletion-less twin of "move onto",
+  // aimed at exactly the ground this guard exists for.
+  refuseSelfDestruction(destination, "copy onto");
   if (args.overwrite !== true) {
     try {
       await fs.lstat(destination);
