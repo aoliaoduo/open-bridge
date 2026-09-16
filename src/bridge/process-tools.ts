@@ -519,6 +519,11 @@ export function listSessions(): unknown {
     connected_at: null,
     first_seen: new Date(state.modernSince || state.modernLastUsed).toISOString(),
     last_used: new Date(state.modernLastUsed).toISOString(),
+    // The legacy rows carry their busy count through the console's session
+    // view; the stateless era has no session to hang one on, so it is reported
+    // here — and it is the honest answer to "is this instance working right
+    // now?" for a request that has not finished yet.
+    in_flight: state.modernInFlight,
   }];
 }
 

@@ -327,6 +327,13 @@ export async function startHttpInternal(): Promise<void> {
         // The stateless era's nearest thing to a handshake: the session view needs
         // a start time to describe a modern caller at all (see listSessions).
         if (!state.modernSince) state.modernSince = state.modernLastUsed;
+        // Marked busy for the WHOLE request, with the activity clock stamped
+        // again on the way out. Both halves matter and both were missing: an
+        // arrival stamp alone makes a 70 s tool call look like 70 s of silence
+        // (longer than the finish settle window), so the watchdogs announced an
+        // ending in the middle of a turn — measured in this workspace's own log,
+        // three "sent finished" pushes within seconds of long verifies.
+        state.modernInFlight += 1;
         try {
           await modernNodeHandlerOf()(req, res, parsedBody);
         } catch (e) {
@@ -334,6 +341,9 @@ export async function startHttpInternal(): Promise<void> {
           record("bridge", "error", `Modern MCP handler failed: ${message}`);
           if (!res.headersSent) res.writeHead(500, { ...securityHeaders, "content-type": "application/json" });
           if (!res.writableEnded) res.end(JSON.stringify({ error: message }));
+        } finally {
+          state.modernInFlight = Math.max(0, state.modernInFlight - 1);
+          state.modernLastUsed = Date.now();
         }
         return;
       }

@@ -168,6 +168,17 @@ export const state = {
    */
   modernSince: 0,
   /**
+   * Modern-era requests currently being served, 0 when none.
+   *
+   * The session table counts this for legacy sessions (`activeRequests`) and the
+   * watchdogs read it — "a request in flight is the Bridge being slow, not the
+   * human being away". The stateless era had no equivalent, so a modern call
+   * that outlasted the finish settle window (45 s) looked exactly like silence:
+   * the phone bell announced "the AI stopped" while the AI was waiting on its
+   * own `npm run verify`. Counted per request, decremented on the way out.
+   */
+  modernInFlight: 0,
+  /**
    * Whether the "you are running an older build" note has already gone out.
    *
    * Per process, not per session: the fact is about the process, and the modern

@@ -734,7 +734,9 @@ export function idleWatchVerdict(input: {
  */
 export function latestSessionActivity(): { lastUsedMs: number; activeRequests: number; hasOpenTodos: boolean } {
   let lastUsedMs = 0;
-  let activeRequests = 0;
+  // Both eras count here, because the verdicts below ask one question — "is the
+  // Bridge busy right now?" — and a modern request is as busy as a legacy one.
+  let activeRequests = state.modernInFlight;
   let hasOpenTodos = false;
   for (const session of state.sessions.values()) {
     if (session.lastUsed > lastUsedMs) lastUsedMs = session.lastUsed;

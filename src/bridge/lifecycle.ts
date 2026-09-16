@@ -139,6 +139,7 @@ async function stopInternal(notify = true): Promise<void> {
   // as an ancient "last call" and skew the idle/finish watchdogs' latch.
   state.modernLastUsed = 0;
   state.modernSince = 0;
+  state.modernInFlight = 0;
   // Same reasoning one step further: the "older build than dist/" note is a
   // per-process fact, and a stop/start in this process may happen after a rebuild.
   state.notedStaleBuild = false;

@@ -61,6 +61,8 @@ export function getBridgeStatus(): Record<string, unknown> {
      */
     active_sessions: state.sessions.size,
     modern_last_used: state.modernLastUsed > 0 ? new Date(state.modernLastUsed).toISOString() : null,
+    /** Modern requests being served right now — see state.modernInFlight. */
+    modern_in_flight: state.modernInFlight,
     active_commands: [...state.commands.values()].filter(command => !command.done).length,
     tool_profile: host().config.get<string>("toolProfile", "full"),
     // Must report what tools/list actually advertises: the toolProfile filter

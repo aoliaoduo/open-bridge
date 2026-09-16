@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **长调用的过程中会响「已结束」铃声。** 现代（无状态）请求从来不计入活动计数，`modernLastUsed` 又只在请求**到达**时盖一次时间戳 —— 于是任何超过结束静默窗口（45 秒）的调用，在结束看门狗眼里就是「45 秒没有动静」，铃声在调用还在跑的时候就响了：日志里 11:43:51 与 11:51:51 两次推送，分别落在那两轮 71 秒 `npm run verify` 结束后的十几秒，正是「活干完了」的错觉。现在现代请求也算在途（`state.modernInFlight`），时间戳**在请求结束时**重盖，活动的定义回到它该有的意思：工作停下之后又过了 45 秒。会话视图的现代行随带 `in_flight`、overview 随带 `modern_in_flight` —— 看门狗读的就是这个数。纯函数判据在 `test/modern-inflight-activity.test.ts`（红→绿：先要求「在途必须可见」）；真进程钉的是 `test/notification-inflight-integration.test.mjs`（真 6 秒调用、真并发读、结束后计数回落）。
+
 - **`Start` 只重试 ngrok 隧道，而失败提示正让人去点它。** 隧道起不来时唯一的恢复手段是那次重试（`state.server` 已在、`tunnelRole` 为 `none`、没有待触发的重连），而它的判断写成 `tunnelProvider === "ngrok"` —— tailscale 下点 Start 只会回「已在运行」，funnel 一直躺到整实例重启；更糟的是失败路径本身在提示「修复后点 Start 重试」（provider 切换警告里那句），等于把操作者指向一个空按钮。同一条链上还有第二处：`funnel --bg` 的子进程按设计立即退出（代理是 daemon 侧的配置项），而它被留在了 `state.tunnel` 里 —— 那个槽位被当作「隧道还在」的凭据，于是即便把判断改成 provider 无关，`!state.tunnel` 依旧会拦住重试。现在两个 provider 都走同一次重试，`--bg` 的子进程退出时清掉槽位（仅当槽位仍指向自己），`state.tunnel` 只代表「真的还活着的隧道」。新增 `test/tailscale-tunnel-integration.test.mjs`：以 Node 自身充当 tailscale CLI（fixture 目录里无扩展名的 `status` / `funnel` 两个脚本，与 ngrok 那份 fixture 同一手法），先让 funnel 起不来，再点 Start —— 未修复代码上红在「attempts stayed at 1」。
 
 - **tailscale 实例不往别的实例的 peer 注册表发布自己。** 「要不要对外发布」的那个判断只认 ngrok，于是 funnel 模式的实例只写自己的注册表文件：在一台机器上两个实例共享唯一的 443 funnel 时（这正是 peer 共享存在的理由，等价于 ngrok 免费版一个域名），谁也看不见谁，follower 永远不会发生 —— 而且这个失败是无声的，日志里没有一句「我没有发布」。「是否真的有隧道在跑」现在提取成 `tunnelInPlay(provider, ngrokDomain, tailscaleDomain)` 并逐 provider 读各自的域名：`--no-tunnel` 残留着 ngrok 域名照样不发布，tailscale 实例在域名发现之前也不发布（那时确实没有可服务的地址）。判据在 `test/tunnel-in-play.test.ts`。
