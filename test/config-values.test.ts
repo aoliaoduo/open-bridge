@@ -43,6 +43,23 @@ test("plain strings are trimmed, non-empty, and capped", () => {
   assert.match(err("shellPath", "x".repeat(501)), /at most 500 characters/);
 });
 
+test("the tailscale executable is writable through this path, and empty means \"discover\"", () => {
+  // Two surfaces can write settings — the console page and `set_config_value` —
+  // and this key existed on only one of them: the console's manifest knew it, the
+  // console's field wrote it, docs/configuration.md described it, and this
+  // validator answered "Unsupported Open Bridge setting". A client that read the
+  // config with get_config, saw tailscaleExecutable, and set it back was refused
+  // by a message that reads like the key does not exist.
+  assert.equal(ok("tailscaleExecutable", "C:\\Program Files\\Tailscale\\tailscale.exe"),
+    "C:\\Program Files\\Tailscale\\tailscale.exe");
+  // Unlike ngrokExecutable (whose auto value is the literal "ngrok"), "" is the
+  // canonical "let the resolver find it" — PATH first, then the MSI's install
+  // dir — so clearing the override must be a legal write.
+  assert.equal(ok("tailscaleExecutable", ""), "");
+  assert.match(err("tailscaleExecutable", 42), /string/);
+  assert.match(err("tailscaleExecutable", "x".repeat(501)), /at most 500 characters/);
+});
+
 test("shellArgs trims and drops empties, then enforces the cap by refusal", () => {
   assert.deepEqual(ok("shellArgs", [" -NoLogo ", "", "-ExecutionPolicy Bypass"]), ["-NoLogo", "-ExecutionPolicy Bypass"]);
   assert.deepEqual(ok("shellArgs", []), []);

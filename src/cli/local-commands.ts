@@ -12,6 +12,7 @@
 import * as fs from "node:fs";
 
 import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
+import { resolveTailscaleExecutable } from "../bridge/tailscale-locate.js";
 import { t } from "../bridge/cli-i18n.js";
 import {
   deleteToken, listTokenViews, mintToken, revokeToken, rotateToken,
@@ -239,10 +240,24 @@ export async function cmdDoctor(parsed: ParsedArgs): Promise<void> {
   // site: without the explicit type argument T infers from the literal
   // fallback, so `domain` types as "" and `domain || "未配置…"` reads as a
   // branch that can never be taken.
-  const ngrokExe = nodeHost.config.get<string>("ngrokExecutable", "ngrok");
-  check("tunnel provider", true, `${nodeHost.config.get<string>("tunnelProvider", "ngrok")} (${ngrokExe})`);
-  const domain = nodeHost.config.get<string>("ngrokDomain", "");
-  check("ngrok domain", true, domain || t("未配置（serve 时隧道需要，可先 --no-tunnel 本地用）", "not configured (needed for the tunnel on serve; --no-tunnel works locally without it)"));
+  // The provider line names the executable THAT PROVIDER will run: this read as
+  // `tailscale (ngrok)` for a funnel installation, which is the kind of detail
+  // an operator checks precisely because something else is already wrong. And
+  // the domain line follows the provider too — under tailscale the ngrok domain
+  // is irrelevant, while the ts.net name is the thing worth reporting (and is
+  // discovered, so "not configured yet" is a normal state until the first start).
+  const provider = nodeHost.config.get<string>("tunnelProvider", "ngrok");
+  const tunnelExe = provider === "tailscale"
+    ? resolveTailscaleExecutable(nodeHost.config.get<string>("tailscaleExecutable", ""))
+    : nodeHost.config.get<string>("ngrokExecutable", "ngrok");
+  check("tunnel provider", true, `${provider} (${tunnelExe})`);
+  if (provider === "tailscale") {
+    const tsDomain = nodeHost.config.get<string>("tailscaleDomain", "");
+    check("tailscale domain", true, tsDomain || t("未配置（serve 时从 tailscale CLI 自动发现）", "not configured (discovered from the tailscale CLI at serve time)"));
+  } else {
+    const domain = nodeHost.config.get<string>("ngrokDomain", "");
+    check("ngrok domain", true, domain || t("未配置（serve 时隧道需要，可先 --no-tunnel 本地用）", "not configured (needed for the tunnel on serve; --no-tunnel works locally without it)"));
+  }
   check("config file", true, nodeHost.configPath());
   const live = readAllRuntimes(home);
   check("instance", true, live.length === 0

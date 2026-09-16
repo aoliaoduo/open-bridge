@@ -56,6 +56,25 @@ function schemaOf(name: string): { type?: string; items?: unknown; required?: st
   return def?.outputSchema as ReturnType<typeof schemaOf>;
 }
 
+test("get_config declares every tunnel setting, both providers", () => {
+  // The declared shape is a curated subset of the config keys on purpose (the
+  // schema ships with every tools/list, and the console is the real editor), but
+  // the subset has to be complete WITHIN a feature area or it misleads exactly
+  // where a client is reading it: tailscaleDomain and tailscaleExecutable were
+  // added to the config, the console and docs/configuration.md while this schema
+  // kept the two ngrok names only. A client that plans against the declaration
+  // then cannot see the settings of the provider it is actually running.
+  const properties = schemaOf("get_config")?.properties ?? {};
+  const tunnelKeys = ["tunnelProvider", "ngrokDomain", "ngrokExecutable", "tailscaleDomain", "tailscaleExecutable"];
+  for (const key of tunnelKeys) {
+    assert.ok(properties[key], `get_config must declare ${key}`);
+  }
+  // Types are the ones the values actually carry: a schema that declares a
+  // number where the config stores a string is the same lie in miniature.
+  assert.equal((properties["tailscaleDomain"] as { type?: string }).type, "string");
+  assert.equal((properties["tailscaleExecutable"] as { type?: string }).type, "string");
+});
+
 test("array-returning tools declare an array", () => {
   for (const name of ARRAY_RETURNING) {
     const schema = schemaOf(name);

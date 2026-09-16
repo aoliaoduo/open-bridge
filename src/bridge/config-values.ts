@@ -142,6 +142,26 @@ export function validateConfigValue(key: string, value: unknown): ConfigValidati
     return { ok: true, value: trimmed };
   }
 
+  if (key === "tailscaleExecutable") {
+    // One of the two surfaces that can write settings knew this key and the
+    // other did not: the console's manifest accepted it, its field wrote it,
+    // docs/configuration.md described it, and this validator answered
+    // "Unsupported Open Bridge setting" — a refusal that reads like the key does
+    // not exist, aimed at a client that had just read it back from get_config.
+    // "" is a real value here (unlike ngrokExecutable, whose auto choice is the
+    // literal "ngrok"): it means the resolver decides — PATH first, then the
+    // MSI's install dir — and clearing an override is exactly what the console's
+    // field writes when emptied.
+    if (typeof value !== "string") {
+      return { ok: false, error: "tailscaleExecutable must be a string. (expected 'tailscaleExecutable': string)" };
+    }
+    const trimmedExecutable = value.trim();
+    if (trimmedExecutable.length > MAX_STRING_CHARS) {
+      return { ok: false, error: `tailscaleExecutable must be at most ${MAX_STRING_CHARS} characters.` };
+    }
+    return { ok: true, value: trimmedExecutable };
+  }
+
   if (key === "shellArgs") {
     if (!Array.isArray(value) || value.some((item: unknown) => typeof item !== "string")) {
       return { ok: false, error: "shellArgs must be an array of strings." };
