@@ -34,6 +34,19 @@ npm run verify            # 提交前硬门槛，必须全绿
 
 视觉证据惯例（来源 cindy）：行为/界面变更要留截图到 `docs/evidence/<面>/<日期>/步骤名.png`。
 
+## 冷启动清单（本地全没了，只靠 GitHub 仓库）
+
+**开发线：无缝。** clone 后 `npm install && npm run verify`（GH Actions 每次 push 都在无菌
+Ubuntu clone 上把这套跑绿，已被 CI 反复证明）。唯独 desktop 打包流程目前只在 Windows 本机
+实证过，新机器首次 `cd desktop && npm install && npm run pack` 应可用但未跨机验证。
+
+**运行线：几分钟重设**（config 含密钥，本就不该进仓库——缝是特性）：
+1. `npm install -g .`（重装 CLI）
+2. 隧道重配：ngrok 控制台拿 authtoken 或 `tailscale login`，然后 `open-bridge config set tunnelProvider ...`
+3. 选工作区（`open-bridge` 启动时或桌面壳里选）
+4. 桌面端：`cd desktop && npm install && npm start`
+5. 新的公网 MCP URL（路由令牌重新生成）复制给网页 AI——旧 URL 必然失效，这是预期
+
 ## 恢复开发时的优先级
 
 1. **NSIS 打包 `npm run dist`**：还没跑过一次；跑完把安装包烟测（双击安装→托盘→三视图）。
