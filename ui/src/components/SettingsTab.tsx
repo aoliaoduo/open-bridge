@@ -414,8 +414,8 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
               hint={tunnelFacts.ngrok.domains.length
                 ? t("来自你 ngrok 账号里的保留域名；不选则用 ngrok 分配的随机地址。",
                     "Your account's reserved domains; leave it unset to use ngrok's random address.")
-                : t("留空则用 ngrok 分配的随机地址；读不到保留域名时也可以手动填写。",
-                    "Leave empty to use ngrok's random address; type one when the list cannot be read.")}
+                : t("留空则用 ngrok 分配的随机地址。想让保留域名出现在下拉里：把 ngrok 后台的 API key 写进 ngrok.yml 的 api_key 一行（authtoken 不能用于 API）。",
+                    "Leave empty to use ngrok's random address. For a dropdown here, put an API key on the api_key line of ngrok.yml — an authtoken does not work for the API.")}
             >
               {tunnelFacts.ngrok.domains.length > 0 ? (
                 <select

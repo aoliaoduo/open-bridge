@@ -151,8 +151,22 @@ whichever provider is selected:
 - **Nothing was removed, only folded.** The executable pickers, the hand-typed
   domain, the authtoken field, the proxy switch and auto-reconnect are all in
   高级设置. The card also keeps `ngrokDomain` in a dropdown of the account's
-  reserved domains when that list can be read, falling back to typing when it
   cannot.
+- **The reserved-domain dropdown needs an ngrok *API key*, not your authtoken.**
+  ngrok keeps the two credentials apart on purpose: the authtoken opens tunnels,
+  and `api.ngrok.com` refuses it outright (`ERR_NGROK_206` — "the authentication
+  you specified is actually an authtoken ... check your records for an API key").
+  The card reads `api_key:` out of ngrok's own config (one line, from
+  <https://dashboard.ngrok.com/api-keys>) and only then asks for the list; without
+  one it says which credential is missing and the field stays typable, which is a
+  normal state rather than a fault — a machine that only ever ran
+  `ngrok config add-authtoken` has a working tunnel and no list to show.
+- **A Store install of ngrok is found too.** ngrok from the Microsoft Store
+  reaches PATH as an *App Execution Alias*: `…\Microsoft\WindowsApps\ngrok.exe`
+  is a reparse point that CreateProcess resolves and `stat` — hence `existsSync` —
+  cannot follow. That path now counts as installed, the picker labels it
+  PATH（Microsoft Store 版）so it is not mistaken for the zip someone unpacked
+  themselves, and the alias directory is offered even when PATH omits it.
 - The card is backed by `GET /api/tunnel` (facts + the plan 「自动配置」 would run,
   in one object, so the promise and the write cannot drift). It carries no
   credential. `/api` stays loopback-only.

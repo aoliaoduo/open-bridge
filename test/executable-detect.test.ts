@@ -115,3 +115,44 @@ test("the same binary reached two ways is one entry, not two", () => {
   assert.deepEqual(choices.map(choice => choice.value), ["/opt/homebrew/bin/ngrok"]);
   assert.equal(choices[0]?.label, "PATH", "first spelling wins, as declared");
 });
+
+/**
+ * ngrok installed from the Microsoft Store reaches PATH as an *App Execution
+ * Alias*: `…\Microsoft\WindowsApps\ngrok.exe` is a reparse point that the
+ * kernel resolves at CreateProcess time, so `existsSync` — which follows the
+ * link — answers no for a program the operator runs every day. The card
+ * believed `existsSync`, told a machine with a working ngrok to go download
+ * ngrok, and never filled the executable path in.
+ */
+const storeAliasEnv = (alias: string, dir: string) => ({
+  platform: "win32" as NodeJS.Platform,
+  exists: () => false,                                  // what existsSync says about an alias
+  lstat: (file: string) => (file === alias ? { isSymbolicLink: () => true } : null),
+  pathEnv: dir,
+  pathExt: ".COM;.EXE;.BAT;.CMD",
+  env: { LOCALAPPDATA: "C:\\Users\\dev\\AppData\\Local", USERPROFILE: "C:\\Users\\dev" },
+});
+
+test("a Store app's alias on PATH counts as an installed ngrok", () => {
+  const dir = "C:\\Users\\dev\\AppData\\Local\\Microsoft\\WindowsApps";
+  const alias = `${dir}\\ngrok.exe`;
+
+  assert.equal(findOnPath("ngrok", storeAliasEnv(alias, dir)), alias,
+    "the name resolves, because CreateProcess resolves it");
+  const choices = detectNgrok(storeAliasEnv(alias, dir));
+  assert.equal(choices[0]?.value, alias);
+  // Labelled, because the path looks like a stub and the operator has to be
+  // able to tell it apart from the zip they unpacked themselves.
+  assert.equal(choices[0]?.label, "PATH（Microsoft Store 版）");
+});
+
+test("POSIX keeps the strict rule: a dangling symlink is not a program", () => {
+  const env = {
+    platform: "linux" as NodeJS.Platform,
+    exists: () => false,
+    lstat: () => ({ isSymbolicLink: () => true }),
+    pathEnv: "/usr/local/bin",
+    env: { HOME: "/home/dev" },
+  };
+  assert.equal(findOnPath("ngrok", env), undefined);
+});

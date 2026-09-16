@@ -155,7 +155,7 @@ function planNgrok({ current, authtokenStored, facts }: AutoConfigInput): AutoCo
   } else if (ngrok.installed) {
     notes.push("找到的 ngrok 只有 PATH 上的名字，没有确定路径：用「高级」里的下拉选一个具体副本。");
   } else {
-    notes.push("这台机器上没找到 ngrok：先从 ngrok.com 下载，再用「高级」里的手动填写指出它在哪里。");
+    notes.push("这台机器上没找到 ngrok：装一个（ngrok.com 下载或 Microsoft Store 都行），再用「高级」里的手动填写指出它在哪里。");
   }
 
   if (ngrok.authtokenSource === "stored" || authtokenStored) {
@@ -187,7 +187,7 @@ function planNgrok({ current, authtokenStored, facts }: AutoConfigInput): AutoCo
   }
 
   const blocked = !ngrok.installed && ngrok.authtokenSource === "none"
-    ? "这台机器既没有 ngrok，也没有可导入的 authtoken：先从 ngrok.com 下载 ngrok，并运行一次 ngrok config add-authtoken。"
+    ? "这台机器既没有 ngrok，也没有可导入的 authtoken：先装好 ngrok（ngrok.com 下载或 Microsoft Store），并运行一次 ngrok config add-authtoken。"
     : null;
   return { provider: "ngrok", blocked, writes, keep, notes };
 }

@@ -49,9 +49,9 @@ export function ngrokConfigCandidates(
  * one key — and a file we cannot parse simply reports "no token", which is the
  * same state as having none.
  */
-export function parseNgrokAuthtoken(text: string): string {
+export function parseNgrokConfigValue(text: string, key: string): string {
   for (const line of text.split(/\r?\n/)) {
-    const match = /^\s*authtoken:\s*(.+?)\s*$/.exec(line);
+    const match = new RegExp(`^\\s*${key}:\\s*(.+?)\\s*$`).exec(line);
     if (!match) continue;
     const value = (match[1] ?? "").replace(/^["']|["']$/g, "").trim();
     if (value) return value;
@@ -59,18 +59,59 @@ export function parseNgrokAuthtoken(text: string): string {
   return "";
 }
 
-/** The authtoken ngrok itself would use, or null when there is none to read. */
-export function readNgrokConfigAuthtoken(
-  options: { env?: Record<string, string | undefined>; platform?: NodeJS.Platform; readFile?: (file: string) => string } = {},
-): { file: string; token: string } | null {
+/** The `authtoken:` line: what opens a tunnel. */
+export function parseNgrokAuthtoken(text: string): string {
+  return parseNgrokConfigValue(text, "authtoken");
+}
+
+/**
+ * The `api_key:` line: what api.ngrok.com accepts.
+ *
+ * ngrok keeps its credentials split in two and the split matters. The authtoken
+ * opens tunnels — it is the one the bridge imports and the one the agent runs
+ * on — and the REST API refuses it outright with ERR_NGROK_206 ("the
+ * authentication you specified is actually an authtoken ... check your records
+ * for an API key"). The reserved-domain list is an API question, so it needs
+ * this key; a machine that never made one has an authtoken, a working tunnel
+ * and no list to show, which is a normal state rather than a fault.
+ */
+export function parseNgrokApiKey(text: string): string {
+  return parseNgrokConfigValue(text, "api_key");
+}
+
+/** Where ngrok's config is, and how to read it — injected in tests. */
+export interface NgrokConfigReadOptions {
+  env?: Record<string, string | undefined>;
+  platform?: NodeJS.Platform;
+  readFile?: (file: string) => string;
+}
+
+/**
+ * Both of ngrok's credentials, out of the one file that holds them.
+ *
+ * Read together on purpose: "ngrok is configured" and "the domain list can be
+ * read" are different questions with different answers, and the card has to be
+ * able to report the first as a yes and the second as a why-not.
+ */
+export function readNgrokConfigCredentials(
+  options: NgrokConfigReadOptions = {},
+): { file: string; authtoken: string; apiKey: string } | null {
   const readFile = options.readFile ?? ((file: string) => readFileSync(file, "utf8"));
   for (const file of ngrokConfigCandidates(options.env ?? process.env, options.platform ?? process.platform)) {
     try {
-      const token = parseNgrokAuthtoken(readFile(file));
-      if (token) return { file, token };
+      const text = readFile(file);
+      const authtoken = parseNgrokAuthtoken(text);
+      const apiKey = parseNgrokApiKey(text);
+      if (authtoken || apiKey) return { file, authtoken, apiKey };
     } catch { /* missing or unreadable: try the next location */ }
   }
   return null;
+}
+
+/** The authtoken ngrok itself would use, or null when there is none to read. */
+export function readNgrokConfigAuthtoken(options: NgrokConfigReadOptions = {}): { file: string; token: string } | null {
+  const found = readNgrokConfigCredentials(options);
+  return found?.authtoken ? { file: found.file, token: found.authtoken } : null;
 }
 
 /** The domain names out of `GET /reserved_domains`, tolerating an odd payload. */
@@ -94,30 +135,44 @@ export interface ReservedDomainsResult {
 }
 
 /**
+ * Why the domain list is empty when ngrok's API is the reason.
+ *
+ * One line, because it is rendered inside the card's read-only summary as
+ * "保留域名：读不到（…）". The authtoken is not broken and this copy must not
+ * suggest it is — it is simply not the credential the API takes.
+ */
+export const NGROK_API_KEY_REQUIRED = "ngrok 的 REST API 需要 API key，authtoken 不能用于 API";
+
+/**
  * Ask ngrok which reserved domains this account owns.
  *
- * Online, but the operator's own token: this is the difference between a
- * dropdown and "go copy your domain out of the ngrok dashboard", which is the
- * step a novice cannot do. A failure is reported, never fatal — the field then
- * falls back to typing, and an offline machine still gets a working card.
+ * With the operator's own API key, and only when there is one: this is the
+ * difference between a dropdown and "go copy your domain out of the ngrok
+ * dashboard", which is the step a novice cannot do. A failure is reported, never
+ * fatal — the field then falls back to typing, and an offline machine still gets
+ * a working card.
  */
 export async function fetchReservedDomains(
-  authtoken: string,
+  apiKey: string,
   options: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
 ): Promise<ReservedDomainsResult> {
   const doFetch = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 5_000;
   try {
     const response = await doFetch("https://api.ngrok.com/reserved_domains", {
-      headers: { authorization: `Bearer ${authtoken}`, "ngrok-version": "2" },
+      headers: { authorization: `Bearer ${apiKey}`, "ngrok-version": "2" },
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
-      // ngrok answers 400 to a token it cannot parse and 401 to one it does not
-      // recognise; both mean the same thing to the operator, and both are worth
-      // saying out loud — otherwise the field just looks empty.
-      const stale = response.status === 400 || response.status === 401;
-      return { domains: [], error: `ngrok 接口返回 HTTP ${response.status}${stale ? "（authtoken 可能已失效）" : ""}` };
+      // ngrok says so itself when the credential is the wrong KIND; answering
+      // "your token expired" instead sends the operator to re-copy a credential
+      // that was working.
+      const body = await response.json().catch(() => null) as { error_code?: unknown } | null;
+      if (body?.error_code === "ERR_NGROK_206") return { domains: [], error: NGROK_API_KEY_REQUIRED };
+      // 401/403 is the API key itself being wrong or revoked; anything else is
+      // reported as it came.
+      const badKey = response.status === 401 || response.status === 403;
+      return { domains: [], error: `ngrok 接口返回 HTTP ${response.status}${badKey ? "（API key 可能已失效）" : ""}` };
     }
     const domains = parseReservedDomains(await response.json().catch(() => null));
     return { domains, error: domains.length ? null : "ngrok 返回的保留域名为空" };
@@ -186,7 +241,7 @@ export interface TunnelDetectOptions {
 export async function detectNgrokFacts(options: TunnelDetectOptions = {}): Promise<NgrokFacts> {
   const detect = options.detect ?? {};
   const choice = ngrokChoice(options.ngrokExecutable ?? "", detect);
-  const fileToken = readNgrokConfigAuthtoken({
+  const config = readNgrokConfigCredentials({
     env: options.env,
     platform: options.platform,
     ...(options.readFile ? { readFile: options.readFile } : {}),
@@ -194,21 +249,28 @@ export async function detectNgrokFacts(options: TunnelDetectOptions = {}): Promi
   const stored = options.storedAuthtoken?.trim() ?? "";
   const authtokenSource: NgrokFacts["authtokenSource"] = stored
     ? "stored"
-    : fileToken
+    : config?.authtoken
       ? "ngrok-config"
       : "none";
 
   let domains: string[] = [];
   let domainsError: string | null = null;
-  // Either token asks the same question; the stored one wins because it is the
-  // one the tunnel will actually use.
-  const token = stored || fileToken?.token || "";
-  if (!options.skipDomainsApi && token) {
-    const result = await fetchReservedDomains(token, {
-      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-    });
-    domains = result.domains;
-    domainsError = result.error;
+  // Two credentials, two questions: the authtoken is what the tunnel runs on,
+  // the API key is what the domain list needs.
+  const token = stored || config?.authtoken || "";
+  const apiKey = config?.apiKey ?? "";
+  if (!options.skipDomainsApi) {
+    if (apiKey) {
+      const result = await fetchReservedDomains(apiKey, {
+        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      });
+      domains = result.domains;
+      domainsError = result.error;
+    } else if (token) {
+      // The common state: an authtoken and no API key. One line saying which
+      // credential the list wants, so the empty dropdown has a reason.
+      domainsError = NGROK_API_KEY_REQUIRED;
+    }
   }
 
   return {

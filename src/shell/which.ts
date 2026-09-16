@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync } from "node:fs";
 import * as path from "node:path";
 
 /**
@@ -24,6 +24,12 @@ export interface ExecutableChoice {
 export interface DetectEnv {
   platform?: NodeJS.Platform;
   exists?: (file: string) => boolean;
+  /**
+   * Entry-shaped probe, injected in tests alongside `exists`. On Windows the
+   * difference it makes is the whole Store story: an App Execution Alias is a
+   * reparse point `stat` cannot follow but CreateProcess can.
+   */
+  lstat?: (file: string) => { isSymbolicLink(): boolean } | null;
   /** Raw PATH string; defaults to this process's. */
   pathEnv?: string;
   /** Raw PATHEXT (Windows); defaults to this process's, then a sane list. */
@@ -32,19 +38,60 @@ export interface DetectEnv {
   env?: Record<string, string | undefined>;
 }
 
+
 interface ResolvedEnv {
   platform: NodeJS.Platform;
   exists: (file: string) => boolean;
+  lstat: (file: string) => { isSymbolicLink(): boolean } | null;
   pathEnv: string;
   pathExt: string;
   env: Record<string, string | undefined>;
 }
 
+/** `lstat`, but a missing entry answers null instead of throwing. */
+export function lstatOrNull(file: string): { isSymbolicLink(): boolean } | null {
+  try {
+    return lstatSync(file);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Is this path a program the OS would actually run?
+ *
+ * `existsSync` is the obvious answer and it is wrong for one common case: an
+ * app installed from the Microsoft Store reaches PATH as an *App Execution
+ * Alias*. `%LOCALAPPDATA%\Microsoft\WindowsApps\ngrok.exe` is a 78-byte
+ * reparse point that CreateProcess resolves at spawn time, so `stat` — and with
+ * it `existsSync` — fails on the file the operator's own terminal runs every
+ * day. The alias exists only because the app is installed, so a Windows
+ * reparse point counts as present. Everywhere else the strict rule stands: a
+ * dangling symlink is not a program.
+ */
+export function executableExists(file: string, platform: NodeJS.Platform = process.platform): boolean {
+  if (existsSync(file)) return true;
+  return platform === "win32" && (lstatOrNull(file)?.isSymbolicLink() ?? false);
+}
+
+/** Would the OS resolve this PATH entry? `executableExists` explains the alias. */
+function present(resolved: ResolvedEnv, file: string): boolean {
+  if (resolved.exists(file)) return true;
+  return resolved.platform === "win32" && (resolved.lstat(file)?.isSymbolicLink() ?? false);
+}
+
+/** The Store's alias directory: a hit here means the app came from the Store. */
+export function isWindowsStoreAlias(file: string): boolean {
+  return /[\\/]microsoft[\\/]windowsapps[\\/]/i.test(file);
+}
+
 export function resolveDetectEnv(given: DetectEnv = {}): ResolvedEnv {
   const env = given.env ?? process.env;
+  const platform = given.platform ?? process.platform;
   return {
-    platform: given.platform ?? process.platform,
-    exists: given.exists ?? existsSync,
+    platform,
+    exists: given.exists ?? ((file: string) => executableExists(file, platform)),
+    lstat: given.lstat ?? lstatOrNull,
     pathEnv: given.pathEnv ?? env.PATH ?? env.Path ?? "",
     pathExt: given.pathExt ?? env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD",
     env,
@@ -56,11 +103,14 @@ export function resolveDetectEnv(given: DetectEnv = {}): ResolvedEnv {
  *
  * Windows needs PATHEXT applied: "ngrok" on PATH is really ngrok.exe, and a
  * plain existsSync("...\\ngrok") answers false for a binary that is very much
- * installed. Returns the resolved absolute file, because a picker that shows
- * a bare name cannot tell the operator WHICH ngrok it is about to run.
+ * installed. A Store install needs one more step on top of PATHEXT — the
+ * found file is an alias, see `present` — and both are why the check here is
+ * not a bare existsSync. Returns the resolved absolute file, because a picker
+ * that shows a bare name cannot tell the operator WHICH ngrok it runs.
  */
 export function findOnPath(name: string, given: DetectEnv = {}): string | undefined {
-  const { platform, exists, pathEnv, pathExt } = resolveDetectEnv(given);
+  const resolved = resolveDetectEnv(given);
+  const { platform, pathEnv, pathExt } = resolved;
   const separator = platform === "win32" ? ";" : ":";
   // Join with the TARGET platform's rules, not the running one's. They are the
   // same in production, and different under test — a Windows runner exercising
@@ -79,7 +129,7 @@ export function findOnPath(name: string, given: DetectEnv = {}): string | undefi
     if (!dir) continue;
     for (const extension of extensions) {
       const candidate = join(dir, `${name}${extension}`);
-      if (exists(candidate)) return candidate;
+      if (present(resolved, candidate)) return candidate;
     }
   }
   return undefined;
@@ -100,7 +150,7 @@ export function availableChoices(
   candidates: readonly { value: string | undefined; label: string }[],
   probe?: DetectEnv,
 ): ExecutableChoice[] {
-  const exists = probe ? resolveDetectEnv(probe).exists : undefined;
+  const resolved = probe ? resolveDetectEnv(probe) : undefined;
   const seen = new Set<string>();
   const choices: ExecutableChoice[] = [];
   for (const candidate of candidates) {
@@ -109,7 +159,7 @@ export function availableChoices(
     const key = value.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    if (exists && !exists(value)) continue;
+    if (resolved && !present(resolved, value)) continue;
     choices.push({ value, label: candidate.label, available: true });
   }
   return choices;

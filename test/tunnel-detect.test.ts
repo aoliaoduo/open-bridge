@@ -85,7 +85,7 @@ test("ngrok facts: the configured path wins, the token source is reported withou
     ngrokExecutable: "D:\\bin\\ngrok.exe",
     env: { LOCALAPPDATA: "C:\\L", USERPROFILE: "C:\\U" },
     platform: "win32",
-    readFile: () => "authtoken: 2secret_value\n",
+    readFile: () => "api_key: 2api_key_value\nauthtoken: 2secret_value\n",
     fetchImpl: (async () => new Response(JSON.stringify({ reserved_domains: [{ domain: "a.ngrok-free.app" }] }), { status: 200 })) as unknown as typeof fetch,
   });
 
@@ -95,6 +95,7 @@ test("ngrok facts: the configured path wins, the token source is reported withou
   assert.deepEqual(facts.domains, ["a.ngrok-free.app"]);
   // The value itself is nowhere in the facts: this object is rendered in the browser.
   assert.equal(JSON.stringify(facts).includes("2secret_value"), false);
+  assert.equal(JSON.stringify(facts).includes("2api_key_value"), false);
 });
 
 test("ngrok facts: nothing installed, nothing to import — empty is not an error", async () => {
@@ -154,4 +155,70 @@ test("tailscale facts come from the CLI's own JSON, and a dead daemon leaves def
 test("the facts shape stays JSON-clean for the console", () => {
   const keys: Array<keyof TunnelFacts> = ["ngrok", "tailscale"];
   assert.deepEqual(keys.length, 2);
+});
+
+test("an authtoken is never sent to ngrok's REST API, which wants an API key", async () => {
+  // ngrok's own answer to that call is ERR_NGROK_206 — "the authentication you
+  // specified is actually an authtoken, check your records for an API key" —
+  // and the card used to translate it into "authtoken 可能已失效", sending the
+  // operator to re-copy a credential that was working the whole time.
+  let calls = 0;
+  const spy = (async () => { calls += 1; return new Response("{}", { status: 200 }); }) as unknown as typeof fetch;
+
+  const fromFile = await detectNgrokFacts({
+    env: { LOCALAPPDATA: "C:\\L", USERPROFILE: "C:\\U" },
+    platform: "win32",
+    readFile: () => "version: \"3\"\nagent:\n    authtoken: 3Iwl_token_only\n",
+    fetchImpl: spy,
+  });
+  const fromStore = await detectNgrokFacts({
+    storedAuthtoken: "2stored_token",
+    env: { LOCALAPPDATA: "C:\\L", USERPROFILE: "C:\\U" },
+    platform: "win32",
+    readFile: () => { throw new Error("ENOENT"); },
+    fetchImpl: spy,
+  });
+
+  assert.equal(calls, 0, "without an API key there is nothing the API would accept");
+  assert.equal(fromFile.authtokenSource, "ngrok-config", "the authtoken itself is still fine");
+  assert.equal(fromStore.authtokenSource, "stored");
+  for (const facts of [fromFile, fromStore]) {
+    assert.deepEqual(facts.domains, []);
+    assert.match(facts.domainsError ?? "", /API key/);
+    assert.equal((facts.domainsError ?? "").includes("失效"), false,
+      "the token is not what is missing");
+  }
+});
+
+test("a reserved-domain list is fetched with the API key from ngrok's config", async () => {
+  const seen: string[] = [];
+  const facts = await detectNgrokFacts({
+    env: { LOCALAPPDATA: "C:\\L", USERPROFILE: "C:\\U" },
+    platform: "win32",
+    readFile: () => "version: \"3\"\napi_key: 2api_key_value\nagent:\n    authtoken: 3Iwl_agent_token\n",
+    fetchImpl: (async (_url: string, init?: RequestInit) => {
+      seen.push(String((init?.headers as Record<string, string> | undefined)?.authorization ?? ""));
+      return new Response(JSON.stringify({ reserved_domains: [{ domain: "bridge.example.invalid" }] }), { status: 200 });
+    }) as unknown as typeof fetch,
+  });
+
+  assert.deepEqual(seen, ["Bearer 2api_key_value"], "the API key authenticates, the authtoken does not");
+  assert.deepEqual(facts.domains, ["bridge.example.invalid"]);
+  assert.equal(facts.domainsError, null);
+  assert.equal(JSON.stringify(facts).includes("2api_key_value"), false,
+    "and the key stays out of the payload the browser renders");
+});
+
+test("ngrok's own \"that is an authtoken\" answer is translated, not blamed on the token", async () => {
+  const result = await fetchReservedDomains("3Iwl_token_only", {
+    fetchImpl: (async () => new Response(JSON.stringify({
+      error_code: "ERR_NGROK_206",
+      status_code: 400,
+      msg: "The authentication you specified is actually an authtoken. Check your records for an API key.",
+    }), { status: 400, headers: { "content-type": "application/json" } })) as unknown as typeof fetch,
+  });
+
+  assert.deepEqual(result.domains, []);
+  assert.match(result.error ?? "", /API key/);
+  assert.equal((result.error ?? "").includes("失效"), false);
 });

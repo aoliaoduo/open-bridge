@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { emptyTunnelFacts, planTunnelAutoConfig, type AutoConfigInput, type AutoConfigWrite } from "../src/bridge/tunnel-plan.js";
+import { detectNgrok } from "../src/bridge/ngrok-locate.js";
 
 /**
  * 「自动配置」 is the one action on the settings page that writes several values
@@ -150,4 +151,40 @@ test("provider none plans nothing and says what to do first", () => {
   const plan = planTunnelAutoConfig(input({ provider: "none" }));
   assert.deepEqual(plan.writes, []);
   assert.match(plan.blocked ?? "", /选一个提供商/);
+});
+
+test("the Store copy of ngrok is offered, not denied", () => {
+  // The exact complaint from a machine that runs `ngrok version` fine: the
+  // card said "没找到 ngrok，先从 ngrok.com 下载". Detection has to see the
+  // alias, and the plan has to write the path it found.
+  const dir = "C:\\Users\\dev\\AppData\\Local\\Microsoft\\WindowsApps";
+  const alias = `${dir}\\ngrok.exe`;
+  const [choice] = detectNgrok({
+    platform: "win32",
+    exists: () => false,
+    lstat: (file: string) => (file === alias ? { isSymbolicLink: () => true } : null),
+    pathEnv: dir,
+    pathExt: ".COM;.EXE;.BAT;.CMD",
+    env: { LOCALAPPDATA: "C:\\Users\\dev\\AppData\\Local", USERPROFILE: "C:\\Users\\dev" },
+  });
+
+  const facts = emptyTunnelFacts();
+  facts.ngrok = {
+    ...facts.ngrok,
+    installed: Boolean(choice),
+    executable: choice?.value ?? "",
+    executableLabel: choice?.label ?? "",
+    authtokenSource: "stored",
+  };
+
+  const plan = planTunnelAutoConfig(input({ facts }));
+
+  assert.ok(
+    plan.writes.some(write => write.kind === "config" && write.key === "ngrokExecutable" && write.value === alias),
+    "the Store copy is a real path and gets written like any other",
+  );
+  assert.ok(
+    !plan.notes.some(note => note.includes("没找到 ngrok")),
+    "a machine that can run ngrok must never be told to install it",
+  );
 });

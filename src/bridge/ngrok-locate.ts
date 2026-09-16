@@ -1,4 +1,4 @@
-import { availableChoices, findOnPath, resolveDetectEnv, type DetectEnv, type ExecutableChoice } from "../shell/which.js";
+import { availableChoices, findOnPath, isWindowsStoreAlias, resolveDetectEnv, type DetectEnv, type ExecutableChoice } from "../shell/which.js";
 
 /** What `ngrokExecutable: ""` (or the literal default "ngrok") ends up running. */
 export const NGROK_ON_PATH = "ngrok";
@@ -24,7 +24,10 @@ export function detectNgrok(given: DetectEnv = {}): ExecutableChoice[] {
     const localAppData = env.LOCALAPPDATA ?? (home ? `${home}\\AppData\\Local` : "");
     const programFiles = env.ProgramFiles ?? "C:\\Program Files";
     return availableChoices([
-      { value: onPath, label: "PATH" },
+      { value: onPath, label: onPath && isWindowsStoreAlias(onPath) ? "PATH（Microsoft Store 版）" : "PATH" },
+      // The same directory without PATH: how a machine that has never opened a
+      // terminal still ends up with ngrok.
+      { value: localAppData ? `${localAppData}\\Microsoft\\WindowsApps\\ngrok.exe` : undefined, label: "Microsoft Store" },
       // Chocolatey, Scoop and winget each have one canonical place.
       { value: "C:\\ProgramData\\chocolatey\\bin\\ngrok.exe", label: "Chocolatey" },
       { value: home ? `${home}\\scoop\\shims\\ngrok.exe` : undefined, label: "Scoop" },
