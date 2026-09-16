@@ -12,7 +12,7 @@
  */
 import { host } from "../host/host.js";
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { healthCheckUrl, probePublicBridge } from "../http/peers.js";
+import { healthCheckUrl, probePublicBridge, type PublicBridgeVerdict } from "../http/peers.js";
 import { validateNgrokDomain } from "../http/request-policy.js";
 import { isDeterministicNetworkFailure } from "../network/net-failure.js";
 import { isEndpointTakenError, isFatalNgrokError, ngrokFailureSummary } from "../network/ngrok-failure.js";
@@ -23,6 +23,7 @@ import { enqueueLifecycle } from "./lifecycle-queue.js";
 import { publishSelf } from "./peer-registry.js";
 import { detectNgrok } from "./ngrok-locate.js";
 import { probeTailscaleDomain, resolveTailscaleExecutable } from "./tailscale-locate.js";
+import { funnelMountIsOurs, probeFunnelHolder } from "./funnel-ownership.js";
 
 /** Consecutive deterministic (DNS/refused/TLS) health failures before aborting startup early. */
 const PUBLIC_HEALTH_DETERMINISTIC_FAILURE_LIMIT = 3;
@@ -268,11 +269,13 @@ async function watchPublicDomain(domain: string): Promise<boolean> {
     host().ui.refresh();
     return true;
   }
-  // Only ngrok's own "no endpoint here" answer is evidence that nobody holds the
-  // domain. A timeout or a 5xx while the holder reconnects is NOT evidence, and
-  // a round that is merely inconclusive resets the counter — the claim below
-  // spawns a tunnel, so it must not be triggered by someone else's bad minute.
-  const verdict = await probePublicBridge(domain, state.routeToken);
+  // Who holds the endpoint, in this provider's own terms: ngrok's edge answers
+  // "no endpoint here" directly, while for funnel the holder can only be another
+  // instance on this machine, so the daemon's serve config is the evidence. Only
+  // a definite `free` counts — a timeout or a 5xx while the holder reconnects is
+  // NOT evidence, and an inconclusive round resets the counter, because the claim
+  // below spawns a tunnel and must not be triggered by someone else's bad minute.
+  const verdict = await publicVerdictFor(domain);
   // A busy instance is the other claimant (a reconnect is armed, or a tunnel
   // child exists): never count towards a claim while it works. Resetting rather
   // than merely skipping keeps the rule the docs promise — *two consecutive*
@@ -284,8 +287,49 @@ async function watchPublicDomain(domain: string): Promise<boolean> {
   state.missingPublicRounds = 0;
   stopPublicWatch();
   record("ngrok", "progress", "Public domain is free again; this window will claim it.");
-  await claimFreedDomain();
+  await claimReleasedEndpoint(domain);
   return true;
+}
+
+/**
+ * The provider's own answer to "who is serving the public endpoint now".
+ *
+ * Read from config on every round rather than captured: a provider switch tears
+ * this watch down anyway (lifecycle), so the live value is both cheaper and the
+ * one that cannot go stale behind a switch.
+ */
+function publicVerdictFor(domain: string): Promise<PublicBridgeVerdict> {
+  if (host().config.get<string>("tunnelProvider", "ngrok") !== "tailscale") {
+    return probePublicBridge(domain, state.routeToken);
+  }
+  const exe = resolveTailscaleExecutable(String(host().config.get<string>("tailscaleExecutable", "") ?? ""));
+  return probeFunnelHolder(exe, domain, state.port);
+}
+
+/**
+ * Take the released endpoint, in the provider's own terms.
+ *
+ * ngrok's claim is a full restart (its tunnel is a child process this instance
+ * owns, and restarting re-arms the whole path). Funnel needs no restart: the
+ * mount is daemon-side state, so the claim is the same spawn a start performs —
+ * and going through the lifecycle queue keeps it serialized with everything else
+ * that touches the tunnel.
+ */
+async function claimReleasedEndpoint(domain: string): Promise<void> {
+  if (host().config.get<string>("tunnelProvider", "ngrok") !== "tailscale") {
+    await claimFreedDomain();
+    return;
+  }
+  const generation = state.tunnelGeneration;
+  await enqueueLifecycle(async () => {
+    if (generation !== state.tunnelGeneration) return;
+    await startTailscaleFunnel(generation);
+  });
+  // The watch stops itself to make room for the claim. A claim that did not end
+  // in ownership — the mount went back under someone else, or the funnel failed
+  // to come up — must keep watching, because the ngrok path gets its watch back
+  // for free (the claim restarts the instance) and this one does not.
+  if (state.tunnelRole !== "owner" && !state.stopping) startPublicWatch(domain);
 }
 
 /**
@@ -330,6 +374,25 @@ async function startTailscaleFunnel(_generation: number): Promise<void> {
   }
 
   const port = state.port;
+  // Who holds 443 decides whether this instance serves or follows. A live peer on
+  // this machine must NOT be displaced: the daemon keeps one mount per port, so
+  // spawning here would hijack the peer's public endpoint — and the peer's own
+  // teardown would then switch off OUR public access. Follow it instead; the
+  // watch promotes this instance the moment the mount is released.
+  if ((await probeFunnelHolder(exe, domain, port)) === "other") {
+    state.tunnelRole = "blocked";
+    startPublicWatch(domain);
+    await publishSelf();
+    const adopted = await adoptSharedTunnel(domain);
+    record(
+      "ngrok",
+      "completed",
+      adopted && state.tunnelUrl
+        ? `443 由本机另一个实例的 funnel 服务；先经它发布：${redactedPublicUrl(state.tunnelUrl)}`
+        : "443 由本机另一个实例的 funnel 占用；在它开始转发本工作区之前，本实例只在本机可用。",
+    );
+    return;
+  }
   state.tunnelRole = "owner";
   const child = spawn(exe, ["funnel", "--bg", String(port)], {
     windowsHide: windowsHideForChild(),
@@ -365,11 +428,20 @@ async function startTailscaleFunnel(_generation: number): Promise<void> {
  * process is already gone by teardown time (--bg exits after the backend
  * accepts), so killing it achieves nothing: the only real undo is this
  * subcommand. Best-effort - a daemon that is down makes the config moot.
+ *
+ * Only when the mount is still OURS. `funnel off` takes down whatever is on 443,
+ * and the daemon holds one mount per port: a follower that never claimed, or an
+ * instance whose mount was replaced while it ran, would otherwise switch off
+ * somebody else's public endpoint on its way out. A CLI that cannot answer
+ * leaves the mount alone for the same reason - a best-effort guess here deletes
+ * a peer's access, and the cost of doing nothing is a stale mount that the next
+ * instance's claim replaces anyway.
  */
 export function teardownTailscaleFunnel(): void {
   if (process.platform !== "win32" && process.platform !== "darwin" && process.platform !== "linux") return;
   try {
     const exe = resolveTailscaleExecutable(String(host().config.get<string>("tailscaleExecutable", "") ?? ""));
+    if (!funnelMountIsOurs(exe, state.port)) return;
     execFileSync(exe, ["funnel", "--https=443", "off"], { stdio: "ignore", timeout: 5_000, windowsHide: true });
   } catch {
     // Nothing to take down, or the daemon is not running: either way done.
