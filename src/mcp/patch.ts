@@ -30,10 +30,11 @@ export type PatchSource =
 export function resolvePatchSource(patch: unknown, patchFile: unknown): PatchSource {
   const patchText = typeof patch === "string" && patch.length > 0 ? patch : undefined;
   const filePath = typeof patchFile === "string" && patchFile.trim().length > 0 ? patchFile.trim() : undefined;
-  if ((patchText === undefined) === (filePath === undefined)) {
-    throw new Error(
-      "Provide exactly one of patch or patch_file. (expected 'patch': string or 'patch_file': string)",
-    );
+  if (patchText === undefined && filePath === undefined) {
+    throw new Error("Missing one of \"patch\" or \"patch_file\". apply_patch requires exactly one patch source. (expected 'patch': string or 'patch_file': string)");
+  }
+  if (patchText !== undefined && filePath !== undefined) {
+    throw new Error("Conflict: provide exactly one of \"patch\" or \"patch_file\". (expected 'patch': string or 'patch_file': string)");
   }
   return patchText !== undefined ? { kind: "inline", content: patchText } : { kind: "file", path: filePath! };
 }

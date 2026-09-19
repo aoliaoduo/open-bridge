@@ -39,18 +39,18 @@ function required(args: Args, family: keyof typeof FAMILY_ACTIONS): string {
   const key = FAMILY_PARAMS[family];
   const value = args[key];
   if (typeof value === "string" && value.trim()) return value.trim();
-  throw new Error(`Missing "${key}". Pass one of: ${FAMILY_ACTIONS[family].join(", ")}.`);
+  throw new Error(`Missing "${key}". ${family} requires one of: ${FAMILY_ACTIONS[family].join(", ")}.`);
 }
 
-/** Reject a value the catalog does not offer, naming the ones that exist. */
+/** Reject a value the catalog does not offer, naming the field and valid replacements. */
 function invalid(family: keyof typeof FAMILY_ACTIONS, value: string): Error {
-  return new Error(`Unknown ${FAMILY_PARAMS[family]} "${value}" for ${family}. Valid values: ${FAMILY_ACTIONS[family].join(", ")}.`);
+  return new Error(`Invalid "${FAMILY_PARAMS[family]}" value "${value}" for ${family}. Expected one of: ${FAMILY_ACTIONS[family].join(", ")}.`);
 }
 
 /** Name required by the single-service operations, before an empty lookup becomes misleading. */
 function namedService(args: Args, action: "start" | "stop" | "restart" | "delete"): Args {
   if (typeof args.name === "string" && args.name.trim()) return pick(args, ["name"]);
-  throw new Error(`Missing "name". service{action:"${action}"} requires a saved service name.`);
+  throw new Error(`Missing "name". service action "${action}" requires a saved service name.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ export function waitFamily(args: Args): Promise<unknown> {
     return waitProcess(pick(args, ["command_id", "timeout_ms"]));
   }
   if (args.ms !== undefined) return Promise.resolve(waitTool(pick(args, ["ms"])));
-  throw new Error('wait needs "ms" (sleep) or "command_id" (wait for that process to exit).');
+  throw new Error('Missing one of "ms" or "command_id". wait requires a sleep duration or a process id.');
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +192,7 @@ export function connectivityFamily(args: Args): Promise<unknown> {
     case "http":
       return checkHttpTool(pick(args, ["url", "timeout_ms", "max_redirects", "scope"]));
     case "":
-      throw new Error('connectivity needs "url" (HTTP) or "port" (TCP), or an explicit target of "http" or "port".');
+      throw new Error('Missing one of "url" or "port". connectivity requires an HTTP URL or TCP port; target may be inferred.');
     default:
       throw invalid("connectivity", target);
   }

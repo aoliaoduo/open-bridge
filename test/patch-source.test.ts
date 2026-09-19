@@ -16,15 +16,18 @@ test("patch_file only resolves to a trimmed workspace path", () => {
   });
 });
 
-test("both provided is rejected with the expected shapes in the message", () => {
+test("both provided is a Conflict that names the two expected patch shapes", () => {
   assert.throws(
     () => resolvePatchSource("--- a", "x.diff"),
-    /exactly one of patch or patch_file.*expected 'patch': string or 'patch_file': string/s,
+    /^Error: Conflict: provide exactly one of "patch" or "patch_file"\. .*expected 'patch': string or 'patch_file': string/s,
   );
 });
 
-test("neither provided is rejected with the same error", () => {
-  assert.throws(() => resolvePatchSource(undefined, undefined), /exactly one of patch or patch_file/);
+test("neither provided is Missing rather than a conflicting pair", () => {
+  assert.throws(
+    () => resolvePatchSource(undefined, undefined),
+    /^Error: Missing one of "patch" or "patch_file"\. .*expected 'patch': string or 'patch_file': string/s,
+  );
 });
 
 test("empty patch string counts as absent, so patch_file wins", () => {

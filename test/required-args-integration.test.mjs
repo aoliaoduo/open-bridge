@@ -196,7 +196,31 @@ test("single-service actions name a missing service name instead of inventing an
   }
 });
 
-// --- ④ report_progress: message -------------------------------------------
+// --- ④ common input-error vocabulary --------------------------------------
+
+test("common tool input mistakes lead with Missing, Invalid, or Conflict", async () => {
+  const cases = [
+    ["missing write payload", "write_file", { path: "never-written-by-error-contract.txt" }, /^Missing one of "content" or "content_base64"\./],
+    ["missing edit mode", "edit_block", { path: "never-edited-by-error-contract.txt" }, /^Missing one of "old_text" or "edits"\./],
+    ["conflicting edit modes", "edit_block", { path: "never-edited-by-error-contract.txt", old_text: "before", edits: [{ old_text: "before" }] }, /^Conflict: /],
+    ["missing patch source", "apply_patch", {}, /^Missing one of "patch" or "patch_file"\./],
+    ["conflicting patch sources", "apply_patch", { patch: "*** Begin Patch", patch_file: "ignored.patch" }, /^Conflict: /],
+    ["invalid file operation", "file_op", { op: "reticulate" }, /^Invalid "op" value "reticulate" for file_op\./],
+    ["missing wait mode", "wait", {}, /^Missing one of "ms" or "command_id"\./],
+    ["invalid process action", "process_control", { action: "pause" }, /^Invalid "action" value "pause" for process_control\./],
+    ["missing connectivity target", "connectivity", {}, /^Missing one of "url" or "port"\./],
+    ["invalid connectivity target", "connectivity", { target: "socket" }, /^Invalid "target" value "socket" for connectivity\./],
+    ["invalid service action", "service", { action: "dance" }, /^Invalid "action" value "dance" for service\./],
+  ];
+
+  for (const [label, tool, args, expected] of cases) {
+    const result = await callTool(tool, args);
+    assert.equal(result.isError, true, `${label} must be rejected`);
+    assert.match(result.text, expected, `${label} says how to repair the call`);
+  }
+});
+
+// --- ⑤ report_progress: message -------------------------------------------
 
 test("`report_progress` refuses a dropped message but still accepts an empty one", async () => {
   const missing = await callTool("report_progress", { phase: "running", category: "test" });

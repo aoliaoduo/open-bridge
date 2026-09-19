@@ -852,7 +852,7 @@ export async function writeFile(args: Args): Promise<unknown> {
   // so an explicit empty string can still create an empty file; a call that
   // forgets the payload entirely is a client bug and must error out.
   if (args.content_base64 == null && typeof args.content !== "string") {
-    throw new Error("write_file requires content or content_base64. (expected 'content': string or 'content_base64': string)");
+    throw new Error("Missing one of \"content\" or \"content_base64\". write_file requires a text or Base64 payload. (expected 'content': string or 'content_base64': string)");
   }
   if (args.content_base64 != null) {
     const base64Text = String(args.content_base64);
@@ -974,13 +974,16 @@ export async function editBlock(args: Args): Promise<unknown> {
   const file = await securePath(requiredArg(args, "path"));
   const hasSingle = args.old_text !== undefined || args.new_text !== undefined;
   const hasEdits = args.edits !== undefined;
-  if (hasSingle === hasEdits) {
-    throw new Error("Provide exactly one of old_text/new_text or edits. (expected 'edits': 1..20 items of {old_text: string, new_text?: string})");
+  if (!hasSingle && !hasEdits) {
+    throw new Error('Missing one of "old_text" or "edits". edit_block requires one edit mode; "new_text" is optional with "old_text".');
+  }
+  if (hasSingle && hasEdits) {
+    throw new Error('Conflict: provide exactly one edit mode — "old_text" (with optional "new_text") or "edits".');
   }
   if (hasEdits) {
     const edits = args.edits;
     if (!Array.isArray(edits) || edits.length < 1 || edits.length > 20) {
-      throw new Error("edits must be an array of 1..20 items. (expected 'edits': 1..20 items of {old_text: string, new_text?: string})");
+      throw new Error('Invalid "edits": expected an array of 1..20 items with "old_text" and optional "new_text".');
     }
     const raw = await readEditableText(file);
     assertExpectedHash(raw, args.expected_sha256, String(args.path));
@@ -996,7 +999,7 @@ export async function editBlock(args: Args): Promise<unknown> {
       const item = edits[i] as { old_text?: unknown; new_text?: unknown };
       const oldText = typeof item.old_text === "string" ? item.old_text : "";
       if (!oldText) {
-        throw new Error(`edits[${i}].old_text must be a non-empty string. (expected 'edits[i].old_text': string)`);
+        throw new Error(`Invalid "edits[${i}].old_text": expected a non-empty string.`);
       }
       const newText = String(item.new_text ?? "");
       const needle = applyEol(oldText, eol);
@@ -1017,7 +1020,12 @@ export async function editBlock(args: Args): Promise<unknown> {
   }
   const oldText = String(args.old_text ?? "");
   const newText = String(args.new_text ?? "");
-  if (!oldText) throw new Error("old_text must not be empty. (expected 'old_text': string)");
+  if (!oldText) {
+    if (args.old_text === undefined || args.old_text === null) {
+      throw new Error('Missing "old_text". edit_block single-edit mode requires text to find.');
+    }
+    throw new Error('Invalid "old_text": expected a non-empty string.');
+  }
   const raw = await readEditableText(file);
   assertExpectedHash(raw, args.expected_sha256, String(args.path));
   // Byte-preserving editing: the needle/replacement are normalized to the
@@ -1037,7 +1045,7 @@ export async function editBlock(args: Args): Promise<unknown> {
     ? (replaceAll ? occurrences : 1)
     : Number(args.expected_replacements);
   if (!Number.isInteger(expected) || expected < 0) {
-    throw new Error("expected_replacements must be a non-negative integer. (expected 'expected_replacements': number)");
+    throw new Error('Invalid "expected_replacements": expected a non-negative integer.');
   }
   if (args.expected_replacements === undefined && occurrences === 0) {
     // replace_all honors an explicit expected count when given; without one,

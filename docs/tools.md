@@ -16,6 +16,7 @@
 - 声明了 `outputSchema` 的工具同时返回 `structuredContent`（类型化数据，**永远是 JSON 对象**）。处理器的兼容文本仍可能是裸数组；此时类型化载荷用 `{ items: [...] }` 包装——目前包括 `read_files`、`service_status` 和 `activity_log{action:"recent"}`，解析类型化结果时读 `items`。**被截断过的结果一定明说**：三个列举类工具（`list_directory`、`find_files`、`search_files`）都返回 `{ items: [...], truncated: boolean, next_offset }`，而不是裸数组。`truncated: true` 的意思是"结果不是完整集合，别把这一页当全部"；对可逐页列举的行结果，`next_offset` 非 `null` 时原样回传为下一次的 `offset`，`null` 表示本页已结束。命中上限既不代表"结果为空"，也不代表"就这些"。`list_directory` 另外给 `total`（只在平铺 `depth: 1` 时是真实总数，其余为 `null`）。文本块始终保留。
 - **结果里可能多出一个 `Note:` 文本块**，它不改变字段集。目前只用于提示**本进程跑的是比 `dist/` 更旧的构建**（每个进程只说一次；重启实例后再看）。`deprecated`（见文末旧名表）走的是同一条路：只进文本块，不进 `structuredContent`。
 - 出错时返回 `isError: true` 与一句话原因；错误信息通常给出下一步（例如"先 `read_files` 再重试"）。
+- **常见输入错误的开头有固定含义**：`Missing …` 表示漏传了字段（或一组选项）；`Invalid …` 表示字段已给但值不合约；`Conflict: …` 表示同时给了互斥的输入方式。三类信息都会点名字段和可行的改法；文件版本冲突、路径保护和外部命令失败等业务错误会保留各自更具体的说明。
 
 ---
 
