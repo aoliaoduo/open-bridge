@@ -21,6 +21,7 @@ import {tmpdir} from "node:os";
 import path from "node:path";
 import {routeTokenFor, waitForRuntime} from "./lib/bridge-runtime.mjs";
 import {setTimeout as delay} from "node:timers/promises";
+import Ajv from "ajv";
 
 const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 
@@ -30,6 +31,9 @@ let port;
 let routeToken;
 let serveExit = null;
 let serveOutput = "";
+const outputSchemaAjv = new Ajv({ allErrors: true, strict: false });
+const outputValidators = new Map();
+const validatedOutputTools = new Set();
 
 before(async () => {
   home = mkdtempSync(path.join(tmpdir(), "ob-protocol-"));
@@ -46,12 +50,29 @@ before(async () => {
     try { routeToken = routeTokenFor(home, home); } catch { await delay(250); }
   }
   assert.ok(routeToken, "route token was persisted");
+
+  // Compile the schemas that the running MCP endpoint actually advertises, not
+  // a hand-copied test version. Every successful tools/call below is then
+  // checked against the client-visible contract at one common boundary.
+  const { sessionId } = await openSession();
+  assert.ok(sessionId, "the schema-audit session was initialized");
+  const catalog = await mcpCall(sessionId, "tools/list", {});
+  assert.equal(catalog.status, 200, "the schema-audit catalog is available");
+  for (const tool of catalog.payload?.result?.tools ?? []) {
+    if (tool.outputSchema) outputValidators.set(tool.name, outputSchemaAjv.compile(tool.outputSchema));
+  }
+  assert.ok(outputValidators.size >= 30, "the full published output catalog was compiled");
 });
 
 after(async () => {
-  if (child && !child.killed) child.kill("SIGTERM");
-  await delay(300);
-  removeTempDir(home);
+  try {
+    const unexercised = [...outputValidators.keys()].filter(name => !validatedOutputTools.has(name));
+    assert.deepEqual(unexercised, [], "every published outputSchema has a successful live contract example");
+  } finally {
+    if (child && !child.killed) child.kill("SIGTERM");
+    await delay(300);
+    removeTempDir(home);
+  }
 });
 
 function rawRequest(method, reqPath, body, headers = {}) {
@@ -107,8 +128,28 @@ async function mcpCall(sessionId, method, params) {
   return { status: res.status, payload: res.status === 200 ? lastSsePayload(res.body) : null, body: res.body };
 }
 
+function assertPublishedOutputSchema(name, payload) {
+  const result = payload?.result;
+  if (!result || result.isError) return;
+  const validate = outputValidators.get(name);
+  // Legacy aliases are compatibility entry points, not separately published
+  // tools. Their canonical counterpart is validated by the same suite.
+  if (!validate) return;
+
+  assert.ok(
+    result.structuredContent && typeof result.structuredContent === "object",
+    `${name} advertises an outputSchema and must return structuredContent`,
+  );
+  assert.ok(
+    validate(result.structuredContent),
+    `${name} structuredContent violates its published outputSchema: ${outputSchemaAjv.errorsText(validate.errors)}`,
+  );
+  validatedOutputTools.add(name);
+}
+
 async function callTool(sessionId, name, args) {
   const { status, payload } = await mcpCall(sessionId, "tools/call", { name, arguments: args });
+  assertPublishedOutputSchema(name, payload);
   return { status, payload, text: payload?.result?.content?.[0]?.text ?? "" };
 }
 
@@ -481,6 +522,52 @@ test("remaining response schemas match live structuredContent", async () => {
   const batch = await callTool(sessionId, "batch", { calls: [{ tool: "get_usage_stats" }] });
   assert.equal(batch.payload?.result?.structuredContent?.total, 1);
   assert.equal(batch.payload?.result?.structuredContent?.results?.[0]?.ok, true);
+});
+
+test("the schema audit exercises every remaining published output contract", async () => {
+  const { sessionId } = await openSession();
+
+  const written = await callTool(sessionId, "write_file", {
+    path: "schema-audit-file.txt",
+    content: "schema audit\n",
+  });
+  assert.equal(written.payload?.result?.isError, undefined);
+  const info = await callTool(sessionId, "get_file_info", { path: "schema-audit-file.txt" });
+  assert.equal(info.payload?.result?.structuredContent?.type, "file");
+
+  const patch = [
+    "*** Begin Patch",
+    "*** Add File: schema-audit-patch.txt",
+    "+schema audit patch",
+    "*** End Patch",
+    "",
+  ].join("\n");
+  const applied = await callTool(sessionId, "apply_patch", { patch });
+  assert.equal(applied.payload?.result?.structuredContent?.applied, true);
+
+  const review = await callTool(sessionId, "review_changes", { mark_reviewed: false });
+  assert.equal(typeof review.payload?.result?.structuredContent?.available, "boolean");
+
+  const interactive = await callTool(sessionId, "start_process", {
+    command: `node -e "process.stdin.once('data', data => { process.stdout.write(data); process.exit(0); })"`,
+  });
+  const interactiveId = interactive.payload?.result?.structuredContent?.command_id;
+  assert.equal(typeof interactiveId, "string");
+  const interacted = await callTool(sessionId, "interact_with_process", {
+    command_id: interactiveId,
+    input: "schema-interaction",
+    wait_ms: 1000,
+  });
+  assert.equal(interacted.payload?.result?.structuredContent?.command_id, interactiveId);
+
+  const configured = await callTool(sessionId, "set_config_value", { key: "logMaxBytes", value: 262144 });
+  assert.equal(configured.payload?.result?.structuredContent?.key, "openBridge.logMaxBytes");
+  const scripted = await callTool(sessionId, "run_script", { source: "return { schema_audit: true };" });
+  assert.equal(scripted.payload?.result?.structuredContent?.ok, true);
+  const skills = await callTool(sessionId, "list_skills", {});
+  assert.equal(typeof skills.payload?.result?.structuredContent?.count, "number");
+  const notification = await callTool(sessionId, "notify", { event: "finished", title: "schema audit" });
+  assert.equal(notification.payload?.result?.structuredContent?.event, "finished");
 });
 
 test("a forged session id is refused and the server keeps serving", async () => {
