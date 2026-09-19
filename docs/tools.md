@@ -15,7 +15,8 @@
 - 命令**非零退出码不是调用失败**：调用可以返回 `status: "completed"` 且 `exit_code != 0`，必须自己看 `exit_code`。
 - 声明了 `outputSchema` 的工具同时返回 `structuredContent`（类型化数据，**永远是 JSON 对象**）。处理器的兼容文本仍可能是裸数组；此时类型化载荷用 `{ items: [...] }` 包装——目前包括 `read_files`、`service_status` 和 `activity_log{action:"recent"}`，解析类型化结果时读 `items`。**被截断过的结果一定明说**：三个列举类工具（`list_directory`、`find_files`、`search_files`）都返回 `{ items: [...], truncated: boolean, next_offset }`，而不是裸数组。`truncated: true` 的意思是"结果不是完整集合，别把这一页当全部"；对可逐页列举的行结果，`next_offset` 非 `null` 时原样回传为下一次的 `offset`，`null` 表示本页已结束。命中上限既不代表"结果为空"，也不代表"就这些"。`list_directory` 另外给 `total`（只在平铺 `depth: 1` 时是真实总数，其余为 `null`）。文本块始终保留。
 - **结果里可能多出一个 `Note:` 文本块**，它不改变字段集。目前只用于提示**本进程跑的是比 `dist/` 更旧的构建**（每个进程只说一次；重启实例后再看）。`deprecated`（见文末旧名表）走的是同一条路：只进文本块，不进 `structuredContent`。
-- 出错时返回 `isError: true` 与一句话原因；错误信息通常给出下一步（例如"先 `read_files` 再重试"）。
+- 出错时返回 `isError: true` 与一句话原因；错误信息通常给出下一步（例如"先 `read_files` 再重试"）。成功结果的文本和 `structuredContent` 形状不会因错误契约而改变。
+- **机器可读的输入错误详情**：P7 已统一的 `Missing`、`Invalid`、`Conflict` 工具错误，除保留原文本外，还会在 `structuredContent.error` 提供 `{ kind, tool, fields, message }`。`kind` 是稳定枚举：`missing`（漏传）、`invalid`（值不合约）或 `conflict`（互斥输入同时给出）；`tool` 总是规范工具名；`fields` 是相关字段名数组；`message` 与第一个文本块完全相同。其他业务错误仍仅保留原有文本。已声明 `outputSchema` 的工具在这类错误结果也允许此对象——其成功输出 schema 不会拿来校验错误详情。协议层的请求格式错误仍是 JSON-RPC/MCP 协议错误，不伪装成工具错误。
 - **常见输入错误的开头有固定含义**：`Missing …` 表示漏传了字段（或一组选项）；`Invalid …` 表示字段已给但值不合约；`Conflict: …` 表示同时给了互斥的输入方式。三类信息都会点名字段和可行的改法；文件版本冲突、路径保护和外部命令失败等业务错误会保留各自更具体的说明。
 
 ---

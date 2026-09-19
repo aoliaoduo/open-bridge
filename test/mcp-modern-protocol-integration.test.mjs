@@ -236,18 +236,60 @@ test("two consecutive modern requests are independent (no session to carry)", as
   assert.equal(second.payload.result.content.length, first.payload.result.content.length);
 });
 
-test("a modern tools/call error is a JSON-RPC error, not an isError result", async () => {
-  const { status, payload } = await modern("tools/call", {
+test("modern input errors keep prose and carry typed details, even with output schemas", async () => {
+  const cases = [
+    {
+      name: "write_file",
+      arguments: { path: "never-written-by-error-test.txt" },
+      kind: "missing",
+      fields: ["content", "content_base64"],
+      prose: /^Missing one of "content" or "content_base64"\./,
+    },
+    {
+      name: "service",
+      arguments: { action: "not-a-real-action" },
+      kind: "invalid",
+      fields: ["action"],
+      prose: /^Invalid "action" value "not-a-real-action" for service\./,
+    },
+    {
+      name: "apply_patch",
+      arguments: { patch: "not a patch", patch_file: "irrelevant.patch" },
+      kind: "conflict",
+      fields: ["patch", "patch_file"],
+      prose: /^Conflict: provide exactly one of "patch" or "patch_file"\./,
+    },
+  ];
+
+  for (const expected of cases) {
+    const { status, payload } = await modern("tools/call", {
+      name: expected.name,
+      arguments: expected.arguments,
+    });
+    assert.equal(status, 200, JSON.stringify(payload));
+    const result = payload?.result;
+    const prose = result?.content?.[0]?.text ?? "";
+    assert.equal(result?.isError, true, `${expected.name} is a tool error, not a success`);
+    assert.match(prose, expected.prose, `${expected.name} keeps its readable P7 explanation`);
+    assert.deepEqual(result?.structuredContent?.error, {
+      kind: expected.kind,
+      tool: expected.name,
+      fields: expected.fields,
+      message: prose,
+    }, `${expected.name} has a stable typed companion`);
+  }
+
+  const domainError = await modern("tools/call", {
     name: "read_files",
     arguments: { paths: ["../definitely-outside-the-workspace.txt"] },
   });
-  // Either shape is a legitimate rejection; what must never happen is a 200
-  // carrying a fabricated success.
-  if (status === 200 && payload?.result) {
-    assert.equal(payload.result.isError, true, "a failed call must not look like a success");
-  } else {
-    assert.ok(payload?.error, "a rejected call carries a JSON-RPC error");
-  }
+  assert.equal(domainError.status, 200, JSON.stringify(domainError.payload));
+  assert.equal(domainError.payload?.result?.isError, true);
+  assert.equal(
+    domainError.payload?.result?.structuredContent,
+    undefined,
+    "non-P7 domain errors retain their previous text-only result shape",
+  );
 });
 
 test("each exchange leaves a bounded trace line naming the era and method", async () => {
@@ -311,12 +353,20 @@ test("the legacy era still mints a session and reports errors as isError", async
   const legacyCall = await rawRequest(
     "POST",
     `/mcp/${routeToken}`,
-    JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method: "tools/call", params: { name: "read_files", arguments: { paths: ["../outside.txt"] } } }),
+    JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method: "tools/call", params: { name: "write_file", arguments: { path: "never-written-by-legacy-error-test.txt" } } }),
     { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-session-id": sessionId },
   );
   const payload = decode(legacyCall.body);
+  const result = payload?.result;
+  const prose = result?.content?.[0]?.text ?? "";
   assert.equal(legacyCall.status, 200, "the legacy transport reports failures in-band");
-  assert.equal(payload?.result?.isError, true, "legacy keeps the isError result shape");
+  assert.equal(result?.isError, true, "legacy keeps the isError result shape");
+  assert.deepEqual(result?.structuredContent?.error, {
+    kind: "missing",
+    tool: "write_file",
+    fields: ["content", "content_base64"],
+    message: prose,
+  }, "legacy and modern calls receive the same typed error contract");
 });
 
 test("bridge_status reports a modern caller even though it has no session", async () => {

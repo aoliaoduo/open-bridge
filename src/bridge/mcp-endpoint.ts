@@ -23,6 +23,7 @@ import { root } from "./paths.js";
 import { discoverWorkspaceSkills, skillsIndexSuffix } from "./skills.js";
 import { invoke } from "./dispatcher.js";
 import { normalizeToolCall } from "./tool-call-shape.js";
+import { describeToolError } from "./tool-error.js";
 import { buildStaleness, staleBuildAdvice } from "./build-staleness.js";
 import { persistUsageStats } from "./usage-store.js";
 import { notifyUsageInstructions, resolveNotifySettings } from "./notify.js";
@@ -185,20 +186,13 @@ export function createMcp(session: SessionState): Server {
   );
   mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: listToolDefinitions() }));
   mcp.setRequestHandler(CallToolRequestSchema, async req => {
-    // Same single tool surface as the 2026-07-28 era (runToolCall): the only
-    // era difference is error reporting — a failure here becomes an
-    // `{ isError: true }` result instead of a JSON-RPC error.
+    // Both protocol eras receive the same CallToolResult, including a typed
+    // companion for failures. The prose block remains the compatibility path.
     const outcome = await runToolCall(
       req.params.name,
       (req.params.arguments ?? {}) as Record<string, unknown>,
       session,
     );
-    if (!outcome.ok) {
-      return {
-        isError: true,
-        content: [{ type: "text", text: outcome.message }],
-      };
-    }
     return outcome.result;
   });
   return mcp;
@@ -240,19 +234,29 @@ export function headerValue(raw: string | string[] | undefined): string | undefi
 /**
  * The tool surface, shared verbatim by both protocol paths.
  *
- * `tools/list` is identical in both eras. For `tools/call` the only difference
- * is error reporting: the 2025-era transport serialized `{ isError: true }` into
- * a successful JSON-RPC result, while the 2026-07-28 era expects the handler to
- * throw and lets the protocol layer build the error result. Both are wired from
+ * `tools/list` is identical in both eras. `tools/call` also returns the same
+ * CallToolResult shape for a handled failure: `isError`, its readable text, and
+ * an optional typed `structuredContent.error` companion. Both are wired from
  * this one function so the catalog, usage counters, audit lines and
  * structuredContent rules can never drift between eras.
  */
 type ToolCallPayload = {
   content: Array<{ type: "text"; text: string }>;
   structuredContent?: Record<string, unknown>;
+  isError?: true;
 };
 
-type ToolCallOutcome = { ok: true; result: ToolCallPayload } | { ok: false; message: string };
+type ToolCallOutcome = { ok: boolean; result: ToolCallPayload };
+
+function toolErrorPayload(name: string, message: string): ToolCallPayload {
+  const tool = normalizeToolCall(name).tool;
+  const error = describeToolError(tool, message);
+  return {
+    isError: true,
+    content: [{ type: "text", text: message }],
+    ...(error ? { structuredContent: { error } } : {}),
+  };
+}
 
 async function runToolCall(
   name: string,
@@ -321,7 +325,7 @@ async function runToolCall(
     // this is the same treatment every other audit line gets.
     const reason = e instanceof Error ? e.message : String(e);
     record(name, "error", `Failed in ${Date.now() - startedAt} ms: ${reason}`);
-    return { ok: false, message: reason };
+    return { ok: false, result: toolErrorPayload(name, reason) };
   }
 }
 
@@ -362,7 +366,6 @@ function createSpecMcp(): InstanceType<typeof SpecServer> {
       (req.params.arguments ?? {}) as Record<string, unknown>,
       state.latestSession,
     );
-    if (!outcome.ok) throw new Error(outcome.message);
     return outcome.result;
   });
   return server;
