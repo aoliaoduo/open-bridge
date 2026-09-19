@@ -22,6 +22,8 @@ export interface ActivityLogSearchResult {
   entries: ActivityLogEntry[];
   total_scanned: number;
   truncated: boolean;
+  /** Absolute offset for the next page, or null when this page is final. */
+  next_offset: number | null;
 }
 
 export interface ActivityLogSearchArgs {
@@ -83,7 +85,7 @@ export async function searchActivityLog(
   logPath: string | undefined,
   args: ActivityLogSearchArgs = {},
 ): Promise<ActivityLogSearchResult> {
-  const empty: ActivityLogSearchResult = { entries: [], total_scanned: 0, truncated: false };
+  const empty: ActivityLogSearchResult = { entries: [], total_scanned: 0, truncated: false, next_offset: null };
   if (!logPath) return empty;
   // Validate before scanning: an unparseable `since` used to slip past the
   // per-line try/catch and silently match nothing ("no activity"), which is a
@@ -112,9 +114,12 @@ export async function searchActivityLog(
   entries.sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0)); // newest first
   const limit = Math.min(Math.max(Number(args.limit ?? 50) || 50, 1), 500);
   const offset = Math.max(Number(args.offset ?? 0) || 0, 0);
+  const page = entries.slice(offset, offset + limit);
+  const truncated = entries.length > offset + limit;
   return {
-    entries: entries.slice(offset, offset + limit),
+    entries: page,
     total_scanned: totalScanned,
-    truncated: entries.length > offset + limit,
+    truncated,
+    next_offset: truncated ? offset + page.length : null,
   };
 }

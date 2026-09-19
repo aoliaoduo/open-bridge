@@ -13,7 +13,7 @@
 - 返回值是 JSON 对象，**每个工具的字段集是固定的**：缺失的事实表现为 `null` 或空字符串，**不会**靠"某个字段不在"来表达。所以永远**按字段名解析，不要按行数/行是否存在来解析**。
 - 命令类工具（`run_command`、`start_process`、`send_to_shell`、`interact_with_process`）返回**合并输出 `output`**，同时给出**分离的 `stdout` / `stderr`**；分页读取还带 `offset` / `next_offset` / `truncated`。
 - 命令**非零退出码不是调用失败**：调用可以返回 `status: "completed"` 且 `exit_code != 0`，必须自己看 `exit_code`。
-- 声明了 `outputSchema` 的工具同时返回 `structuredContent`（类型化数据，**永远是 JSON 对象**）。处理器的兼容文本仍可能是裸数组；此时类型化载荷用 `{ items: [...] }` 包装——目前包括 `read_files`、`service_status` 和 `activity_log{action:"recent"}`，解析类型化结果时读 `items`。**被截断过的结果一定明说**：三个列举类工具（`list_directory`、`find_files`、`search_files`）返回 `{ items: [...], truncated: boolean }`，而不是裸数组。`truncated: true` 的意思是"还有更多，别把这一页当全部"；命中上限既不代表"结果为空"，也不代表"就这些"。`list_directory` 另外给 `total`（只在平铺 `depth: 1` 时是真实总数，其余为 `null`）和 `next_offset`（继续翻页时原样回传的入参）。文本块始终保留。
+- 声明了 `outputSchema` 的工具同时返回 `structuredContent`（类型化数据，**永远是 JSON 对象**）。处理器的兼容文本仍可能是裸数组；此时类型化载荷用 `{ items: [...] }` 包装——目前包括 `read_files`、`service_status` 和 `activity_log{action:"recent"}`，解析类型化结果时读 `items`。**被截断过的结果一定明说**：三个列举类工具（`list_directory`、`find_files`、`search_files`）都返回 `{ items: [...], truncated: boolean, next_offset }`，而不是裸数组。`truncated: true` 的意思是"结果不是完整集合，别把这一页当全部"；对可逐页列举的行结果，`next_offset` 非 `null` 时原样回传为下一次的 `offset`，`null` 表示本页已结束。命中上限既不代表"结果为空"，也不代表"就这些"。`list_directory` 另外给 `total`（只在平铺 `depth: 1` 时是真实总数，其余为 `null`）。文本块始终保留。
 - **结果里可能多出一个 `Note:` 文本块**，它不改变字段集。目前只用于提示**本进程跑的是比 `dist/` 更旧的构建**（每个进程只说一次；重启实例后再看）。`deprecated`（见文末旧名表）走的是同一条路：只进文本块，不进 `structuredContent`。
 - 出错时返回 `isError: true` 与一句话原因；错误信息通常给出下一步（例如"先 `read_files` 再重试"）。
 
@@ -62,11 +62,11 @@
 
 ### 工作区读取
 
-**list_directory** — 列目录。`depth` 1–3、`include_hidden`、`max_entries`、`offset`；结果是 `{items: [{name, type}], truncated, total, next_offset}`。`offset` 只对平铺（`depth: 1`）有意义 —— 和 `depth > 1` 一起给会被明确拒绝，而不是悄悄按某一层分页。
+**list_directory** — 列目录。`depth` 1–3、`include_hidden`、`max_entries`、`offset`；结果是 `{items: [{name, type}], truncated, total, next_offset}`。平铺 `depth: 1` 时，非空 `next_offset` 可直接续页，末页为 `null`；`total` 是真实总数。`offset` 只对平铺有意义 —— 和 `depth > 1` 一起给会被明确拒绝，而不是悄悄按某一层分页。递归结果的 `total`、`next_offset` 都是 `null`；若因 `max_entries` 被截断，`truncated` 仍会明确说明，但递归树没有可恢复的页游标。
 
-**find_files** — 按 glob 找文件（`*`、`**`、`?`、`{a,b}`、`[abc]`）；纯名字/前缀仍按 basename 匹配，`src/**/*.ts` 这种按完整相对路径匹配。结果是 `{items, truncated}`；上限只在**已收集到的数量**上生效，所以"正好到达上限"会如实报告 `truncated: true`（内部多探一个，不靠猜）。
+**find_files** — 按 glob 找文件（`*`、`**`、`?`、`{a,b}`、`[abc]`）；纯名字/前缀仍按 basename 匹配，`src/**/*.ts` 这种按完整相对路径匹配。`offset` + `max_results` 翻页，结果固定为 `{items, truncated, next_offset}`；上限只在**已收集到的数量**上生效，所以"正好到达上限"会如实报告 `truncated: true`（内部多探一个，不靠猜）。`max_results: 0` 只用于探测：会返回空 `items` 和 `next_offset: null`，应改用正数才能继续翻页。
 
-**search_files** — 在工作区文件里搜文本：有 ripgrep 就用（快），否则内置扫描；两套引擎**看的文件集合完全相同**：`.git`、`node_modules`、`dist` 之外一律都搜，**`.gitignore` 不会让文件消失**（它管的是提交，不是文件是否存在；同一次搜索的结果不该因为正则语法触发哪套引擎而不同）。`query` 默认按**正则**解析（`regex: false` 才按字面匹配；非法正则直接报错，不会静默给空）；`include` 限定文件（如 `["*.ts"]`）；`context`（0–20）在每处匹配前后带若干行；`offset` + `max_results` 翻页。`path` 可以是目录或单个文件。
+**search_files** — 在工作区文件里搜文本：有 ripgrep 就用（快），否则内置扫描；两套引擎**看的文件集合完全相同**：`.git`、`node_modules`、`dist` 之外一律都搜，**`.gitignore` 不会让文件消失**（它管的是提交，不是文件是否存在；同一次搜索的结果不该因为正则语法触发哪套引擎而不同）。`query` 默认按**正则**解析（`regex: false` 才按字面匹配；非法正则直接报错，不会静默给空）；`include` 限定文件（如 `["*.ts"]`）；`context`（0–20）在每处匹配前后带若干行；`offset` + `max_results` 翻页，结果的 `next_offset` 可直接作为下一次 `offset`。`max_results: 0` 返回空页且不给续读游标，避免原地循环；需要翻页时用正数。`path` 可以是目录或单个文件。
 
 - 正则语义是 **JavaScript** 的（内置扫描用的就是 `RegExp`）。ripgrep 的默认引擎不支持先行/后顾（`(?=`、`(?!`、`(?<=`、`(?<!`）与反向引用（`\1`），这类查询会由内置扫描回答 —— 结果一致，只是慢一些，不会因此少给或不报错。看到空结果时先确认不是正则写错或 `include` 太窄。
 
@@ -135,7 +135,7 @@
 
 **配置、任务与批量调用** — `get_config` 是完整且字段固定的运行时配置（`notify.barkKey` 始终为脱敏提示）；`set_config_value` 返回 `{ key, value }`；`get_usage_stats` 固定含累计计数和 `by_tool`。`set_todos` 的兼容文本仍是数组，但 `structuredContent` 为 `{ items: [...] }`；`get_todos` 固定含会话任务、持久任务、上次进度和保存时间；`report_progress` 确认 `{ received, message, pushed }`，再按需要返回阶段/类别/百分比/任务编号。`batch` 固定给总数、成功/失败数、是否提前停止及每个子调用的成功结果或错误。
 
-**读取、探测与 Bridge 状态** — `read_process_output` 与 `interact_with_process` 的分页结果固定携带 `command_id`、`stream`、`offset`、`next_offset`、累计字节、丢弃字节和 `truncated`；`read_service_log` 也固定携带同样可续读的 offset / next_offset / truncated 核心字段。`connectivity` 用互斥结果区分 TCP（host / port / open）和 HTTP（url / status / redirects）探测。`bridge_status` 按 `overview`、`auth`、`locks`、`sessions` 四种 section 返回对应的精确对象；sessions 的类型化结果为 `{ items: [...] }`。
+**读取、探测与 Bridge 状态** — `read_process_output` 与 `interact_with_process` 的分页结果固定携带 `command_id`、`stream`、`offset`、`next_offset`、累计字节、丢弃字节和 `truncated`；`read_service_log` 也固定携带同样可续读的 offset / next_offset / truncated 核心字段。它们是**追加字节流**而不是有限行集合：`next_offset` 始终是下一次读取的绝对字节位置（即使已经读到当前末尾，也保持数字，之后新增输出可从那里读）；`truncated` 表示这次读没有覆盖所有可用字节，不能单独理解成“后面必定还有一页”。`connectivity` 用互斥结果区分 TCP（host / port / open）和 HTTP（url / status / redirects）探测。`bridge_status` 按 `overview`、`auth`、`locks`、`sessions` 四种 section 返回对应的精确对象；sessions 的类型化结果为 `{ items: [...] }`。
 
 ### 连通性与服务
 
@@ -147,7 +147,7 @@
 
 **service_status** — `live`（默认）：保存的服务 + 实时进程状态 + 健康检查，检查受 `timeout_ms` 约束（默认 5000，最大 120000；慢的检查返回 `{ok:false, timed_out:true}` 而不是拖住整个响应）。`definitions`：只列定义，不做探测，适合轮询。
 
-**read_service_log** — 读某个服务的持久日志（默认 service-logs 目录，`save_service` 的 `log_file` 可覆盖）。日志**跨重启追加**。省略 `offset` 读尾部；给 `offset` 往更早翻页。
+**read_service_log** — 读某个服务的持久日志（默认 service-logs 目录，`save_service` 的 `log_file` 可覆盖）。日志**跨重启追加**。省略 `offset` 读当前尾部；给 `offset` 从该绝对字节位置向后读，并把返回的 `next_offset` 原样用于下一次读取。因为日志可以继续增长，读到当前末尾时 `next_offset` 仍是数字；`truncated` 同时覆盖省略 `offset` 时未返回的较早内容和受 `max_bytes` 限制时未返回的较晚内容。
 
 ### 手机通知（notify）
 
@@ -164,7 +164,7 @@
 
 **get_config** / **set_config_value** — 读/改运行配置（改完是否需要重启看具体键）。`get_config` 的 `structuredContent` 完整声明当前所有运行时配置字段及其类型；Bark 设备密钥仍仅返回掩码，绝不返回明文。
 
-**activity_log** — `recent`（最近活动，`max_results`）· `search`（按 `tool` / `status` / `query` / `since` 检索 `audit.log` 与轮转文件，`limit` 1–500、`offset` 分页）· `clear`（清空内存缓冲、截断当前审计日志并删掉轮转文件，**不可逆**）。其 `structuredContent` 随 action 明确分支：`recent` 为 `{items}`，`search` 为 `{entries, total_scanned, truncated}`，`clear` 为 `{cleared_memory_entries, live_truncated, rotated_removed}`。
+**activity_log** — `recent`（最近活动，`max_results`）· `search`（按 `tool` / `status` / `query` / `since` 检索 `audit.log` 与轮转文件，`limit` 1–500、`offset` 分页）· `clear`（清空内存缓冲、截断当前审计日志并删掉轮转文件，**不可逆**）。其 `structuredContent` 随 action 明确分支：`recent` 为 `{items}`，`search` 为 `{entries, total_scanned, truncated, next_offset}`（`next_offset` 可直接续页），`clear` 为 `{cleared_memory_entries, live_truncated, rotated_removed}`。
 
   - **`at` 是 ISO-8601 UTC，不是操作者的挂钟时间。** 这是刻意的：`since` 过滤要把它反解析成毫秒，机读需要绝对时刻。但 `bridge.log`、控制台日志流和活动视图显示的都是**本机时间**，所以在 UTC+8 的机器上，用户口中的「03:40 那次调用」对应这里的 `19:40Z`。**把时间复述给用户之前先换算**，否则双方会以为在说两件事。`ts`（epoch 毫秒）是同一时刻的另一种表示，做算术时用它更省事。
 

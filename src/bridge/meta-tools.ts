@@ -368,6 +368,7 @@ export async function searchActivityLogTool(args: Args): Promise<Record<string, 
     entries: result.entries,
     total_scanned: result.total_scanned,
     truncated: result.truncated,
+    next_offset: result.next_offset,
   };
 }
 

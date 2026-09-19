@@ -320,6 +320,92 @@ test("outputSchema tools answer with structuredContent in the declared shape", a
     "wait declares duration and process results");
 });
 
+test("row pages expose reusable continuation offsets in live structuredContent", async () => {
+  const { sessionId } = await openSession();
+  const dir = "continuation-contract";
+  const marker = "p5-continuation-marker";
+  const created = await callTool(sessionId, "file_op", { op: "create_directory", path: dir });
+  assert.equal(created.payload?.result?.structuredContent?.created, true);
+  for (const name of ["one.txt", "two.txt"]) {
+    const written = await callTool(sessionId, "write_file", {
+      path: `${dir}/${name}`, content: `${marker} ${name}`,
+    });
+    assert.equal(written.status, 200, `fixture ${name} was written`);
+  }
+
+  const requireRowContinuation = (page, label) => {
+    assert.equal(page?.truncated, true, `${label} reports an incomplete first page`);
+    assert.equal(typeof page?.next_offset, "number", `${label} publishes a reusable offset`);
+    assert.ok(page.next_offset > 0, `${label} advances its cursor`);
+  };
+
+  const directory = await callTool(sessionId, "list_directory", {
+    path: dir, depth: 1, max_entries: 1,
+  });
+  const directoryPage = directory.payload?.result?.structuredContent;
+  requireRowContinuation(directoryPage, "list_directory");
+  assert.equal(directoryPage?.total, 2, "a flat directory page reports its exact total");
+  const directoryNext = await callTool(sessionId, "list_directory", {
+    path: dir, depth: 1, max_entries: 1, offset: directoryPage.next_offset,
+  });
+  assert.equal(directoryNext.payload?.result?.structuredContent?.next_offset, null,
+    "the final directory page has a null continuation cursor");
+
+  const found = await callTool(sessionId, "find_files", {
+    path: dir, pattern: "*.txt", max_results: 1,
+  });
+  const foundPage = found.payload?.result?.structuredContent;
+  requireRowContinuation(foundPage, "find_files");
+  const foundNext = await callTool(sessionId, "find_files", {
+    path: dir, pattern: "*.txt", max_results: 1, offset: foundPage.next_offset,
+  });
+  assert.equal(foundNext.payload?.result?.structuredContent?.next_offset, null,
+    "the final file-find page has a null continuation cursor");
+  assert.notEqual(foundNext.payload?.result?.structuredContent?.items?.[0], foundPage?.items?.[0],
+    "find_files does not repeat the row consumed by its cursor");
+  const zeroFind = await callTool(sessionId, "find_files", {
+    path: dir, pattern: "*.txt", max_results: 0,
+  });
+  assert.deepEqual(zeroFind.payload?.result?.structuredContent?.items, []);
+  assert.equal(zeroFind.payload?.result?.structuredContent?.next_offset, null,
+    "a zero-sized find page does not publish a looping cursor");
+
+  const searched = await callTool(sessionId, "search_files", {
+    path: dir, query: marker, regex: false, max_results: 1,
+  });
+  const searchedPage = searched.payload?.result?.structuredContent;
+  requireRowContinuation(searchedPage, "search_files");
+  const searchedNext = await callTool(sessionId, "search_files", {
+    path: dir, query: marker, regex: false, max_results: 1, offset: searchedPage.next_offset,
+  });
+  assert.equal(searchedNext.payload?.result?.structuredContent?.next_offset, null,
+    "the final text-search page has a null continuation cursor");
+  assert.notEqual(searchedNext.payload?.result?.structuredContent?.items?.[0]?.path, searchedPage?.items?.[0]?.path,
+    "search_files does not repeat the match consumed by its cursor");
+  const zeroSearch = await callTool(sessionId, "search_files", {
+    path: dir, query: marker, regex: false, max_results: 0,
+  });
+  assert.deepEqual(zeroSearch.payload?.result?.structuredContent?.items, []);
+  assert.equal(zeroSearch.payload?.result?.structuredContent?.next_offset, null,
+    "a zero-sized text-search page does not publish a looping cursor");
+
+  const activity = await callTool(sessionId, "activity_log", {
+    action: "search", tool: "write_file", limit: 1,
+  });
+  const activityPage = activity.payload?.result?.structuredContent;
+  requireRowContinuation(activityPage, "activity_log search");
+  const activityNext = await callTool(sessionId, "activity_log", {
+    action: "search", tool: "write_file", limit: 1, offset: activityPage.next_offset,
+  });
+  assert.ok(
+    activityNext.payload?.result?.structuredContent?.next_offset === null ||
+      typeof activityNext.payload?.result?.structuredContent?.next_offset === "number",
+    "the continued audit page keeps the same nullable cursor contract",
+  );
+  assert.notDeepEqual(activityNext.payload?.result?.structuredContent?.entries?.[0], activityPage?.entries?.[0],
+    "activity search does not repeat the entry consumed by its cursor");
+});
+
 test("remaining response schemas match live structuredContent", async () => {
   const { sessionId } = await openSession();
   const catalog = await mcpCall(sessionId, "tools/list", {});

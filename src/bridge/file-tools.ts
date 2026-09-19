@@ -504,11 +504,13 @@ export async function findFiles(args: Args): Promise<unknown> {
   const limit = Number.isFinite(Number(args.max_results)) && Number(args.max_results) >= 0
     ? Math.floor(Number(args.max_results))
     : DEFAULT_MAX_SEARCH_RESULTS;
+  const rawOffset = Number(args.offset);
+  const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
 
-  // Walk one match PAST the page: that extra entry is what makes "there were
-  // more" a measured fact instead of an assumption. Without it a capped walk
-  // and a complete walk are indistinguishable, and the caller stops looking.
-  const probe = limit + 1;
+  // Walk one match PAST the requested page: that extra entry is what makes
+  // "there were more" a measured fact instead of an assumption. Include the
+  // skipped rows in the probe so every offset has the same evidence.
+  const probe = offset + limit + 1;
   async function walk(dir: string): Promise<void> {
     if (out.length >= probe) return;
     for (const e of await fs.readdir(dir, { withFileTypes: true })) {
@@ -529,7 +531,15 @@ export async function findFiles(args: Args): Promise<unknown> {
     }
   }
   await walk(base);
-  return { items: out.slice(0, limit), truncated: out.length > limit };
+  const page = out.slice(offset, offset + limit + 1);
+  const items = page.slice(0, limit);
+  const truncated = page.length > limit;
+  return {
+    items,
+    truncated,
+    // A zero-sized page cannot advance safely; retry with a positive cap.
+    next_offset: truncated && items.length > 0 ? offset + items.length : null,
+  };
 }
 
 export async function searchFiles(args: Args): Promise<unknown> {
@@ -601,6 +611,7 @@ export async function searchFiles(args: Args): Promise<unknown> {
             : {}),
         })),
         truncated: page.length > limit,
+        next_offset: page.length > limit && page.length > 1 ? offset + limit : null,
       };
     } catch (error) {
       // Say WHAT failed, not just that something did. record() redacts and bounds
@@ -686,10 +697,14 @@ export async function searchFiles(args: Args): Promise<unknown> {
         return out.length < pageEnd;
       });
     }
-    return { items: out.slice(0, limit), truncated: out.length > limit };
+    const items = out.slice(0, limit);
+    const truncated = out.length > limit;
+    return { items, truncated, next_offset: truncated && items.length > 0 ? offset + items.length : null };
   }
   await walk(base);
-  return { items: out.slice(0, limit), truncated: out.length > limit };
+  const items = out.slice(0, limit);
+  const truncated = out.length > limit;
+  return { items, truncated, next_offset: truncated && items.length > 0 ? offset + items.length : null };
 }
 
 export async function readFiles(args: Args): Promise<unknown> {

@@ -92,9 +92,10 @@ test("activity_log declares all three action result variants", () => {
   assert.equal(itemsOf(recent)?.type, "array");
   assert.ok(itemsOf(recent)?.items, "recent rows are described");
 
-  assert.deepEqual(search?.required, ["entries", "total_scanned", "truncated"]);
+  assert.deepEqual(search?.required, ["entries", "total_scanned", "truncated", "next_offset"]);
   assert.equal(search?.properties?.entries?.type, "array");
   assert.equal(search?.properties?.truncated?.type, "boolean");
+  assert.deepEqual(search?.properties?.next_offset?.type, ["number", "null"]);
 
   assert.deepEqual(clear?.required, ["cleared_memory_entries", "live_truncated", "rotated_removed"]);
   assert.equal(clear?.properties?.cleared_memory_entries?.type, "number");
@@ -102,14 +103,21 @@ test("activity_log declares all three action result variants", () => {
   assert.equal(clear?.properties?.rotated_removed?.type, "boolean");
 });
 
-test("page-returning tools declare an object that can carry truncation state", () => {
+test("row-page tools publish a nullable continuation cursor", () => {
   for (const name of PAGE_RETURNING) {
     const schema = schemaOf(name);
-    assert.equal(schema?.type, "object", `${name} answers with {items, truncated}`);
+    assert.equal(schema?.type, "object", `${name} answers with {items, truncated, next_offset}`);
     assert.ok(schema?.properties && "items" in schema.properties, `${name} must declare its rows`);
-    assert.ok(schema?.properties && "truncated" in schema.properties, `${name} must declare truncation`);
-    assert.deepEqual([...(schema?.required ?? [])].sort(), ["items", "truncated"]);
+    assert.equal(schema?.properties?.truncated?.type, "boolean", `${name} declares truncation`);
+    assert.deepEqual(schema?.properties?.next_offset?.type, ["number", "null"],
+      `${name} uses a nullable terminal continuation cursor`);
+    const expected = name === "list_directory"
+      ? ["items", "next_offset", "total", "truncated"]
+      : ["items", "next_offset", "truncated"];
+    assert.deepEqual([...(schema?.required ?? [])].sort(), expected);
   }
+  assert.deepEqual(schemaOf("list_directory")?.properties?.total?.type, ["number", "null"],
+    "directory pages always state whether an exact flat total is available");
 });
 
 test("every paged schema describes the row array", () => {
@@ -218,7 +226,15 @@ test("remaining write, status and batch tools publish concrete structured result
   assert.equal(schemaOf("connectivity")?.oneOf?.length, 2, "connectivity distinguishes TCP and HTTP probes");
   assert.equal(schemaOf("bridge_status")?.oneOf?.length, 4, "bridge_status declares all four sections");
   assert.deepEqual(schemaOf("set_todos")?.required, ["items"], "set_todos uses the structured array envelope");
-  for (const key of ["command_id", "stream", "next_offset", "truncated"]) {
-    assert.ok(schemaOf("read_process_output")?.required?.includes(key), `process pages require ${key}`);
+  for (const name of ["read_process_output", "interact_with_process"]) {
+    for (const key of ["command_id", "stream", "next_offset", "truncated"]) {
+      assert.ok(schemaOf(name)?.required?.includes(key), `${name} pages require ${key}`);
+    }
   }
+  const serviceLog = schemaOf("read_service_log");
+  for (const key of ["offset", "next_offset", "truncated"]) {
+    assert.ok(serviceLog?.required?.includes(key), `service-log pages require ${key}`);
+  }
+  assert.equal(serviceLog?.properties?.next_offset?.type, "number",
+    "streaming logs expose an absolute byte cursor even at the current end");
 });
