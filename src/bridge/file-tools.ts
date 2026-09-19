@@ -485,9 +485,9 @@ export async function listDirectory(args: Args): Promise<unknown> {
     truncated,
     total,
     // The offset that would resume this survey, so the cap is recoverable
-    // rather than terminal. Null when there is nothing left to ask for, and
-    // for recursive listings (see the depth-1-only note above).
-    next_offset: truncated && depth === 1 ? offset + items.length : null,
+    // rather than terminal. An empty page cannot advance its cursor safely;
+    // retry with a positive cap. Recursive listings are not pageable.
+    next_offset: truncated && depth === 1 && items.length > 0 ? offset + items.length : null,
   };
 }
 

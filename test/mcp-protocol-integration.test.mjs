@@ -444,6 +444,12 @@ test("row pages expose reusable continuation offsets in live structuredContent",
   });
   assert.equal(directoryNext.payload?.result?.structuredContent?.next_offset, null,
     "the final directory page has a null continuation cursor");
+  const zeroDirectory = await callTool(sessionId, "list_directory", {
+    path: dir, depth: 1, max_entries: 0,
+  });
+  assert.deepEqual(zeroDirectory.payload?.result?.structuredContent?.items, []);
+  assert.equal(zeroDirectory.payload?.result?.structuredContent?.next_offset, null,
+    "a zero-sized directory page does not publish a looping cursor");
 
   const found = await callTool(sessionId, "find_files", {
     path: dir, pattern: "*.txt", max_results: 1,
