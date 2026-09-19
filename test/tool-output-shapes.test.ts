@@ -222,7 +222,13 @@ test("remaining write, status and batch tools publish concrete structured result
     const schema = schemaOf(name);
     assert.ok(schema?.required?.length, `${name} declares required result fields`);
   }
-  assert.equal(schemaOf("review_changes")?.oneOf?.length, 2, "review distinguishes unavailable and available workspaces");
+  const review = schemaOf("review_changes");
+  assert.equal(review?.oneOf?.length, 2, "review distinguishes unavailable and available workspaces");
+  const availableReview = review?.oneOf?.find(branch => branch.properties?.available?.enum?.[0] === true);
+  assert.ok(availableReview?.required?.includes("working_tree"), "review declares its current-worktree fact");
+  assert.deepEqual(availableReview?.properties?.working_tree?.required, ["clean", "summary"]);
+  assert.equal(availableReview?.properties?.working_tree?.properties?.clean?.type, "boolean");
+  assert.equal(availableReview?.properties?.working_tree?.properties?.summary?.type, "object");
   assert.equal(schemaOf("connectivity")?.oneOf?.length, 2, "connectivity distinguishes TCP and HTTP probes");
   assert.equal(schemaOf("bridge_status")?.oneOf?.length, 4, "bridge_status declares all four sections");
   assert.deepEqual(schemaOf("set_todos")?.required, ["items"], "set_todos uses the structured array envelope");

@@ -13,9 +13,9 @@
 
 import assert from "node:assert/strict";
 import {test, before, after} from "node:test";
-import {spawn} from "node:child_process";
+import {execFileSync, spawn} from "node:child_process";
 import http from "node:http";
-import {mkdtempSync, readFileSync} from "node:fs";
+import {mkdtempSync, readFileSync, writeFileSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import {tmpdir} from "node:os";
 import path from "node:path";
@@ -26,6 +26,7 @@ import Ajv from "ajv";
 const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 
 let home;
+let dataHome;
 let child;
 let port;
 let routeToken;
@@ -39,17 +40,22 @@ const validatedOutputTools = new Set();
 
 before(async () => {
   home = mkdtempSync(path.join(tmpdir(), "ob-protocol-"));
+  dataHome = mkdtempSync(path.join(tmpdir(), "ob-protocol-data-"));
+  execFileSync("git", ["init", "--quiet"], { cwd: home });
+  execFileSync("git", ["config", "user.name", "Open Bridge protocol test"], { cwd: home });
+  execFileSync("git", ["config", "user.email", "protocol-test@example.invalid"], { cwd: home });
+  execFileSync("git", ["commit", "--allow-empty", "--quiet", "-m", "protocol baseline"], { cwd: home });
   child = spawn(process.execPath, [
     path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--no-tunnel", "--port", "0", "--root", home, "--home", home,
+    "serve", "--no-tunnel", "--port", "0", "--root", home, "--home", dataHome,
   ], { stdio: ["ignore", "pipe", "pipe"] });
   child.stdout.on("data", d => { serveOutput += d; });
   child.stderr.on("data", d => { serveOutput += d; });
   child.on("exit", (code, signal) => { serveExit = { code, signal }; });
-  const runtime = await waitForRuntime(home, home);
+  const runtime = await waitForRuntime(dataHome, home);
   port = runtime.port;
   for (let i = 0; i < 40 && !routeToken; i += 1) {
-    try { routeToken = routeTokenFor(home, home); } catch { await delay(250); }
+    try { routeToken = routeTokenFor(dataHome, home); } catch { await delay(250); }
   }
   assert.ok(routeToken, "route token was persisted");
 
@@ -79,6 +85,7 @@ after(async () => {
     if (child && !child.killed) child.kill("SIGTERM");
     await delay(300);
     removeTempDir(home);
+    removeTempDir(dataHome);
   }
 });
 
@@ -193,7 +200,7 @@ test("a failed call records WHY it failed, not just how long it took", async () 
   assert.match(failed.text, /todos must be an array/, "the caller is told what is wrong");
 
   await delay(300);
-  const audit = readFileSync(path.join(home, "audit.log"), "utf8")
+  const audit = readFileSync(path.join(dataHome, "audit.log"), "utf8")
     .split("\n").filter(Boolean).map(line => JSON.parse(line));
   const entry = audit.findLast(row => row.tool === "set_todos" && row.status === "error");
   assert.ok(entry, "the failure reached the audit log");
@@ -569,7 +576,28 @@ test("the schema audit exercises every remaining published output contract", asy
   assert.equal(applied.payload?.result?.structuredContent?.applied, true);
 
   const review = await callTool(sessionId, "review_changes", { mark_reviewed: false });
-  assert.equal(typeof review.payload?.result?.structuredContent?.available, "boolean");
+  const reviewContent = review.payload?.result?.structuredContent;
+  assert.equal(typeof reviewContent?.available, "boolean");
+  assert.equal(reviewContent?.available, true, "the schema-audit workspace is a Git repository");
+  assert.equal(typeof reviewContent?.working_tree?.clean, "boolean");
+  assert.equal(reviewContent?.working_tree?.clean, false, "the new audit files are still uncommitted");
+  assert.ok((reviewContent?.working_tree?.summary?.files ?? 0) >= 2,
+    "working_tree counts current uncommitted audit files separately from the review baseline");
+
+  // Keep the checkpoint, then add a later commit. The cumulative review must
+  // retain that history while working_tree reports the now-clean checkout.
+  execFileSync("git", ["add", "-A"], { cwd: home });
+  execFileSync("git", ["commit", "--quiet", "-m", "schema audit checkpoint"], { cwd: home });
+  writeFileSync(path.join(home, "committed-after-review.txt"), "reviewed commit\n");
+  execFileSync("git", ["add", "committed-after-review.txt"], { cwd: home });
+  execFileSync("git", ["commit", "--quiet", "-m", "committed after review checkpoint"], { cwd: home });
+  const committedReview = await callTool(sessionId, "review_changes", { mark_reviewed: false });
+  const committedContent = committedReview.payload?.result?.structuredContent;
+  assert.ok((committedContent?.summary?.files ?? 0) >= 1,
+    "the cumulative review keeps changes that were committed after its checkpoint");
+  assert.equal(committedContent?.working_tree?.clean, true,
+    "a later committed change does not make the current working tree dirty");
+  assert.deepEqual(committedContent?.working_tree?.summary, { files: 0, additions: 0, deletions: 0 });
 
   const interactive = await callTool(sessionId, "start_process", {
     command: `node -e "process.stdin.once('data', data => { process.stdout.write(data); process.exit(0); })"`,

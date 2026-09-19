@@ -114,6 +114,21 @@ async function readReviewBetween(gitRoot: string, before: string, after: string)
 }
 
 /**
+ * Summarize only what is uncommitted in the current workspace. The main review
+ * compares snapshots and can include later commits, so this separate fact keeps
+ * a clean checkout from looking like an unreviewed working tree.
+ */
+async function currentWorkingTree(gitRoot: string, head: string, snapshot: string): Promise<{ clean: boolean; summary: ReviewSummary }> {
+  const raw = await git(gitRoot, ["diff", "--numstat", "-z", head, snapshot]);
+  const summary = parseNumstat(raw).reduce<ReviewSummary>((total, file) => ({
+    files: total.files + 1,
+    additions: total.additions + file.additions,
+    deletions: total.deletions + file.deletions,
+  }), { files: 0, additions: 0, deletions: 0 });
+  return { clean: summary.files === 0, summary };
+}
+
+/**
  * Show every workspace change since the last review (or since workspace open),
  * then advance the baseline to now when mark_reviewed is not false.
  * Non-git workspaces return { available: false, reason } instead of failing.
@@ -145,6 +160,7 @@ export async function reviewChanges(args: JsonArgs): Promise<unknown> {
     // Anchor the open checkpoint at the current state when this workspace has
     // never been reviewed before.
     const initial = await snapshotWorkingTree(gitRoot, head, workspaceRoot);
+    const workingTree = await currentWorkingTree(gitRoot, head, initial);
     if (!openCommit) await git(gitRoot, ["update-ref", refs.open, initial]);
     if (!baselineCommit) await git(gitRoot, ["update-ref", refs.baseline, initial]);
     if (openCommit) {
@@ -162,6 +178,7 @@ export async function reviewChanges(args: JsonArgs): Promise<unknown> {
         files: review.files,
         patch: bounded.text,
         patch_truncated: bounded.truncated,
+        working_tree: workingTree,
         baseline_advanced: true,
         note: "The previous review baseline was missing and has been rebuilt at the current state; the diff above covers everything since the workspace-open checkpoint.",
       };
@@ -174,7 +191,10 @@ export async function reviewChanges(args: JsonArgs): Promise<unknown> {
       files: [],
       patch: "",
       patch_truncated: false,
-      note: "Review checkpoints established at the current workspace state. Call again after edits to see what changed.",
+      working_tree: workingTree,
+      note: workingTree.clean
+        ? "Review checkpoints established at the current workspace state. Call again after edits to see what changed."
+        : "Review checkpoints established at the current workspace state. Existing uncommitted changes are summarized in working_tree and form this starting baseline; call again after edits to see what changed.",
     };
   }
 
@@ -187,6 +207,7 @@ export async function reviewChanges(args: JsonArgs): Promise<unknown> {
 
   const snapshot = await snapshotWorkingTree(gitRoot, baseline, workspaceRoot);
   const review = await readReviewBetween(gitRoot, baseline, snapshot);
+  const workingTree = await currentWorkingTree(gitRoot, head, snapshot);
 
   const markReviewed = args.mark_reviewed !== false;
   if (markReviewed) {
@@ -203,6 +224,10 @@ export async function reviewChanges(args: JsonArgs): Promise<unknown> {
     files: review.files,
     patch: bounded.text,
     patch_truncated: bounded.truncated,
+    working_tree: workingTree,
+    note: workingTree.clean
+      ? "The current working tree is clean. This review may still list commits made since the selected checkpoint."
+      : "The review includes the current uncommitted workspace changes summarized in working_tree, plus any commits made since the selected checkpoint.",
     ...(markReviewed ? { baseline_advanced: true } : {}),
   };
 }
