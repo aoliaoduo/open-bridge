@@ -279,6 +279,45 @@ test("outputSchema tools answer with structuredContent in the declared shape", a
   assert.equal(terminated.payload?.result?.structuredContent?.command_id, commandId);
   assert.equal(typeof terminated.payload?.result?.structuredContent?.terminated, "boolean",
     "process_control terminate exposes its final snapshot result");
+
+  const shellName = "typed-output-shell";
+  const openedShell = await callTool(sessionId, "open_shell", { name: shellName });
+  assert.equal(typeof openedShell.payload?.result?.structuredContent?.command_id, "string");
+  const shellCommand = await callTool(sessionId, "send_to_shell", { name: shellName, command: "printf schema-shell" });
+  const shellResult = shellCommand.payload?.result?.structuredContent;
+  assert.equal(shellResult?.name, shellName);
+  assert.equal(shellResult?.output, "schema-shell");
+  assert.equal(shellResult?.exit_code, 0);
+  assert.equal(shellResult?.timed_out, false);
+  assert.equal(shellResult?.shell_alive, true);
+  const closedShell = await callTool(sessionId, "close_shell", { name: shellName });
+  assert.deepEqual(closedShell.payload?.result?.structuredContent, { name: shellName, closed: true });
+  const missingShell = await callTool(sessionId, "close_shell", { name: "not-open-typed-shell" });
+  assert.deepEqual(missingShell.payload?.result?.structuredContent,
+    { name: "not-open-typed-shell", closed: false, reason: "not_open" });
+
+  const durationWait = await callTool(sessionId, "wait", { ms: 0 });
+  assert.deepEqual(durationWait.payload?.result?.structuredContent, { waited_ms: 0 });
+  const processWait = await callTool(sessionId, "wait", { command_id: commandId, timeout_ms: 0 });
+  const waitedProcess = processWait.payload?.result?.structuredContent;
+  assert.equal(waitedProcess?.command_id, commandId);
+  assert.equal(typeof waitedProcess?.output, "string");
+  assert.equal(typeof waitedProcess?.stdout, "string");
+  assert.equal(typeof waitedProcess?.truncated, "boolean");
+  const policy = await callTool(sessionId, "set_process_policy", {
+    command_id: commandId, auto_restart: false, max_restarts: 0, restart_delay_ms: 0,
+  });
+  assert.deepEqual(policy.payload?.result?.structuredContent,
+    { command_id: commandId, auto_restart: false, max_restarts: 0, restart_delay_ms: 0 });
+
+  for (const name of ["send_to_shell", "set_process_policy"]) {
+    const definition = catalogTools.find(tool => tool.name === name);
+    assert.equal(definition?.outputSchema?.type, "object", `${name} declares its fixed object result`);
+  }
+  assert.equal(catalogTools.find(tool => tool.name === "close_shell")?.outputSchema?.oneOf?.length, 2,
+    "close_shell declares close and not_open results");
+  assert.equal(catalogTools.find(tool => tool.name === "wait")?.outputSchema?.oneOf?.length, 2,
+    "wait declares duration and process results");
 });
 
 test("a forged session id is refused and the server keeps serving", async () => {

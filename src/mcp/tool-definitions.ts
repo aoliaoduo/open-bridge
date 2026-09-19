@@ -160,6 +160,57 @@ const OPEN_SHELL_OUTPUT_SCHEMA = {
   ],
 } as const;
 
+const SEND_TO_SHELL_OUTPUT_SCHEMA = {
+  type: "object", description: "The result of one command in a persistent shell.",
+  required: ["name", "command_id", "output", "stdout", "stderr", "exit_code", "timed_out", "status", "shell_alive", "cwd"],
+  properties: {
+    name: { type: "string" }, command_id: { type: "string" }, output: { type: "string" }, stdout: { type: "string" }, stderr: { type: "string" },
+    exit_code: { type: ["number", "null"] }, timed_out: { type: "boolean" }, status: { type: "string", enum: ["completed", "running", "shell_exited"] },
+    shell_alive: { type: "boolean" }, cwd: { type: "string" }, output_dropped: { type: "boolean" }, note: { type: "string" },
+  },
+} as const;
+
+const CLOSE_SHELL_OUTPUT_SCHEMA = {
+  oneOf: [
+    {
+      type: "object", description: "The named shell was closed.", required: ["name", "closed"],
+      properties: { name: { type: "string" }, closed: { type: "boolean", enum: [true] } },
+    },
+    {
+      type: "object", description: "There was no shell by that name to close.", required: ["name", "closed", "reason"],
+      properties: { name: { type: "string" }, closed: { type: "boolean", enum: [false] }, reason: { type: "string", enum: ["not_open"] } },
+    },
+  ],
+} as const;
+
+const WAIT_PROCESS_OUTPUT_SCHEMA = {
+  ...PROCESS_SNAPSHOT_SCHEMA,
+  description: "The final process snapshot after waiting, with captured output.",
+  required: [...PROCESS_SNAPSHOT_SCHEMA.required, "output", "stdout", "stderr", "truncated"],
+  properties: {
+    ...PROCESS_SNAPSHOT_SCHEMA.properties,
+    output: { type: "string" }, stdout: { type: "string" }, stderr: { type: "string" }, truncated: { type: "boolean" },
+  },
+} as const;
+
+const WAIT_OUTPUT_SCHEMA = {
+  oneOf: [
+    {
+      type: "object", description: "A fixed-duration wait.", required: ["waited_ms"],
+      properties: { waited_ms: { type: "number" } }, not: { required: ["command_id"] },
+    },
+    { ...WAIT_PROCESS_OUTPUT_SCHEMA, not: { required: ["waited_ms"] } },
+  ],
+} as const;
+
+const PROCESS_POLICY_OUTPUT_SCHEMA = {
+  type: "object", description: "The applied policy for one managed process.",
+  required: ["command_id", "auto_restart", "max_restarts", "restart_delay_ms"],
+  properties: {
+    command_id: { type: "string" }, auto_restart: { type: "boolean" }, max_restarts: { type: "number" }, restart_delay_ms: { type: "number" },
+  },
+} as const;
+
 const FILE_OP_OUTPUT_SCHEMA = {
   oneOf: [
     {
@@ -265,10 +316,10 @@ export const TOOL_DEFINITIONS = [
   { name: "start_process", description: "Start a supervised process (server, watcher, daemon). ready_pattern waits for startup output. Without it, ready=true means no check was requested; inspect status/exit_code.", inputSchema: { type: "object", required: ["command"], properties: { command: { type: "string", minLength: 1 }, cwd: { type: "string" }, env: { type: "object", additionalProperties: { type: "string" } }, ready_pattern: { type: "string" }, ready_timeout_ms: { type: "number", description: "How long ready_pattern may take, in ms (default 10000, max 2147483647). On expiry the call returns ready:false and the process keeps running. There is no timeout_ms here: nothing is killed." }, resource_keys: { type: "array", items: { type: "string" }, maxItems: 16, description: "Optional resource locks held for as long as the process runs, e.g. [\"port:5173\"]. Two calls naming the same key never start at once, so a reserved port or output directory cannot be claimed twice." }, strip_ansi: { type: "boolean", description: "Strip ANSI escape sequences (colors, cursor control) from returned output fields. Default true." } } }, outputSchema: SUPERVISED_PROCESS_LAUNCH_OUTPUT_SCHEMA },
   { name: "interact_with_process", description: "Send input to a supervised process and return the output produced after it. Plain non-PTY pipes only; for a full terminal session use open_shell, for output-only reads use read_process_output.", inputSchema: { type: "object", required: ["command_id", "input"], properties: { command_id: { type: "string" }, input: { type: "string" }, append_newline: { type: "boolean" }, wait_ms: { type: "number", description: "Pause after writing, capped at 60000 like read_process_output." }, offset: { type: "number", description: "Absolute read position; omit to read only output produced after this input." }, max_bytes: { type: "number" }, stream: { type: "string", enum: ["merged", "stdout", "stderr"], description: "Which capture to read; offsets then refer to that stream. Default merged." }, strip_ansi: { type: "boolean", description: "Strip ANSI escape sequences (colors, cursor control) from returned output fields. Default true." } } }, outputSchema: PROCESS_OUTPUT_SCHEMA },
   { name: "open_shell", description: "Open a persistent named shell for interactive/REPL flows (daemons: start_process; one-shots: run_command). list=true returns the open shells instead. Needs bash/sh.", inputSchema: { type: "object", properties: { name: { type: "string", description: "Session name (default 'default')." }, cwd: { type: "string" }, list: { type: "boolean", description: "Return the open shells instead of opening one." } } }, outputSchema: OPEN_SHELL_OUTPUT_SCHEMA },
-  { name: "send_to_shell", description: "Run a command in a shell opened with open_shell; cwd/env/venv persist between calls. Waits up to timeout_ms via a sentinel and returns output plus exit code; on timeout the shell stays open.", inputSchema: { type: "object", required: ["command"], properties: { name: { type: "string", description: "Session name (default 'default')." }, command: { type: "string", minLength: 1 }, timeout_ms: { type: "number" }, strip_ansi: { type: "boolean", description: "Strip ANSI escape sequences from returned output fields. Default true." } } } },
-  { name: "close_shell", description: "Close a persistent shell session opened with open_shell.", inputSchema: { type: "object", properties: { name: { type: "string" } } } },
-  { name: "wait", description: "Wait for a fixed number of milliseconds (ms), or for a supervised process to exit (command_id with an optional timeout_ms). Blocks; changes nothing.", inputSchema: { type: "object", properties: { ms: { type: "number", minimum: 0 }, command_id: { type: "string" }, timeout_ms: { type: "number" } } } },
-  { name: "set_process_policy", description: "Enable or disable automatic restart for a managed process.", inputSchema: { type: "object", required: ["command_id"], properties: { command_id: { type: "string" }, auto_restart: { type: "boolean" }, max_restarts: { type: "number" }, restart_delay_ms: { type: "number" } } } },
+  { name: "send_to_shell", description: "Run a command in a shell opened with open_shell; cwd/env/venv persist between calls. Waits up to timeout_ms via a sentinel and returns output plus exit code; on timeout the shell stays open.", inputSchema: { type: "object", required: ["command"], properties: { name: { type: "string", description: "Session name (default 'default')." }, command: { type: "string", minLength: 1 }, timeout_ms: { type: "number" }, strip_ansi: { type: "boolean", description: "Strip ANSI escape sequences from returned output fields. Default true." } } }, outputSchema: SEND_TO_SHELL_OUTPUT_SCHEMA },
+  { name: "close_shell", description: "Close a persistent shell session opened with open_shell.", inputSchema: { type: "object", properties: { name: { type: "string" } } }, outputSchema: CLOSE_SHELL_OUTPUT_SCHEMA },
+  { name: "wait", description: "Wait for a fixed number of milliseconds (ms), or for a supervised process to exit (command_id with an optional timeout_ms). Blocks; changes nothing.", inputSchema: { type: "object", properties: { ms: { type: "number", minimum: 0 }, command_id: { type: "string" }, timeout_ms: { type: "number" } } }, outputSchema: WAIT_OUTPUT_SCHEMA },
+  { name: "set_process_policy", description: "Enable or disable automatic restart for a managed process.", inputSchema: { type: "object", required: ["command_id"], properties: { command_id: { type: "string" }, auto_restart: { type: "boolean" }, max_restarts: { type: "number" }, restart_delay_ms: { type: "number" } } }, outputSchema: PROCESS_POLICY_OUTPUT_SCHEMA },
   { name: "process_control", description: "Restart or terminate a supervised process by command_id. Restart keeps the original command and cwd; delay_ms applies to restart. terminate is force_terminate.", inputSchema: { type: "object", required: ["action", "command_id"], properties: { action: { type: "string", enum: ["restart", "terminate"] }, command_id: { type: "string" }, delay_ms: { type: "number", description: "restart only: pause before restarting (default 0)." } } }, outputSchema: PROCESS_CONTROL_OUTPUT_SCHEMA },
   { name: "get_process_snapshot", description: "Read detailed lifecycle information for one or all managed processes.", inputSchema: { type: "object", properties: { command_id: { type: "string" } } }, outputSchema: PROCESS_SNAPSHOT_OUTPUT_SCHEMA },
   { name: "connectivity", description: "Probe a target: port (TCP connect) or http (status, latency, up to 5 redirects, Basic auth from URL userinfo). target is inferred from url/port when omitted.", inputSchema: { type: "object", properties: { target: { type: "string", enum: ["port", "http"] }, host: { type: "string" }, port: { type: "number" }, url: { type: "string" }, timeout_ms: { type: "number" }, max_redirects: { type: "number" }, scope: { type: "string", enum: ["loopback-and-public", "loopback", "public", "any"], description: "Which network locations may be reached. Defaults to loopback-and-public: local dev servers and public endpoints, with LAN, cloud-metadata and other special addresses refused. \"any\" is an explicit opt-in; an unrecognised value is treated as the default, never as \"any\"." } } }, outputSchema: { type: "object", properties: { ok: { type: "boolean" }, status: { type: "number" }, latency_ms: { type: "number" }, error: { type: "string" } } } },

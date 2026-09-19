@@ -117,17 +117,17 @@
 
 **process_control** — `restart`（用原命令与原 cwd 重起，可带 `delay_ms`）· `terminate`（强制结束）。都按 `command_id`。restart 的 `structuredContent` 为 `{command_id, restarted, restart_count, auto_restart}`；terminate 则提供包含 `terminated`（及必要时 `already_exited`）的最终进程 snapshot。
 
-**wait** — `ms` 睡一会儿；`command_id`（+ 可选 `timeout_ms`）等该进程退出。两者都给时按进程算。
+**wait** — `ms` 睡一会儿；`command_id`（+ 可选 `timeout_ms`）等该进程退出。两者都给时按进程算。`structuredContent` 按这两个互斥输入分支返回：`ms` 是 `{ waited_ms }`；`command_id` 是最终进程 snapshot，另带合并 `output`、`stdout`、`stderr` 和 `truncated`（以及相应输出字节计数）。
 
-**set_process_policy** — 调整监督策略（超时、输出上限等行为）。
+**set_process_policy** — 调整一个受监管进程的自动重启策略；`structuredContent` 固定为 `{ command_id, auto_restart, max_restarts, restart_delay_ms }`，即实际应用后的四个策略值。
 
 **get_process_snapshot** — 一次列出所有受监管进程（状态、命令、cwd、启动时间）。排查"现在到底有什么在跑"时先用它。传 `command_id` 时 `structuredContent` 是该进程对象；省略时兼容文本仍是数组，而类型化结果为 `{items: [...]}`。
 
 **open_shell** — 开一个**具名持久 shell**（需要 bash/sh，Windows 上是 Git Bash）。同一个 shell 跨调用存活，`cd`、导出变量、激活的 virtualenv **都保留**；`list: true` 则返回当前开着的 shell 列表（`name` / `command_id` / `cwd` / `alive` / `started_at`）。打开/复用时 `structuredContent` 是一个 shell 对象；列举时兼容文本是数组、类型化结果为 `{items: [...]}`。
 
-**send_to_shell** — 在 `open_shell` 开的 shell 里跑命令，经哨兵字符串等它结束（上限 `timeout_ms`），返回输出与退出码；超时则 shell 保持开着。
+**send_to_shell** — 在 `open_shell` 开的 shell 里跑命令，经哨兵字符串等它结束（上限 `timeout_ms`），返回输出与退出码；超时则 shell 保持开着。`structuredContent` 固定给出 `{ name, command_id, output, stdout, stderr, exit_code, timed_out, status, shell_alive, cwd }`；若本次输出的前段已被保留上限挤掉，另有 `output_dropped: true`，超时时还有继续读取/重试说明 `note`。`status` 是 `completed`、`running` 或 `shell_exited`，而非靠字段缺失判断。
 
-**close_shell** — 关掉某个持久 shell。
+**close_shell** — 关掉某个持久 shell。`structuredContent` 互斥地为成功的 `{ name, closed: true }`，或该名称本来未打开的 `{ name, closed: false, reason: "not_open" }`。
 
 ### 连通性与服务
 

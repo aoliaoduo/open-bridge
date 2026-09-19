@@ -182,3 +182,26 @@ test("command launch tools declare their real foreground and supervised results"
   assert.ok(supervised?.required?.includes("ready_checked"));
   assert.ok(supervised?.required?.includes("command_id"));
 });
+
+test("shell lifecycle and wait tools declare their input-dependent results", () => {
+  const shellCommand = schemaOf("send_to_shell");
+  assert.equal(shellCommand?.type, "object");
+  for (const key of ["command_id", "output", "exit_code", "timed_out", "shell_alive"]) {
+    assert.ok(shellCommand?.required?.includes(key), `send_to_shell requires ${key}`);
+  }
+
+  const close = schemaOf("close_shell")?.oneOf ?? [];
+  assert.equal(close.length, 2, "close_shell distinguishes close from not_open");
+  assert.deepEqual(close[0]?.required, ["name", "closed"]);
+  assert.deepEqual(close[1]?.required, ["name", "closed", "reason"]);
+
+  const waits = schemaOf("wait")?.oneOf ?? [];
+  assert.equal(waits.length, 2, "wait distinguishes duration and command waits");
+  assert.deepEqual(waits[0]?.required, ["waited_ms"]);
+  for (const key of ["command_id", "output", "stdout", "stderr", "truncated"]) {
+    assert.ok(waits[1]?.required?.includes(key), `wait command branch requires ${key}`);
+  }
+
+  const policy = schemaOf("set_process_policy");
+  assert.deepEqual(policy?.required, ["command_id", "auto_restart", "max_restarts", "restart_delay_ms"]);
+});
