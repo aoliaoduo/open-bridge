@@ -403,6 +403,15 @@ export async function listDirectory(args: Args): Promise<unknown> {
       + "Narrow the path or raise max_entries instead. (expected 'offset': number, with depth 1)");
   }
 
+  // A zero-row flat page still has an exact, useful total: reading this one
+  // directory is the same bounded work an ordinary flat listing performs.
+  // It cannot safely offer a continuation because it returned no rows.
+  if (max === 0 && depth === 1) {
+    const entries = await fs.readdir(base, { withFileTypes: true });
+    const total = entries.filter(e => includeHidden || !e.name.startsWith(".")).length;
+    return { items: [], truncated: total > offset, total, next_offset: null };
+  }
+
   // Shared budget so max_entries bounds the response across the WHOLE tree
   // (children included). Each directory frame reserves one slot for itself
   // before expanding children, so exhausting the budget never causes an

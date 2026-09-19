@@ -95,9 +95,10 @@ test("list_directory reports the cap, the true total and the offset that continu
   assert.equal(next.next_offset, 6, "the third page starts where this one stopped");
 });
 
-test("a zero-sized directory page does not publish a looping cursor", async () => {
+test("a zero-sized directory page reports its flat total without a looping cursor", async () => {
   const zero = (await listDirectory({ path: ".", max_entries: 0 })) as unknown as Listing;
   assert.deepEqual(zero.items, []);
+  assert.equal(zero.total, 13, "the one flat directory read can still report its exact total");
   assert.equal(zero.truncated, true);
   assert.equal(zero.next_offset, null, "an empty page cannot safely advance its cursor");
 });
