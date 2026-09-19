@@ -320,6 +320,60 @@ test("outputSchema tools answer with structuredContent in the declared shape", a
     "wait declares duration and process results");
 });
 
+test("remaining response schemas match live structuredContent", async () => {
+  const { sessionId } = await openSession();
+  const catalog = await mcpCall(sessionId, "tools/list", {});
+  const tools = catalog.payload?.result?.tools ?? [];
+  for (const name of ["write_file", "edit_block", "apply_patch", "workspace_brief", "save_service", "set_config_value", "get_config", "get_usage_stats", "report_progress", "get_todos", "read_service_log", "batch"]) {
+    const schema = tools.find(tool => tool.name === name)?.outputSchema;
+    assert.ok(schema?.required?.length, `${name} advertises required structured fields`);
+  }
+
+  const written = await callTool(sessionId, "write_file", { path: "remaining-shape.txt", content: "before" });
+  assert.equal(written.payload?.result?.structuredContent?.mode, "overwrite");
+  assert.equal(typeof written.payload?.result?.structuredContent?.sha256, "string");
+  const edited = await callTool(sessionId, "edit_block", { path: "remaining-shape.txt", old_text: "before", new_text: "after" });
+  assert.equal(edited.payload?.result?.structuredContent?.replacements, 1);
+  assert.equal(typeof edited.payload?.result?.structuredContent?.diff, "string");
+
+  const brief = await callTool(sessionId, "workspace_brief", {});
+  assert.equal(typeof brief.payload?.result?.structuredContent?.workspace, "string");
+  assert.ok(Array.isArray(brief.payload?.result?.structuredContent?.top_level_entries));
+  const config = await callTool(sessionId, "get_config", {});
+  assert.equal(typeof config.payload?.result?.structuredContent?.toolProfile, "string");
+  const usageStats = await callTool(sessionId, "get_usage_stats", {});
+  assert.equal(typeof usageStats.payload?.result?.structuredContent?.by_tool, "object");
+
+  const saved = await callTool(sessionId, "save_service", {
+    name: "remaining-shape-service", command: `node -e "process.stdout.write('remaining')"`,
+  });
+  assert.deepEqual(saved.payload?.result?.structuredContent, { name: "remaining-shape-service", saved: true });
+  const serviceLog = await callTool(sessionId, "read_service_log", { name: "remaining-shape-service" });
+  assert.equal(serviceLog.payload?.result?.structuredContent?.name, "remaining-shape-service");
+  assert.equal(typeof serviceLog.payload?.result?.structuredContent?.next_offset, "number");
+
+  const todos = await callTool(sessionId, "set_todos", { todos: [{ id: "remaining", title: "schema", status: "in_progress" }] });
+  assert.deepEqual(todos.payload?.result?.structuredContent?.items, [{ id: "remaining", title: "schema", status: "in_progress" }]);
+  const progress = await callTool(sessionId, "report_progress", { message: "testing", phase: "verifying", category: "test" });
+  assert.equal(progress.payload?.result?.structuredContent?.received, true);
+  const listedTodos = await callTool(sessionId, "get_todos", {});
+  assert.equal(listedTodos.payload?.result?.structuredContent?.session_todos?.[0]?.id, "remaining");
+
+  const probe = await callTool(sessionId, "connectivity", { target: "port", host: "127.0.0.1", port });
+  assert.equal(probe.payload?.result?.structuredContent?.port, port);
+  assert.equal(typeof probe.payload?.result?.structuredContent?.open, "boolean");
+  const overview = await callTool(sessionId, "bridge_status", { section: "overview" });
+  assert.equal(typeof overview.payload?.result?.structuredContent?.tool_count, "number");
+  const locks = await callTool(sessionId, "bridge_status", { section: "locks" });
+  assert.ok(Array.isArray(locks.payload?.result?.structuredContent?.held));
+  const sessions = await callTool(sessionId, "bridge_status", { section: "sessions" });
+  assert.ok(Array.isArray(sessions.payload?.result?.structuredContent?.items));
+
+  const batch = await callTool(sessionId, "batch", { calls: [{ tool: "get_usage_stats" }] });
+  assert.equal(batch.payload?.result?.structuredContent?.total, 1);
+  assert.equal(batch.payload?.result?.structuredContent?.results?.[0]?.ok, true);
+});
+
 test("a forged session id is refused and the server keeps serving", async () => {
   const forged = await mcpCall("0000000000000000000000000000dead", "tools/call", { name: "get_bridge_status", arguments: {} });
   assert.ok(forged.status === 404 || forged.status === 400, `a forged session must be refused, got ${forged.status}`);

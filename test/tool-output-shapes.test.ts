@@ -205,3 +205,20 @@ test("shell lifecycle and wait tools declare their input-dependent results", () 
   const policy = schemaOf("set_process_policy");
   assert.deepEqual(policy?.required, ["command_id", "auto_restart", "max_restarts", "restart_delay_ms"]);
 });
+
+test("remaining write, status and batch tools publish concrete structured results", () => {
+  for (const name of [
+    "write_file", "edit_block", "apply_patch", "workspace_brief", "save_service", "set_config_value",
+    "get_config", "get_usage_stats", "report_progress", "get_todos", "read_service_log", "batch",
+  ]) {
+    const schema = schemaOf(name);
+    assert.ok(schema?.required?.length, `${name} declares required result fields`);
+  }
+  assert.equal(schemaOf("review_changes")?.oneOf?.length, 2, "review distinguishes unavailable and available workspaces");
+  assert.equal(schemaOf("connectivity")?.oneOf?.length, 2, "connectivity distinguishes TCP and HTTP probes");
+  assert.equal(schemaOf("bridge_status")?.oneOf?.length, 4, "bridge_status declares all four sections");
+  assert.deepEqual(schemaOf("set_todos")?.required, ["items"], "set_todos uses the structured array envelope");
+  for (const key of ["command_id", "stream", "next_offset", "truncated"]) {
+    assert.ok(schemaOf("read_process_output")?.required?.includes(key), `process pages require ${key}`);
+  }
+});

@@ -129,6 +129,14 @@
 
 **close_shell** — 关掉某个持久 shell。`structuredContent` 互斥地为成功的 `{ name, closed: true }`，或该名称本来未打开的 `{ name, closed: false, reason: "not_open" }`。
 
+### 结构化返回补充
+
+**文件写入与审阅** — `write_file` 固定返回 `{ path, bytes, mode, sha256 }`（二进制写入额外给 `encoding: "base64"`）；`edit_block` 固定返回 `{ path, replacements, sha256 }`，可附 `applied_edits` / `diff`；`apply_patch` 固定返回 `{ applied: true, files, changes }`，每项 `changes` 明确给路径、动作、增删行数和 diff。`review_changes` 则明确区分不可用的 `{ available: false, reason }` 与可审阅的 diff 结果。`workspace_brief` 固定含工作区、顶层条目、指令文件、Git 摘要和 Bridge 摘要，存在时才附 manifests / skills。
+
+**配置、任务与批量调用** — `get_config` 是完整且字段固定的运行时配置（`notify.barkKey` 始终为脱敏提示）；`set_config_value` 返回 `{ key, value }`；`get_usage_stats` 固定含累计计数和 `by_tool`。`set_todos` 的兼容文本仍是数组，但 `structuredContent` 为 `{ items: [...] }`；`get_todos` 固定含会话任务、持久任务、上次进度和保存时间；`report_progress` 确认 `{ received, message, pushed }`，再按需要返回阶段/类别/百分比/任务编号。`batch` 固定给总数、成功/失败数、是否提前停止及每个子调用的成功结果或错误。
+
+**读取、探测与 Bridge 状态** — `read_process_output` 与 `interact_with_process` 的分页结果固定携带 `command_id`、`stream`、`offset`、`next_offset`、累计字节、丢弃字节和 `truncated`；`read_service_log` 也固定携带同样可续读的 offset / next_offset / truncated 核心字段。`connectivity` 用互斥结果区分 TCP（host / port / open）和 HTTP（url / status / redirects）探测。`bridge_status` 按 `overview`、`auth`、`locks`、`sessions` 四种 section 返回对应的精确对象；sessions 的类型化结果为 `{ items: [...] }`。
+
 ### 连通性与服务
 
 **connectivity** — `{url}` 探 HTTP(S)：状态码与延迟，最多跟 5 次重定向，URL 里的 userinfo 当 Basic 认证，目标地址**先解析再固定**。`{port}` 或 `{host, port}` 探 TCP 是否可连。用它们做就绪判断，别用 `curl`。
