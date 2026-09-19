@@ -84,9 +84,9 @@
 
 ### 工作区写入
 
-**write_file** — 新建或覆盖。`content` 或 `content_base64`；`mode: "append"` 追加；`expected_sha256` 防止覆盖已变化的文件。追加**按目标文件现有的换行风格**写入（CRLF 文件里的新行也是 CRLF，LF 文件里就是 LF —— 只有追加的这段被归一，磁盘上原有的字节不动）；`content_base64` 追加**按字节原样**，不做换行归一，因为那条路是给二进制用的。
+**write_file** — 新建或覆盖。必须提供 `content` 或 `content_base64`（两者同给时按 `content_base64` 写）；`mode: "append"` 追加；`expected_sha256` 防止覆盖已变化的文件。追加**按目标文件现有的换行风格**写入（CRLF 文件里的新行也是 CRLF，LF 文件里就是 LF —— 只有追加的这段被归一，磁盘上原有的字节不动）；`content_base64` 追加**按字节原样**，不做换行归一，因为那条路是给二进制用的。
 
-**edit_block** — 单文件精确替换：`old_text` 必须**恰好匹配一次**（除非用 `expected_replacements` 指定次数）；也可一次给 1–20 个 hunk（`edits`），**全部命中才写**。零匹配时错误里附**最接近的一段文本**与可能的漂移原因。带 `expected_sha256` 防陈旧编辑。
+**edit_block** — 单文件精确替换有两个互斥输入：单次替换必须给 `old_text`（`new_text` 省略即删除），或一次给 1–20 个 hunk（`edits`），**全部命中才写**。`old_text` 必须**恰好匹配一次**（除非用 `expected_replacements` 指定次数）；零匹配时错误里附**最接近的一段文本**与可能的漂移原因。带 `expected_sha256` 防陈旧编辑。
 
 **apply_patch** — 两种语法：经典 unified diff（只能改已存在文件）与 ShunCode 块（`*** Add File:` / `*** Update File:` / `*** Delete File:`，可新建与删除）。`patch` 与 `patch_file` 二选一；`expected_sha256` 按路径映射校验。
 
@@ -117,7 +117,7 @@
 
 **process_control** — `restart`（用原命令与原 cwd 重起，可带 `delay_ms`）· `terminate`（强制结束）。都按 `command_id`。restart 的 `structuredContent` 为 `{command_id, restarted, restart_count, auto_restart}`；terminate 则提供包含 `terminated`（及必要时 `already_exited`）的最终进程 snapshot。
 
-**wait** — `ms` 睡一会儿；`command_id`（+ 可选 `timeout_ms`）等该进程退出。两者都给时按进程算。`structuredContent` 按这两个互斥输入分支返回：`ms` 是 `{ waited_ms }`；`command_id` 是最终进程 snapshot，另带合并 `output`、`stdout`、`stderr` 和 `truncated`（以及相应输出字节计数）。
+**wait** — 至少给 `ms`（睡一会儿）或 `command_id`（+ 可选 `timeout_ms`，等该进程退出）之一；两者都给时按进程算。`structuredContent` 随实际模式返回：`ms` 是 `{ waited_ms }`；`command_id` 是最终进程 snapshot，另带合并 `output`、`stdout`、`stderr` 和 `truncated`（以及相应输出字节计数）。
 
 **set_process_policy** — 调整一个受监管进程的自动重启策略；`structuredContent` 固定为 `{ command_id, auto_restart, max_restarts, restart_delay_ms }`，即实际应用后的四个策略值。
 
@@ -139,7 +139,7 @@
 
 ### 连通性与服务
 
-**connectivity** — `{url}` 探 HTTP(S)：状态码与延迟，最多跟 5 次重定向，URL 里的 userinfo 当 Basic 认证，目标地址**先解析再固定**。`{port}` 或 `{host, port}` 探 TCP 是否可连。用它们做就绪判断，别用 `curl`。
+**connectivity** — 至少给 `url` 或 `port` 之一；`target` 可省略（会据此推断）。`{url}` 探 HTTP(S)：状态码与延迟，最多跟 5 次重定向，URL 里的 userinfo 当 Basic 认证，目标地址**先解析再固定**。`{port}` 或 `{host, port}` 探 TCP 是否可连。用它们做就绪判断，别用 `curl`。
 
 **save_service** — 定义/更新一个命名服务（命令、cwd、group、port、健康 URL、日志文件、自动重启策略）。**定义**与**运行**是两回事。
 

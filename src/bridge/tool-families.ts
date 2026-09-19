@@ -47,6 +47,12 @@ function invalid(family: keyof typeof FAMILY_ACTIONS, value: string): Error {
   return new Error(`Unknown ${FAMILY_PARAMS[family]} "${value}" for ${family}. Valid values: ${FAMILY_ACTIONS[family].join(", ")}.`);
 }
 
+/** Name required by the single-service operations, before an empty lookup becomes misleading. */
+function namedService(args: Args, action: "start" | "stop" | "restart" | "delete"): Args {
+  if (typeof args.name === "string" && args.name.trim()) return pick(args, ["name"]);
+  throw new Error(`Missing "name". service{action:"${action}"} requires a saved service name.`);
+}
+
 // ---------------------------------------------------------------------------
 // service — start / stop / restart / delete one service, or a whole group
 // ---------------------------------------------------------------------------
@@ -55,13 +61,13 @@ export async function serviceFamily(args: Args): Promise<unknown> {
   const action = required(args, "service");
   switch (action) {
     case "start":
-      return startService(pick(args, ["name"]));
+      return startService(namedService(args, action));
     case "stop":
-      return stopService(pick(args, ["name"]));
+      return stopService(namedService(args, action));
     case "restart":
-      return restartService(pick(args, ["name"]));
+      return restartService(namedService(args, action));
     case "delete":
-      return deleteService(pick(args, ["name"]));
+      return deleteService(namedService(args, action));
     case "start_all":
       return startAllServices(pick(args, ["group", "parallel"]));
     case "stop_all":

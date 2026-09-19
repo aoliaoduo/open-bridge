@@ -185,7 +185,18 @@ test("`get_process_snapshot` keeps command_id optional: omitted still means ever
   await callTool("process_control", { action: "terminate", command_id: commandId });
 });
 
-// --- ③ report_progress: message -------------------------------------------
+// --- ③ service: action-specific name --------------------------------------
+
+test("single-service actions name a missing service name instead of inventing an unknown one", async () => {
+  for (const action of ["start", "stop", "restart", "delete"]) {
+    const missing = await callTool("service", { action });
+    assert.equal(missing.isError, true, `service ${action} without name must fail`);
+    assert.match(missing.text, /Missing "name"/, `service ${action} names its missing argument`);
+    assert.doesNotMatch(missing.text, /Unknown service/, `service ${action} is not misdiagnosed as a lookup failure`);
+  }
+});
+
+// --- ④ report_progress: message -------------------------------------------
 
 test("`report_progress` refuses a dropped message but still accepts an empty one", async () => {
   const missing = await callTool("report_progress", { phase: "running", category: "test" });

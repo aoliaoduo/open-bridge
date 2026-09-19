@@ -173,6 +173,29 @@ test("tools/list advertises the catalog and get_bridge_status agrees on the coun
   assert.equal(reported, tools.length, "the status count must match what tools/list advertises");
 });
 
+test("tools/list declares the inputs that each operation branch needs", async () => {
+  const { sessionId } = await openSession();
+  const catalog = await mcpCall(sessionId, "tools/list", {});
+  const tools = catalog.payload?.result?.tools ?? [];
+  const input = name => tools.find(tool => tool.name === name)?.inputSchema;
+  const branch = (schema, key, value) => schema?.oneOf?.find(entry => entry.properties?.[key]?.enum?.includes(value));
+
+  assert.deepEqual(input("write_file")?.anyOf?.map(entry => entry.required),
+    [["content"], ["content_base64"]], "write_file advertises that a payload is required");
+  assert.deepEqual(input("apply_patch")?.oneOf?.map(entry => entry.required),
+    [["patch"], ["patch_file"]], "apply_patch advertises its mutually exclusive sources");
+  assert.deepEqual(branch(input("file_op"), "op", "copy")?.required,
+    ["op", "source", "destination"], "copy advertises both endpoints");
+  assert.deepEqual(branch(input("service"), "action", "start")?.required,
+    ["action", "name"], "single-service actions advertise their name");
+  assert.deepEqual(branch(input("service"), "action", "start_all")?.required,
+    ["action"], "bulk service actions do not invent a name requirement");
+  assert.deepEqual(input("wait")?.anyOf?.map(entry => entry.required),
+    [["ms"], ["command_id"]], "wait exposes sleep and process-wait modes");
+  assert.deepEqual(input("connectivity")?.anyOf?.map(entry => entry.required),
+    [["url"], ["port"]], "connectivity exposes HTTP and TCP entry points");
+});
+
 test("outputSchema tools answer with structuredContent in the declared shape", async () => {
   const { sessionId } = await openSession();
   const services = await callTool(sessionId, "service_status", { detail: "definitions" });

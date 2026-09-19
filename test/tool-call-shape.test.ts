@@ -38,6 +38,25 @@ const repoRoot = path.resolve(here, "..");
 
 const advertised = new Set(TOOL_DEFINITIONS.map(tool => tool.name));
 
+type InputProperty = { enum?: readonly string[]; type?: unknown; minItems?: number; items?: InputSchema };
+type InputBranch = { required?: readonly string[]; properties?: Record<string, InputProperty>; not?: unknown; description?: string };
+type InputSchema = {
+  required?: readonly string[];
+  properties?: Record<string, InputProperty>;
+  oneOf?: readonly InputBranch[];
+  anyOf?: readonly InputBranch[];
+};
+
+function inputSchemaOf(name: string): InputSchema {
+  const definition = TOOL_DEFINITIONS.find(tool => tool.name === name);
+  assert.ok(definition, `${name} is advertised`);
+  return definition.inputSchema as InputSchema;
+}
+
+function branchFor(schema: InputSchema, key: string, value: string): InputBranch | undefined {
+  return schema.oneOf?.find(branch => branch.properties?.[key]?.enum?.includes(value));
+}
+
 /** Handler names, read out of the dispatcher's table. */
 function handlerNames(): Set<string> {
   const source = readFileSync(path.join(repoRoot, "src", "bridge", "dispatcher.ts"), "utf8");
@@ -71,6 +90,39 @@ test("the family vocabulary and the definitions agree", () => {
     const enumValues = (definition.inputSchema.properties as Record<string, { enum?: readonly string[] }>)[property]?.enum ?? [];
     assert.deepEqual([...enumValues].sort(), [...actions].sort(), `${family}'s ${property} enum drifted from FAMILY_ACTIONS`);
   }
+});
+
+test("dependent inputs are explicit in the catalog, not hidden in handler errors", () => {
+  const fileOp = inputSchemaOf("file_op");
+  for (const [op, required] of [
+    ["create_directory", ["op", "path"]],
+    ["copy", ["op", "source", "destination"]],
+    ["move", ["op", "source", "destination"]],
+    ["delete", ["op", "path"]],
+  ] as const) {
+    assert.deepEqual(branchFor(fileOp, "op", op)?.required, required, `file_op ${op}`);
+  }
+
+  const service = inputSchemaOf("service");
+  for (const action of ["start", "stop", "restart", "delete"]) {
+    assert.deepEqual(branchFor(service, "action", action)?.required, ["action", "name"], `service ${action}`);
+  }
+  for (const action of ["start_all", "stop_all"]) {
+    assert.deepEqual(branchFor(service, "action", action)?.required, ["action"], `service ${action}`);
+  }
+
+  assert.deepEqual(inputSchemaOf("write_file").anyOf?.map(branch => branch.required),
+    [["content"], ["content_base64"]], "write_file requires a text or binary payload");
+  assert.deepEqual(inputSchemaOf("apply_patch").oneOf?.map(branch => branch.required),
+    [["patch"], ["patch_file"]], "apply_patch exposes exactly one source choice");
+  assert.deepEqual(inputSchemaOf("edit_block").oneOf?.map(branch => branch.required),
+    [["old_text"], ["edits"]], "edit_block distinguishes one replacement from hunk mode");
+  assert.equal(inputSchemaOf("edit_block").properties?.edits?.minItems, 1,
+    "the catalog refuses an empty hunk list before the handler runs");
+  assert.deepEqual(inputSchemaOf("wait").anyOf?.map(branch => branch.required),
+    [["ms"], ["command_id"]], "wait advertises its two valid modes");
+  assert.deepEqual(inputSchemaOf("connectivity").anyOf?.map(branch => branch.required),
+    [["url"], ["port"]], "connectivity advertises the argument that chooses a probe");
 });
 
 test("a family tool is only its discriminator; nothing else is a family", () => {
