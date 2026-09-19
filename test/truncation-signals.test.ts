@@ -95,6 +95,23 @@ test("list_directory reports the cap, the true total and the offset that continu
   assert.equal(next.next_offset, 6, "the third page starts where this one stopped");
 });
 
+test("list_directory orders flat pages by name so their cursor stays stable", async () => {
+  const ordered = path.join(dir, "ordered");
+  mkdirSync(ordered);
+  // Create them in the opposite order. The visible order is a tool contract,
+  // not an accident of the filesystem's insertion order.
+  writeFileSync(path.join(ordered, "z-last.txt"), "z", "utf8");
+  writeFileSync(path.join(ordered, "a-first.txt"), "a", "utf8");
+
+  const first = (await listDirectory({ path: "ordered", max_entries: 1 })) as unknown as Listing;
+  assert.deepEqual(first.items.map(item => item.name), ["a-first.txt"]);
+  assert.equal(first.next_offset, 1);
+
+  const second = (await listDirectory({ path: "ordered", max_entries: 1, offset: first.next_offset! })) as unknown as Listing;
+  assert.deepEqual(second.items.map(item => item.name), ["z-last.txt"]);
+  assert.equal(second.next_offset, null);
+});
+
 test("an uncapped listing is not marked truncated, and says there is nothing more", async () => {
   const all = (await listDirectory({ path: "." })) as unknown as Listing;
   assert.equal(all.items.length, 13);

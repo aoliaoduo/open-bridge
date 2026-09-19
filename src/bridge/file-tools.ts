@@ -422,6 +422,9 @@ export async function listDirectory(args: Args): Promise<unknown> {
       return [];
     }
     const entries = await fs.readdir(dir, { withFileTypes: true });
+    // A flat continuation cursor names positions in this list, so the order
+    // must not vary with the filesystem's directory-entry order between calls.
+    entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
     // A flat listing already holds every entry in hand, so its true size is
     // free to report. For depth > 1 that number would mean walking the whole
     // tree -- the work max_entries exists to avoid -- so it stays null
