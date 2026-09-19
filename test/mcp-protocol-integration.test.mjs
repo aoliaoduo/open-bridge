@@ -242,6 +242,16 @@ test("outputSchema tools answer with structuredContent in the declared shape", a
     command: `node -e "process.stdout.write('schema-page')"`,
   });
   const commandId = JSON.parse(launched.text).command_id;
+  const foregroundLaunch = launched.payload?.result?.structuredContent;
+  assert.equal(foregroundLaunch?.command_id, commandId);
+  assert.equal(typeof foregroundLaunch?.exit_code, "number",
+    "a completed foreground command exposes its typed exit result");
+  const supervised = await callTool(sessionId, "start_process", {
+    command: `node -e "process.stdout.write('schema-supervised')"`,
+  });
+  assert.equal(supervised.payload?.result?.structuredContent?.ready_checked, false,
+    "a supervised launch exposes the no-readiness-check distinction");
+
   const snapshots = await callTool(sessionId, "get_process_snapshot", {});
   assert.ok(Array.isArray(snapshots.payload?.result?.structuredContent?.items),
     "an all-process snapshot is an items envelope");

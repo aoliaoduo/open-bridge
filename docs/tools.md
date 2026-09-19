@@ -105,11 +105,11 @@
 
 ### 命令与进程
 
-**run_command** — 命令文本由 shell 解释：`shellPath` / `shellArgs` 未配置时自动探测（Windows：Git Bash → PowerShell 7 → Windows PowerShell），连接时下发的 instructions 会点名实际解释器与方言——写错方言不一定报错，`2>nul` 在 bash 下会生成一个名为 `nul` 的文件。前台等待最多 `timeout_ms`（默认 120000）。**超时不会杀掉进程**：它继续在监管下运行，返回 `status: "running"` 与 `command_id`，之后用 `read_process_output` / `wait` 继续读，或用 `process_control{action:"terminate"}` 停掉。退出码非零**不是**调用失败。链式命令（`a; b`）的 `exit_code` 取最后一段，要前一段的退出码就以 `echo EXIT=$?` 结尾。
+**run_command** — 命令文本由 shell 解释：`shellPath` / `shellArgs` 未配置时自动探测（Windows：Git Bash → PowerShell 7 → Windows PowerShell），连接时下发的 instructions 会点名实际解释器与方言——写错方言不一定报错，`2>nul` 在 bash 下会生成一个名为 `nul` 的文件。前台等待最多 `timeout_ms`（默认 120000）。**超时不会杀掉进程**：它继续在监管下运行，返回 `status: "running"` 与 `command_id`，之后用 `read_process_output` / `wait` 继续读，或用 `process_control{action:"terminate"}` 停掉。退出码非零**不是**调用失败。链式命令（`a; b`）的 `exit_code` 取最后一段，要前一段的退出码就以 `echo EXIT=$?` 结尾。`structuredContent` 区分三种结果：已完成前台命令（含 `exit_code`）、`background:true` 的受监管启动（含 `ready` / `ready_checked`）和超时但仍运行的命令（含 `message` 与继续所需的 `command_id`）。
 
 **长任务不要占住一次前台 MCP 请求。** 构建、验证、迁移或任何耗时不确定的命令应传 `background: true`，立即取得 `command_id`，再用 `read_process_output`、`wait` 或 `process_control` 续读、等待或终止；不要因客户端/传输层等待超时就重发原命令——那会并发执行两次有副作用的工作。例：`run_command{command:"npm run verify", background:true, resource_keys:["build:dist"]}`，随后按返回的 `command_id` 读取输出。无论命令是后台还是 `start_process` 启动，只在传入 `ready_pattern` 时 `ready` 才是实际观察到的就绪信号；没有该模式时保留的 `ready:true` 只表示**没有请求就绪检查**，请看 `ready_checked:false` 与 `status` / `exit_code`。
 
-**start_process** — 面向**长驻**进程（服务器、watcher、守护进程）：`ready_pattern` 等启动输出，返回 `command_id` 交给进程工具组。就绪等待由 **`ready_timeout_ms`**（毫秒，默认 **10000**，上限 2147483647）控制：等不到就让调用返回 `ready: false` + `status: "running"`，**不会杀进程**（慢启动的构建要放宽，就调这个值）。这里**没有 `timeout_ms`** —— 那是 `run_command` 的（前台运行才有"完成"可限时）；传了会**点名拒绝**，而不是像以前那样被静默忽略。
+**start_process** — 面向**长驻**进程（服务器、watcher、守护进程）：`ready_pattern` 等启动输出，返回 `command_id` 交给进程工具组。就绪等待由 **`ready_timeout_ms`**（毫秒，默认 **10000**，上限 2147483647）控制：等不到就让调用返回 `ready: false` + `status: "running"`，**不会杀进程**（慢启动的构建要放宽，就调这个值）。这里**没有 `timeout_ms`** —— 那是 `run_command` 的（前台运行才有"完成"可限时）；传了会**点名拒绝**，而不是像以前那样被静默忽略。其类型化启动结果明确携带 `ready`、`ready_checked`、输出截断计数与 `command_id`；`ready_checked:false` 表示没有请求模式检查，而不是已经观察到就绪。
 
 **read_process_output** — 分页读受监管命令的输出：`offset` / `max_bytes`，`stream` 只读一路，`wait_ms`（最大 60000）阻塞等待**新**输出。默认 128 KiB/次，大输出传更大的 `max_bytes`，用 `next_offset` 翻页，`truncated` 告诉你还有没有。它和 `interact_with_process` 的 `structuredContent` 共用同一份分页契约：`offset` 是本页实际起点（省略入参时从最早仍保留的字节开始；请求已丢弃的早期位置会报错、绝不静默跳过），`next_offset` 是下一页入参，`output_available_bytes` 是当前仍保留的字节，`dropped_bytes` 是已不再可读的早期字节；这四项都按所选 `stream` 计数。`truncated` 的意思是本页未覆盖完整流（可能少了前面、也可能少了后面）；要判断后面是否还有已捕获内容，比较 `next_offset < output_bytes`。
 

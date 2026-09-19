@@ -167,3 +167,18 @@ test("service action variants preserve their single and batch result contracts",
   assert.equal(itemsOf(actions[4])?.type, "array");
   assert.equal(itemsOf(actions[4])?.items?.oneOf?.length, 2, "batch rows cover start_all and stop_all");
 });
+
+test("command launch tools declare their real foreground and supervised results", () => {
+  const runs = schemaOf("run_command")?.oneOf ?? [];
+  assert.equal(runs.length, 3, "run_command declares background, completed and timeout branches");
+  assert.ok(runs[0]?.required?.includes("ready_checked"), "background distinguishes an observed readiness check");
+  assert.ok(runs[1]?.required?.includes("exit_code"), "foreground completion carries exit code");
+  assert.ok(runs[2]?.required?.includes("message"), "foreground timeout explains the next step");
+  assert.deepEqual(runs[2]?.properties?.status?.enum, ["running"]);
+
+  const supervised = schemaOf("start_process");
+  assert.equal(supervised?.type, "object", "start_process has only the supervised launch shape");
+  assert.equal(supervised?.oneOf, undefined, "start_process never returns foreground run variants");
+  assert.ok(supervised?.required?.includes("ready_checked"));
+  assert.ok(supervised?.required?.includes("command_id"));
+});
