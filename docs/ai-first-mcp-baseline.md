@@ -54,7 +54,7 @@ A proposed MCP change should state which of these it improves and demonstrate it
 
 1. **Recommended: durable AI task-flow contract tests.** Capture a compact set of representative agent flows—orientation, grouped inspection, scoped script result, and an honest recoverable failure—at the MCP boundary. This protects behavior that single-tool unit tests cannot see, without inventing a second abstraction layer.
 2. **Targeted branch-schema clarity.** Audit only the action/operation branches that have produced real agent mistakes or ambiguous output variants; add precise descriptions or constraints there rather than annotate every field mechanically.
-3. **Measured context shaping.** Determine how supported clients load the 65 KB tool catalog and 9.5 KB initialization instructions before considering profiles, catalog partitioning, or prompt reductions. Do not optimize from byte count alone.
+3. **Measured context shaping — P3 complete.** See [the transport evidence](ai-first-mcp-context-loading-p3.md): instructions are discovery/initialization payloads and the catalog is sent only on tools/list, while actual model-context packing remains client-specific. Do not optimize from byte count alone.
 4. **Execution-lifecycle evidence.** Continue prioritizing truthful asynchronous process and service outcomes when a reproducible gap is found; P10's failed-start contract is the current baseline for this category.
 
 ## Verification performed for P0
