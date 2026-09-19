@@ -199,6 +199,33 @@ test("outputSchema tools answer with structuredContent in the declared shape", a
   assert.ok(Array.isArray(files.payload?.result?.structuredContent?.items),
     "read_files wraps its raw row array in typed items");
   assert.equal(files.payload?.result?.structuredContent?.items?.[0]?.path, "typed.txt");
+  const createdDirectory = await callTool(sessionId, "file_op", { op: "create_directory", path: "typed-dir" });
+  assert.equal(createdDirectory.payload?.result?.structuredContent?.created, true,
+    "file_op create_directory keeps its specific result shape");
+  const copied = await callTool(sessionId, "file_op", { op: "copy", source: "typed.txt", destination: "typed-copy.txt" });
+  assert.equal(copied.payload?.result?.structuredContent?.destination, "typed-copy.txt");
+  const moved = await callTool(sessionId, "file_op", { op: "move", source: "typed-copy.txt", destination: "typed-moved.txt" });
+  assert.equal(moved.payload?.result?.structuredContent?.source, "typed-copy.txt");
+  const deleted = await callTool(sessionId, "file_op", { op: "delete", path: "typed-moved.txt" });
+  assert.equal(deleted.payload?.result?.structuredContent?.deleted, true);
+
+  const savedService = await callTool(sessionId, "save_service", {
+    name: "typed-service", group: "typed-group", command: `node -e "process.stdout.write('typed-service')"`,
+  });
+  assert.equal(savedService.status, 200, "the typed service fixture was saved");
+  const startedService = await callTool(sessionId, "service", { action: "start", name: "typed-service" });
+  assert.equal(startedService.payload?.result?.structuredContent?.status, "running");
+  const restartedService = await callTool(sessionId, "service", { action: "restart", name: "typed-service" });
+  assert.equal(restartedService.payload?.result?.structuredContent?.restarted, true);
+  const startedServices = await callTool(sessionId, "service", { action: "start_all", group: "typed-group" });
+  assert.ok(Array.isArray(startedServices.payload?.result?.structuredContent?.items),
+    "service start_all uses the typed items envelope");
+  const stoppedServices = await callTool(sessionId, "service", { action: "stop_all", group: "typed-group" });
+  assert.ok(Array.isArray(stoppedServices.payload?.result?.structuredContent?.items),
+    "service stop_all uses the typed items envelope");
+  const deletedService = await callTool(sessionId, "service", { action: "delete", name: "typed-service" });
+  assert.equal(deletedService.payload?.result?.structuredContent?.deleted, true);
+
   const recent = await callTool(sessionId, "activity_log", { action: "recent" });
   assert.ok(Array.isArray(recent.payload?.result?.structuredContent?.items),
     "activity_log recent uses the same object envelope");
@@ -233,6 +260,15 @@ test("outputSchema tools answer with structuredContent in the declared shape", a
   assert.equal(typeof page?.output_available_bytes, "number");
   assert.equal(typeof page?.dropped_bytes, "number");
   assert.equal(typeof page?.truncated, "boolean");
+
+  const restarted = await callTool(sessionId, "process_control", { action: "restart", command_id: commandId });
+  assert.equal(restarted.payload?.result?.structuredContent?.command_id, commandId);
+  assert.equal(restarted.payload?.result?.structuredContent?.restarted, true,
+    "process_control restart exposes its restart result");
+  const terminated = await callTool(sessionId, "process_control", { action: "terminate", command_id: commandId });
+  assert.equal(terminated.payload?.result?.structuredContent?.command_id, commandId);
+  assert.equal(typeof terminated.payload?.result?.structuredContent?.terminated, "boolean",
+    "process_control terminate exposes its final snapshot result");
 });
 
 test("a forged session id is refused and the server keeps serving", async () => {

@@ -124,6 +124,95 @@ const OPEN_SHELL_OUTPUT_SCHEMA = {
   ],
 } as const;
 
+const FILE_OP_OUTPUT_SCHEMA = {
+  oneOf: [
+    {
+      type: "object", description: "Directory creation result.", required: ["path", "created"],
+      properties: { path: { type: "string" }, created: { type: "boolean" } },
+    },
+    {
+      type: "object", description: "Copy or move result. A same-source move may report unchanged.", required: ["source", "destination"],
+      properties: { source: { type: "string" }, destination: { type: "string" }, unchanged: { type: "boolean" } },
+    },
+    {
+      type: "object", description: "File or directory deletion result.", required: ["path", "deleted"],
+      properties: { path: { type: "string" }, deleted: { type: "boolean" } },
+    },
+  ],
+} as const;
+
+const PROCESS_CONTROL_OUTPUT_SCHEMA = {
+  oneOf: [
+    {
+      type: "object", description: "A restarted managed process.",
+      required: ["command_id", "restarted", "restart_count", "auto_restart"],
+      properties: {
+        command_id: { type: "string" }, restarted: { type: "boolean" }, restart_count: { type: "number" }, auto_restart: { type: "boolean" },
+      },
+    },
+    {
+      ...PROCESS_SNAPSHOT_SCHEMA,
+      description: "A terminated managed process, including its final snapshot.",
+      required: [...PROCESS_SNAPSHOT_SCHEMA.required, "terminated"],
+      properties: { ...PROCESS_SNAPSHOT_SCHEMA.properties, terminated: { type: "boolean" }, already_exited: { type: "boolean" } },
+    },
+  ],
+} as const;
+
+const SERVICE_START_RESULT_SCHEMA = {
+  type: "object", description: "A service that has started or was already running.",
+  required: ["name", "command_id", "status"],
+  properties: {
+    name: { type: "string" }, command_id: { type: "string" }, status: { type: "string", enum: ["running", "already_running"] },
+  },
+  additionalProperties: false,
+} as const;
+
+const SERVICE_STOP_RESULT_SCHEMA = {
+  type: "object", description: "A single service stop attempt.",
+  required: ["name", "command_id", "stopped", "status"],
+  properties: {
+    name: { type: "string" }, command_id: { type: ["string", "null"] }, stopped: { type: "boolean" },
+    status: { type: "string", enum: ["running", "stopped"] }, hint: { type: "string" },
+  },
+  additionalProperties: false,
+} as const;
+
+const SERVICE_RESTART_RESULT_SCHEMA = {
+  type: "object", description: "A restarted service.",
+  required: ["name", "command_id", "restarted"],
+  properties: { name: { type: "string" }, command_id: { type: "string" }, restarted: { type: "boolean" } },
+  additionalProperties: false,
+} as const;
+
+const SERVICE_DELETE_RESULT_SCHEMA = {
+  type: "object", description: "A service definition deletion attempt.",
+  required: ["name", "deleted", "stopped"],
+  properties: { name: { type: "string" }, deleted: { type: "boolean" }, stopped: { type: "boolean" }, hint: { type: "string" } },
+  additionalProperties: false,
+} as const;
+
+const SERVICE_BATCH_RESULT_SCHEMA = ARRAY_RESULT_SCHEMA({
+  oneOf: [
+    SERVICE_START_RESULT_SCHEMA,
+    {
+      type: "object", description: "A service stop result in stop_all.", required: ["name", "command_id", "stopped"],
+      properties: { name: { type: "string" }, command_id: { type: ["string", "null"] }, stopped: { type: "boolean" } },
+      additionalProperties: false,
+    },
+  ],
+} as const, "Service action results, in items for start_all or stop_all.");
+
+const SERVICE_OUTPUT_SCHEMA = {
+  oneOf: [
+    SERVICE_START_RESULT_SCHEMA,
+    SERVICE_STOP_RESULT_SCHEMA,
+    SERVICE_RESTART_RESULT_SCHEMA,
+    SERVICE_DELETE_RESULT_SCHEMA,
+    SERVICE_BATCH_RESULT_SCHEMA,
+  ],
+} as const;
+
 export const TOOL_DEFINITIONS = [
   { name: "list_directory", description: "List files and folders in a workspace directory. Hidden entries need include_hidden=true. A capped listing reports truncated/total/next_offset; offset pages it (depth 1 only).", inputSchema: { type: "object", properties: { path: { type: "string" }, depth: { type: "number", enum: [1, 2, 3] }, include_hidden: { type: "boolean", default: false }, max_entries: { type: "number" }, offset: { type: "number", description: "Skip this many visible entries (depth 1 only) to page a truncated listing." } } } , outputSchema: { type: "object", required: ["items", "truncated"], properties: { items: { type: "array", items: { type: "object", required: ["name", "type"], properties: { name: { type: "string" }, type: { type: "string", enum: ["file", "directory"] }, children: { type: "array" } } } }, truncated: { type: "boolean", description: "True when max_entries cut the listing short." }, total: { type: "number", nullable: true, description: "Entries a flat listing would return; null for depth > 1, where counting the tree is what max_entries avoids." }, next_offset: { type: "number", nullable: true, description: "Offset that continues a truncated depth-1 listing; null when there is nothing more." } } } },
   { name: "find_files", description: "Find files by glob (*, **, ?, {a,b}, [abc]); a plain name/prefix matches by basename, \"src/**/*.ts\" by full path. Reports truncated when max_results cut the walk short.", inputSchema: { type: "object", required: ["pattern"], properties: { pattern: { type: "string" }, path: { type: "string" }, max_results: { type: "number" } } } , outputSchema: { type: "object", required: ["items", "truncated"], properties: { items: { type: "array", items: { type: "string" } }, truncated: { type: "boolean", description: "True when more files matched than were returned." } } } },
@@ -132,7 +221,7 @@ export const TOOL_DEFINITIONS = [
   { name: "write_file", description: "Create or overwrite a file. Provide content (text) or content_base64 (binary). Pass expected_sha256 from read_files to prevent overwriting a changed file.", inputSchema: { type: "object", required: ["path"], properties: { path: { type: "string" }, content: { type: "string" }, content_base64: { type: "string", description: "Base64-encoded binary content; overwrites the file." }, mode: { type: "string", enum: ["overwrite", "append"] }, expected_sha256: { type: "string" } } } },
   { name: "edit_block", description: "Replace an exact text block (old_text/new_text), or 1-20 hunks via edits (all-or-nothing). old_text must match exactly once; pass expected_sha256 from read_files. Prefer apply_patch for multi-file.", inputSchema: { type: "object", required: ["path"], properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" }, edits: { type: "array", maxItems: 20, items: { type: "object", properties: { old_text: { type: "string" }, new_text: { type: "string" } } } }, expected_replacements: { type: "number" }, replace_all: { type: "boolean" }, expected_sha256: { type: "string" } } } },
   { name: "get_file_info", description: "Read metadata for a file or directory. Includes sha256 for files up to 128 MiB; larger files report sha256 null (the digest would require buffering the whole file into memory).", inputSchema: { type: "object", required: ["path"], properties: { path: { type: "string" } } } , outputSchema: { type: "object", required: ["path", "type"], properties: { path: { type: "string" }, type: { type: "string", enum: ["file", "directory"] }, size: { type: "number" }, modified: { type: "string" }, created: { type: "string" }, sha256: { type: ["string", "null"] } } } },
-  { name: "file_op", description: "One file-system operation: create_directory, copy, move or delete. copy and move take source/destination (overwrite optional); delete takes recursive.", inputSchema: { type: "object", required: ["op"], properties: { op: { type: "string", enum: ["create_directory", "copy", "move", "delete"] }, path: { type: "string" }, source: { type: "string" }, destination: { type: "string" }, overwrite: { type: "boolean" }, recursive: { type: "boolean" } } }, outputSchema: { type: "object", properties: { items: { type: "array" }, path: { type: "string" }, source: { type: "string" }, destination: { type: "string" }, deleted: { type: "boolean" } } } },
+  { name: "file_op", description: "One file-system operation: create_directory, copy, move or delete. copy and move take source/destination (overwrite optional); delete takes recursive.", inputSchema: { type: "object", required: ["op"], properties: { op: { type: "string", enum: ["create_directory", "copy", "move", "delete"] }, path: { type: "string" }, source: { type: "string" }, destination: { type: "string" }, overwrite: { type: "boolean" }, recursive: { type: "boolean" } } }, outputSchema: FILE_OP_OUTPUT_SCHEMA },
   { name: "apply_patch", description: "Apply a patch inline (patch) or from a file (patch_file), exactly one. Unified diff updates existing files; ShunCode blocks (Add/Update/Delete File) also create and delete files.", inputSchema: { type: "object", required: [], properties: { patch: { type: "string" }, patch_file: { type: "string", description: "Workspace path to a patch file whose content is applied (mutually exclusive with patch)." }, expected_sha256: { type: "object", additionalProperties: { type: "string" } } } } },
   { name: "review_changes", description: "One cumulative git diff of everything changed since the last review (edits plus shell side effects). Needs a Git workspace with a commit. mark_reviewed (default true) advances the baseline.", inputSchema: { type: "object", properties: { since: { type: "string", enum: ["last_shown", "workspace_open"], description: "Diff target: since the last review (default) or since the workspace's first review checkpoint." }, mark_reviewed: { type: "boolean", description: "Advance the review baseline to the current state (default true)." }, max_patch_bytes: { type: "number", description: "Patch size budget in bytes (default 65536; head+tail truncation)." } } } },
   { name: "workspace_brief", description: "One-call project orientation: workspace path, top-level layout, manifests, AGENTS.md/CLAUDE.md, git branch and dirty count, recent activity. Call once on an unfamiliar project.", inputSchema: { type: "object", properties: {} } },
@@ -144,11 +233,11 @@ export const TOOL_DEFINITIONS = [
   { name: "close_shell", description: "Close a persistent shell session opened with open_shell.", inputSchema: { type: "object", properties: { name: { type: "string" } } } },
   { name: "wait", description: "Wait for a fixed number of milliseconds (ms), or for a supervised process to exit (command_id with an optional timeout_ms). Blocks; changes nothing.", inputSchema: { type: "object", properties: { ms: { type: "number", minimum: 0 }, command_id: { type: "string" }, timeout_ms: { type: "number" } } } },
   { name: "set_process_policy", description: "Enable or disable automatic restart for a managed process.", inputSchema: { type: "object", required: ["command_id"], properties: { command_id: { type: "string" }, auto_restart: { type: "boolean" }, max_restarts: { type: "number" }, restart_delay_ms: { type: "number" } } } },
-  { name: "process_control", description: "Restart or terminate a supervised process by command_id. Restart keeps the original command and cwd; delay_ms applies to restart. terminate is force_terminate.", inputSchema: { type: "object", required: ["action", "command_id"], properties: { action: { type: "string", enum: ["restart", "terminate"] }, command_id: { type: "string" }, delay_ms: { type: "number", description: "restart only: pause before restarting (default 0)." } } }, outputSchema: { type: "object", properties: { items: { type: "array" }, command_id: { type: "string" }, status: { type: "string" }, terminated: { type: "boolean" }, restarted: { type: "boolean" } } } },
+  { name: "process_control", description: "Restart or terminate a supervised process by command_id. Restart keeps the original command and cwd; delay_ms applies to restart. terminate is force_terminate.", inputSchema: { type: "object", required: ["action", "command_id"], properties: { action: { type: "string", enum: ["restart", "terminate"] }, command_id: { type: "string" }, delay_ms: { type: "number", description: "restart only: pause before restarting (default 0)." } } }, outputSchema: PROCESS_CONTROL_OUTPUT_SCHEMA },
   { name: "get_process_snapshot", description: "Read detailed lifecycle information for one or all managed processes.", inputSchema: { type: "object", properties: { command_id: { type: "string" } } }, outputSchema: PROCESS_SNAPSHOT_OUTPUT_SCHEMA },
   { name: "connectivity", description: "Probe a target: port (TCP connect) or http (status, latency, up to 5 redirects, Basic auth from URL userinfo). target is inferred from url/port when omitted.", inputSchema: { type: "object", properties: { target: { type: "string", enum: ["port", "http"] }, host: { type: "string" }, port: { type: "number" }, url: { type: "string" }, timeout_ms: { type: "number" }, max_redirects: { type: "number" }, scope: { type: "string", enum: ["loopback-and-public", "loopback", "public", "any"], description: "Which network locations may be reached. Defaults to loopback-and-public: local dev servers and public endpoints, with LAN, cloud-metadata and other special addresses refused. \"any\" is an explicit opt-in; an unrecognised value is treated as the default, never as \"any\"." } } }, outputSchema: { type: "object", properties: { ok: { type: "boolean" }, status: { type: "number" }, latency_ms: { type: "number" }, error: { type: "string" } } } },
   { name: "save_service", description: "Save a reusable named process definition in the workspace (project orchestration: named, grouped, supervised daemons reusable across sessions; for ad-hoc long-running tasks use start_process instead).", inputSchema: { type: "object", required: ["name", "command"], properties: { name: { type: "string" }, command: { type: "string" }, cwd: { type: "string" }, env: { type: "object", additionalProperties: { type: "string" } }, group: { type: "string" }, port: { type: "number" }, health_url: { type: "string" }, log_file: { type: "string", description: "Optional explicit log file (workspace-relative or absolute); defaults to the extension storage service-logs directory." }, auto_restart: { type: "boolean" }, max_restarts: { type: "number" }, restart_delay_ms: { type: "number" } } } },
-  { name: "service", description: "Start, stop, restart or delete one saved service (name), or start_all/stop_all a group. save_service defines them; service_status reports state.", inputSchema: { type: "object", required: ["action"], properties: { action: { type: "string", enum: ["start", "stop", "restart", "delete", "start_all", "stop_all"] }, name: { type: "string", description: "Service name; required by start/stop/restart/delete." }, group: { type: "string", description: "start_all/stop_all only: limit to one group." }, parallel: { type: "boolean", description: "start_all only: default true; false starts them one at a time." } } }, outputSchema: { type: "object", properties: { items: { type: "array" }, name: { type: "string" }, command_id: { type: ["string", "null"] }, status: { type: "string" }, stopped: { type: "boolean" }, deleted: { type: "boolean" } } } },
+  { name: "service", description: "Start, stop, restart or delete one saved service (name), or start_all/stop_all a group. save_service defines them; service_status reports state.", inputSchema: { type: "object", required: ["action"], properties: { action: { type: "string", enum: ["start", "stop", "restart", "delete", "start_all", "stop_all"] }, name: { type: "string", description: "Service name; required by start/stop/restart/delete." }, group: { type: "string", description: "start_all/stop_all only: limit to one group." }, parallel: { type: "boolean", description: "start_all only: default true; false starts them one at a time." } } }, outputSchema: SERVICE_OUTPUT_SCHEMA },
   { name: "service_status", description: "Saved services with live state; health checks are bounded by timeout_ms. detail=definitions returns the definitions only, with no probes.", inputSchema: { type: "object", properties: { name: { type: "string" }, group: { type: "string" }, timeout_ms: { type: "number" }, detail: { type: "string", enum: ["live", "definitions"], description: "definitions = saved definitions only, no health probes." } } }, outputSchema: ARRAY_RESULT_SCHEMA(SERVICE_STATUS_ROW_SCHEMA, "One row per saved service, in items.") },
   { name: "read_process_output", description: "Read paginated output of a supervised command (offset/max_bytes, default 128 KiB a call; stream=stdout|stderr for one stream). wait_ms blocks up to 60000 for new output.", inputSchema: { type: "object", required: ["command_id"], properties: { command_id: { type: "string" }, offset: { type: "number" }, max_bytes: { type: "number" }, wait_ms: { type: "number", description: "Block up to this many ms waiting for new output when none is buffered yet (default 0 = return immediately)." }, stream: { type: "string", enum: ["merged", "stdout", "stderr"], description: "Which capture to read; offsets then refer to that stream. Default merged." }, strip_ansi: { type: "boolean", description: "Strip ANSI escape sequences (colors, cursor control) from returned output fields. Default true." } } }, outputSchema: PROCESS_OUTPUT_SCHEMA },     { name: "get_config", description: "Read complete Open Bridge runtime configuration; the Bark device key is masked.", inputSchema: { type: "object", properties: {} } , outputSchema: { type: "object", properties: { tunnelProvider: { type: "string" }, ngrokDomain: { type: "string" }, ngrokExecutable: { type: "string" }, sharedPeerRegistry: { type: "string" }, tailscaleDomain: { type: "string" }, tailscaleExecutable: { type: "string" }, shellPath: { type: "string" }, shellArgs: { type: "array", items: { type: "string" } }, port: { type: "number" }, publicHealthTimeoutMs: { type: "number" }, unrestrictedFileAccess: { type: "boolean" }, allowedDirectories: { type: "array", items: { type: "string" } }, autoReconnect: { type: "boolean" }, ngrokUseHttpProxy: { type: "boolean" }, toolProfile: { type: "string" }, logMaxBytes: { type: "number" }, "auth.enabled": { type: "boolean" }, "auth.tokenTtlSeconds": { type: "number" }, "oauth.enabled": { type: "boolean" }, "oauth.allowedRedirectHosts": { type: "array", items: { type: "string" } }, "concurrency.enabled": { type: "boolean" }, "concurrency.holdTimeoutMs": { type: "number" }, "concurrency.waitTimeoutMs": { type: "number" }, "notify.enabled": { type: "boolean" }, "notify.barkKey": { type: "string", description: "Masked device-key hint; never the secret." }, "notify.serverUrl": { type: "string" }, "sound.enabled": { type: "boolean" }, "sound.fileWaiting": { type: "string" }, "sound.fileFinished": { type: "string" } } } },
   { name: "bridge_status", description: "Bridge introspection, one section per call: overview (health and counts), auth (bearer tokens), locks (concurrency table), sessions (connected clients).", inputSchema: { type: "object", properties: { section: { type: "string", enum: ["overview", "auth", "locks", "sessions"], description: "Default overview." } } }, outputSchema: { type: "object", properties: { items: { type: "array" }, state: { type: "string" }, tool_count: { type: "number" }, enabled: { type: "boolean" }, locks: { type: "array" } } } }, { name: "set_config_value", description: "Change an Open Bridge setting.", inputSchema: { type: "object", required: ["key", "value"], properties: { key: { type: "string" }, value: {} } } },  { name: "get_usage_stats", description: "Read aggregate tool-call statistics.", inputSchema: { type: "object", properties: {} }, outputSchema: { type: "object", properties: { started_at: { type: "string" }, uptime_ms: { type: "number" }, calls: { type: "number" }, successes: { type: "number" }, failures: { type: "number" }, by_tool: { type: "object" }, tracked_commands: { type: "number" }, active_commands: { type: "number" } } } },

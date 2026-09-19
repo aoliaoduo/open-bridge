@@ -90,7 +90,7 @@
 
 **apply_patch** — 两种语法：经典 unified diff（只能改已存在文件）与 ShunCode 块（`*** Add File:` / `*** Update File:` / `*** Delete File:`，可新建与删除）。`patch` 与 `patch_file` 二选一；`expected_sha256` 按路径映射校验。
 
-**file_op** — 见上文工具族：`create_directory`（`path`）· `copy` / `move`（`source`、`destination`、可选 `overwrite`）· `delete`（`path`、可选 `recursive`）。
+**file_op** — 见上文工具族：`create_directory`（`path`）· `copy` / `move`（`source`、`destination`、可选 `overwrite`）· `delete`（`path`、可选 `recursive`）。`structuredContent` 按操作返回 `{path, created}`、`{source, destination, unchanged?}` 或 `{path, deleted}`；copy 与普通 move 共用传输形状。
 
 - `path` / `source` / `destination` 缺失时**直接报错**（`Missing "path".`），不再被 `String(undefined)` 变成名为 `undefined` 的文件。
 - **自毁护栏**：`delete` / `move` 的目标若命中**工作区根、Bridge 数据目录（`~/.open-bridge`）、盘根**，或它们的祖先目录，一律拒绝（`Refusing to delete "…"`）。`unrestrictedFileAccess` 不变 —— 工作区外的普通路径照旧可读写，真要清空请用 `run_command`。
@@ -115,7 +115,7 @@
 
 **interact_with_process** — 给进程送输入并返回**这次输入之后**产生的输出（不传 `offset` 就不必自己记游标；`wait_ms` 上限 60000，与 `read_process_output` 一致）。面向普通非 PTY 管道；完整终端会话请用 `open_shell`。
 
-**process_control** — `restart`（用原命令与原 cwd 重起，可带 `delay_ms`）· `terminate`（强制结束）。都按 `command_id`。
+**process_control** — `restart`（用原命令与原 cwd 重起，可带 `delay_ms`）· `terminate`（强制结束）。都按 `command_id`。restart 的 `structuredContent` 为 `{command_id, restarted, restart_count, auto_restart}`；terminate 则提供包含 `terminated`（及必要时 `already_exited`）的最终进程 snapshot。
 
 **wait** — `ms` 睡一会儿；`command_id`（+ 可选 `timeout_ms`）等该进程退出。两者都给时按进程算。
 
@@ -135,7 +135,7 @@
 
 **save_service** — 定义/更新一个命名服务（命令、cwd、group、port、健康 URL、日志文件、自动重启策略）。**定义**与**运行**是两回事。
 
-**service** — 控制已保存的服务：`start` / `stop` / `restart` / `delete`（需要 `name`），`start_all` / `stop_all`（可带 `group`；`parallel: false` 逐个启）。`stop` 幂等：本来没跑就返回 `{stopped:false, status:"stopped"}`。
+**service** — 控制已保存的服务：`start` / `stop` / `restart` / `delete`（需要 `name`），`start_all` / `stop_all`（可带 `group`；`parallel: false` 逐个启）。`stop` 幂等：本来没跑就返回 `{stopped:false, status:"stopped"}`。单服务的 `structuredContent` 分别为启动 `{name, command_id, status}`、停止 `{name, command_id, stopped, status, hint?}`、重启 `{name, command_id, restarted}` 或删除 `{name, deleted, stopped, hint?}`；两种 `*_all` 保持兼容文本数组，并以 `{items:[...]}` 提供类型化结果。
 
 **service_status** — `live`（默认）：保存的服务 + 实时进程状态 + 健康检查，检查受 `timeout_ms` 约束（默认 5000，最大 120000；慢的检查返回 `{ok:false, timed_out:true}` 而不是拖住整个响应）。`definitions`：只列定义，不做探测，适合轮询。
 

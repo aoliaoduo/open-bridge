@@ -23,6 +23,7 @@ type Schema = {
   properties?: Record<string, Schema>;
   oneOf?: Schema[];
   enum?: string[];
+  additionalProperties?: boolean;
 };
 
 const STRUCTURED_ARRAY_OUTPUT = new Set(["service_status", "read_files"]);
@@ -134,4 +135,35 @@ test("snapshot and shell tools declare their input-dependent structured results"
   assert.deepEqual(shells[1]?.required, ["items"]);
   assert.equal(itemsOf(shells[1])?.type, "array");
   assert.ok(itemsOf(shells[1])?.items, "shell-list rows are described");
+});
+
+test("action-family tools declare each non-overlapping result shape", () => {
+  const fileOps = schemaOf("file_op")?.oneOf ?? [];
+  assert.equal(fileOps.length, 3, "create, transfer and delete each have a result shape");
+  assert.deepEqual(fileOps[0]?.required, ["path", "created"]);
+  assert.deepEqual(fileOps[1]?.required, ["source", "destination"]);
+  assert.equal(fileOps[1]?.properties?.unchanged?.type, "boolean");
+  assert.deepEqual(fileOps[2]?.required, ["path", "deleted"]);
+
+  const processActions = schemaOf("process_control")?.oneOf ?? [];
+  assert.equal(processActions.length, 2, "restart and terminate are distinct result variants");
+  assert.deepEqual(processActions[0]?.required, ["command_id", "restarted", "restart_count", "auto_restart"]);
+  assert.ok(processActions[1]?.required?.includes("terminated"));
+  assert.ok(processActions[1]?.required?.includes("command_id"));
+  assert.equal(processActions[1]?.properties?.already_exited?.type, "boolean");
+});
+
+test("service action variants preserve their single and batch result contracts", () => {
+  const actions = schemaOf("service")?.oneOf ?? [];
+  assert.equal(actions.length, 5, "start, stop, restart, delete and batched actions are explicit");
+  assert.deepEqual(actions[0]?.required, ["name", "command_id", "status"]);
+  assert.deepEqual(actions[1]?.required, ["name", "command_id", "stopped", "status"]);
+  assert.deepEqual(actions[2]?.required, ["name", "command_id", "restarted"]);
+  assert.deepEqual(actions[3]?.required, ["name", "deleted", "stopped"]);
+  for (const action of actions.slice(0, 4)) {
+    assert.equal(action?.additionalProperties, false, "single-action variants cannot overlap by extra fields");
+  }
+  assert.deepEqual(actions[4]?.required, ["items"]);
+  assert.equal(itemsOf(actions[4])?.type, "array");
+  assert.equal(itemsOf(actions[4])?.items?.oneOf?.length, 2, "batch rows cover start_all and stop_all");
 });
