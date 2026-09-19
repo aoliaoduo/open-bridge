@@ -659,6 +659,94 @@ test("the schema audit exercises every remaining published output contract", asy
   assert.equal(notification.payload?.result?.structuredContent?.event, "finished");
 });
 
+test("an AI can orient itself from one structured workspace brief", async () => {
+  // An agent must be able to select its next tool without opening a directory
+  // tree or guessing whether this is a Git workspace. The contract is the
+  // structured shape, not the human-readable text duplicate.
+  const { sessionId } = await openSession();
+  const brief = await callTool(sessionId, "workspace_brief", {});
+  const result = brief.payload?.result?.structuredContent;
+  assert.equal(brief.status, 200);
+  assert.equal(brief.payload?.result?.isError, undefined);
+  assert.equal(result?.workspace, home, "the workspace anchor is explicit");
+  assert.ok(Array.isArray(result?.top_level_entries), "the layout is machine-readable");
+  assert.ok(Array.isArray(result?.instruction_files), "agent instruction files are named");
+  assert.equal(typeof result?.git?.branch, "string", "the Git branch is available without a shell");
+  assert.equal(typeof result?.git?.dirty_files, "number", "workspace dirtiness is numeric");
+  assert.equal(result?.bridge?.tool_count, 39, "the available tool surface is explicit");
+});
+
+test("an AI can group independent inspection calls and retain ordered per-call outcomes", async () => {
+  const { sessionId } = await openSession();
+  const batched = await callTool(sessionId, "batch", {
+    mode: "parallel",
+    calls: [
+      { tool: "bridge_status", arguments: {} },
+      { tool: "get_usage_stats", arguments: {} },
+      { tool: "list_skills", arguments: {} },
+    ],
+  });
+  const result = batched.payload?.result?.structuredContent;
+  assert.equal(batched.status, 200);
+  assert.equal(batched.payload?.result?.isError, undefined);
+  assert.equal(result?.mode, "parallel");
+  assert.equal(result?.total, 3);
+  assert.equal(result?.succeeded, 3);
+  assert.equal(result?.failed, 0);
+  assert.equal(result?.stopped_early, false);
+  assert.deepEqual(result?.results?.map(item => item.tool), [
+    "bridge_status", "get_usage_stats", "list_skills",
+  ], "parallel completion never scrambles the requested order");
+  assert.ok(result?.results?.every(item => item.ok === true), "each success is explicit");
+});
+
+test("an AI sees a recoverable row failure without losing the successful sibling", async () => {
+  // This is a normal task-level failure, not a transport error: a caller can
+  // consume the good file and decide what to do about the missing one.
+  writeFileSync(path.join(home, "agent-flow-readable.txt"), "agent-flow-content\n");
+  const { sessionId } = await openSession();
+  const read = await callTool(sessionId, "read_files", {
+    paths: ["agent-flow-readable.txt", "agent-flow-definitely-missing.txt"],
+  });
+  const rows = read.payload?.result?.structuredContent?.items;
+  assert.equal(read.status, 200);
+  assert.equal(read.payload?.result?.isError, undefined, "a row error is not a failed tool call");
+  assert.equal(rows?.length, 2, "one row remains for each requested path");
+  assert.deepEqual(rows?.map(item => item.path), [
+    "agent-flow-readable.txt", "agent-flow-definitely-missing.txt",
+  ], "row order stays aligned with the request");
+  assert.equal(rows?.[0]?.content, "agent-flow-content\n");
+  assert.match(rows?.[1]?.error ?? "", /ENOENT|no such file|not found|cannot find/i,
+    "the missing sibling supplies an actionable error");
+});
+
+test("an AI can compose calls and return only its decision-relevant projection", async () => {
+  const { sessionId } = await openSession();
+  const scripted = await callTool(sessionId, "run_script", {
+    source: `const [bridge, skills] = await Promise.all([
+  tools.bridge_status({}),
+  tools.list_skills({}),
+]);
+return {
+  bridge_state: bridge.state,
+  build_stale: bridge.build_stale,
+  skill_count: skills.count,
+};`,
+  });
+  const result = scripted.payload?.result?.structuredContent;
+  assert.equal(scripted.status, 200);
+  assert.equal(result?.ok, true);
+  assert.equal(result?.calls, 2);
+  assert.deepEqual(result?.by_tool, { bridge_status: 1, list_skills: 1 });
+  assert.equal(result?.truncated, false);
+  assert.deepEqual(Object.keys(result?.result ?? {}).sort(), [
+    "bridge_state", "build_stale", "skill_count",
+  ], "the caller receives the deliberate projection, not both raw tool payloads");
+  assert.equal(typeof result?.result?.bridge_state, "string");
+  assert.equal(typeof result?.result?.build_stale, "boolean");
+  assert.equal(typeof result?.result?.skill_count, "number");
+});
+
 test("a forged session id is refused and the server keeps serving", async () => {
   const forged = await mcpCall("0000000000000000000000000000dead", "tools/call", { name: "get_bridge_status", arguments: {} });
   assert.ok(forged.status === 404 || forged.status === 400, `a forged session must be refused, got ${forged.status}`);
