@@ -427,6 +427,15 @@ test("row pages expose reusable continuation offsets in live structuredContent",
     assert.equal(written.status, 200, `fixture ${name} was written`);
   }
 
+  const mixedRead = await callTool(sessionId, "read_files", {
+    paths: [`${dir}/one.txt`, `${dir}/missing.txt`],
+  });
+  const readRows = mixedRead.payload?.result?.structuredContent?.items;
+  assert.equal(mixedRead.status, 200, "one unreadable path does not fail the whole batch");
+  assert.equal(readRows?.length, 2, "read_files keeps one result per requested path");
+  assert.match(readRows?.[0]?.content ?? "", new RegExp(marker), "the readable sibling is retained");
+  assert.match(readRows?.[1]?.error ?? "", /path does not exist/, "the unreadable sibling carries its error");
+
   const requireRowContinuation = (page, label) => {
     assert.equal(page?.truncated, true, `${label} reports an incomplete first page`);
     assert.equal(typeof page?.next_offset, "number", `${label} publishes a reusable offset`);

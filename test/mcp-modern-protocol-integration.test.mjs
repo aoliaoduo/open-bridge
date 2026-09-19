@@ -284,12 +284,11 @@ test("modern input errors keep prose and carry typed details, even with output s
     arguments: { paths: ["../definitely-outside-the-workspace.txt"] },
   });
   assert.equal(domainError.status, 200, JSON.stringify(domainError.payload));
-  assert.equal(domainError.payload?.result?.isError, true);
-  assert.equal(
-    domainError.payload?.result?.structuredContent,
-    undefined,
-    "non-P7 domain errors retain their previous text-only result shape",
-  );
+  const domainRows = domainError.payload?.result?.structuredContent?.items;
+  assert.equal(domainError.payload?.result?.isError, undefined,
+    "a valid path that cannot be read is a row error, not a failed batch");
+  assert.equal(domainRows?.length, 1, "the rejected path keeps its result row");
+  assert.match(domainRows?.[0]?.error ?? "", /inside the workspace/);
 });
 
 test("each exchange leaves a bounded trace line naming the era and method", async () => {

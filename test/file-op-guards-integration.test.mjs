@@ -402,8 +402,11 @@ test("a relative path cannot walk out of the workspace, whatever the tool", asyn
   assert.equal(written.isError, true, "write_file must refuse it too");
   assert.match(written.text, /inside the workspace/);
 
-  const read = await callTool("read_files", { paths: ["../ob-escape-relative.txt"] });
-  assert.equal(read.isError, true, "and reading it is not a way around the rule");
+  const read = await callToolPayload("read_files", { paths: ["../ob-escape-relative.txt"] });
+  const readRows = JSON.parse(read.result.content?.[0]?.text ?? "[]");
+  assert.equal(read.result.isError, undefined, "a rejected read path is reported in its result row");
+  assert.equal(readRows?.length, 1, "the rejected path still has one result row");
+  assert.match(readRows?.[0]?.error ?? "", /inside the workspace/);
 
   // A working directory is a path like any other: run_command used to accept
   // ".." and run there.

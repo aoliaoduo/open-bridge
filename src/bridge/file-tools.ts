@@ -22,6 +22,7 @@ import {
   record,
 } from "./state.js";
 import { securePath, rejectSymlink, root } from "./paths.js";
+import { enrichFsError } from "./error-hints.js";
 import type { JsonArgs } from "./json-args.js";
 
 type Args = JsonArgs;
@@ -737,6 +738,9 @@ export async function readFiles(args: Args): Promise<unknown> {
     if (typeof p !== "string" || p.trim() === "") {
       throw new Error(`paths[${index}] must be a non-empty string. (expected 'paths': string[])`);
     }
+    // A valid sibling path being unreadable must not discard other requested
+    // files. The public array contract promises one row per named path.
+    try {
     const maxBytes = Number.isFinite(Number(args.max_bytes)) && Number(args.max_bytes) >= 0
       ? Number(args.max_bytes)
       : DEFAULT_MAX_READ_BYTES;
@@ -827,6 +831,10 @@ export async function readFiles(args: Args): Promise<unknown> {
           }
         : {}),
     };
+    } catch (error) {
+      const enriched = enrichFsError(error);
+      return { path: p, error: enriched instanceof Error ? enriched.message : String(enriched) };
+    }
   }));
 }
 
