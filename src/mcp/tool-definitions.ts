@@ -74,6 +74,56 @@ const ACTIVITY_LOG_OUTPUT_SCHEMA = {
   ],
 } as const;
 
+const PROCESS_SNAPSHOT_SCHEMA = {
+  type: "object",
+  required: [
+    "command_id", "command", "cwd", "shell_alive", "status", "exit_code", "started_at", "uptime_ms",
+    "restart_count", "auto_restart", "max_restarts", "restart_delay_ms", "last_event", "output_bytes",
+    "stdout_bytes", "stderr_bytes", "output_buffer_start", "output_available_bytes", "dropped_bytes",
+  ],
+  properties: {
+    command_id: { type: "string" }, command: { type: "string" }, cwd: { type: "string" },
+    pid: { type: "number" }, shell_alive: { type: "boolean" }, status: { type: "string", enum: ["running", "completed"] },
+    exit_code: { type: ["number", "null"] }, termination_reason: { type: "string" },
+    started_at: { type: "string" }, ended_at: { type: "string" }, uptime_ms: { type: "number" },
+    restart_count: { type: "number" }, auto_restart: { type: "boolean" }, max_restarts: { type: "number" },
+    restart_delay_ms: { type: "number" }, last_event: { type: "string" }, spawn_error: { type: "string" },
+    output_bytes: { type: "number" }, stdout_bytes: { type: "number" }, stderr_bytes: { type: "number" },
+    output_buffer_start: { type: "number" }, output_available_bytes: { type: "number" }, dropped_bytes: { type: "number" },
+  },
+} as const;
+
+const PROCESS_SNAPSHOT_OUTPUT_SCHEMA = {
+  oneOf: [
+    PROCESS_SNAPSHOT_SCHEMA,
+    ARRAY_RESULT_SCHEMA(PROCESS_SNAPSHOT_SCHEMA, "All retained process snapshots, in items when command_id is omitted."),
+  ],
+} as const;
+
+const SHELL_SESSION_ROW_SCHEMA = {
+  type: "object",
+  required: ["name", "command_id", "cwd", "alive", "started_at"],
+  properties: {
+    name: { type: "string" }, command_id: { type: "string" }, cwd: { type: "string" },
+    alive: { type: "boolean" }, started_at: { type: "string" },
+  },
+} as const;
+
+const OPEN_SHELL_OUTPUT_SCHEMA = {
+  oneOf: [
+    {
+      type: "object", description: "The opened or already-open named shell.",
+      required: ["name", "command_id", "cwd"],
+      properties: {
+        name: { type: "string" }, command_id: { type: "string" }, cwd: { type: "string" },
+        status: { type: "string" }, shell: { type: "string" }, pid: { type: "number" },
+        already_open: { type: "boolean" },
+      },
+    },
+    ARRAY_RESULT_SCHEMA(SHELL_SESSION_ROW_SCHEMA, "Open shell sessions, in items when list is true."),
+  ],
+} as const;
+
 export const TOOL_DEFINITIONS = [
   { name: "list_directory", description: "List files and folders in a workspace directory. Hidden entries need include_hidden=true. A capped listing reports truncated/total/next_offset; offset pages it (depth 1 only).", inputSchema: { type: "object", properties: { path: { type: "string" }, depth: { type: "number", enum: [1, 2, 3] }, include_hidden: { type: "boolean", default: false }, max_entries: { type: "number" }, offset: { type: "number", description: "Skip this many visible entries (depth 1 only) to page a truncated listing." } } } , outputSchema: { type: "object", required: ["items", "truncated"], properties: { items: { type: "array", items: { type: "object", required: ["name", "type"], properties: { name: { type: "string" }, type: { type: "string", enum: ["file", "directory"] }, children: { type: "array" } } } }, truncated: { type: "boolean", description: "True when max_entries cut the listing short." }, total: { type: "number", nullable: true, description: "Entries a flat listing would return; null for depth > 1, where counting the tree is what max_entries avoids." }, next_offset: { type: "number", nullable: true, description: "Offset that continues a truncated depth-1 listing; null when there is nothing more." } } } },
   { name: "find_files", description: "Find files by glob (*, **, ?, {a,b}, [abc]); a plain name/prefix matches by basename, \"src/**/*.ts\" by full path. Reports truncated when max_results cut the walk short.", inputSchema: { type: "object", required: ["pattern"], properties: { pattern: { type: "string" }, path: { type: "string" }, max_results: { type: "number" } } } , outputSchema: { type: "object", required: ["items", "truncated"], properties: { items: { type: "array", items: { type: "string" } }, truncated: { type: "boolean", description: "True when more files matched than were returned." } } } },
@@ -89,13 +139,13 @@ export const TOOL_DEFINITIONS = [
   { name: "run_command", description: "Run a shell command. For long work use background=true, then follow command_id; do not retry the call. A foreground timeout leaves it running. Check exit_code: non-zero is not a tool failure.", inputSchema: { type: "object", required: ["command"], properties: { command: { type: "string", minLength: 1 }, cwd: { type: "string" }, background: { type: "boolean", description: "Return immediately with command_id for long or uncertain work; continue with read_process_output, wait or process_control rather than retrying the command." }, timeout_ms: { type: "number", description: "Max milliseconds to wait before returning \"running\"; the process is left alive. Default 120000." }, resource_keys: { type: "array", items: { type: "string" }, maxItems: 16, description: "Optional resource locks held for the whole call, e.g. [\"build:dist\"]. Two calls naming the same key never run at once - use it to stop concurrent runs from fighting over one output directory, port, emulator or database. Omit for ordinary commands." }, env: { type: "object", additionalProperties: { type: "string" } }, strip_ansi: { type: "boolean", description: "Strip ANSI escape sequences (colors, cursor control) from returned output fields. Default true." } } } },
   { name: "start_process", description: "Start a supervised process (server, watcher, daemon). ready_pattern waits for startup output. Without it, ready=true means no check was requested; inspect status/exit_code.", inputSchema: { type: "object", required: ["command"], properties: { command: { type: "string", minLength: 1 }, cwd: { type: "string" }, env: { type: "object", additionalProperties: { type: "string" } }, ready_pattern: { type: "string" }, ready_timeout_ms: { type: "number", description: "How long ready_pattern may take, in ms (default 10000, max 2147483647). On expiry the call returns ready:false and the process keeps running. There is no timeout_ms here: nothing is killed." }, resource_keys: { type: "array", items: { type: "string" }, maxItems: 16, description: "Optional resource locks held for as long as the process runs, e.g. [\"port:5173\"]. Two calls naming the same key never start at once, so a reserved port or output directory cannot be claimed twice." }, strip_ansi: { type: "boolean", description: "Strip ANSI escape sequences (colors, cursor control) from returned output fields. Default true." } } } },
   { name: "interact_with_process", description: "Send input to a supervised process and return the output produced after it. Plain non-PTY pipes only; for a full terminal session use open_shell, for output-only reads use read_process_output.", inputSchema: { type: "object", required: ["command_id", "input"], properties: { command_id: { type: "string" }, input: { type: "string" }, append_newline: { type: "boolean" }, wait_ms: { type: "number", description: "Pause after writing, capped at 60000 like read_process_output." }, offset: { type: "number", description: "Absolute read position; omit to read only output produced after this input." }, max_bytes: { type: "number" }, stream: { type: "string", enum: ["merged", "stdout", "stderr"], description: "Which capture to read; offsets then refer to that stream. Default merged." }, strip_ansi: { type: "boolean", description: "Strip ANSI escape sequences (colors, cursor control) from returned output fields. Default true." } } }, outputSchema: PROCESS_OUTPUT_SCHEMA },
-  { name: "open_shell", description: "Open a persistent named shell for interactive/REPL flows (daemons: start_process; one-shots: run_command). list=true returns the open shells instead. Needs bash/sh.", inputSchema: { type: "object", properties: { name: { type: "string", description: "Session name (default 'default')." }, cwd: { type: "string" }, list: { type: "boolean", description: "Return the open shells instead of opening one." } } }, outputSchema: { type: "object", properties: { name: { type: "string" }, command_id: { type: "string" }, cwd: { type: "string" }, status: { type: "string" }, pid: { type: "number" }, already_open: { type: "boolean" }, items: { type: "array" } } } },
+  { name: "open_shell", description: "Open a persistent named shell for interactive/REPL flows (daemons: start_process; one-shots: run_command). list=true returns the open shells instead. Needs bash/sh.", inputSchema: { type: "object", properties: { name: { type: "string", description: "Session name (default 'default')." }, cwd: { type: "string" }, list: { type: "boolean", description: "Return the open shells instead of opening one." } } }, outputSchema: OPEN_SHELL_OUTPUT_SCHEMA },
   { name: "send_to_shell", description: "Run a command in a shell opened with open_shell; cwd/env/venv persist between calls. Waits up to timeout_ms via a sentinel and returns output plus exit code; on timeout the shell stays open.", inputSchema: { type: "object", required: ["command"], properties: { name: { type: "string", description: "Session name (default 'default')." }, command: { type: "string", minLength: 1 }, timeout_ms: { type: "number" }, strip_ansi: { type: "boolean", description: "Strip ANSI escape sequences from returned output fields. Default true." } } } },
   { name: "close_shell", description: "Close a persistent shell session opened with open_shell.", inputSchema: { type: "object", properties: { name: { type: "string" } } } },
   { name: "wait", description: "Wait for a fixed number of milliseconds (ms), or for a supervised process to exit (command_id with an optional timeout_ms). Blocks; changes nothing.", inputSchema: { type: "object", properties: { ms: { type: "number", minimum: 0 }, command_id: { type: "string" }, timeout_ms: { type: "number" } } } },
   { name: "set_process_policy", description: "Enable or disable automatic restart for a managed process.", inputSchema: { type: "object", required: ["command_id"], properties: { command_id: { type: "string" }, auto_restart: { type: "boolean" }, max_restarts: { type: "number" }, restart_delay_ms: { type: "number" } } } },
   { name: "process_control", description: "Restart or terminate a supervised process by command_id. Restart keeps the original command and cwd; delay_ms applies to restart. terminate is force_terminate.", inputSchema: { type: "object", required: ["action", "command_id"], properties: { action: { type: "string", enum: ["restart", "terminate"] }, command_id: { type: "string" }, delay_ms: { type: "number", description: "restart only: pause before restarting (default 0)." } } }, outputSchema: { type: "object", properties: { items: { type: "array" }, command_id: { type: "string" }, status: { type: "string" }, terminated: { type: "boolean" }, restarted: { type: "boolean" } } } },
-  { name: "get_process_snapshot", description: "Read detailed lifecycle information for one or all managed processes.", inputSchema: { type: "object", properties: { command_id: { type: "string" } } }, outputSchema: { type: "object" } },
+  { name: "get_process_snapshot", description: "Read detailed lifecycle information for one or all managed processes.", inputSchema: { type: "object", properties: { command_id: { type: "string" } } }, outputSchema: PROCESS_SNAPSHOT_OUTPUT_SCHEMA },
   { name: "connectivity", description: "Probe a target: port (TCP connect) or http (status, latency, up to 5 redirects, Basic auth from URL userinfo). target is inferred from url/port when omitted.", inputSchema: { type: "object", properties: { target: { type: "string", enum: ["port", "http"] }, host: { type: "string" }, port: { type: "number" }, url: { type: "string" }, timeout_ms: { type: "number" }, max_redirects: { type: "number" }, scope: { type: "string", enum: ["loopback-and-public", "loopback", "public", "any"], description: "Which network locations may be reached. Defaults to loopback-and-public: local dev servers and public endpoints, with LAN, cloud-metadata and other special addresses refused. \"any\" is an explicit opt-in; an unrecognised value is treated as the default, never as \"any\"." } } }, outputSchema: { type: "object", properties: { ok: { type: "boolean" }, status: { type: "number" }, latency_ms: { type: "number" }, error: { type: "string" } } } },
   { name: "save_service", description: "Save a reusable named process definition in the workspace (project orchestration: named, grouped, supervised daemons reusable across sessions; for ad-hoc long-running tasks use start_process instead).", inputSchema: { type: "object", required: ["name", "command"], properties: { name: { type: "string" }, command: { type: "string" }, cwd: { type: "string" }, env: { type: "object", additionalProperties: { type: "string" } }, group: { type: "string" }, port: { type: "number" }, health_url: { type: "string" }, log_file: { type: "string", description: "Optional explicit log file (workspace-relative or absolute); defaults to the extension storage service-logs directory." }, auto_restart: { type: "boolean" }, max_restarts: { type: "number" }, restart_delay_ms: { type: "number" } } } },
   { name: "service", description: "Start, stop, restart or delete one saved service (name), or start_all/stop_all a group. save_service defines them; service_status reports state.", inputSchema: { type: "object", required: ["action"], properties: { action: { type: "string", enum: ["start", "stop", "restart", "delete", "start_all", "stop_all"] }, name: { type: "string", description: "Service name; required by start/stop/restart/delete." }, group: { type: "string", description: "start_all/stop_all only: limit to one group." }, parallel: { type: "boolean", description: "start_all only: default true; false starts them one at a time." } } }, outputSchema: { type: "object", properties: { items: { type: "array" }, name: { type: "string" }, command_id: { type: ["string", "null"] }, status: { type: "string" }, stopped: { type: "boolean" }, deleted: { type: "boolean" } } } },

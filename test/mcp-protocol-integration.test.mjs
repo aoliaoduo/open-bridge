@@ -215,6 +215,16 @@ test("outputSchema tools answer with structuredContent in the declared shape", a
     command: `node -e "process.stdout.write('schema-page')"`,
   });
   const commandId = JSON.parse(launched.text).command_id;
+  const snapshots = await callTool(sessionId, "get_process_snapshot", {});
+  assert.ok(Array.isArray(snapshots.payload?.result?.structuredContent?.items),
+    "an all-process snapshot is an items envelope");
+  const snapshot = await callTool(sessionId, "get_process_snapshot", { command_id: commandId });
+  assert.equal(snapshot.payload?.result?.structuredContent?.command_id, commandId,
+    "a targeted process snapshot remains one object");
+  const shells = await callTool(sessionId, "open_shell", { list: true });
+  assert.ok(Array.isArray(shells.payload?.result?.structuredContent?.items),
+    "open_shell list is an items envelope");
+
   const output = await callTool(sessionId, "read_process_output", { command_id: commandId });
   const page = output.payload?.result?.structuredContent;
   assert.equal(page?.command_id, commandId);

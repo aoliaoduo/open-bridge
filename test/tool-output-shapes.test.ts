@@ -118,3 +118,20 @@ test("every paged schema describes the row array", () => {
     assert.ok(items?.items, `${name}.items must describe the row shape`);
   }
 });
+
+test("snapshot and shell tools declare their input-dependent structured results", () => {
+  const snapshots = schemaOf("get_process_snapshot")?.oneOf ?? [];
+  assert.equal(snapshots.length, 2, "one snapshot or an items envelope");
+  assert.equal(snapshots[0]?.type, "object");
+  assert.ok(snapshots[0]?.required?.includes("command_id"));
+  assert.deepEqual(snapshots[1]?.required, ["items"]);
+  assert.equal(itemsOf(snapshots[1])?.type, "array");
+  assert.ok(itemsOf(snapshots[1])?.items, "snapshot rows are described");
+
+  const shells = schemaOf("open_shell")?.oneOf ?? [];
+  assert.equal(shells.length, 2, "open and list variants are explicit");
+  assert.deepEqual(shells[0]?.required, ["name", "command_id", "cwd"]);
+  assert.deepEqual(shells[1]?.required, ["items"]);
+  assert.equal(itemsOf(shells[1])?.type, "array");
+  assert.ok(itemsOf(shells[1])?.items, "shell-list rows are described");
+});
