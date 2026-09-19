@@ -261,6 +261,27 @@ test("tools/list declares the inputs that each operation branch needs", async ()
     ["action", "name"], "single-service actions advertise their name");
   assert.deepEqual(branch(input("service"), "action", "start_all")?.required,
     ["action"], "bulk service actions do not invent a name requirement");
+
+  // Defaults are part of an agent's call contract: omitting one must never
+  // require it to infer whether the operation is serial, destructive or
+  // fail-fast from runtime behavior.
+  const fileOp = input("file_op");
+  assert.equal(fileOp?.properties?.overwrite?.default, false,
+    "copy/move replacement is opt-in when overwrite is omitted");
+  assert.equal(fileOp?.properties?.recursive?.default, false,
+    "recursive deletion is opt-in when recursive is omitted");
+  const service = input("service");
+  assert.equal(service?.properties?.parallel?.default, true,
+    "bulk service actions are concurrent unless the agent requests serial work");
+  assert.match(String(service?.properties?.group?.description), /every saved service/,
+    "omitting group explicitly means all saved services");
+  const batchInput = input("batch");
+  assert.equal(batchInput?.properties?.mode?.default, "sequential");
+  assert.equal(batchInput?.properties?.fail_fast?.default, false);
+  assert.match(String(batchInput?.properties?.fail_fast?.description), /Ignored in parallel/);
+  assert.match(String(batchInput?.properties?.calls?.items?.properties?.tool?.description), /Canonical advertised tool name/);
+  assert.match(String(batchInput?.properties?.calls?.items?.properties?.arguments?.description), /omit when it takes none/);
+
   assert.deepEqual(input("wait")?.anyOf?.map(entry => entry.required),
     [["ms"], ["command_id"]], "wait exposes sleep and process-wait modes");
   assert.deepEqual(input("connectivity")?.anyOf?.map(entry => entry.required),
