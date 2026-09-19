@@ -31,8 +31,10 @@ let port;
 let routeToken;
 let serveExit = null;
 let serveOutput = "";
-const outputSchemaAjv = new Ajv({ allErrors: true, strict: false });
+const contractAjv = new Ajv({ allErrors: true, strict: false });
+const inputValidators = new Map();
 const outputValidators = new Map();
+const validatedInputTools = new Set();
 const validatedOutputTools = new Set();
 
 before(async () => {
@@ -53,21 +55,26 @@ before(async () => {
 
   // Compile the schemas that the running MCP endpoint actually advertises, not
   // a hand-copied test version. Every successful tools/call below is then
-  // checked against the client-visible contract at one common boundary.
+  // checked against both client-visible input and output contracts at one
+  // common boundary.
   const { sessionId } = await openSession();
   assert.ok(sessionId, "the schema-audit session was initialized");
   const catalog = await mcpCall(sessionId, "tools/list", {});
   assert.equal(catalog.status, 200, "the schema-audit catalog is available");
   for (const tool of catalog.payload?.result?.tools ?? []) {
-    if (tool.outputSchema) outputValidators.set(tool.name, outputSchemaAjv.compile(tool.outputSchema));
+    if (tool.inputSchema) inputValidators.set(tool.name, contractAjv.compile(tool.inputSchema));
+    if (tool.outputSchema) outputValidators.set(tool.name, contractAjv.compile(tool.outputSchema));
   }
-  assert.ok(outputValidators.size >= 30, "the full published output catalog was compiled");
+  assert.equal(inputValidators.size, 39, "every published tool exposes a compilable input contract");
+  assert.equal(outputValidators.size, 39, "every published tool exposes a compilable output contract");
 });
 
 after(async () => {
   try {
-    const unexercised = [...outputValidators.keys()].filter(name => !validatedOutputTools.has(name));
-    assert.deepEqual(unexercised, [], "every published outputSchema has a successful live contract example");
+    const unexercisedInputs = [...inputValidators.keys()].filter(name => !validatedInputTools.has(name));
+    assert.deepEqual(unexercisedInputs, [], "every published inputSchema has a successful live contract example");
+    const unexercisedOutputs = [...outputValidators.keys()].filter(name => !validatedOutputTools.has(name));
+    assert.deepEqual(unexercisedOutputs, [], "every published outputSchema has a successful live contract example");
   } finally {
     if (child && !child.killed) child.kill("SIGTERM");
     await delay(300);
@@ -128,6 +135,21 @@ async function mcpCall(sessionId, method, params) {
   return { status: res.status, payload: res.status === 200 ? lastSsePayload(res.body) : null, body: res.body };
 }
 
+function assertPublishedInputSchema(name, args, payload) {
+  const result = payload?.result;
+  if (!result || result.isError) return;
+  const validate = inputValidators.get(name);
+  // Legacy aliases are compatibility entry points, not separately published
+  // tools. Their canonical counterpart is validated by the same suite.
+  if (!validate) return;
+
+  assert.ok(
+    validate(args),
+    `${name} accepted input outside its published inputSchema: ${contractAjv.errorsText(validate.errors)}`,
+  );
+  validatedInputTools.add(name);
+}
+
 function assertPublishedOutputSchema(name, payload) {
   const result = payload?.result;
   if (!result || result.isError) return;
@@ -142,13 +164,14 @@ function assertPublishedOutputSchema(name, payload) {
   );
   assert.ok(
     validate(result.structuredContent),
-    `${name} structuredContent violates its published outputSchema: ${outputSchemaAjv.errorsText(validate.errors)}`,
+    `${name} structuredContent violates its published outputSchema: ${contractAjv.errorsText(validate.errors)}`,
   );
   validatedOutputTools.add(name);
 }
 
 async function callTool(sessionId, name, args) {
   const { status, payload } = await mcpCall(sessionId, "tools/call", { name, arguments: args });
+  assertPublishedInputSchema(name, args, payload);
   assertPublishedOutputSchema(name, payload);
   return { status, payload, text: payload?.result?.content?.[0]?.text ?? "" };
 }

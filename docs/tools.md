@@ -10,6 +10,7 @@
 
 ## 结果字段约定（所有工具通用）
 
+- `tools/list` 中每个工具的 `inputSchema` 是规范调用的机器可读契约：必填字段、枚举、互斥/替代输入和字段类型都以它为准。旧工具名和旧参数仍会先兼容转换；新调用应按规范工具名与该 schema 组装参数，避免依赖未公布的处理器宽容行为。
 - 返回值是 JSON 对象，**每个工具的字段集是固定的**：缺失的事实表现为 `null` 或空字符串，**不会**靠"某个字段不在"来表达。所以永远**按字段名解析，不要按行数/行是否存在来解析**。
 - 命令类工具（`run_command`、`start_process`、`send_to_shell`、`interact_with_process`）返回**合并输出 `output`**，同时给出**分离的 `stdout` / `stderr`**；分页读取还带 `offset` / `next_offset` / `truncated`。
 - 命令**非零退出码不是调用失败**：调用可以返回 `status: "completed"` 且 `exit_code != 0`，必须自己看 `exit_code`。

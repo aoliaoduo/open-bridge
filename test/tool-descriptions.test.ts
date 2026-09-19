@@ -55,6 +55,19 @@ test("every tool description says what the tool does", () => {
   assert.deepEqual(thin, [], `descriptions under ${MIN_DESCRIPTION_CHARS} chars: ${thin.join(", ")}`);
 });
 
+test("every public input field explains its call-time meaning", () => {
+  const missing = TOOL_DEFINITIONS.flatMap(tool => {
+    const properties = (tool.inputSchema as unknown as {
+      properties?: Record<string, { description?: unknown }>;
+    }).properties ?? {};
+    return Object.entries(properties)
+      .filter(([, schema]) => typeof schema.description !== "string" || schema.description.trim().length < 8)
+      .map(([field]) => `${tool.name}.${field}`);
+  });
+
+  assert.deepEqual(missing, [], `input properties without a useful description: ${missing.join(", ")}`);
+});
+
 test("the per-tool detail has a documented home", () => {
   // The trimmed rules went to docs/tools.md; if that file disappears, the
   // trimming turns into information loss, so the budget and the document are
