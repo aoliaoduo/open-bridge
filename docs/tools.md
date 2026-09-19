@@ -111,7 +111,7 @@
 
 **start_process** — 面向**长驻**进程（服务器、watcher、守护进程）：`ready_pattern` 等启动输出，返回 `command_id` 交给进程工具组。就绪等待由 **`ready_timeout_ms`**（毫秒，默认 **10000**，上限 2147483647）控制：等不到就让调用返回 `ready: false` + `status: "running"`，**不会杀进程**（慢启动的构建要放宽，就调这个值）。这里**没有 `timeout_ms`** —— 那是 `run_command` 的（前台运行才有"完成"可限时）；传了会**点名拒绝**，而不是像以前那样被静默忽略。
 
-**read_process_output** — 分页读受监管命令的输出：`offset` / `max_bytes`，`stream` 只读一路，`wait_ms`（最大 60000）阻塞等待**新**输出。默认 128 KiB/次，大输出传更大的 `max_bytes`，用 `next_offset` 翻页，`truncated` 告诉你还有没有。
+**read_process_output** — 分页读受监管命令的输出：`offset` / `max_bytes`，`stream` 只读一路，`wait_ms`（最大 60000）阻塞等待**新**输出。默认 128 KiB/次，大输出传更大的 `max_bytes`，用 `next_offset` 翻页，`truncated` 告诉你还有没有。它和 `interact_with_process` 的 `structuredContent` 共用同一份分页契约：`offset` 是本页实际起点（省略入参时从最早仍保留的字节开始；请求已丢弃的早期位置会报错、绝不静默跳过），`next_offset` 是下一页入参，`output_available_bytes` 是当前仍保留的字节，`dropped_bytes` 是已不再可读的早期字节；这四项都按所选 `stream` 计数。`truncated` 的意思是本页未覆盖完整流（可能少了前面、也可能少了后面）；要判断后面是否还有已捕获内容，比较 `next_offset < output_bytes`。
 
 **interact_with_process** — 给进程送输入并返回**这次输入之后**产生的输出（不传 `offset` 就不必自己记游标；`wait_ms` 上限 60000，与 `read_process_output` 一致）。面向普通非 PTY 管道；完整终端会话请用 `open_shell`。
 

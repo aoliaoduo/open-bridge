@@ -73,6 +73,31 @@ test("get_config declares every runtime setting with its actual default type", (
   }
 });
 
+test("process-output tools publish the page and continuation contract", () => {
+  // Both passive reads and request/response input return outputRead(). The
+  // paginator is only useful if a client can discover its cursor, retained-byte
+  // and truncation fields without reverse-engineering a text response.
+  for (const name of ["read_process_output", "interact_with_process"]) {
+    const schema = schemaOf(name);
+    assert.equal(schema?.type, "object", `${name} returns one output page`);
+    const properties = schema?.properties as Record<string, { type?: string | string[]; enum?: string[] }> | undefined;
+    assert.deepEqual(
+      Object.keys(properties ?? {}).sort(),
+      [
+        "command_id", "dropped_bytes", "exit_code", "next_offset", "offset",
+        "output", "output_available_bytes", "output_bytes", "status", "stream",
+        "termination_reason", "truncated",
+      ],
+      `${name} must declare every output-page field`,
+    );
+    assert.equal(properties?.output?.type, "string");
+    assert.equal(properties?.next_offset?.type, "number");
+    assert.equal(properties?.truncated?.type, "boolean");
+    assert.deepEqual(properties?.stream?.enum, ["merged", "stdout", "stderr"]);
+    assert.deepEqual(properties?.exit_code?.type, ["number", "null"]);
+  }
+});
+
 test("array-returning tools declare an array", () => {
   for (const name of ARRAY_RETURNING) {
     const schema = schemaOf(name);

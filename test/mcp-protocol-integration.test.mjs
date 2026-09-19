@@ -184,6 +184,22 @@ test("outputSchema tools answer with structuredContent in the declared shape", a
   const shape = status.payload?.result?.structuredContent;
   assert.equal(typeof shape?.state, "string", "get_bridge_status declares a state field");
   assert.equal(typeof shape?.tool_count, "number");
+
+  // A process-output page used to be text-only, despite carrying the cursor a
+  // client needs to keep reading. It must now expose the same fields as typed
+  // structuredContent, not merely a JSON-looking text block.
+  const launched = await callTool(sessionId, "run_command", {
+    command: `node -e "process.stdout.write('schema-page')"`,
+  });
+  const commandId = JSON.parse(launched.text).command_id;
+  const output = await callTool(sessionId, "read_process_output", { command_id: commandId });
+  const page = output.payload?.result?.structuredContent;
+  assert.equal(page?.command_id, commandId);
+  assert.equal(page?.output, "schema-page");
+  assert.equal(typeof page?.next_offset, "number");
+  assert.equal(typeof page?.output_available_bytes, "number");
+  assert.equal(typeof page?.dropped_bytes, "number");
+  assert.equal(typeof page?.truncated, "boolean");
 });
 
 test("a forged session id is refused and the server keeps serving", async () => {
