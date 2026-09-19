@@ -2,7 +2,7 @@
 
 **Give ChatGPT, Claude or Cursor real access to one folder on your machine — files, commands, processes — over a standard MCP endpoint.**
 
-[![CI](https://github.com/aoliaoduo/open-bridge-app/actions/workflows/ci.yml/badge.svg)](https://github.com/aoliaoduo/open-bridge-app/actions/workflows/ci.yml)
+[![CI](https://github.com/aoliaoduo/open-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/aoliaoduo/open-bridge/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](package.json)
 
@@ -35,7 +35,7 @@ Public MCP URL: https://<your-domain>/mcp/<route token>      ← with ngrok conf
 
 Editor extensions tie the AI to the editor. This does not: the bridge is a
 plain HTTP server, so the same workspace is reachable from a browser tab, a
-desktop app, or a phone — anything that speaks MCP.
+phone, or any other MCP-capable client.
 
 - **39 tools** — read, write, patch, search, run commands, supervise
   long-running processes, orchestrate named services.
@@ -59,8 +59,10 @@ free port, so the URL changes each start. `--port 18080` keeps it stable.
 **Closing the terminal stops the bridge.** That window owns the instance —
 which is also why the console has no start/stop buttons.
 
-On Windows there is `start-open-bridge.cmd`: double-click it, type the folder
-you want, and it installs, builds and opens the console for you.
+On Windows, `start-open-bridge.cmd` asks which folder to serve. For this
+repository itself, double-click `start-open-bridge-project.cmd`: it always uses
+this project as the workspace, rebuilds it, and serves the console on fixed
+port **8123** (without opening a browser).
 
 Everything else — every command, every setting, the console tour, the tunnel,
 notifications, the data directory — is in

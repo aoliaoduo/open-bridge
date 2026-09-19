@@ -29,6 +29,9 @@ on:
       # session's instructions, and docs/tools.md is the tool contract.
       - "AGENTS.md"
       - "docs/tools.md"
+      # This root document is shipped in the npm package and its links are
+      # checked by the release preflight.
+      - "ARCHITECTURE.md"
   pull_request:
   workflow_dispatch:
 
@@ -80,6 +83,9 @@ jobs:
 
       - name: Test (unit + API integration)
         run: npm test
+
+      - name: Package preflight
+        run: npm run package:check
 
       - name: CLI smoke test
         shell: bash

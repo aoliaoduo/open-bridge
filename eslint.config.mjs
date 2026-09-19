@@ -7,9 +7,7 @@ import tseslint from "typescript-eslint";
 // empty catch blocks are an intentional best-effort pattern; build output,
 // bundled assets and dependencies are not linted.
 export default tseslint.config(
-  // desktop/dist is the electron-builder output tree (hundreds of MB of
-  // minified bundles); root-anchored patterns do not reach into desktop/.
-  { ignores: ["dist/**", "build/**", "ui/dist/**", "desktop/dist/**", "node_modules/**", ".cluster/**", "参考/**"] }, // 参考/ 是拷来的第三方项目，不进入我们的质量门
+  { ignores: ["dist/**", "build/**", "ui/dist/**", "node_modules/**", ".cluster/**", "参考/**"] }, // 参考/ 是拷来的第三方项目，不进入我们的质量门
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -28,13 +26,6 @@ export default tseslint.config(
     files: ["**/*.{js,mjs,cjs}"],
     languageOptions: {
       globals: globals.node,
-    },
-  },
-  {
-    // 工作台渲染层跑在 Chromium 里：window/document/TextDecoder 们是空气。
-    files: ["desktop/workbench/**/*.js"],
-    languageOptions: {
-      globals: { ...globals.browser, obDesktop: "readonly" },
     },
   },
   {

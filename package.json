@@ -15,11 +15,11 @@
   "author": "aoliaoduo <aoliaoduo@126.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/aoliaoduo/open-bridge-app.git"
+    "url": "git+https://github.com/aoliaoduo/open-bridge.git"
   },
-  "homepage": "https://github.com/aoliaoduo/open-bridge-app#readme",
+  "homepage": "https://github.com/aoliaoduo/open-bridge#readme",
   "bugs": {
-    "url": "https://github.com/aoliaoduo/open-bridge-app/issues"
+    "url": "https://github.com/aoliaoduo/open-bridge/issues"
   },
   "type": "module",
   "license": "MIT",
@@ -39,6 +39,7 @@
     "docs/configuration.md",
     "docs/tools.md",
     "CHANGELOG.md",
+    "ARCHITECTURE.md",
     "LICENSE"
   ],
   "scripts": {
@@ -52,6 +53,8 @@
     "test:ui": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.ui.json --noEmit",
     "verify": "npm run typecheck && npm run lint && npm run build && npm test",
+    "package:check": "npm pack --dry-run --json --ignore-scripts | node scripts/package-check.mjs",
+    "release:check": "npm run verify && npm run package:check",
     "audit": "npm audit --registry=https://registry.npmjs.org",
     "start:local": "node bin/open-bridge.js serve --port 18080 --no-tunnel"
   },

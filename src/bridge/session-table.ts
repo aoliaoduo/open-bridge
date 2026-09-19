@@ -8,7 +8,7 @@
 import { host } from "../host/host.js";
 import { MAX_SESSIONS, state } from "./state.js";
 import { pruneCommands } from "./processes.js";
-import { finishNoticeTick, idleNoticeTick, repeatTick } from "./notify.js";
+import { finishNoticeTick } from "./notify.js";
 
 /** Idle MCP sessions are reclaimed after this long without activity. */
 const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
@@ -61,17 +61,8 @@ export function startSessionPruneLoop(): void {
     // long-idle Bridge kept every finished command's buffers (3 x 32 MiB)
     // and its %TEMP% capture file alive indefinitely.
     try { pruneCommands(); } catch { /* best-effort sweep */ }
-    // The notification idle-watchdog rides this sweep instead of owning a
-    // second timer: one 60 s heartbeat for "time passed on an idle Bridge",
-    // started and stopped as one unit. Its own decisions are guarded inside.
-    try { idleNoticeTick(); } catch { /* best-effort sweep */ }
-    // Same sweep, opposite case: idle warns about work that stalled, this one
-    // announces work that finished without the AI saying so.
+    // One quiet fallback for an exchange that ended without an explicit alert.
     try { finishNoticeTick(); } catch { /* best-effort sweep */ }
-    // And the third case: a 「持续响铃」 episode nobody has answered yet rings
-    // again here. Same heartbeat on purpose — the ringing then stops with the
-    // sweeps that started it instead of owning a timer of its own.
-    try { repeatTick(); } catch { /* best-effort sweep */ }
   }, SESSION_PRUNE_INTERVAL_MS);
 }
 

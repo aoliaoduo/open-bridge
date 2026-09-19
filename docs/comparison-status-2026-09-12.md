@@ -1,7 +1,7 @@
-# open-bridge-app 对三个参照项目：取了多少、是否更强
+# open-bridge 对三个参照项目：取了多少、是否更强
 
 判定日期：2026-09-12 ｜ 对象：`DesktopCommanderMCP`、`devspace`、`taskquay`（本地克隆目录）
-沿用仓库内既有的对照基线：`open-bridge-app/docs/refactor-comparison.md`（512 行，含 D1–D9 / T1–T7 / M1–M3 清单）
+沿用仓库内既有的对照基线：`open-bridge/docs/refactor-comparison.md`（512 行，含 D1–D9 / T1–T7 / M1–M3 清单）
 
 > **这是一份带日期的实测快照。** 里面的版本号、工具数、断言数是判定当时的读数，之后会随提交变化（同一文件里出现的 54 / 55 两种工具计数，就是这种变化的痕迹）。要引用「现在」的数字，请看 `package.json`、`README.md`，或直接问一台运行中的实例：`get_bridge_status`。
 
@@ -33,7 +33,7 @@ Agent 委派、worktree、artifact、skills、生态分发、文件预览 UI 是
 
 ## 二、度量对比（实测）
 
-| | **open-bridge-app** | DesktopCommanderMCP | devspace | taskquay |
+| | **open-bridge** | DesktopCommanderMCP | devspace | taskquay |
 | --- | --- | --- | --- | --- |
 | 定位 | 本机能力的 MCP 桥接（CLI + 控制台 + HTTP API） | 终端/文件 编辑类 MCP server + 闭源 App | 把 Codex 式流程带给 ChatGPT 的自托管 MCP | devspace 二开：可委派的执行/项目管理层 |
 | 版本/HEAD | `1.0.0-alpha.3` · 本机 | 0.2.48 · 56deabc | 1.0.8 · 33d6d0b | 1.0.8 · 4ba4283 |

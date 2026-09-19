@@ -61,8 +61,8 @@ test("empty means silent, and stays allowed", () => {
 });
 
 test("the console can actually write every sound setting", () => {
-  // Same trap that shipped with notify.call*: declared everywhere except
-  // CONFIG_SPEC, so the control rendered and the save was refused.
+  // The settings model and console gate must agree, or a rendered control
+  // would fail only after the operator clicked Save.
   assert.ok(normalizeSettingsMessage({ command: "setConfig", key: "sound.enabled", value: true }));
   for (const key of KEYS) {
     assert.ok(
@@ -120,9 +120,8 @@ test("the console can stop a sound that is already playing", () => {
 /**
  * Pressing 发送测试 under 手机（Bark） opened a music player on the desktop.
  *
- * The test push travels as an `attention` event, and every attention event
- * makes a local noise — so a button whose entire purpose is "does the phone
- * channel work" was exercising the other channel too. Worse than noisy: the
+ * The test push travels as a `waiting` event, so a button whose entire purpose
+ * is "does the phone channel work" must not exercise the local channel too. Worse than noisy: the
  * operator cannot tell which channel the result belongs to.
  *
  * Asserted on the wiring rather than by spawning a player: the guard is that
@@ -142,20 +141,14 @@ test("the Bark test button asks for a silent-locally push", () => {
   );
 });
 
-test("pushNotification honours silentLocally before anything else", () => {
+test("pushNotification honours silentLocally without coupling sound to Bark", () => {
   const notify = readFileSync(path.join(process.cwd(), "src/bridge/notify.ts"), "utf8");
-  // Asserted on the condition rather than on an exact code shape: this test
-  // broke once when the routing table was introduced and the guard grew a
-  // second clause, even though the behaviour was unchanged. What must hold is
-  // that the only playAlertSound call in the send path is governed by
-  // silentLocally, and that it still sits ahead of the Bark gate so a
-  // key-less machine chimes.
   const call = notify.indexOf("playAlertSound(soundFile)");
   assert.ok(call > 0, "the send path must still play a sound");
-  const guardWindow = notify.slice(Math.max(0, call - 400), call);
-  assert.match(guardWindow, /!options\.silentLocally/, "the local sound must be behind silentLocally");
-  assert.ok(
-    call < notify.indexOf("route.bark !== true"),
-    "the sound must be decided before the phone gate, not after it",
+  assert.match(
+    notify.slice(Math.max(0, call - 500), call),
+    /options\.silentLocally \? "" : soundFileForEvent/,
+    "the local sound must be behind silentLocally",
   );
+  assert.ok(call < notify.indexOf("// A sound-only setup"), "a local sound is considered before the phone-only return");
 });

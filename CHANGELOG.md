@@ -1,1277 +1,133 @@
 # Changelog
 
-All notable changes to this project are documented here.
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+所有重要变更记录于此。格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，版本遵循 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)。
+
+详细的设计过程、根因分析和测试用例请查阅 Git 历史、源码注释与对应文档；本文件只保留面向使用者的发布摘要。
 
 ## [Unreleased]
 
 ### Added
 
-- **桌面客户端 v2：总览 / 活动实况 / 工具目录三视图的完整壳。** 侧栏可折叠（图标+标签），明暗双主题（跟随系统，可锁），Toast 反馈，快捷键（1/2/3 切视图、/ 聚焦搜索、Esc 清搜索、Ctrl+D 换主题）。总览 = 服务 hero + 连接器 URL 卡 + 一眼看桥；活动实况 = 搜索/状态过滤/暂停/清空/自动滚动，增量渲染（键去重 + Fragment + 250 节点上限）；工具目录 = 39 个 MCP 工具的名片网格（链握手后自动预载）。主进程补 `setAppUserModelId`（对齐 electron-builder appId，否则打包版通知没图标——HippoBuddy 注释里的坑）、`ob:reveal-path`（打开工作区/定位日志）、`--smoke-view=` 直开视图截图的证据回路；`mcp:tools` 返回边拍平旧 agent 时代遗留的 OpenAI 工具壳。视觉证据入库 docs/evidence/desktop/2026-09-16/（cindy 证据惯例）。
+- 新增 `npm run package:check` 与 `npm run release:check`：发布前检查 npm 实际打包清单，确保 CLI、编译产物和用户文档齐全，且不误发源码、测试和工作流文件；CI 同步执行该检查。
+- 为长命令的后台监管结果新增 `ready_checked`，明确区分“已观察到就绪”与“未请求就绪检查”；工具契约和文档同步说明基于 `command_id` 续读，避免传输超时后重发有副作用的命令。
+- 补全 `get_config` 的 MCP 输出 schema：工具档、认证、OAuth、并发、通知、声音和日志等实际返回字段现均有机器可读类型声明。
+- 新增可选的 **Tailscale Funnel** 公网隧道提供商；保留既有 ngrok 与 `--no-tunnel` 路径。
+- 新增 `start-open-bridge-project.cmd`：双击后固定以本项目为工作区、使用端口 **8123**，构建后在终端显示控制台地址但不自动打开浏览器。
 
-- **桌面壳第二跳收敛为「网页 AI 的客户端」：总览 + 活动实况。** 本地 agent 循环撤掉（网页 AI 才是驾驶员），壳回到独有价值：常驻、托盘、状态可视、连接器 URL 一键复制（公网优先、回环兜底、令牌遮罩显隐、隧道未启提示去控制台）、桥活动日志滚动直播（壳内 /api/activity 轮询，2s 心跳、暂停/清空/自动滚动）。mcp.* IPC 保留为 B 阶段窗格（diff/终端/审批）的插座。
+### Changed
 
-- **Tailscale Funnel 作为第二个公网隧道提供商。** 已装 Tailscale 的机器不必再为 ngrok 注册第二个账号：`open-bridge config set tunnelProvider tailscale` 后，实例用本机固定的 ts.net 域名（从 `tailscale status --json` 自动发现，无需手填）把 `/mcp` 公开到 `https://<机器名>.<tailnet>.ts.net`，自动 TLS。无 authtoken（CLI 直接与本地 daemon 通信）；免费版限 443 端口、需在 login.tailscale.com 一次性启用 Funnel。停机时清理 daemon 侧的 funnel 配置（`--bg` 的子进程瞬间退出，杀进程没用，唯一真正的撤销是这条子命令）。Host 白名单按 provider 选择公网域名（tailscale 用 `tailscaleDomain`，ngrok 用 `ngrokDomain`）；`X-Forwarded-For` 的追加行为与 ngrok 一致，失败限流照常工作。`test/tailscale-locate.test.ts` 与真实 bridge 上的端到端冒烟（healthz + MCP initialize 握手）各钉一条。
+- 手机通知收敛为两个明确事件：`waiting`（真正等待回答/选择）和 `finished`（本轮结束）。每个工作 episode 最多一次 Bark 请求，固定使用持续、time-sensitive 的投递形态。
+- 对会暂停回合的提问/选择，连接指令要求在展示 UI 前或同一回合发送 `waiting`。
+- 控制台隧道设置统一为“提供商、状态与操作、高级设置”三段；自动配置只填空值，公网可达性可在控制台验证。
+- 连接时会说明实际用于执行命令的 shell 与方言，避免模型按错误语法运行命令。
 
 ### Removed
 
-- **删除桌面端本地 LLM 对话面（llm:chat / llm:test / llm.event / 设置对话框 / 工作台 store）。** 方向是把本机能力经公网 MCP 交给网页 AI 使用，不在桌面端重复造一个竞品 agent；壳的价值是常驻与可视化，模型能力交给网页端。另：第三方参考项目目录 `参考/`（拷来研读的外部代码）加入 eslint 忽略列表——不忽略时全仓 lint 在其上倒出 7.4 万条错误，verify 被拖死。
-
-### Changed
-
-- **连接时下发的 instructions 从不告诉模型「命令由谁解释」，猜错不报错、只会静默走错。** bridge 在 spawn 前本就探测 shell（Git Bash → PowerShell 7 → Windows PowerShell），探测结果决定每条 `run_command` / `start_process` / `open_shell` 命令文本的解释者——但它只用于 spawn，从不下发；连上的模型只能凭症状猜（`nul` 文件、`&&` 是否可用），而方言差异大多是**不报错、只走错**的那类（`2>nul` 在 Git Bash 里会生成一个名叫 `nul` 的文件）。现在 instructions 用与 spawn 同一份 `resolveShell()` 结果点名解释器与调用形态（如 `C:\Program Files\Git\bin\bash.exe`（`-lc`）），并按方言附一句写作提示（POSIX 还是 PowerShell）；方言分类从 `defaultShellArgs` 内部谓词提为 `shellDialect()`，spawn 参数与 instructions 文案共用一处，不再可能各说各话。发现失败延续既有规矩（同 notifySuffix / skillsSuffix）：静默降级为空串，绝不阻止会话建立。`test/shell-usage.test.ts` 钉住「解释器逐字出现、方言与 `defaultShellArgs` 同源」；`test/shell-instructions-integration.test.mjs` 对未重建的 dist 先红（集成测试跑 `dist/` 而非 `src/`，正是 AGENTS.md 记的那条），verify 后转绿。
-
-- **设置页的隧道一栏，同一件事说两种话。** 提供商有两个，讲的却是两套：ngrok 一边是「authtoken + 预留域名 + 可执行文件 + 系统代理」，tailscale 一边是「公网域名 + 可执行文件」—— 字段数量、填法、默认感、连术语都不一样（一边「隧道」一边「Funnel」），同一个人在两页之间切换时读到的，是「这两件事好像不是同一个功能」。而「面向小白、能自动就自动」恰好在这一堆填空里最难成立：他得先知道 ngrok 装在哪、去后台复制 authtoken、再复制一个保留域名。现在两个提供商渲染**同一张卡的三段**：① 提供商 ▾（含 none）；② 状态与操作 —— 只读摘要（装了没有、登录没有、账号里有几个保留域名、443 现在归谁）+「一键自动配置」/「重新检测」/「测试公网可达」；③ 高级设置（默认收起）—— 可执行文件下拉、手填的公网地址、authtoken、系统代理、自动重连，**一项能力都没删**。规则写进 `settings-model.ts` 的键声明（`configControlShape`）：机器能找到的值给下拉，CLI 在启动时填的值只读展示，其余保持种类本身决定的样子（布尔→开关、枚举→下拉、整数→数字）—— 「能选就不要填」因此是一处声明，而不是组件里的一串 if。
-
-- **「一键自动配置」一次点击写多个值，所以它先说清写什么。** 计划由 `src/bridge/tunnel-plan.ts` 的纯函数算出（`planTunnelAutoConfig`：只填空字段；账号下有多个保留域名就交给人选，不替你猜；ts.net 域名不写 —— 隧道的启动路径本来就会从 CLI 把它填进 `tailscaleDomain`），控制台渲染的是**同一个对象**，服务端执行的是**同一个对象**，于是按钮下方的承诺与落盘的内容不可能不一致。两条硬规矩：**不覆盖你写过的值**（已填的只报告「保持不变」），**探测只读**（绝不改 ngrok / tailscale 自己的配置，也不替谁开 Funnel；authtoken 是唯一不上页面的值，只报来源，导入在服务端读文件）。写入的值若影响正在跑的隧道，立刻按新配置重建（复用提供商切换那套），而不是等下次重启。
-
-- **公网可达性从命令行搬进卡片。** 「测试公网可达」跑的就是 `open-bridge health` 那几条检查（其中公网那条是**真的**经隧道发一次 `/healthz` 请求），卡片只取决定结论的三行（隧道 / 公网连通 / 暴露面）并给出下一步。检测本身单独走 `GET /api/tunnel` 并有 60 秒缓存（要 spawn 两个 CLI、有 token 时还要调 ngrok 的 API），设置页不因此变慢；响应里没有任何凭据。判据在 `test/tunnel-plan.test.ts`（纯函数：只填空、不覆盖、多域名交给人）与 `test/tunnel-detect.test.ts`（解析与探测全部注入依赖，不 spawn 真 CLI、不联网），控制台一侧在 `ui/src/App.test.tsx` 钉住四条：只读摘要来自探测、一次点击就写、tailscale 是同构的三段且折叠后仍在、公网可达三行如实回报。
-
-### Added
-
-- **Desktop 工作台阶段二：Codex 形态的 agent 界面与真 agent 循环。** 主窗改载自研工作台（`desktop/workbench/`，file:// 本地页面，零新增运行时依赖）：左侧栏「工作 / 项目分组会话 / 最近会话 / 底部模型署名」、空状态大标题、底部 composer（项目 chip、自动伸缩输入框、权限 chip、模型 chip、发送键），布局对齐 Codex 桌面形态。agent 两条腿都在主进程：LLM 走 **OpenAI 兼容端点**（baseUrl/key/模型可配、限本机保存、连接测试在线、SSE 流式解析含 tool_calls 归并）；工具走**壳转 MCP**——握手本地桥、抓路由令牌、tools/list 映射成 function schema（描述截 400 字符）、tools/call 直通 structuredContent，附着实例拿不到令牌时明说怎么接管。agent 循环封顶 25 步、单工具结果截 12000 字符；权限 chip「完全访问 / 只读」切换工具面（只读模式只暴露读类工具）。项目 = 桥的工作区，切换即重启服务并自动播种当前工作区。`--smoke` 新增第 4 秒渲染截图（userData/smoke-shot.png），无人值守时界面结构有图可证。旧版监控控制台移到托盘「打开控制台（监控）」独立窗。**注意：LLM/MCP 端到端链路需配置真实 key 后首次实测**，此前验证到流式解析与渲染层为止。
-
-- **Open Bridge Desktop：桌面壳第一阶段（薄壳，Windows 首发）。** `desktop/` 子目录自成一棵依赖（Electron + electron-builder，不混入桥的依赖树）。壳以 `ELECTRON_RUN_AS_NODE` 子进程托管 `open-bridge serve`：自选回环端口显式下传、healthz 等待、崩溃按 1s/2s/5s/15s 退避自愈、托盘常驻（打开控制台 / 重启服务 / 更换工作区 / 退出）、关窗不退服务、退出时优雅 SIGTERM。同工作区已有实例在跑时不打架，直接附着到它的端口。preload 以 contextIsolation 暴露 `obDesktop`（status / restartBridge），为下一阶段 codex 风格的 agent 工作台界面预留插座；窗口本体仍是 dist/ui 控制台。冒烟模式 `npm run smoke` 开窗二十秒自退。栈选型与 Codex Desktop / Claude Desktop / Trae / Qoder 相同（全部 Electron）。
+- 移除 Electron 桌面客户端及其构建链；项目保持 CLI + MCP 服务 + Web 控制台。
+- 移除 MCP 工具结果中的“行为教练”提示层。工具、todo 看板和批处理能力不受影响，但模型不再被连续调用提示和过时的 todo 通知说法打扰。
+- 移除旧的通知路由、重复投递、进度/注意力事件和 todo 自动推送配置。
 
 ### Fixed
 
-- **`copy` 目录 + `overwrite:true` 对准工作区根这类目标，是绕过自毁守卫的静默合并覆写。** move 与 delete 都过 `refuseSelfDestruction`，copy 没有——因为 fs.cp 自己会拒「文件压目录」，看上去已经够安全；但**目录压目录** fs.cp 不是拒，是 merge：源树把目标树的同名文件逐个强制改写并应答成功。对准工作区根、Bridge 自己的数据目录或盘符根时，整个项目树被改写且全程无报错——这正是守卫存在的那片地面，落点与 "move onto" 完全相同，只是不带删除语义。现 copy 同样先经守卫（拒绝语 "copy onto"）。集成测试先红后绿：`destination: "." + overwrite:true` 未修时应答成功、canary 被改成源树版本；修复后拒、canary 原样。
+- 加固文件复制、补丁、路径、自毁保护和换行处理，避免静默覆盖或错误 diff。
+- 修复 OAuth 令牌撤销、跨进程令牌写入、动态注册限流和公开路由的安全边界。
+- 将遗漏 `finished` 的自动兜底从 45 秒延长为固定十分钟，避免把长任务或静默工作误报为结束。
+- 修复 shell 标记跨轮询、进程输出长轮询、参数校验和现代 MCP 请求活动计数。
+- 修复多实例端口提示、隧道持有/接管、ngrok/Tailscale 检测与运行中切换提供商。
 
-- **结尾换行符的增删，被展示 diff 渲染成一行幽灵空行，统计跟着撒谎。** `unifiedDiff` 剔除 `split("\n")` 幻影元素的条件是「两侧都以换行结尾」——单侧变化（`"a\n"` → `"a"`）时幻影留在换行那一侧：渲染出一条内容为空的 `-` 行，`deletions` 凭空 +1，而真正发生的事（最后一行的终止符变了）在 diff 里完全隐形。改为按侧独立剔除；两侧终止状态不同时把一个共享行对拉回变更区，配上 git 同款标记 `\ No newline at end of file`，计数随之成为真实的「替换 1 行」。此前的注释声称双侧条件「顺带修了单侧的计数」，代码并没有——注释与代码不一致本身就是这个 bug 的报警器。`test/line-diff.test.ts` 新增「移除结尾换行」「新增结尾换行」两条用例：先红（幻影 `-` 行、计数 1/0），修复后转绿（标记、计数 1/1），既有的双侧换行用例全部保持绿。
-
-- **同一个更新块里两个裸 `@@` 纯插入 hunk，会按相反顺序落到文件末尾。** hunk 应用顺序的 tie-break 是「排序键相同就逆 body 序」——对**有限锚点**这恰好是对的：两个插入锚在同一行，后应用的插进同一个位置、把先应用的挤到下方，文档里因此保持 body 序（既有测试钉着这条）。但裸 `@@` 的排序键是 `+Infinity`，它的插入点不是某个固定行，而是**文件末尾——且每次追加后末尾都会移动**：先应用的 hunk 永远占住更靠前的位置，逆序应用就成了逆序落盘。AI 按顺序写的两段内容（先 A 后 B），写进文件变成先 B 后 A，补丁照常报成功，没有任何一行报错提示顺序反了。修复把「键相同」按含义拆开：有限锚点维持逆 body 序，裸 `@@`（EOF 追加）回到正 body 序。顺带拆掉一个暗雷：旧写法靠 `Infinity - Infinity` 得到 NaN、再靠 NaN 是 falsy 才走进 tie-break——比较器离「随机排序」只差一次重构，现在是显式判断。`test/patch.test.ts` 新增用例先跑红（断言落盘 `keep\nA\nB\n`，实际写出 `keep\nB\nA\n`），修后全绿；原有「同一坐标两个插入保持 body 序」用例继续通过——两种语义的边界划对了。
-
-- **吊销 OAuth 令牌只吊销了递上来的那一个，客户端刷新一下就回来了。** `revokeToken` 把 access token 标记 revoked、把 refresh token 删掉——但只处理**与递上来的密钥哈希相同的那一行**。于是吊销 access token 之后，同一次授权发出的 refresh token 还活着：客户端拿它换一个新的 access token 就继续用，而操作者以为自己刚刚已经把这个凭据销毁了。**一个客户端自己就能撤销掉的「吊销」不叫吊销。** RFC 7009 §2.1 明写了反方向（吊销 refresh token 时 SHOULD 一并作废同一 grant 下的所有 access token），而正方向正是按下那个按钮的人所理解的语义。
-
-  改为按 grant 吊销：本服务器每次授权只发一对 access/refresh，两者都带 `client_id` 与 `resource`，所以用这两个字段认定同一 grant，两半一起作废。只影响被点名的那个客户端，别的客户端照常工作——这正是 per-client 凭据的意义。`test/oauth-integration.test.mjs` 新增两向用例；原有的「refresh 轮换后旧的失效」用例继续通过（轮换写入的是新一对，不会自我吊销）。
-
-- **AI 传的展示参数会盖掉操作者的通知设置。** 设置页为每类事件提供了 level 与「持续响铃」开关，那是操作者一次性表态：每种消息允许打扰到什么程度。但 `notify` 工具同时把同一批参数开放给调用方，且 `withEventDefaults` 的合并方向是「调用方没说，才用操作者的」——**反过来就是调用方说了就赢**。于是模型回一个 `level:"critical"` 就能穿透操作者亲手设的静音，回一个 `call:1` 就能让一台被明确关掉响铃的手机响到有人去按。而模型读不到设置页，它是在**推翻一个自己根本看不见的偏好**，纯靠猜。这也是 notify 对模型要求过高的根源：14 个参数里 11 个是 Bark 展示旋钮，每一个都要求模型判断它没有信息去判断的事。
-
-  修法是把决定权还给唯一知情的一方：11 个旋钮（`sound/level/volume/call/badge/url/icon/group/isArchive/copy/autoCopy`）从工具 schema 整体移除，模型只剩 `event/title/message`——说清楚发生了什么，多响由设置决定。`withEventDefaults` 改为默认只从 config 取值，新增 `trusted` 开关给服务器自己的推送（idle 看门狗、设置页测试按钮刻意用 `timeSensitive`：那是本地的主动决定，不是远端的猜测），`parseBarkExtras` 随参数一并删除。代价是模型不能再为某条特别紧要的消息临时提级；换来的是操作者设了静音就真的静音。`test/notify-knobs.test.ts` 与改写后的集成用例覆盖：旧集成用例断言的正是「AI 传 sound=minuet 就出现在推送上」，它现在断言相反的事。
-
-- **哨兵被两次轮询切开，`send_to_shell` 就永久卡死这个会话。** 分块扫描用 `carry`（256 字节重叠）兜住「marker 跨边界被切断」，注释也是这么写的 —— 但 `carry` 是 `scanForMarker` 内的局部变量，每次调用重置，而游标 `scannedOffset` 是跨调用持久的：于是它只覆盖了单次调用内部的 chunk 分割，**完全覆盖不到两次调用之间的分割**。轮询每 60 ms 一次，哨兵行 `__OB_DONE_xxx__=0\n` 的 `=0` 与结尾换行落在不同轮询里是常态。此时第一次扫描因「匹配必须紧跟换行」（这条检查本身是对的，它防的是截断数字）返回 null，**可游标已经推过了那些字节**；第二次从游标起扫只看到孤立的换行，carry 又空了 —— marker 永久丢失。后果是三连：空等满 `timeout_ms`（默认 120 秒）、对一个**成功**的命令谎报 `timed_out` 且 `exit_code: null`、`pendingMarker` 就此挂住，该会话此后拒绝一切命令（"still running the previous command"），唯一出路是 `close_shell` + `open_shell`。这正是模块头注释声称已修好的那个卡死 —— 游标修掉了 tail-window 那一半，跨调用这一半留到了现在。扫描逻辑抽进 `src/shell/marker-scan.ts`（carry 与游标同为会话状态，发新命令时清 carry，避免上一条命令的残字节与新 marker 凑出假匹配），`test/marker-scan.test.ts` 先跑给未修的实现看过：「跨两次扫描的哨兵」「逐字节到达」「`-123` 从 `-1` 处被切开不得报成 -1」三条都红，修后转绿。此前 `test/session-marker.test.ts` 只测纯函数 `scanMarkerExitCode`（喂完整文本当然过），出问题的分块层零覆盖。
-
-- **`read_process_output` 的 `wait_ms` 长轮询，在唯一值得用它的场景下从不生效。** 判据写的是 `buffer.state().availableBytes === 0`，可 `availableBytes` 是**缓冲区保留的总字节数**，与调用方读到哪儿无关 —— 进程只要吐过一个字节它就永远为正。于是等待分支被跳过，长轮询退化成它本该取代的忙轮询：实测 `echo FIRST_LINE; sleep 60`，读完后带 `offset=11, wait_ms=8000` 再读，**0 秒返回**（对照组：从未输出过的 `sleep 60` 能正常等满）。也就是说它只在进程一个字节都没打印时有效，而那恰恰是最不需要它的时候；跟随 dev server、构建、watcher —— 全部真实用例 —— 每次调用一个 roundtrip，token 与延迟白烧，工具描述承诺的 "blocks up to 60000 for new output" 并不成立。判据换成「**这个调用方**是否已追平」：`offset >= totalBytes` 才等。纯函数放 `src/process/output-cursor.ts`（`resolveReadOffset` / `hasUnreadOutput`），`test/output-cursor.test.ts` 第一条就钉住旧 bug 的现场 —— `availableBytes` 为 11 而 offset 11 的调用方仍属追平、必须阻塞。此前 `wait_ms` 在测试里只有三处命中，全是 `interact_with_process`（另一条盲睡路径），这条零覆盖。
-
-- **`interact_with_process` 的 `offset` 校验晚于 stdin 写入，错误调用的副作用已经落地。** 裸 `Number(args.offset)` 没有 finite/整数/非负检查，`NaN` 确实会被下游 `outputRead` 拦下 —— 但那一行在 `stdin.write()` **之后**：一个 offset 拼错的调用，输入已经进了进程，调用方却收到一条错误，这个副作用没法撤。同一个函数上方二十行刚为 `stream` 做过完全相同的处理（注释写着「so the agent sees a refused call whose side effect already landed」），`offset` 漏了。校验按同一契约前移到写入之前。
-
-- **「持续响铃直到点开」做不到，因为 Bark 的 `call=1` 只响约 30 秒。** 操作者拿这个开关生成的 URL 反问过：「`…/持续响铃?call=1` 这个不就是持续响铃吗？」—— 按 Bark 自己的文档，不是：`call` 重复播放铃声约 30 秒后就停，而且只有在「级别」允许发声时才响得到（要压过静音键得用 `critical`）。开关承诺的是一件单次请求做不到的事，于是这句话现在由服务端兑现：一条开着「持续响铃」的通知送达后进入一个「回合」，共享的 60 秒扫查里每约 45 秒重推同一条消息（每条铃声约 30 秒，听感因此是连续响），直到有人应声（回合开始之后的任何一次请求 —— AI 只在你发话后才跑）、满 10 次、到 15 分钟上限、或开关与渠道被关掉。判据是纯函数 `repeatVerdict`（`test/notify.test.ts` 钉住四条：首响未结束不动、到点重推、封顶/窗口/开关都要停，以及**最容易写错的那一条** —— 武装那次调用自己的收尾时间戳不算「人回来了」，把它读成应声这个开关就只会响一次，正是操作者抱怨的状态）。设置页的副文案改成如实描述（单次约 30 秒、每分钟再响、最多 10 次），并写明「持续响铃」是 Bridge 在续推。
-
-- **「对话结束」的通知会被一条「任务完成」的进度推送顶掉。** 结束看门狗（`finishNoticeTick`）的职责是替沉默的 AI 说话，它唯一该闭嘴的理由是「AI 自己已经说过了」；而这句话此前读的是**任何**成功送达的推送 —— 只要最后一条推送落在完成时刻前 60 秒内，本回合的结束通告就被当成「已说过」。`set_todos` 每勾完一项就推一条 `progress`（「A、B。」），它出现在收尾前几十秒是常态，于是操作者收到一条「2 项完成」，紧接着本回合真正结束、却再没有任何通知：这正是「对话结束通知好像没了」的全部内容（今天的桥接日志可作证：14:19:07 的 progress 之后本回合结束，日志里再无一条 finished）。现在只有真正宣布结束的事件才动那个时钟（`announcesEnding`：`finished` / `waiting` / `attention`，三者都在说「回来一趟」），`progress` 不再替它作答；`clearNotifyLedger` 一并清掉这个标记，进程内重启不继承上一轮的「已宣布」。红→绿的判据在 `test/notify.test.ts`：`announcesEnding("progress")` 必须为 false（三个 ending 事件为 true），且 `markSelfNotified(…, "progress")` 之后看门狗读到的时间戳仍是 0。
-
-- **本机装着 ngrok，卡片却说「没找到 ngrok」。** 从 Microsoft Store 装的 ngrok 落在 PATH 上的是 *App Execution Alias*：`%LOCALAPPDATA%\Microsoft\WindowsApps\ngrok.exe` 是个 78 字节的 reparse point，由 CreateProcess 在启动时解析，而 `existsSync` 走 `stat`、跟不过去 —— 于是检测（`findOnPath` → `detectNgrok` → 设置页的下拉与只读摘要）对一个天天能在终端跑起来的程序给出「不存在」，卡片据此让人去 ngrok.com 下载，并且不肯把可执行文件路径写进配置（「一键自动配置」因此在真装了 ngrok 的机器上永远填不上这一项）。现在 Windows 上的 reparse point 计为「存在」（别名只在应用已安装时出现），PATH 命中的那一份标注「Microsoft Store 版」以区别于自解压的 zip，Store 的别名目录也进了候选列表；POSIX 侧的严格判据不变（悬空软链仍不算程序）。红→绿的判据在 `test/executable-detect.test.ts`（注入 `lstat`：别名算存在、悬空软链不算），端到端钉在 `test/tunnel-plan.test.ts`（Store 副本要被写进 `ngrokExecutable`，且绝不出现「没找到 ngrok」）。
-
-- **拿 authtoken 去问 API，被拒之后还怪 authtoken 失效。** ngrok 把凭据分成两种且不通用：authtoken 开隧道，REST API 只认 API key —— 用 authtoken 去问 `api.ngrok.com/reserved_domains`，ngrok 自己的答复是 `ERR_NGROK_206`「你给我的其实是 authtoken，去查 API key」，而卡片把它译成「（authtoken 可能已失效）」，让一个正在正常开隧道的凭据背锅（这台机器就是活证：另一个 ngrok agent 此刻正用同一个 token 服务着那个保留域名）。现在探测先从 ngrok.yml 读 `api_key:`，有才发问（`Authorization: Bearer` 用 API key），没有就不发问、只说明缺哪一张凭据；`ERR_NGROK_206` 按原意翻译，401/403 才说 API key 失效。「公网地址」字段的提示与 `docs/configuration.md` 同步说明怎样让下拉出现（把 API key 写进 ngrok.yml 的 `api_key:` 一行）。红→绿的判据在 `test/tunnel-detect.test.ts`：authtoken 绝不送去 API、原作者是 API key、206 的译文里不许出现「失效」。
-
-- **tailscale 的 funnel 没有 ngrok 那套「谁持有公网入口」的机制。** ngrok 路径在启动前问边缘「这个保留域名有没有人服务」，不是 `free` 就跟随，并挂上监视：持有者退出、连着两轮 `free` 之后接管。funnel 没得可问 —— ts.net 名字属于本机，唯一的持有者只可能是本机另一个实例 —— 于是它什么都不问：两个 tailscale 实例都直接 `funnel --bg`，而 daemon 一个端口只留一份挂载，后启动的那份于是**顶掉**先启动的那份；更糟的是先启动的那份退出时无条件执行 `funnel off`，把幸存者还活着的公网入口一起关掉 —— 共享端口这类冲突在这里不是「启动被拒」（ngrok 的样子），而是运行中互相拆台。现在 funnel 走同一套判据，证据换成 daemon 的真话 `funnel status --json` 加上「挂载后端那个端口还有没有人在听」：指向本实例＝**mine**，指向一个还活着的端口＝**跟随**（先 publish、再 adopt，接管交给监视），指向一个没人听的端口＝**这就是释放**（进程没跑 `funnel off` 就死了，等配置自己消失等于永远等），CLI 没答＝**unknown**（永不当作空闲）。监视对两个 provider 都成立，接管动作各自适形：ngrok 仍是整实例重启，funnel 只重跑一次 `funnel --bg`（挂载是 daemon 状态，无需重启，也不该因此打断本机会话）。teardown 现在认所有权：`funnel off` 只在 443 挂载确实指向自己时才执行，求不出来就什么都不做。新增 `src/bridge/funnel-ownership.ts`（判据为纯函数，`test/funnel-ownership.test.ts` 钉住 mine/other/free/unknown 四态、非 443 挂载不算 funnel、以及「CLI 没答不等于空配置」）；`test/tailscale-tunnel-integration.test.mjs` 的假 CLI 改成有状态（挂载写进 daemon、可读可清），新增三条真进程用例：活挂载只能跟随不能被抢、挂载成了残骸时跟随者必须接管、teardown 不许动别人的挂载 —— 三条在未修复代码上全红（分别是「抢了」、45 秒内没有接管、关掉了别人的挂载）。
-
-- **「端口已被占用」不说占用者是谁。** 所有实例共用一个配置文件，于是同一个端口被写给了每一份副本：目录搬了地方、或者机器上多了第二份拷贝时，后启动的那份被先启动的那份挡在门外，而提示只说「可能是另一个实例」—— 操作者正站在新目录里，看不见那个实例，也没有下一步可做（这正是「移动目录后 serve 失败」的全部内容：不是缺文件，是 18080 被旧目录那份实例占着）。现在这条拒绝点名持有者：pid 与它服务的目录，并给出可直接执行的解法 `open-bridge stop --pid <pid>`；如果占用者根本不是 Bridge 实例，就给平台自己的查占用命令（`netstat -ano | findstr :<port>` / `lsof -i :<port>`），因为那时正确的提示不是去 stop 谁。`stop` 因此新增 `--pid`：跨目录指名停哪个实例，其余实例不受影响（用法与 `docs/configuration.md` 同步）；被拒的这次启动也把自己的启动锁带走 —— 拒绝发生在启动锁之后，留下的那条记录指着一个已经退出的 pid，属于同一类残渣。`test/multi-instance-integration.test.mjs` 新增三条真进程用例 —— 拒绝必须点名持有者与目录、`--pid` 停对实例且不误伤、腾出端口后新目录能照配置端口启动（三条在未修复代码上分别红在「没有点名 pid」「--pid 被忽略而停错了实例」「配置端口无人腾出」）。
-
-- **长调用的过程中会响「已结束」铃声。** 现代（无状态）请求从来不计入活动计数，`modernLastUsed` 又只在请求**到达**时盖一次时间戳 —— 于是任何超过结束静默窗口（45 秒）的调用，在结束看门狗眼里就是「45 秒没有动静」，铃声在调用还在跑的时候就响了：日志里 11:43:51 与 11:51:51 两次推送，分别落在那两轮 71 秒 `npm run verify` 结束后的十几秒，正是「活干完了」的错觉。现在现代请求也算在途（`state.modernInFlight`），时间戳**在请求结束时**重盖，活动的定义回到它该有的意思：工作停下之后又过了 45 秒。会话视图的现代行随带 `in_flight`、overview 随带 `modern_in_flight` —— 看门狗读的就是这个数。纯函数判据在 `test/modern-inflight-activity.test.ts`（红→绿：先要求「在途必须可见」）；真进程钉的是 `test/notification-inflight-integration.test.mjs`（真 6 秒调用、真并发读、结束后计数回落）。
-
-- **`Start` 只重试 ngrok 隧道，而失败提示正让人去点它。** 隧道起不来时唯一的恢复手段是那次重试（`state.server` 已在、`tunnelRole` 为 `none`、没有待触发的重连），而它的判断写成 `tunnelProvider === "ngrok"` —— tailscale 下点 Start 只会回「已在运行」，funnel 一直躺到整实例重启；更糟的是失败路径本身在提示「修复后点 Start 重试」（provider 切换警告里那句），等于把操作者指向一个空按钮。同一条链上还有第二处：`funnel --bg` 的子进程按设计立即退出（代理是 daemon 侧的配置项），而它被留在了 `state.tunnel` 里 —— 那个槽位被当作「隧道还在」的凭据，于是即便把判断改成 provider 无关，`!state.tunnel` 依旧会拦住重试。现在两个 provider 都走同一次重试，`--bg` 的子进程退出时清掉槽位（仅当槽位仍指向自己），`state.tunnel` 只代表「真的还活着的隧道」。新增 `test/tailscale-tunnel-integration.test.mjs`：以 Node 自身充当 tailscale CLI（fixture 目录里无扩展名的 `status` / `funnel` 两个脚本，与 ngrok 那份 fixture 同一手法），先让 funnel 起不来，再点 Start —— 未修复代码上红在「attempts stayed at 1」。
-
-- **tailscale 实例不往别的实例的 peer 注册表发布自己。** 「要不要对外发布」的那个判断只认 ngrok，于是 funnel 模式的实例只写自己的注册表文件：在一台机器上两个实例共享唯一的 443 funnel 时（这正是 peer 共享存在的理由，等价于 ngrok 免费版一个域名），谁也看不见谁，follower 永远不会发生 —— 而且这个失败是无声的，日志里没有一句「我没有发布」。「是否真的有隧道在跑」现在提取成 `tunnelInPlay(provider, ngrokDomain, tailscaleDomain)` 并逐 provider 读各自的域名：`--no-tunnel` 残留着 ngrok 域名照样不发布，tailscale 实例在域名发现之前也不发布（那时确实没有可服务的地址）。判据在 `test/tunnel-in-play.test.ts`。
-
-- **`set_config_value` 不认识 `tailscaleExecutable`。** 能写设置的入口有两个（控制台设置页与 MCP 的 `set_config_value`），而新键只加进了一个：设置清单（`settings-model.ts`）认它、控制台输入框在写它、`docs/configuration.md` 在讲它，MCP 那条路却回 `Unsupported Open Bridge setting: tailscaleExecutable` —— 对一个刚从 `get_config` 里读到这个键的客户端来说，这句话等于在说「这个键不存在」。现在两条路共用同一条校验，且**允许空串**：`ngrokExecutable` 的自动值是字面量 `"ngrok"`，而这里空串本身就是合法值（让解析器决定：先 PATH，再 MSI 默认安装目录），控制台把输入框清空时写的正是它。`test/config-values.test.ts` 钉住三条（可写、空串合法、超长拒绝）。
-
-- **`open-bridge doctor` 的隧道行在 tailscale 下显示 ngrok 可执行文件。** 那一行写死了 `(${ngrokExe})`，于是 funnel 安装显示成 `tailscale (ngrok)` —— 操作者本来就是因为别处不对劲才来看这一行的。域名行同样跟着 provider 走：ngrok 下报 `ngrokDomain`，tailscale 下报 `tailscaleDomain`（未配置时说明它会在 serve 时从 CLI 发现，这是正常状态）。
-
-- **`get_config` 的声明里没有 tailscale 的两个键。** 声明的输出形状是刻意裁剪过的子集（这份 schema 随每次 `tools/list` 一起发给客户端，真正的编辑器是控制台），但**一个功能区内必须完整** —— `tailscaleDomain` / `tailscaleExecutable` 进了配置、控制台和文档，schema 却只有两个 ngrok 名字：照声明做计划的客户端，恰好看不到它正在运行的那个 provider 的设置。`test/tool-output-shapes.test.ts` 新增一条：隧道族的五个键都必须声明，且类型与真实值一致。
-
-- **切换隧道提供商只写配置、不重建运行中的隧道。** 切换原来只把值落盘：运行中的旧 provider 继续服务到下次重启，而状态页如实播报着一个操作者已经离开的 provider 的 URL（实测：控制台把 ngrok 切成 tailscale，配置文件写着 `tailscale`，状态页仍发 ngrok 地址）。`setConfig` 现在识别这个变化并重建隧道（先拆掉两族隧道 —— 不能复用 `stopInternal` 里的 provider 判断，那里读的是**新**值，恰好会在切换时放过**旧**隧道），会话、托管进程、本地监听都不受影响。`test/tailscale-tunnel-integration.test.mjs` 双向钉住（切到 `none` 必须撤下隧道，切回来必须产生一次新的 funnel 尝试）。
-
-- **隧道设置卡片不分提供商。** 选 Tailscale Funnel 后页面仍摆着整套 ngrok 专用字段（authtoken、预留域名、可执行文件、系统代理开关），提示去改会被静默忽略的值，而它真正服务的 ts.net 域名既看不到也改不了。卡片现在按 provider 渲染：ngrok 保持原样；tailscale 只有公网域名（从发现结果预填，若与 CLI 报告的不一致会在启动时报错）与可执行文件路径；none 只剩 provider 与自动重连开关。
-
-- **同一轮五路审计里的另外十项修复（明细见 `1c22366` 的提交信息；第十一项令牌吊销见下条）：** 失败限流改用 `X-Forwarded-For` 的**最后**一项（ngrok/Tailscale 都追加真实 IP，取第一项等于让客户端自选预算）；`config.json` 解析失败不再静默回落默认值（会把 public-authed 降级成 public-open）；公网域名监视链可分裂出第二条（已停机的实例被重新拉活）；`run_script` 返回结构化克隆装不下的值（如函数）时不再静默变成超时，而是快速失败并给出 `UnserializableReturn`；`read_files` 的 `end_line` 在无尾换行文件上少报一行；`stop_service` 超时后不再谎报已停止（句柄保留，`delete_service` 在进程存活时拒绝）；`apply_patch` 的锁按 block 模式而非 diff 模式解析头部（仓库里真有 `b/` 目录时锁错了文件）；shell 会话的退出码不再从跨扫描块边界的标记里读出（曾把 `-123` 读成 `-1`）；`notify.idleMinutes: 0` 不再把结束通知的静默延迟压成 0（那个 0 是关掉空闲看门狗，不是让铃声立刻响）；控制台 Shell 参数改成一参数一行（含空格的参数曾被永久拆开）。
-
-- **另一进程吊销的令牌会被本进程的写回复活。** 令牌写入是「读基准 → 变换 → 与磁盘合并 → 写回」，旧合并规则只保护「本进程没见过的行」；对两边都有的行，本进程的版本整体胜出。时序：本进程任一记录写（每 30 秒的 useCount 刷盘就够）先读到基准 → CLI 进程吊销令牌 T 并落盘 → 本进程把仍携带 T 未吊销版本的列表写回 —— **吊销静默失效**。这正是合并想防的场景，但它只防「新增行被删」，不防「已有行被外部改了状态」。现在 `mergeRecordsWithDisk` 接收基准做三方判定：磁盘独有的行只有「基准里也从未有过」（真·外来新铸造）才保留；`revokedAt` 按磁盘确立者为准，本进程写回不撤销已确立的吊销。`test/auth-core.test.ts` 钉住三条（含 purge 行不得复活的回归 —— 初版修复就栽在这里，被 `guards-integration` 抓住）。
-
-- **旧世代的「没有会话」把两种失败说成同一句话。** 2025 世代的客户端没带可用会话时，传输层对「从来没握过手」和「握过手、但会话已经不在了（重启、空闲回收、同一个 URL 换了实例）」回的都是 `400 -32000 "Bad Request: Server not initialized"`。这句话读起来像「服务器坏了」，而两种情况的解法都只是**再发一次 `initialize`** —— 于是最自然的结论恰好是唯一没有出路的那个：本轮真付了代价，一轮探测据此写了「引擎握手已坏」的报告，而同一台服务在两条代码之外正好好地服务现代协议请求。现在分开回答：没有 `mcp-session-id` 头 → `400` / `-32000` / `data.reason: "initialize-required"`；带了服务端不认识的 id → `404` / `-32001` / `data.reason: "session-expired"`（404 也是规范对未知会话 id 的要求）。`initialize` 本身从不被拦：带着过期 id 重握手照样成功并拿回新 id —— 容忍是刻意的，重连不该需要特例。新增 `src/bridge/session-guidance.ts`（纯函数，判据在 `test/session-guidance.test.ts`）与 `test/legacy-session-guidance-integration.test.mjs`（真进程上钉住两条响应、握手不受影响、现代世代不被拦）。红先绿后：未修复代码上两条集成用例分别红在「缺 `data.reason`」与「状态是 400 而不是 404」。
-
-- **旧名会静默丢掉调用方的参数。** 旧名对照表是「同一个问题换一种写法」：`get_bridge_status` = `bridge_status{section:"overview"}`。于是同一个键同时带着调用方的值和工具的固定值时，输的总是调用方 —— 实测 `get_bridge_status{section:"sessions"}` 拿到的是 overview，调用方（我）以为自己问了会话表。结果里的 `deprecated` 本来就在说「该换成 bridge_status」，现在它多一个 `ignored`：列出被丢弃的键、以及被固定取值覆盖的键（`{section: {sent: "sessions", used: "overview"}}`）。`test/tool-call-shape.test.ts` 钉住三种情形 —— 覆盖、丢弃、以及原样转发（后者不该出现 `ignored`，否则字段本身就变成噪音）。
-
-- **「谁连着我」在会话视图里只有一半答案。** 现代协议不建会话，于是 `bridge_status{section:"sessions"}` 在纯现代客户端说话时返回空列表 —— 而空列表正是**一个已经死掉的 Bridge** 的样子；`active_sessions: 0` 同理。现在 overview 多一个 `modern_last_used`（ISO 时间戳或 `null`），session 视图在有过现代请求时多一行明确「不是会话」的汇总：`era: "modern"` / `stateless: true` / `closable: false` / `connected_at: null` / `first_seen` / `last_used`，并且**不谎报** `calls` 与 `todo_count`（那两个计数器挂在会话上）。会话**表**本身依旧不掺假条目 —— `state.sessions` 不该长出不持有 transport 的项（它自己的注释写着这条），说实话的是视图。`test/mcp-modern-protocol-integration.test.mjs` 钉住两个字段。
-
-- **进程跑的是旧构建，而唯一的提示待在一个没人会先问的问题里。** `bridge_status.build_stale` 一直如实回答「我看到的代码是不是正在跑的代码」，但只有已经起疑的调用方才问得出这个问题。代价本轮付过了：一轮探测把**旧进程**的行为当成磁盘上代码的行为写进报告，而磁盘上的代码是好的 —— 没有测试能抓住这种错误，因为被冤枉的代码是对的。现在这条事实跟着一次已经发生的调用走：本进程一旦被发现比 `dist/` 旧，就在**一次**成功结果的文本块里说明（每个进程一次；现代与旧世代都给，因为现代世代没有会话，正是最不会先去问 `bridge_status` 的那类调用方）。纯函数 `staleBuildAdvice` 在 `test/build-staleness.test.ts`；接入路径是**手工复现**的 —— 触碰 `dist/*.js` 的 mtime 后第一次调用带提示、第二次不带，新鲜构建下一次都不出现（这一条写在提交信息里，没有自动化用例，因为测试里动 `dist` 会污染同时运行的其它套件）。
-
-- **`wait` 与 `run_command` 的 32 位计时器溢出**：`setTimeout` 超过 2147483647 会带警告在 ~1 ms 触发（本仓库在 `timeout_ms: 1e18` 上实测过，`clampMs` 就是为它加的天花板），但 `wait {ms}` 与 `run_command {timeout_ms}` 两个入口恰好都没走它。结果是一个想「等 35 天」的调用在 2 ms 内返回、还如实报告 `waited_ms: 3000000000` —— 调用方的排程静默提前了一个月。两处现在都经过 `clampMs`（诚实报告实际等待值），且 `wait` 的计时器 `unref`：一个等待不该在进程排空时拴住它。新增 `test/wait-tool.test.ts`，其中溢出用例用「300 ms 内不得 settle」探针断言 —— 旧代码 ~1 ms 就 settle，正是它要钉住的红。
-
-- **现代协议（2026-07-28 无会话流）对通知看门狗不可见。** 空闲/结束两个监视器读的都是 `state.sessions` 的 `lastUsed`，而现代协议的请求不建会话：一个纯现代协议的客户端让 Bridge 一直忙，看门狗眼里却是「没人连过」——两个铃都永远不会响。新增 `state.modernLastUsed` 时钟（listener 在现代分支逐请求戳一下），`latestSessionActivity` 与 `completionSnapshot` 把它折叠进来（两时钟取新者）。未修复代码上已验证红。
-
-- **`/oauth/register` 无限流、无数量上限。** 动态注册是匿名的（RFC 7591 要求），每个被接受的请求都往 `secrets.json` 持久化一行 —— 一个循环就能让存储无界增长，而 bearer 门对 tracked keys 的硬上限早已说明这类预算该有。现在按远端 key 限 5 分钟 20 个注册（复用 `AuthFailureLimiter`，429 + `retry-after`），外加 200 个客户端的全局硬上限 —— key 可以轮换，上限不能。集成测试各钉一条，且用独立 `x-forwarded-for` 避免吃掉同文件其他用例的预算。
-
-- **`workspace_brief` 同步阻塞事件循环最长 10 秒。** 两次 `execFileSync("git", …)` 各带 5 秒 timeout，注释声称「timeout 防止阻塞事件循环」——但同步子进程调用期间整个进程冻结，timeout 只封顶不解除。索引被锁的仓库上，每次 `workspace_brief` 都让所有会话硬停最多 10 秒（系统指令还鼓励新会话先调它）。改为 `execFile` 异步并发，注释同步改真。
-
-- **`close_shell` 把强杀记为退出码 0。** shell 在 150 ms 内没退、被 `taskkill /T /F` 打死时，`exitCode ?? 0` 凭空造出一个 0 —— 在每个读退出码的地方都读作「干净退出」。改为 `null`（未知就是未知）。
-
-- **三个列举类工具被截断时不说。** `list_directory` / `find_files` / `search_files` 命中上限就只是「返回得比实际少」：一个 12 个文件的目录用 `max_entries: 3` 问，答三个、没有 `truncated`、没有总数、也没有继续问的入口 —— 调用方（通常是模型）分不清「这个目录有三个文件」和「有 500 个、你拿到前三个」，而这两者导向相反的动作：收工，还是继续找。`read_files` / `run_command` / `read_process_output` 早就为同一个理由报 `truncated`。现在三者的结果是 `{items, truncated}`，`list_directory` 另给 `total` 与 `next_offset`（平铺目录的总数本来就免费 —— `readdir` 已经返回了全部条目），内部用「多探一条」把「正好到达上限」与「还有更多」分开，而不是靠猜。顺带修掉 `find_files` 的上限在单个目录内根本没生效（20 个命中穿过 `max_results: 3`）。新增 `test/truncation-signals.test.ts`。
-
-- **同一句查询，两套搜索引擎看到不同的文件。** `search_files` 有 ripgrep 就用它、查询语法它不支持时才回落到内置扫描，而两条路的「哪些算文件」并不一致：rg 尊重 `.gitignore`（且只在仓库里尊重它），内置扫描没有这个概念。实测同一目录同一份内容，`SECRETTOKEN_XYZ` 只答一个文件，`(?<=S)SECRETTOKEN_XYZ` 答两个 —— 差别不在查询，而在哪个引擎接了活，那是调用方看不见的事实。`.gitignore` 管的是「提交什么」，不是「文件是否存在」，一次读取不该替仓库执行提交卫生。现在 rg 显式带 `--no-ignore`，两者只跳过 `.git` / `node_modules` / `dist`。新增的测试 fixture 自带 `.git`：rg 的 `--require-git` 默认让它不在无仓库的目录里读 `.gitignore`，否则测试会在临时目录里绿得毫无意义（第一版正是如此）。
-
-- **相对路径可以走出工作区。** `resolveFromWorkspace` 对相对输入就是一句 `path.resolve` —— 它不可能失败，向上走正是它的本职工作。于是 `apply_patch` 里一句 `*** Add File: ../../ob-escape.txt` 真的在上一层创建了文件并报成功，`run_command` 的 `cwd: ".."` 也真的在上一层运行。unrestricted 模式下 `resolveSecurePath` 在 allowed-roots 检查之前就返回，而那里的 allowed root 是整个盘 —— 逃逸的目标舒舒服服地待在里面。现在**相对路径一律不得离开工作区**，检查做在工作区锚点上、且先于模式判断；绝对路径语义不变（显式说出一个位置，是调用方在表态，那该由策略来判）。`test/workspace-path.test.ts` 与 `test/file-op-guards-integration.test.mjs` 各钉一条。
-
-- **自毁护栏对 Windows 的路径别名失效。** `refuseSelfDestruction()` 比的是 `path.resolve` 之后的字符串，于是同一个目录换个写法就过去了：`\\?\C:\...\open-bridge-app`（长路径前缀形式）与 `C:\...\open-bridge-app.`（Win32 在打开前会剥掉尾点）都能直达 `fs.rm`，而 `C:\USERS\...` 这类大小写变体一直是拦住的。护栏存在的理由就是那次没人想发生的调用（`delete "."`、删到工作区根），它的强度不该取决于调用方用了哪种写法。现在先归一化再比较：剥掉 `\\?\` / `\\.\` / `//?/`（`UNC` 保持 UNC 语义）、按 Windows 规则去掉每段尾部的点与空格，`..` 与 `.` 原样保留（它们才是携带含义的段）。只在 Windows 上归一 —— POSIX 上 `current.` 是另一个真实存在的目录名，把它改写掉会让合法路径变成误拒。**没有**改用 `fs.realpath`：删掉一个链接并不删掉它指向的东西，一条链向工作区根的软链接不是这里要拦的那种自杀。新增 `test/guard-path-aliases.test.ts`，集成侧补上三种写法的实拦。
-
-- **`write_file{mode:"append"}` 制造混合换行。** CRLF 文件 `p1\r\np2\r\n` 追加 `"p3\n"` 得到字节 `70 31 0d 0a 70 32 0d 0a 70 33 0a` —— 前两行 CRLF，新行 LF。`edit_block` / `apply_patch` 走 `detectEol` / `applyEol` 是保留风格的，只有追加分支把调用方的字节直接交给了 `fs.appendFile`。持续追加下整个文件漂成混合换行，之后每次 diff 与 lint 都是噪音。现在**追加按目标文件现有的换行风格**写入，只归一追加的这段、磁盘上原有字节不动；风格取自**有界的尾部采样**（追加目标常是日志，为写 5 个字节读 400 KB 说不过去；窗口可能切断一对 CRLF，所以不落在 0 字节的窗口多带一个字节的 run-up，否则 CRLF 文件会被采成 LF 主导）。`content_base64` 那条路**故意不动**：那里调用方写的是字节，不是行。新增 `test/append-eol.test.ts`。
-
-- **`start_process` 的 `timeout_ms` 被静默忽略。** 它没有这个参数（那是 `run_command` 的），传了却被接受、然后什么都不做：实测 `timeout_ms: 4000` 配一个永不出现的 `ready_pattern` 等了 10.1 秒 —— 就绪循环一直用自己的 10 秒默认值，而调用方以为自己已经放宽了，慢启动的 vite/next 首编译正是这样被判成「未就绪」的。现在**点名拒绝**，并告诉它真正管用的是 `ready_timeout_ms`；同时把 `ready_timeout_ms` 写进 schema 描述与 `docs/tools.md`：默认 10000 ms、上限 2147483647、等不到只返回 `ready: false` + `status: "running"`，**不杀进程**。集成测试把两件事都钉住（拒绝在 4.5 ms 内返回；`ready_timeout_ms: 1500` 确实按 1.5 秒等）。
-### Added
-
-- **补齐四样开源门面**：`CONTRIBUTING.md`、`CODE_OF_CONDUCT.md`、PR 模板、issue 模板（bug / 功能建议）。由子代理完成，我复核。
-
-  几个决定值得留下来。**CONTRIBUTING 指向 `AGENTS.md` 而不复制它** —— 一条规矩写两份就是两份各自漂移的开始，冲突时以 `AGENTS.md` 为准。**PR 模板只有三个勾选项**（verify 全绿、新测试红过、CHANGELOG 有条目），每个都对应这个仓库真实付过代价的坑，而且每个都写了「不适用时怎么说明」—— 只会被全勾的 checklist 和不会失败的测试是同一种东西。**bug 模板不设「复现步骤」一节**：这个项目的报告天然自带复现物（命令 + 输出），教人粘贴确切输出比通用的「步骤 1、2、3」有用。
-
-  复核时补了两处：**加了 `ISSUE_TEMPLATE/config.yml`** 关掉「开一个空白 issue」的入口 —— 模板竞争的对象就是那条阻力最小的路径；以及**修了 bug 模板里的 `../SECURITY.md`**，它在 `.github/ISSUE_TEMPLATE/` 下只退了一级，实际指向不存在的 `.github/SECURITY.md`。
-
-- **新增 markdown 相对链接检查。** 上面那个坏链是写的时候看不出来的 —— 路径从仓库根目录看是对的，而人就是站在根目录想问题的，偏偏它落在「让贡献者先去读一下」的那句话上。加上检查后立刻又抓到一个：`docs/configuration.md` 里的 `SECURITY.md` 指向了 `docs/SECURITY.md`，那是我上次把章节从 README 搬进 `docs/` 时留下的。
-
-### Changed
-
-- **通知的「哪个事件走哪些渠道」改成一张显式的表。** 规则原先散在四处：`ALWAYS_EVENTS` 集合、`eventSuppressed()`、两个 verdict 顶部的复合条件、以及 `soundFileForEvent` 里的 switch。**每一处单独看都是对的**，但已经连出两个同形状的 bug —— 一个旋钮关掉了它不拥有的渠道：
-
-  - `notify.enabled`（**手机**开关）决定了 `usable`，而兜底监视第一行就查它 → 关掉手机，本机声音一起哑；
-  - `notify.idleMinutes`（**无反应提醒**的阈值）和「对话结束」的判定写在同一个条件里 → 把它设成 0（页面上写着「0 = 关闭」），连带关掉了另一个有自己开关的通知。
-
-  这两个都不是读某一个函数能看出来的：你得同时记住四个文件，还要注意到某个标志的**名字比它实际检查的东西更宽**。现在 `notify-routing.ts` 用纯数据回答「这个事件，哪些渠道可以说话，各自要满足什么」，而且**只有它能回答**。
-
-  配套的是**穷举测试**：4 个事件 × 16 种渠道状态 = 64 种组合，逐一断言。两个已修的 bug 在表里各对应一条性质 ——「一个就绪的渠道不会因为另一个渠道关着而沉默」「每个开关只管自己的事件」。这类问题正是因为「各部件都对、组合起来断了」，所以验收必须在组合层。
-
-  静态扫描找不到这种问题 —— 我先扫了一轮「`if (!flag) return`」，**两个 bug 都没抓到**，因为它们藏在复合条件里。是手写实测才发现的。
-
-### Changed
-
-- **补上键盘可达性的测试。** 查下来控制台本身是好的 —— 遮罩层和抽屉都有 Esc 出口（还做了焦点移入和 `inert` 锁定）、焦点环有全局 `:focus-visible` 兜底、所有可达控件都有名字。但**没有任何东西守着这些**，下一个图标按钮很容易就漏掉 `aria-label`。
-
-  新测试断言：每个键盘可达的控件都必须能被读屏软件念出名字。**刻意不接受 `title` 作为名字** —— 它只在悬停时显示，而多个读屏软件在只有 title 时什么都不念。图标按钮必须有 `aria-label`。
-
-  这轮排查里有两次误报值得记：按源码 grep「有没有 Escape 处理」报了四个文件缺失，四个**全是假的**（正文里出现了 dialog 这个词而已）；所以最终测试改成**渲染出来走 DOM**，而不是读源码。
-
-### Fixed
-
-- **英文界面里夹着中文。** 「去体检页」的英文是 `Open 体检`，还有一句英文说明以 `体检 sends real requests…` 开头。两处都出自同一个习惯 —— 把页面名当专有名词留着不译 —— 而且**只有把控制台切成英文、逐字读过去才会发现**，在中文桌面上永远碰不到。
-
-  补了测试钉住：**英文那一侧不得含有汉字**。刻意不是「第二个参数不许出现 CJK」——Bark、ngrok、Shell 是产品名，两侧都该保留；中文侧本来就中英混排（「Bearer 门禁」）。范围收窄了，检查才有用。
-
-  测试本身写错过一次：长文案常写成 `"前半 " + "后半"`，而我第一版按「第一个字符串是中文、第二个是英文」去取，于是把中文的续行当成了译文，报了两条**误报**。改成先按顶层逗号切参数、再把每个参数内拼接的字面量合起来。
-
-- **六个工具的 `outputSchema` 在撒谎：声明返回对象，实际返回数组。** `activity_log`、`service_status`、`read_files`、`search_files`、`find_files`、`list_directory` 全都把行数据包在一个**根本不存在的 `items` 字段**里。模型按 schema 写 `result.items.map(...)`，拿到 `undefined`，然后只能靠试错去发现真实形状 —— 而这是它被告知「已经理解了」的工具。
-
-  `read_files` 错得更远：它压根**没有** `outputSchema`，而紧邻它的 `get_file_info` 的 schema 描述的是单个文件元数据，看上去像是被当成了 read_files 的。
-
-  **这批错误静态检查抓不到** —— 每个 schema 单独看都像模像样，`required` 和 `properties` 也自洽。是**实跑每个工具、对比声明与实际**才暴露的。补了测试钉住：返回数组的工具必须声明 `type: "array"`、必须描述元素类型、且不得把行包进虚构的 `items`。
-
-- **`notify` 的返回值只说手机，不说本机声音 —— 于是响了也报「没送达」。** 重启后实测发现：手机关着、声音开着时，调用 `notify` **确实弹出了播放窗口**（进程验证过），但返回的是 `delivered:false, reason:"disabled"`。模型读到这个会判定「没能通知到任何人」，然后很可能对着刚听见铃声的人说「通知发送失败」。
-
-  `NotifyOutcome` 现在多两个字段：`sounded`（本机是否响了）和 **`announced`（有没有任何渠道通知到）**。`delivered` 保持原义只管手机 —— 日志和既有调用方依赖它 —— 但工具 schema 里写明了「**别拿它当「是否通知到」来判断，看 `announced`**」。测试钉住 `announced === delivered || sounded`，防止它变成第三种说法。
-
-- **「无反应提醒」设为 0 会连带关掉「对话结束时通知」。** 见上一条。**有一条测试把这个 bug 当成规格钉住了** —— 名字就叫「idleMinutes 0 switches off both watchdogs, not just one」。它让缺陷活了下来：任何人修对了行为，都会被这条测试判定为「改坏了」。已改写成正确的期望。
-
-- **关掉手机通知后，本机声音也一起哑了。** 本机声音刻意排在所有 Bark 闸门**之前**，就是为了让没配 Bark 的机器也能响 —— 但两个兜底监视根本走不到那一步：`finishNoticeVerdict` 和 `idleNoticeVerdict` 第一行都是 `if (!input.usable) return false`，而 `usable` 的定义是 **`enabled && Boolean(key)`**，也就是「Bark 能发」。于是关掉手机开关，整条链在最外层就断了，`pushNotification` 压根没被调用。
-
-  现场：`sound.enabled: true`、两个音频文件都配了、等了很久没有任何声音，审计日志里连一条 notify 记录都没有 —— **不是响了没听见，是根本没触发**。
-
-  `usable` 的语义改成「**有任何渠道能通知**」，另开 `barkUsable` 保留原义给 Bark 自己的发送门用。每道门现在问自己的问题：Bark 的发送路径问「手机能不能发」，兜底监视问「有没有任何办法说得出话」。
-
-  测试补在**根因那一层**（`resolveNotifySettings`），而不是只测 verdict —— bug 在前者，只钉后者等于没钉。验证过：把 `usable` 改回只看 Bark，这条会红。
-
-### Changed
-
-- **通知设置页变短：文案精简，三张卡可折叠。** 这一页随着功能增加越滚越长，但量一下就会发现**病因不是控件多，是解释多** —— 4 个开关 + 1 张表，却挂着 **7 段、281 字**说明，最长一段 59 字。
-
-  **先砍文案（281 → 169 字）。** 判据是：**使用说明留下，设计辩护移走**。「不要求存在任务清单——AI 忘了写清单的时候恰恰最需要这条提醒」是在替一个设计决策辩护，它属于文档；「0 = 关闭」是操作信息，留下。移走的部分进了 `docs/configuration.md` 新增的一节，没有丢。顺手发现一句**已经过时的文案**：本机声音那段还写着「试听只放约 6 秒」，而那个限制早就去掉了。
-
-  **再让三张卡可折叠**，状态记在 localStorage。折叠态显示摘要而不是光秃秃的标题 —— 「手机（Bark）· 已配置」「本机声音 · 已启用 · 2 个音频」—— 因为一个不能回答「要不要展开」的折叠，只是把滚动换成了点击。默认全部展开：第一次用的人应该看见全部，折叠是熟悉之后才值的便利。
-
-  折叠做成 `Card` 的**可选**能力（传 `collapsibleId` 才生效），不是所有卡片自动折叠：一张每次都要从头读到尾的卡，藏起来只会更难用。
-
-- **控制台建立字号与间距标度。** 之前是 **11 种字号**，其中 `13 / 12.5 / 12 / 11.5` 四档挤在 1.5px 以内 —— 这种差距眼睛排不出高低，读起来不是层级而是**不整齐**。它们也不是设计出来的，是每次有人为了解决眼前一处而临时加的，标度就是这样被磨掉的。
-
-  现在五档（`--fs-xs` 到 `--fs-xl`），每档之间的距离足以表达意图；60 处 `font-size` 全部改走 token，一个字面 px 都不剩。间距同理建了 4px 栅格的 `--sp-1` 到 `--sp-6`，并归并了 16 处只出现一两次的孤值（`22px`、`26px`、`9px`、`5px` 这类）。
-
-  **`10px` 和 `6px` 刻意没动** —— 它们各出现 26 次和 17 次，是这套布局实际依赖的半档，取整会让每一处的疏密都变样。为了对齐栅格去改一个用得好好的值，那是搅动不是打磨。
-
-  补了测试钉住这件事：`font-size` 必须走 token。这样加第六档是一次对 `:root` 的明确编辑，而不是某条规则里随手写下的数字。
-
-  顺带核对了两件没问题、因此没改的：焦点样式有 `:where(a, button, [tabindex]):focus-visible` 全局兜底（输入框那处 `outline: none` 是有意的，它用 box-shadow 光环替代）；明暗两套主题的文字对比度全部达标，最低 4.60。
-
-- **列表面工具的返回形状：裸数组 → `{items, truncated}`。** `list_directory`、`find_files`、`search_files` 现在返回对象（`list_directory` 另有 `total` 与 `next_offset`），`outputSchema` 同步声明为对象。这是刻意的破坏性变更：数组里没有地方放「这一页被截断了」这个事实，而少了它，一个被截断的答案读起来就是一句关于世界的陈述。消费方按 `.items` 取值；`docs/tools.md` 的「结果字段约定」写明了截断契约，`test/tool-output-shapes.test.ts` 把「声明与真实返回一致」钉在这一层。
 ## [1.0.0-beta.2] — 2026-09-15
 
-大部分是修的。beta.1 之后这个项目开始被真正用起来，于是一批只有在用的时候才会暴露的问题浮出来了 —— 43 条里 22 条是 bug，其中**有 9 条是这一轮自己引入又自己修掉的**：加本机声音通道时把它接进了每一条推送路径（于是 Bark 的测试按钮会放音乐），修排版时给单元格加了 `nowrap`（于是开关压住了隔壁输入框），以及在窗口里写了一句从没验证过的「按 Ctrl+C 停止」。
-
-**新增**：本机声音通知（不需要 Bark，弹一个可关的窗口播放）、ngrok authtoken 可在控制台填写、Bark 参数补齐、两条服务端兜底提示。
-**重构**：通知设置页拆成三张卡（何时打扰 / 手机 / 本机声音），README 从 282 行压到 123 行。
-
 ### Added
 
-- **第二种通知方式：本机声音。** 填一个音频文件的绝对路径就行，不需要 Bark。它回答的是手机推送回答不了的那一半问题 —— **人就在电脑前，只是标签页在后台**；为了知道屏幕上发生了什么而去摸手机，是个很傻的循环，何况不少人根本没装 Bark。
-
-  **只在「AI 停下来等你」的时候响**：等你回答 / 需要你回来（共用一个文件，因为在房间里这两件事是同一件：AI 停了，需要人），以及对话结束。任务进度**没有**槽位 —— 每勾掉一条就叮一声，是让人关掉整个功能的最快方式。
-
-  两个实现决定值得记：**声音在所有 Bark 闸门之前触发**。要是挂在 `settings.usable` 后面，一台没填 Bark 密钥的机器就永远不会响 —— 而那恰恰是最需要本机提示音的配置。另外路径在**保存时**就校验（必须绝对路径、必须音频扩展名），不是等到该响的时候才发现不对：「静默地没响」比一条错误提示难查得多。播放器走 PowerShell 的 `MediaPlayer` 而不是 `SoundPlayer`，后者只认 WAV，指着自己喜欢的 mp3 却只得到静默是很糟的体验。
-
-- **ngrok authtoken 可以在控制台里填了。** 以前隧道要跑起来，必须先在终端执行 `ngrok config add-authtoken <token>` —— 而「打开终端敲一条命令」恰恰是会卡住新手的那一步。更糟的是页面上「预留域名」就摆在那里，看上去配置已经齐了，于是人填完域名、开了隧道、拿到一条 ngrok 报错，却完全不知道缺的是凭据。现在设置 → 隧道的第一项就是 Authtoken，保存后在下次启动实例时生效。
-
-  **存进密钥库，不进 `config.json`。** 这是账号凭据，而 `config.json` 是纯文本、是人求助时会整份贴出来的东西。页面只拿得到掩码（`2abc…••••…45`）和「配没配过」，拿不到原值。已经用过 `ngrok config add-authtoken` 的人不受影响：两条路都有效，这里只在环境变量 `NGROK_AUTHTOKEN` **没有**被人为设置时才注入 —— 有人特意在 CI 或共享 shell 里导出过，不该被几个月前存的值悄悄顶掉。格式明显不对（太短、含空格）当场点名拒绝：**「这不像一个 authtoken」和「隧道启动失败」之间差着一个下午。**
-
-- **Bark 通知补齐到它真正支持的样子。** 此前只开放了 5 个参数，而 Bark 本身提供的远不止：现在加上 `critical` 等级与 `volume`（无视静音，真急事用）、`group`（通知分组，默认 `open-bridge`，多个项目各用各的分组就不会在手机上混成一堆）、`icon`、`isArchive`（存进 Bark 历史，横幅划掉后还能翻出来）、`copy` / `autoCopy`（把一段文本塞进「复制」动作，比如一条待执行命令或一个 id）。
-
-  两个决定值得写下来。其一，`volume` 不配 `critical` 会被**点名拒绝**而不是静默丢弃 —— 设了 volume 的人是以为它会响，悄悄忽略等于把一条「紧急」通知悄悄降级成普通通知，而这种错误只有在真出事没听见时才会被发现。其二，`critical` 本身照收不误：它能不能真的穿透静音取决于用户有没有在 iOS 里给 Bark 开「重要警告」权限，那是手机侧的事，不构成桥拒绝这个参数的理由。加密推送（`ciphertext`）仍未开放，它需要预共享密钥，属于操作员配置而不是单次调用的旋钮。
-
-- **批处理提示：服务端看见「连着做同一件事」就说一句。** 依据是本仓库自己的审计日志，不是对模型的泛泛猜测：`run_command` 977 次对 `run_script` 152 次，而这个仓库的 `docs/tools.md` 明写了成批调用该用后者。建议存在、也被读过，但它输给了一个事实 —— 每一次单独看，伸手去拿 shell 都是更短的念头，而不批处理的代价（多一个往返、多几 KB 上下文）单次不可见，只在总量上显形。
-
-  所以提示挂在总量上，也就是证据所在的地方：连续 N 次同一个工具（中间没有别的工具插进来）触发一次，附在一次**已经成功**的调用结果后面 —— 不是拒绝，不是多一步，只陈述观察到的事实并点名那个能替代它的调用。三条规则让它不至于变成噪音：只认**连续**的运行（工具交替本来就是正常干活，不是漏掉的批处理）、**每个会话每种模式只说一次**（每三次唠叨一遍的提示会和文档一样被过滤掉）、只对**能点出具体替代调用**的模式开口（「你可以更高效」不可执行，「这三次读可以合成一次 read_files」才可以）。失败时绝不附加：调用方那会儿有更要紧的问题，把建议堆在报错上只会埋掉报错。
-
-- **任务清单：服务端现在会在该用的时候点一下。** 实测本仓库审计日志：**一天 2138 次调用，`set_todos` 零次** —— 包括刚把任务看板建起来的那个模型（就是我）。工具有文档、控制台有页面、整套通知都挂在它上面，**但没有任何东西在干活的时候指向它**。挂在一个没人调用的工具上的安全网，不是安全网。
-
-  现在：一个会话里累计 12 次**改动性**调用（写文件、编辑、跑命令……）而始终没有任务清单时，在一次成功的结果后追加一句，说明清单会出现在你的「任务」页、并且勾掉一条就会推一条通知。只读操作（读文件、搜索）**永远不触发** —— 那是在回答问题，不是多步任务，为此唠叨只会让所有提示一起被无视。每会话最多一次，已经建过清单的会话完全不提。
-
-- **新增 `SECURITY.md`。** 这个项目把本机的文件、shell 和进程交给 AI 客户端，公开之后「它的安全模型是什么」一定会被问到，而答案此前散落在 README 的一节、几处代码注释和若干 CHANGELOG 条目里。文件写了三件事：**威胁模型**（谁被信任 —— AI 客户端被信任，没有沙箱、没有逐次确认；提示词注入是真实风险且本项目不处理）、**三档暴露面**的准确定义，以及**哪些事是刻意不锁的**（`unrestrictedFileAccess` 默认开、非零退出码不算失败、行为标注只是给客户端的信息而非限制）—— 最后这一节是有意写在前面的：把「这是选择」和「这是疏漏」分开，报告者才不用为已知取向浪费时间。
-
-  每一条技术主张都对着代码核过，不是照记忆写的：审计摘要截断 500 字符（`state.ts:253`）、Bark 密钥掩码成 `<set:N chars>`（`dispatcher.ts:160`）、CORS 只授予 `/mcp`、`/oauth`、`/.well-known` 三条前缀（`http-listener.ts:171-173`）。初稿把日志轮转写成固定 10 MB，核对时发现它是可配置的 `logMaxBytes`（默认 10 MB），已改准 —— **安全文档写错比不写更糟**，它会让人以为某条边界存在。
+- 完整的设置、会话、工具、健康、服务与安全控制台页面，以及隧道自动检测和诊断能力。
+- 公网 MCP 隧道的多实例协调、健康检查、自动重连和运行状态展示。
 
 ### Changed
 
-- **四类通知都能设「持续响铃」了，不再只有两类。** 原先只给「需要你回来」和「等你回答」开放，理由是只有阻塞型事件配得上。但页面上没有位置解释这个区分，看起来就像漏做了两个 —— 而且这个判断本身也站不住：想让手机一直响到自己确认跑完了任务，不是什么错误用法。
-
-- **移除按事件配铃声。** Bark App 自己就按设备记铃声，在这里再给四个事件各配一份，是把一个没人要的设置摆在两个真正有用的旁边。表格从四列收回三列。
-
-- **README 从 282 行压到 123 行，按「先让人用起来」重排。** 对照了几个高星 MCP 项目的写法，它们的共同点很明确：**一句话说清是什么 → 徽章 → 装 → 最小可用例子 → 其余折叠或外链**。而原来这份是倒过来的——第 11 行就是数据流架构表，安装命令在第 43 行，读者得先看完协议世代对照表才知道怎么跑起来。
-
-  现在开头三行是「是什么 + 三行命令 + 会打印出什么」，紧接着是那句最该说的话：**这个 URL 就是钥匙**。命令表、控制台各页、隧道、通知、数据目录、常见问题整体搬进新建的 `docs/configuration.md`（内容一字未改，只是换了地方——它们是对的，只是位置不对）。README 里留一张文档索引表指过去。
-
-  `docs/configuration.md` 与 `docs/tools.md`、`SECURITY.md` 一并加进 `package.json` 的 `files`：README 现在重度依赖这些链接，不进包的话 npm 页面上全是坏链。那份参考文档只有英文版，中文 README 也链它——顶部写明了原因：翻译一份设置参考，等于让两份文档各自漂移，比只有一种语言更糟。
-
-- **主题切换移到右上角，并改成图标。** 原先它在左下角，文字写着「主题：跟随系统」—— 那行字把一个看一眼就能懂的状态拼写了出来，而且是那块区域里最宽的东西。现在是顶栏右侧的图标按钮：**太阳 / 月亮 / 半圆**三种轮廓各不相同，当前模式扫一眼即知；具体模式名仍在 tooltip 和可访问名称里，读屏用户不会因此少拿到信息。
-
-  顺带删掉了整个 `.sidebar-foot` —— 那块区域上一轮移走「独立版 · 本地面板」后就只剩这个按钮，现在没有内容了。相关的三条 CSS（含一条折叠态和一条窄屏覆盖）一并清除。
-
-- **状态页的「实例生命周期」卡瘦身。** 它三段话里有两段在解释「本页为什么没有启动/停止/重启按钮」—— **一张卡的主要内容是描述自己没有功能**。那个理由是成立的（停止会把承载按钮的页面一起关掉），但它属于文档，不该常驻在每个人第一眼看到的页面上。留下真正会动的部分：构建过期警告，和去体检页的入口。标题也改成「运行中的这份构建」，说的是它实际展示的东西。
-
-- **几处标题与描述改写。** 任务页两张卡的描述把同一句话说了两遍；状态页「它是地址」是废话，而「公网请配合门禁」读起来像补充说明，实际是这页最重要的一句；日志页把「断线期间的行会缺失」写在前面，真正可操作的「去看 audit.log」反而在后面。
-
-- **开关只有点在开关本体上才切换，点旁边的文字不再生效。** 五处开关此前都写成 `<label>` 包住自己的说明文字 —— 这是 HTML 的标准写法，副作用是**整行都成了点击区**。在一个几乎全是「一行一个设置」的页面上，这意味着在设置附近随手一点就可能悄悄改掉一项配置，而这种错误往往要等到它产生后果时才被发现。
-
-  改法不是简单去掉 `<label>`：那会让开关失去可访问名称，屏幕阅读器只会读出「复选框」。现在文字移到 label 之外，开关自己带 `aria-label` —— **缩小的是鼠标的目标，不是控件的可用性**。补了测试钉住这一点（此前没有任何测试守着它，所以改动前后套件都一样绿）。
-
-- **通知设置页重组成三张卡。** 原先一张「手机通知（Bark）」里混着两类完全不同的东西：哪些事值得打扰你，以及 Bark 用什么方式送。加进第二个渠道后这个标题就不成立了 —— 事件开关和无反应监视**不属于 Bark**，它们决定的是「什么事值得打断一个人」，每个渠道再各自回答「怎么告诉他」。
-
-  现在是：**什么时候该打扰你**（任务完成 / 对话结束 / 无反应提醒，渠道无关）→ **手机（Bark）**（密钥、测试、每类通知的送达方式）→ **本机声音**（两个路径 + 试听）。「需要你回来」和「等你回答」从开关区挪进了说明文字，因为它们根本不是开关：没人回答的问题会让对话无限期卡住。
-
-- **每类通知的送达方式改成可以设置，不再是写死的。** 原先设置页上那张表只是「告诉你规则是什么」，而你要的是「让你定规则」。现在四类通知各自可选送达方式（安静只进列表 / 普通横幅 / 穿透专注模式 / 无视静音）和铃声，「需要你回来」与「等你回答」还能勾选持续响铃 —— 参数取自 Bark 自己的文档。
-
-  默认值按每类通知**实际的紧迫程度**给：两类阻塞型（等你回答、需要你回来）默认穿透专注模式，对话结束用普通横幅，进展只进通知列表不打扰。**`critical` 提供但绝不作为默认** —— 它无视手机静音，那是使用者的决定，不该由我们替他做。模型仍可在单次调用里显式指定 `level` 覆盖默认：它知道发生了什么，而你知道你想怎样被打扰，这是两个问题。
-
-  铃声不做白名单校验（Bark 自己会加铃声，写死列表迟早开始拒绝合法的名字），但会拒绝含空格和 URL 字符的值 —— 那种输入不会换个铃声，只会把查询串弄坏。
-
-- **状态页的「健康检查」按钮去掉，改为链到体检页。** 它和体检页问的是同一个问题，**却是两套独立实现**：状态页走 `healthCheck` 设置动作（`runHealthCheck`），体检页走 `/api/health`，各算各的。前者只给「本地 / 公网 / 门禁」三行一个总的成败，后者逐项分级（instance、workspace、tools、build、tunnel、public、exposure）。留完整的那个。
-
-  但 `runHealthCheck` 有一项体检页没有：**验证 Bearer 门禁真的会拒绝匿名请求**。门禁静默失效比没有门禁更糟——操作者以为自己被保护着。这一项已移植进 `/api/health`（开着鉴权时才检查；关着就没有可验证的东西，凭空加一行会让人以为检查过了）。移植时沿用 `selfProbe` 而不是 `fetch`：AGENTS.md 记着那次事故，回环 fetch 会把干净停机变成 Windows 上的 fastfail 退出。随后删掉了已经没有调用方的 `healthCheck` 动作与 `runHealthCheck` 本身（约 77 行）——TypeScript 的穷尽检查当场指出了 handler 分支，lint 接着指出了失效的 import。
-
-- **安全页从「等半秒」变成「立刻出」。** 它的总览只读一个字段 `exposure`，却在为此调用整个 `/api/health` ——实测本机 **479ms**（开了隧道还要加一次真实的公网往返），而 `/api/status` 有同一个字段、**40ms**。现在读 status。体检页的耗时**没有动**：它的本职就是真的发请求，慢是这件事的成本，而且它已经有骨架屏和「体检中…」的明确反馈。
-
-- **通知设置页补上四类通知的对照表。** 规则此前只存在于代码和 `docs/tools.md` 里，页面上只有两个开关。**两个开关都关掉并不等于静音**——`attention`（需要你回来）和 `waiting`（AI 在等你回答）永远送达，而这件事最糟的知情方式是手机响了才发现。现在表格直接列出四类通知各自何时触发、归哪个开关管，以及那条静默兜底。
-
-- **控制台去掉四处重复与两处无信息量的文字。**
-
-  - **顶栏那排动作按钮（复制 MCP 地址 / 一键体检 / 刷新本页）全部移除。** 每一个都已经有自己的家：端点卡片上就有「复制 URL」，体检页自己会跑检查而且导航一键可达，而「刷新本页」做的事不如浏览器自带的刷新可靠（它只重新拉数据，不重载页面）。一排全局按钮复制着各页自己的控件，结果是每一页看起来都有四件事要做。
-  - **顶栏的主题切换也去掉了，只留侧栏底部那个。** 代码里原本的理由是「顶栏在窄屏会隐藏，侧栏那个是移动端的落脚点」——但 ≤720px 时侧栏已经变成抽屉，那个理由本身就不成立。留下的是始终够得着的那一个。
-  - **侧栏的「独立版 · 本地面板」和品牌下的「控制台」二字删除。** 前者是一句自我介绍，对着自己的控制台说；后者更冗余——面包屑每一页都以「控制台」开头。
-  - 连带清掉 `reloadKey`：它唯一的写入方就是那个刷新按钮，留着就是一个恒为 0 的 state 和一个永不变化的 React key。
-
-- **CI 不再为纯文档提交跑整个矩阵。** 每次推 main 都要三个 runner 花约四分钟，包括只改了 CHANGELOG 或 README 的那些 —— 一次不可能失败的验证，换来的是等待。现在 `.md`、`LICENSE`、`.gitignore` 的改动跳过 CI。
-
-  两个细节值得写下来。其一，**用 `paths` 加否定模式，不是 `paths-ignore`**：后者不支持例外，在里面写 `"!AGENTS.md"` 会被当成一个普通文件名而**静默失效**，结果就是 AGENTS.md 的改动也跳过了 CI。查了官方文档才确认这点，第一版就是这么写错的。其二，**两份 Markdown 仍然触发 CI**：`AGENTS.md` 会被注入每个会话的 instructions，`docs/tools.md` 是工具契约，它们改的是行为而不是叙述。PR 则完全不设过滤 —— 合并前那一次值得跑全套。
-
-- **设置页的「隧道（ngrok）」改叫「隧道」。** ngrok 是当前唯一的实现，不是这张卡片的定义 —— 提供商下拉框里本来就有 `none`，以后还可能有别的。左栏导航项一直叫「隧道」，现在标题与它一致（和 Shell 那一对一样重名，属于既有常态）。子页说明里写死的「ngrok 隧道、预留域名与公网发布」一并改成不绑定提供商的说法。
-
-- **无反应监视不再要求存在未完成的任务清单。** 这条前提让它在最该说话的场合全程失效：审计日志实测，2026-09-13 这一天 1274 次工具调用里只有 4 次 `set_todos`、0 条通知 —— 整天没有任何看门狗可能触发，因为 AI 压根没写清单，也就没有「未完成项」可言。**把安全网拴在一个模型可以忘记的工具上，它就会在模型健忘的时候失灵，而那正是它存在的理由。**
-
-  现在沉默本身就够了。清单改变的只是**措辞**：有未完成项时说「任务还在进行，但 N 分钟没有任何动作」，没有清单时只说「连接安静了 N 分钟 —— 可能在等你回复，也可能已经停下」。两句都只陈述服务端看得见的事实，不去推断任何「AI 形状」的东西。唯一保留的否决是「这个会话一次调用都没有过」：没有时钟，就无从测量沉默。
+- 工具目录、CLI 与控制台使用同一套运行状态和工具声明；旧工具名继续兼容。
+- 文件、进程、服务和网络操作的结果统一提供可供客户端读取的结构化数据。
 
 ### Fixed
 
-- **提示音改为弹出一个可见窗口播放，关掉窗口就停 —— 不再有时长上限。** 上一版用「只放 6 秒」来解决「停不下来」，但那是把问题绕开而不是解决：一条宣告对话卡住的提醒，本来就该一直响到有人处理。现在播放会弹出一个控制台窗口，标题写着它是什么、正文写着关掉即停 —— **窗口本身就是停止按钮**，不需要另一套停止协议，也不需要给声音设上限。
-
-  这里踩了两个坑，都写进注释了：直接 `spawn` powershell 且 `stdio: "ignore"` 时，它**没有控制台可附着，会立刻以 code 0 退出** —— 没有窗口、没有声音，但返回值是成功；而 `start` 是 cmd 的内建命令不是可执行文件，必须配 `shell: true` 才有效。两种错法我都实际撞过才定下最终形态。脚本内用轮询而非一次长 `Start-Sleep`，否则 Ctrl+C 要等睡眠结束才响应，等于文案里承诺的第二条退路是假的。
-
-- **试听变成真正的试听：约 6 秒、可停止、不会叠加。** 第一版直接把整首播完，于是按一下四分钟的歌就是四分钟，**而且没有任何办法叫停**；因为「好像没反应」而再按一次，会在第一份上面叠第二份。两半都是设计错误：**试听按定义就该是短的，而能被启动的东西必须能被停止。**
-
-  现在播放器是单例——开始新的会先停掉正在播的；试听只放约 6 秒；旁边有一个永远可点的「停止」按钮（它不能被禁用：页面无从知道子进程是否在响，而需要它的时刻恰恰就是响着的时候）。兜底超时也收紧到「上限 + 1 秒」，只在 PowerShell 自己卡死时才起作用。
-
-- **路径可以直接粘贴带引号的形式。** Windows 资源管理器的「复制文件地址」给出的就是 `"C:\...\歌.flac"`，而那是这个输入框最可能的填法。因为「不是绝对路径」去拒绝剪贴板自己的格式，是很莫名其妙的拒绝。现在成对的首尾引号会被剥掉；文件名中间的引号照旧保留，那是名字的一部分。
-
-- **播放窗口里按 Ctrl+C 没反应 —— 而那是我在窗口里写着的。** 用 `-Command` 启动的 PowerShell 跑的是非交互式管道，一串 `Start-Sleep` 中间引擎根本不会去检查中断，所以那句提示承诺了一条**从未验证过、也不存在**的退路。实测确认过它对控制台控制事件毫无反应。
-
-  **写出一个按了没用的出口，比只写一个能用的更糟** —— 人按了、没反应，于是连「关窗口」那条也开始怀疑。现在改成轮询 `[Console]::KeyAvailable`：**按任意键**即停（150 毫秒内响应），关窗口照旧。文案只留这两条，都是验证过的。
-
-  过程值得记一笔：我写了三版模拟按键的探测脚本想自己验证，全都栽在 PowerShell 的转义和 `Add-Type -PassThru` 返回数组上 —— 而那只是测试工具，不是要交付的东西。第三次失败后停手，直接请用户按一下确认。**在验证工具上耗掉的时间，本身就是一种跑偏。**
-
-- **在「手机（Bark）」里点「发送测试」，电脑上弹出了音乐播放窗口。** 测试推送是以 `attention` 事件发出去的，而**每一个 attention 事件都会在本机响一声** —— 于是一个用来回答「手机这条通道通不通」的按钮，把另一条通道也执行了一遍。比吵更糟的是：两条都动了，你没法判断结果属于哪一条。
-
-  给 `pushNotification` 加了 `silentLocally` 选项，测试按钮传 `true`。**一个测试单一渠道的按钮，不该触碰另一个渠道。** 本机声音仍然刻意排在所有 Bark 闸门**之前**（没填 Bark 密钥的机器也要能响），所以这个开关必须包在那一层，而不是加在后面。
-
-  顺手系统扫了一遍同类问题：所有 `pushNotification` 调用点、`playAlertSound` 调用点、以及控制台里每个带副作用的 action。结论是只有这一处串味，`testSound` / `stopSound` 都只碰自己。另外把 38 个配置键逐一比对了「默认值 / CONFIG_SPEC / 状态类型 / 载荷」四处声明 —— 报出来的 13 个全是误报（它们走 `setAuthEnabled`、`saveDomain` 这类专用 action，`sharedPeerRegistry` 则是只走配置文件的高级项），**没有为了统一形状去改本来正确的代码**。
-
-- **每一轮结束都会收到两条「对话结束」，间隔约 45 秒。** 兜底监视的判据是「AI 自己推送过就别再推」，写成 `notifiedSinceMs >= completedAtMs`。问题在于这两个时间戳的来源：推送在**送达那一刻**打标记，而 `completedAtMs` 是会话的 `lastUsed`，由**同一次调用结束时**写入。于是一个规规矩矩在收尾时调用 `notify` 的模型，它的推送时刻**永远比它要宣告的那个「结束」早两三毫秒** —— 判据读出来是「没人说过」，45 秒后补一条。
-
-  审计日志里的原始数据：推送 `22:39:46.674`，请求完成 `22:39:46.676`，重复推送 `22:40:32`。**相差 2 毫秒。**
-
-  修法是给这个比较一个容差窗口（60 秒）。不是放宽，是**纠偏** —— 推送必然发生在承载它的那次调用内部，精确比较**永远看不见**模型自己的宣告。窗口取一分钟还顺带覆盖了「推完再收尾跑一两个工具」这种常见形状：那仍然是同一个结束。
-
-  **有一条既有测试正是这个 bug 的测试版本**：它断言「比完成时刻早 1 毫秒的推送」应该触发兜底（`true`）。那个断言把最常见的情形误判成了「上一次的旧推送」。已改为 `false`，并另加一条用日志真实时间戳写的回归测试；两条都验证过对未修复代码会红。
-
-- **「持续响铃」点了报「无法识别的操作」。** 加这批设置时，`notify.call*` 写进了 CONFIG_DEFAULTS、类型定义和校验器，**唯独漏了 `CONFIG_SPEC`** —— 而控制台的 `setConfig` 会拒绝任何不在那张表里的键。于是开关正常渲染、点得动，保存时被自己的网关挡回来。一个设置要能用需要四处一致，少一处就是这个结果。
-
-  补了两条测试，分别钉住两层：校验器层，以及 `normalizeSettingsMessage` 这道真正出问题的网关。**第一版的网关测试是假的** —— 我的验证脚本用 `\n` 匹配而文件是 CRLF，压根没改到 `CONFIG_SPEC`，于是「删掉条目后测试仍通过」被我误读成测试无效。按行号精确删除后它如期报出 `notify.callFinished is rejected by the console gate`，正是用户看到的症状。
-
-- **「持续响铃」压到了铃声输入框上。** 上一条修排版时给「送达方式」列加了 `white-space: nowrap`，而 `label.check` 是 `inline-flex` —— 复选框和它的文字被强行排到下拉框同一行，撑破宽度只有 `1%` 的单元格，盖在了隔壁的铃声输入框上：文字看不见了，只剩一个圆点。现在这一格改为纵向排列，下拉框一行、可选的响铃开关在其下。**连续两轮都是「元素跑进隔壁列」，所以这次补了测试**：断言这一格没有 `nowrap`、且确实是纵向排列的，并验证过它对出问题的那版 CSS 会红。
-
-- **通知设置表挤成了一条竖排文字（上一条改动的排版事故）。** 那张四列的表被放进了 `.form-grid` 的**半个格子**里 —— 这个容器是两列布局，而项目里早有 `.span2` 专门给「这一项要占满整行」用的，我没用。结果第一列被压到几个字符宽，「需要你回来」竖着排成一列。现在整块占满宽度，并给四列定了明确宽度：名称列不换行，「什么时候发」那列吸收剩余空间。顺带把「总是发」从名称下面的第二行文字改成一个徽标 —— 它是这类通知的固有属性，不是一行说明，堆在名字底下会被读成名字的一部分。
-
-- **顶栏左上角那个点了没反应的按钮。** 它是打开移动端抽屉的汉堡按钮，本该只在 ≤900px 出现 —— `.menu-btn { display: none }` 写着呢。但同一个元素上还有 `button.icon-btn { display: inline-flex }`，**元素+类的优先级（0-1-1）压过了裸类（0-1-0）**，于是它在任何宽度都显示。而宽屏下抽屉根本不存在，点它什么也不会发生：一个永远在、永远没用的控件。两条规则隔着两百行，谁也不会把它们放在一起看。
-
-  修法是给隐藏规则补上元素限定符，让两边优先级持平。顺带扫了全文件其余 `display: none`，只有这一处中招 —— 没有为了统一形状去动别的。
-
-  **新增的 CSS 回归测试第一版是假的。** 它检查「`.x` 是否被某个 `el.x` 压过」，而真正压过来的是 `button.icon-btn` —— 同一元素上的**另一个类**。那种查法看不见这种情况，所以它对着 bug 照样通过。改成显式声明「哪两个类会出现在同一元素上」，再比较双方优先级；确认过对着未修复的 CSS 会红，报错直接点名 `"button.icon-btn" sets display and wins`。
-
-- **折叠导航后 logo 与下方图标不在一条竖线上。** 折叠态的 `.brand` 里有两个元素（logo 和折叠按钮），`justify-content: center` 居中的是**这一对**，于是 logo 被按钮挤得偏左，而下面每个导航图标都是各自居中的。现在折叠时把按钮改为绝对定位、退出布局流，logo 成为唯一被居中的东西，就对齐了；按钮改为悬停或键盘聚焦时才浮现，不再占位。
-
-- **保存 Authtoken 后的提示指了一个不存在的按钮。** 原话是「设置页上方的『重启隧道』」—— 控制台里**根本没有**这个按钮，而且不是遗漏：状态页早就写明「本页没有启动 / 停止 / 重启按钮，停止会一并关掉这个页面，按钮既点不到也不可靠」。所以那句提示不只是指错地方，它和项目已有的决定是矛盾的。改成实话：关掉承载实例的终端窗口再启动一次。旁边「预留域名」那句「改动后需要重启隧道」同样含糊，一并改成「下次启动实例时生效」。
-
-- **两处导航栏上几乎没用的细滚动条。** 一处是左侧主导航：`.sidebar` 高度锁死 `100vh`，九个导航项在稍矮的窗口里正好溢出一点点。另一处是设置页那排「隧道 端口 目录 Shell 通知 并发」：`.secnav` 带 `overflow-x: auto`，六个标签在正常宽度下根本不会溢出，滚动槽却照样占着，在标签行下面留一条横的细线。
-
-  两者都保留滚动能力——窗口足够窄或够矮时是真需要——改的只是可见性：平时不占滚动槽也不显形，指针移入或键盘焦点进入时才出现。Firefox 走 `scrollbar-width`，Chrome / Edge 走 `::-webkit-scrollbar`。
-
-  **另外两处 `overflow: auto` 特意没动**：日志流是固定 460px 的窗口，滚动条一直是有用的；会话/令牌表格有七八列，横向滚动条在窄窗口下明确告诉人「右边还有列」。它们不属于「明明不需要却占着槽」那一类，为了统一形状去改会把有用的提示也抹掉。
-
-- **清掉 VS Code 扩展时代的四个死命令。** `ready`、`copyUrl`、`copySecret`、`dismissSecret` 还留在控制台动作白名单里，但前端一个都不发。它们是 webview 的产物 —— webview 够不到系统剪贴板，得求宿主代劳，所以每个复制动作都要往宿主发一条消息；浏览器自己就有剪贴板 API。`ready` 同理：那是编辑器把面板交给它时的握手，浏览器没有这道手续。`copySecret` 更直白，它的实现就是抛一句「这里不保存密钥」。
-
-  删掉后 TypeScript 立刻指出 `dispatch()` 的 switch 不再穷尽 —— 原来是那个空操作的 `ready` 分支让函数「碰巧」有了返回路径。补成真正的穷尽检查（`assertHandled(action: never)`），今后往白名单加命令却忘了处理，会在**编译期**报错，而不是在运行时返回一个 undefined。集成测试里拿 `ready` 当「无副作用探针」验证令牌轮换的地方，换成了 `copyPrompt`：一个真实存在、同样无副作用的命令。另补一条测试钉住这四个退役命令现在一律返回 `null`，而不是被当成静默的空操作接受。
-
-- **状态页左右失衡。** 左栏三张卡（MCP 端点、实例生命周期、文件锁明细）对右栏一张五行属性表，页面右下角是一大片空白。把「文件锁明细」挪到右栏与「实时状态」作伴，栅格从 1.65:1 收到 1.25:1 —— 宽的那栏仍然更宽，因为端点 URL 是整页最长的字符串，也是最经不起折行的。
-
-  **但第一次没修对，反而更糟。** 卡片在源码里搬走了，渲染出来却掉到了左下方：`.split` 是两列栅格，搬完之后它有了**三个**直接子元素（左栏容器、实时状态、锁明细），而栅格不会把第三个元素塞进某一列——它换行到第二排左侧。于是左边比原来更长，右边的空白一点没少。现在把实时状态与锁明细包进同一个右栏容器，栅格恢复成两个子元素。
-
-  它为什么能通过验收值得记下来：`tsc` 对两种写法都满意（JSX 都合法），而当时那 15 个测试全是行为断言——表格渲染了吗、工具名在吗、警告能跳转吗。**没有一条看结构，所以布局怎么坏都不会红。** 新增的测试直接读 `.split` 的子元素：必须恰好两列，端点在左，实时状态与锁明细在右。保留之前先对着坏结构跑过一次，确认它报 `expected 3 to be 2` —— 不会失败的测试不算测试。
-
-- **无效的数量上限会被当成「一条都不要」。** 上一族（超时溢出）修完后顺着「数值参数」这条线往下扫，又找到两处，症状同源但更隐蔽：
-
-  `search_files` 传 `max_results: -1` 返回 **166 条**，传 `-1000` 返回 **0 条**——同一个参数、同一个工具，两个相反的答案。分叉点是走哪条搜索路径：ripgrep 把负的 `--max-count` 读作「不限制」于是全给，而内置扫描比较 `out.length >= limit`，负数时第一条就成立于是全不给。`list_directory` 的 `max_entries: -5` 同理返回空——`Math.max(0, -5)` 是 0。
-
-  **「0 条」是这里面最危险的答案。** 一个空结果读起来是「没有匹配 / 目录是空的」，会被直接采信并据此行动；而 166 行起码看着不对劲。一个把上限算错的调用方，会被非常有说服力地告知：你要找的东西不存在。
-
-  两处都改为**回落到默认值**而不是报错——调用方要的是结果，而 `-1` 既不该理解成「全部」也不该理解成「一个都没有」。`0` 保持原义：那是一个明确的「不要行」的请求，不是笔误。
-
-  顺带把其余数值参数扫了一遍，**三处形状相似但本来就是对的，没有动**：`run_command` 的 `timeout_ms`、`review` 的 `max_patch_bytes` 都已有 `>= 0` 检查，`list_directory` 的 `depth` 有注释写明 0 和负数刻意钳到 1。不是每个 `Math.max` 都是 bug，为了统一形状去改一个本来正确的实现，只是搅动。
-
-- **超大的超时值会变成「立刻超时」——三处，一族。** `setTimeout` 的延时存在 32 位有符号整数里，超过 2147483647 之后 Node 打一条 `TimeoutOverflowWarning` 然后**按 1 毫秒处理**。于是「等到天荒地老」精确地变成了「立刻放弃」。三处都实测过，不是读代码推断的：
-
-  | 位置 | 症状（实测） |
-  | --- | --- |
-  | `concurrency.holdTimeoutMs` 等配置 | `1e18` 本意「这把锁基本别自动释放」，实际下一拍就释放——资源在第一个调用还持有时被交给第二个，正是 `resource_keys` 唯一要防的事 |
-  | `timeout_ms` / `delay_ms` 等工具参数 | 等一个 3 秒的进程、超时给 `1e18`，**38 毫秒就返回**，并谎报进程已结束 |
-  | 连通性探测 `timeoutMs` | 探一个不可达地址、超时给 `1e18`，**17 毫秒报「超时」**；使用者会据此断定端口不通，而其实根本没等（修好后：真等 21 秒拿到系统级 ETIMEDOUT） |
-
-  **配置项选择「拒绝」，工具参数与探测选择「钳位」，这个不一致是刻意的。** 配置是存下来、以后还要被读回和据以推理的东西，它**绝不能**表达出与字面不同的含义，所以超限直接报错并告诉你 0 才是关闭它的写法。而工具参数是模型在干活当下给的，一个过大的数字意图很清楚——「尽可能久」——这时给它运行时能做到的最长等待（24.8 天，比任何真实等待都长），比给它 1 毫秒忠实得多。
-
-  钳位放进了 `clampMs` 自身而非各调用点：五个调用点里三个没传 `max`，没有理由让第四个人再想一遍这件事。另外核了两处**没问题**的，避免顺手改坏——`ready_timeout_ms` 走 `Date.now()` 比较不进定时器；`shutdown-deadline.ts` 是写死的 10 秒常量。 `setTimeout` 的延时存在 32 位有符号整数里，超过 2147483647 之后 Node 打一条 `TimeoutOverflowWarning` 然后**按 1 毫秒处理**。于是 `concurrency.holdTimeoutMs = 1e18`——意思明明是「这把锁基本上永远别自动释放」——实际变成「下一拍就释放」。症状离病因很远：一个资源在第一个调用还持有时被交给了第二个调用，而这正是 `resource_keys` 唯一要防的事。
-
-  是这么找到的：给每个数字型配置项喂模型瞎猜时真会写出来的值——`"abc"`、`""`、`null`、`-1`、`1.5`、`NaN`、`Infinity`、`1e18`、`"12abc"`、`{}`、`[]`、`true`。七个里有五个全部拒绝，三个收下了 `1e18`：`holdTimeoutMs`、`waitTimeoutMs`、`auth.tokenTtlSeconds`。
-
-  **修在校验层拒绝，而不是在使用处钳位。** 钳位等于让一个设置项表达的意思和它字面写的不一样，而这次的故障本身就是「一个数字被悄悄改写了含义」——和 AGENTS.md 里那条 `Math.max(0, NaN)` 是同一族。报错会点名上限，并指出 0 才是关闭它的正确写法。`tokenTtlSeconds` 是跟时钟比较、不进定时器，本来不会溢出，但同样加了这个上限：2^31 秒约合 68 年，和「永不过期」没有区别，一个鉴权时长不该因为手滑就变成无限。
-
-- **`logs --follow | head -5` 会留下一个杀不掉的孤儿进程。** `head` 拿够 5 行就关掉管道，而跟踪器只监听 SIGINT，于是它每秒醒来一次、往一个已经不存在的读端写东西——**永远**。没有窗口、没有输出，除非打开任务管理器，否则你根本不知道它在。而管道给 `head`、`less` 或一个提前结束的脚本，是再普通不过的 shell 用法，不是误用。
-
-  **监听 stdout 的 EPIPE 是显而易见的修法，而且它不够——这点值得记下来，因为它看起来就该够。** 那个 error 只在**真的写失败时**才触发，而这个跟踪器只在日志文件长大时才写。日志安静 = 不写 = 不报错 = 不退出：孤儿活得最久的那种情况，恰恰是 EPIPE 监听器唯一漏掉的情况。所以每一拍还会用一次**零长度写**去探管道——它失败的方式和真实写一样，但不依赖「有话要说」。SIGTERM、SIGHUP、SIGBREAK（Windows 关窗）以及 `destroyed` / `writableEnded` 一并覆盖，全部汇到同一个幂等的 `finish()`。
-
-  写测试的过程里错了两次，都记进注释了。**第一次**：从父进程 `child.stdout.destroy()` 复现不了——那关的是测试进程里的读端，跟踪器根本不知情。**第二次**：临时 home 里压根没有日志文件，`cmdLogs` 打印「还没有日志」就返回了，从没进过出问题的代码路径。两版测试对着**没修的代码也通过**。最终这条是用唯一有意义的方式验的：对旧实现 10 秒超时失败，对新实现 1.6 秒通过。**不会失败的测试不算测试。**
-
-- **Windows 上的清理竞态不该算测试失败。** CI 上一个纯文档提交挂了：测试全过，`after` 钩子删临时工作区时抛 EPERM，整个 run 变红；同样的代码在前一个和后一个提交都是绿的。Windows 下 SIGTERM 返回不等于子进程已经放开句柄，索引服务或杀毒软件也可能多占一会儿，于是 `rmSync` 在一棵马上就能删掉的目录上失败。17 个集成测试文件写着同样没有防护的 `rmSync`，这次只是恰好在其中一个引爆。
-
-  新增 `test/tmpdir.mjs` 的 `removeTempDir()`：重试约 1.1 秒，失败就往 stderr 写一行然后返回，**永不抛出** —— teardown 抛异常意味着把一个已经通过的套件报成坏的。临时目录泄漏的代价是零（系统自己会回收），而随机变红的 CI 会毁掉 CI 唯一的用处：**看惯了无缘无故的失败，真正的失败就没人看了。** 之所以留那行 stderr 而不是完全静音：如果哪天每次都清理失败，那是桥自己漏了句柄，得有人看见。
-
-- **随包分发的 ripgrep 缺少许可证正本，而且授权写错了。** `vendor/rg.exe` 是 5.4 MB 的预编译二进制，`vendor/` 又在 `package.json` 的 `files` 里 —— 也就是说它跟着每一次 `npm install` 出门。`vendor/README.md` 写着「MIT 或 Apache-2.0 双授权」，那是 Rust 生态最常见的搭配，**但不是 ripgrep 用的**：上游 `COPYING` 写得很清楚，是 **Unlicense 或 MIT**。MIT 要求分发时附带许可证副本，仓库里一份都没有，只有一个指向上游的链接。现在 `vendor/LICENSE-MIT` 与 `vendor/UNLICENSE` 两份正本就放在二进制旁边，说明文字也改对了，并留了一句话记下它曾经是错的。仓库转公开前该清的东西。
-
-- **集成测试断言中文输出，却从不指定语言 —— 于是在 CI 上红了三次。** 双语那轮给 CLI 加了语言检测（`OPEN_BRIDGE_LANG` → `LC_ALL` → `LC_MESSAGES` → `LANG`），UI 测试当时因为 jsdom 报 `en-US` 集体变红，用 `vitest.setup.ts` 把语言钉住修好了；**`test/*.test.mjs` 那一层被漏掉了**。这些套件 spawn `bin/open-bridge.js` 并断言它人读的输出，而那些断言写的是中文串。
-
-  本机 `LANG=zh_CN.UTF-8`，所以本地 `npm run verify` 一直全绿；GitHub 的 Ubuntu runner 是 `LANG=C.UTF-8`，CLI **正确地**答英文，于是 11 条断言失败。测的不是代码，是运行它的那台机器的环境。
-
-  修法是在测试运行器层面钉死一次：`test/setup-lang.mjs` 设 `process.env.OPEN_BRIDGE_LANG = "zh"`，由 `--import` 在任何测试文件加载前挂上，因此**每个子进程都继承它**，不管那个 spawn 点有没有显式传 `env`（10 个断言中文的文件里只有 3 个传了）。没有逐条去改断言：语言应该是一个**写明的前提**，而不是碰巧对的默认值。
-
-  复现过程本身值得记一笔：第一次用 `env -u LANG -u LC_ALL -u LC_MESSAGES` 模拟 CI，**测试照样全绿**，差点得出「修复没必要」的结论。原因是 `detectCliLang()` 把「一个 locale 变量都没有」判定为中文（这是给 Windows 的刻意行为，见 `cli-i18n.ts` 的注释），而 CI 并不是那种情况 —— 它设了 `LANG=C.UTF-8`，`C` 是显式的「没有语言」，判定为英文。**清空环境与 CI 的环境是两回事**；用 `LANG=C.UTF-8` 才复现出来，并先证伪过：摘掉 setup 该文件红 2 条，挂上 7 条全绿。
+- 修复认证、令牌轮换、公开访问、工作区路径、资源锁、长驻进程、流式读取和多实例竞态问题。
+- 修复控制台的无障碍性、语言一致性、表格布局、轮询竞态和一次性密钥交互。
 
 ## [1.0.0-beta.1] — 2026-09-15
 
 ### Added
-- **`notify` 新增 `waiting` 事件：AI 提问后必须推送，否则对话会卡死。** 起因是一个真实的失败模式：AI 在对话里请用户做选择，用户不在电脑前，没人回答 —— 对话就永远停在那里。从服务端看，「AI 答完了」和「AI 在等你选」**是同一个观测结果**：调用停了。服务端分不出来，也不该猜，所以让模型自己说：问完问题立刻发 `waiting`。它和 `attention` 一样**不受任何开关影响**，永远送达 —— 没人回答的问题会无限期阻塞对话，那不是设置该吞掉的东西。工具描述、连接指令与 `docs/tools.md` 都把这条写成硬要求。
 
-- **控制台与 CLI 讲两种语言了：中文 / English。** 这个项目一直只有中文界面，而它要接的 MCP 客户端和用它的人并不都读中文。现在控制台按浏览器语言自动选（**没有切换按钮** —— 见下方 Changed 里为什么那个按钮又被拿掉了）；CLI 没有浏览器可问，就按 POSIX 的老规矩读 `LC_ALL` → `LC_MESSAGES` → `LANG`，另给一个 `OPEN_BRIDGE_LANG` 强制覆盖——系统是英文但想看中文输出的人，不该被迫改整个 locale。
-
-  译文**成对内联**写在用到它的地方（`t("中文", "English")`），没有集中的消息表，也没有 key。理由很实际：改一句文案时两种语言就在同一行，漏译当场可见；而消息表最常见的结局是 key 还在、某一种语言的值早已过时，且谁也不知道。两个参数都是必填的，半边翻译根本编译不过。
-
-  两处坑值得记下来。其一，`STATE_LABEL`、`ACTIVITY_LABEL` 这类模块级映射表全部改成 getter（`() => string`）：模块初始化只发生一次，若存的是字符串，切语言后拿到的仍是首次加载时那门语言。其二，有个 `kind: "持有" | "等待"` 被当成**比较用的值**而不只是展示文本，翻译它会让判断在英文界面下静默失效——先换成英语哨兵值，再在渲染处翻。文件锁那一栏的中英切换就是靠这个才没坏。
-
-  另外 jsdom 的 `navigator.language` 是 `en-US`，于是上线自动检测后，所有断言中文的既有 UI 测试会集体变红——不是代码坏了，是测试环境默认成了英文。新增的 `vitest.setup.ts` 在每个用例前把语言钉死在中文，让语言成为显式前提而不是运气。
-
-- **控制台新增「任务」页：看得见 AI 正在做什么。** `set_todos` 写的清单从第一天起就存在（`todo-store.ts` 按工作区持久化、断线也留着），但控制台里它只以**一个数字**露过面——会话表里那列 `todos: 3`。于是「有个 AI 在忙」看得到，「它在忙什么」看不到，而后者才是人盯着屏幕时唯一想知道的事。现在是真正的清单：进度条 + `已完成 N/M`、**正在做的那条单独提到最上面**（Cursor/Codex 那种一眼看到当前项的读法）、每条一个状态图标（已完成打勾、进行中转圈、待办空心圈）、完成项标题划掉。数据走新端点 `GET /api/todos`，2 秒轮询，带**过期响应守卫**（沿用服务页那套 `pollSeq`，防止先发后到的慢响应把新答案盖回旧的）。
-
-  **刻意只读**：清单是 AI 的工作记忆，控制台若能替人勾选，就等于在对面跑到一半时改它的计划，两边会对「做完没有」产生分歧。页面只呈现，不写入。
-
-  数据源有两个且**故意不合并**：有活跃 MCP 会话时读会话里的实时清单，没有就回落到持久化存储，并用 `stale` 字段明确标成「已离线」——上一个 AI 断开时留下的计划仍然有用（崩掉的网页 AI 正是无反应监视要处理的场景），但它**不能看起来像正在推进**。空清单不是空白页，而是告诉你「连上来的 AI 调用 set_todos 后计划会出现在这里」。另外 `report_progress` 的最后一行也终于有了去处，作为「最新进展」卡片显示。转圈动画遵守 `prefers-reduced-motion`。
-
-- **手机通知（Bark）：网页 AI 干活时把进展与「需要你回来」直接推到 iPhone。** 控制台「设置 → 手机通知」粘贴 Bark 显示的整条链接（`https://api.day.app/<设备密钥>/…`），写入即解析出密钥；两种模式：**频繁**（任务清单每勾选完一条，服务端在 `set_todos` 落盘时自动推一条汇总，不靠 AI 自觉）与**免打扰**（只送 attention/finished——需要选择/回复、对话结束；进展类一律 `delivered:false, reason:"mode"`，是结构化的「没送」而非错误）。新增 MCP 工具 `notify`（`event`: progress/attention/finished，39 个工具）；连接指令随配置注入使用说明（会话建立时快照，模式判定每次发送实时读）。**无反应监视**：连接静默超过 `notify.idleMinutes`（默认 60，0 = 关）且清单还有未完成项时服务端自己推一条 attention——网页 AI 标签页崩死时唯一能叫回人的通道（骑在既有 60 秒会话清扫节拍上，不新增定时器）。防轰炸：真实发送共享 60 秒 6 条窗口 + 相同内容 60 秒去重，被挡的调用得到结构化原因；控制台「发送测试」是人手动作，绕过账本但保留开关/模式判定。**密钥单进不出**：`get_config`、`set_config_value` 回显、设置页视图、审计摘要、运行日志一律掩码或形状（`set_config_value` 写入 barkKey 的审计行记 `<set:N chars>`）；发送走既有 `probeHttpHealth` 通路（先解析后钉 IP、不跟随重定向、只读响应头），`notify.serverUrl` 默认官方 api.day.app，自建服务仅允许 https 或回环 http。
-
-- **设置页拆成真子页面**：`/console/settings/<段>`（`tunnel`/`network`/`files`/`shell`/`notify`/`locks`/`logs`），原「单页长滚动 + 锚点跳转」改为每个子页一个真实路径——地址栏可深链、可刷新、前进后退可用；页头随子页显示对应标题与说明；侧栏与旧书签（`/console/settings`）落在默认「隧道」页。`SectionNav` 由内部锚点滚动改为受控路由切换。
-- `notify` 支持 AI 按次自选 Bark 推送参数：`sound`（铃声）、`level`（`active`/`timeSensitive`/`passive`）、`call`（1 = 持续响铃，上限 10）、`badge`（0-9999）、`url`（点击跳转）；非法值按参数名拒绝。无反应监视与控制台测试推送固定 `timeSensitive`。无反应提醒默认值 10 → 60 分钟。
+- 增加面向本地工作区的 Web 控制台、实例发现、日志、健康检查和快速接入提示。
+- 增加 `run_script`，可在一次调用中组合多个已有 MCP 工具。
 
 ### Changed
-- **控制台不再提供语言切换按钮：浏览器说什么语言就是什么语言。** 上一轮双语做完，顶栏多了个在「跟随浏览器 / 中文 / English」之间轮换的按钮。它解决的是一个不存在的问题 —— 浏览器早就带着这个答案，而那个按钮只是把答案又问了一遍，还顺带带来三态语义、`localStorage` 里的偏好、以及「记住的选择与浏览器不一致时算谁的」这些要解释的东西。现在检测在首次渲染前跑完一次（首屏就是对的语言，不会先闪一下中文），`LangPref`、`nextLangPref`、`langPrefLabel`、`storeLangPref` 全部删除。主题开关**保留**：明暗是真偏好，同一台机器上的同一个人不同时段会要不同答案，语言不是。
 
-  `localStorage` 那个键还在，但降级成**测试专用的接缝**并在注释里写明：jsdom 报 `en-US`，不把语言钉住的话，所有既有的中文断言会集体变成在测翻译而不是在测行为。
-
-- **日志时间戳砍掉 `+08:00`。** `[2026-09-14 22:49:11.137+08:00]` 里那 6 个字符在每一行重复，而读 bridge 日志的人就坐在写这个日志的机器前面 —— 本机偏移是他唯一不需要被告知的东西。现在是 `[2026-09-14 22:49:11.137]`。毫秒留着：同一秒内两件事谁先谁后是真需求。偏移没有消失，而是搬去了它真正是答案的地方：`doctor` 的 timezone 那行仍然打印 `Asia/Shanghai（+08:00）`，需要精确瞬时的机器读者本来就该看 `audit.log` 的 ISO-8601 UTC 字段。
-
-- **Shell 路径与 ngrok 可执行文件：从「自己填路径」改成「从探测到的列表里挑」。** 这两项原本各是一个文本框，靠 placeholder 提示该填什么。这对已经知道 Git Bash 装在哪的人没问题，对不知道的人是死路 —— 而且填错的代价来得很晚，表现为日志深处一句 spawn ENOENT。服务端本来就得会找这些可执行文件（它得挑默认值），现在把同一份候选列表交给设置页当下拉框用。
-
-  Shell 这边是**一份清单用两次**：`resolveShell()` 挑自动默认值走它，设置页渲染下拉框也走它。此前「怎么找 shell」的知识在解析器里，「给用户看什么」的知识不存在；如果后者被单独写一遍，就会出现下拉框里列着解析器永远不会选的 shell 这种没人会发现的漂移。ngrok 这边新增 `ngrok-locate.ts`，按 PATH → Chocolatey / Scoop / winget / Program Files / Downloads（Windows）或 PATH → /usr/local/bin / Homebrew / Snap / ~/bin（POSIX）探测；**PATH 排第一是有意的** —— ngrok 在 PATH 上时，那就是操作员自己终端跑的那一份，桥和终端各跑一份不同的 ngrok 是很难查的。
-
-  三条设计约束写进了测试：① 猜出来的安装路径**必须确认在磁盘上**才进下拉框，否则只是把 spawn 失败挪进了下拉框；② Windows 查 PATH 要套 PATHEXT，`ngrok` 其实是 `ngrok.exe`，`existsSync("…\\ngrok")` 会对一个装得好好的程序答 false；③ 配置里存着的、探测认不出来的路径**原样保留并以手动模式打开** —— 那是操作员的刻意选择，替他改回一个「已知」的值是静默覆盖。下拉框永远带一个「手动填写路径…」，探测覆盖常见安装方式，不覆盖所有安装方式。
-
-  连带把 ngrok 找不到时的话改了。原文只说「设置 ngrokExecutable」，而这句话只对已经知道该填什么的人有用。现在分两种情况说：探测到了别的副本就**列出来**（「你选错了哪一份」），一个都没探测到就直说这台机器上没装、给下载地址、并提醒只想本机用可以把提供商改成 none。Shell 那两条报错同理，改成指向「设置 → Shell」那个列表。
-
-- **通知从「频繁 / 免打扰」二选一，改成两个独立开关。** 原来 `notify.mode` 是个 enum，于是「每项任务完成都通知」和「对话结束时通知」**只能选一个** —— 而这两个恰恰是最该同时打开的组合。现在是 `notify.onTaskDone` 与 `notify.onFinish`，可以都开、都关、开一个。被开关挡住的事件返回 `delivered:false, reason:"switch_off"`（原 `"mode"`）。旧的 `notify.mode` 写入会被**明确拒绝并告知新键名**，而不是静默忽略：还在用旧键的脚本应该收到报错，而不是眼看写入成功却什么都没发生。
-
-- **服务端兜底通知不再断言「对话已结束」。** 45 秒静默后那条推送原文是「这轮对话已经结束」，但服务端根本没有能力区分「答完了」和「在等你回答」——**有一半的时候它在撒谎**，而且是朝着代价更大的方向撒：看到「已结束」的人不会赶回来回答一个正卡住全局的问题。现在措辞改成「AI 停下了 —— 可能在等你回复，也可能已经做完。去看一眼。」一条通知覆盖两种情况，不误导。
-
-- **拆分 `src/cli.ts`：1111 行 → 418 行，其余按「命令需要什么」分到 `src/cli/` 六个模块。** 原文件里唯一的边界是注释横幅。新的分组依据不是字母序，而是**每个命令依赖什么**，因为那决定了它会怎么失败：`query-commands`（stop/status/url/prompt，需要一个活着的实例）、`inspect-commands`（instances/logs/health）、`local-commands`（config/token/doctor，只碰本地数据目录）、`registry`（运行时记录 + 回环 JSON 客户端）、`args`、`format`、`version`。`cli.ts` 只留三样：帮助文本、`serve`（唯一在本进程里启动整个 Bridge 的命令）、分发表。
-
-  一个约束值得记下来：`AGENTS.md` 规定 `node-host.ts` **只许有两个 import 方**，而拆分天然会诱导新模块直接去 import 它。这里改成由入口点**注入**（`setDefaultHome` / `setHostInstaller`）——拆文件不该悄悄放宽架构约束。复核命令仍是恰好 2 条命中。
-
-- **`AGENTS.md` 里「核心零宿主依赖」那句改成了可验证的说法。** 原文读起来像「`src/bridge|http|mcp|network|process|shell|workspace` 不许 import `node:fs`」，而实测核心里有 17 个文件直接用 `node:fs` / `node:fs/promises`、8 个用 `node:child_process`（`file-tools.ts` 是个文件工具，它当然要用 fs）—— 省字的架构描述，正是下一个改代码的人拿去"清理"正常代码的依据；本仓库已经为「与代码不符的注释」修过 6 处，这是同一类病。真正的约束从来是**依赖方向**：`node-host.ts` 只允许被 `src/cli.ts`（安装宿主）与 `src/server/api-router.ts` import，`grep -rnE 'from "[^"]*node-host\.js"' src/` 恰好 2 条命中即为干净 —— 这条命令本身也是现写的现验：第一版写成 `grep -rn '"node-host' src/`，实测**零命中**（真实 import 是 `from "./host/node-host.js"`，引号后面紧跟的是 `./`，不是 `node-host`），照着它去"复核"会得到「怎么到处都没引」的错误结论。写一条检查命令，就得连它一起证伪。`src/host/host.ts` 的模块头同一种措辞一并改准 —— 它还自相矛盾：写着核心 "must never import a host API directly"，而核心每个模块都 import 本文件的 `host()`。顺带补上 `AGENTS.md` 漏记的两件事：这份文件会被注入给每个连上实例的模型（`mcp-endpoint.ts` 各切 8000 字符，写错一条就被反复消费，所以别把 README 抄进来）、UI 测试跟组件放在 `ui/src/**` 而不是 `test/`（`vitest.config.ts` 的 include 只认那个位置，放错就是静默不跑）。
-- **新增 `CLAUDE.md`：一行指针，正文永远只在 `AGENTS.md` 维护。** 服务端本来就会把根目录的 `AGENTS.md` 与 `CLAUDE.md` 都注入连接说明、README 也早就这么承诺，而仓库里只有前者 —— 默认读 `CLAUDE.md` 的工具于是拿到零份约定。是指针不是副本：两份"约定"必然漂移成互相矛盾的说法。
-- 控制台导航重组：新增「安全」页收敛暴露面、Bearer 门禁、个人令牌与 OAuth 2.1（原「令牌」页、体检页暴露面卡、设置页 OAuth 卡迁入），「第二道锁」退役统一叫 Bearer 门禁，路由令牌不再称为凭证（只是地址）；体检回归只读诊断，状态页警告改为跳转；文件锁表以「文件锁明细」搬到状态页；/console/tokens 跳转新页，书签不断。纯前端重组，后端 API 零改动。
-- **行为不变的重复合并与清理：**UI 里「暴露面 → 文案/语气」原本在状态页与安全页各养一份且措辞已漂移，合并为 `ui/src/exposure.ts` 一张表；`regex-worker` 两个仅差一行输入形状的 worker 源（行批量匹配 / 单次测试）合并为一个；`theme.ts` 只被测试引用的三个函数收回私有；`App.tsx` 拆掉只有一个实现的 `SettingsStateGuard` 中转层；`paths.ts` 删掉无人用的 `unrestricted()` 转发；`processes.ts` 删掉一段重复注释；`session-table` 把 `pruneSessions` 与 `makeRoomForSession` 逐字重复的 LRU 驱逐块提取成 `evictOldestIdleSession()`；`safe-probe.classifyIpv4` 删掉三条永远走不到的保留段子句（`100.100.100.200` 已被 100.64.0.0/10 覆盖，`192.0.2.0/24`、`192.88.99.0/24` 已分别被更宽的 192.0.0.0/16、192.88.0.0/16 判断覆盖），分类行为逐 IP 不变；一键启动脚本的示例路径从作者本机桌面换成通用示例。
+- 工具面收敛为更少的统一入口，同时保留旧名称与现有工作流的兼容性。
+- 生命周期、隧道、会话与路由实现按职责拆分，便于维护。
 
 ### Fixed
-- **失败的工具调用不记录失败原因 —— 整轮审计日志里 13 条 error，没有一条说了为什么。** `mcp-endpoint.ts` 那个 catch 写的是 ``record(name, "error", `Failed in ${...} ms.`)``，而**原因就在手里**：下一行就把它返回给调用方了。日志里只剩耗时——恰恰是失败时最没用的那个数字。
 
-  这条路径**所有 39 个工具共用**，而它是一次失败留下的**唯一痕迹**：控制台活动面板、`activity_log` 搜索、审计文件读的都是它。从日志排查只能看到「edit_block 失败了」，想知道为什么就得把调用重跑一遍。现在写成 `Failed in 483 ms: <原因>`，耗时保留但不再是全部。`record()` 本来就会过 `redactSensitiveText` 并截到 500 字符，原样传进去即可，与其他审计行一视同仁。
-
-  讽刺的是上一轮刚修完 `notify` 的「审计行不说实话」——同一类毛病，在隔壁文件的公共路径上，当时没往上看一层。
-
-- **`edit_block` 匹配到多处时只说数量，不说在哪。** 零匹配那条路径有完整的模糊诊断（最近似的行窗口 + 漂移说明），多匹配这条路径只有一句 `found 3` 加一句「加点上下文让它唯一」——而**位置是已知的**，让调用方自己再 grep 一遍，正是它刚刚委托给这个工具的活。真实案例：本仓库 `CHANGELOG.md` 里 `### Fixed` 出现 3 次，我这几轮为此失败了 6 次。现在报 `Matches start at lines 3, 6, 9.`，超过 8 处截断。给行号而不是给片段，是因为修法几乎总是「往外扩一行」，而你需要行号才能去看那一行旁边是什么。`edit_block` 与 `file_op{op:"edit"}` 两个入口共用同一个辅助函数。
-
-- **`set_todos` 的参数守卫答非所问。** 拿它去读清单（`{action:"list"}`）得到的是 `todos must be an array` —— 一句完全正确、但回答了错误问题的话。真实情况是「`set_todos` 只能写，读要用 `get_todos`」，而 `get_todos` 确实存在。守卫按 AGENTS.md 点名了参数，却没指出**工具选错了**。现在补一句 `use get_todos to read the current one`。条目校验同理：原来是 `requires id, title, and a valid status`，三个字段列一遍让调用方自己去比对；现在直接说 `missing title`，或者 `status must be pending, in_progress or completed (got "doing")` —— status 是唯一有封闭词表的字段，也就是列字段名最解释不清的那个。
-
-- **`.gitignore` 补上 `*.tmp`。** `git add -A` 连着两次把临时的提交信息文件（`commit-msg.tmp`、`msg.tmp`）提交进去，两次都靠 amend 补救。这不是手滑能根治的事——工作区里有临时文件，而用的是「全加进来」的命令。让 git 自己记住比靠命名约定可靠。
-
-- **「最新进展」会把上一个 AI 留下的话当成正在发生的事。** 重启后打开任务页，看到的是一份今天的清单、标着**实时**，下面一张「最新进展」卡片写着「高危子集已提交（424+127+60 全绿）」——那是 23 小时前另一轮对话的半句话，测试数都对不上了（当时 424/127/60，现在 496/145/93）。
-
-  根因在 `todo-store.ts`：`persistTodos()` 写清单时有一行 `lastProgress: current.lastProgress ?? null`，把旧进展一路带进新文档。这行合并**是故意的**，防止同一 tick 里排队的 `set_todos` 与 `report_progress` 互相把对方的字段覆盖成空——所以修法不是停止携带，而是**给携带过来的东西贴上标签**。
-
-  真正缺的是归属信息：文档级的 `sessionId` 属于「最后写清单的人」，而这份文档的两半由不同工具、在不同时刻写入，它回答不了「这句进展是谁说的」。现在 `lastProgress` 自带 `sessionId`，`/api/todos` 据此单独给出 `progress_stale`，页面标题在**最新进展 / 上次进展**之间切换、挂「已离线」标记并把正文灰掉（只挂标记不够——标记很容易被忽略，而下面那句话读起来就像实时状态）。没有 `sessionId` 的老条目一律判为非当前会话，这在定义上就是真的。
-
-  清单那边早就有 `stale` 标记，进展这边没有，于是同一个页面上出现了「实时 + 23 小时前」这种自相矛盾的组合。两张卡片现在各自独立判定新鲜度，因为它们本来就各自独立地变旧。
-
-- **通知的审计行现在说的是实际发生的事。** 三个毛病挤在同一行代码里：`record("notify", "progress", ...)` 把活动状态**写死成 progress**，于是一条成功送达的 `finished` 事件在日志里长成 `[notify] progress: push finished` —— 「progress」在这里同时是活动生命周期状态和通知事件类型，两个意思撞在一行；这行还写在**发送之前**，所以网络失败时它已经宣称推送过了，而控制台活动面板会把它永远画成「进行中」，因为没有任何后续把它移出那个状态。现在状态由真实结果推导：送达记 `completed: sent <event>`，失败记 `warning: send failed (...)`。
-
-  顺带补上一个真正的缺口：**被挡住的推送以前完全不写日志**，每条 gated 分支都是静默 return。于是「我手机怎么没响」这个问题在日志里查不到答案 —— 上个提交加的两个开关还让这件事更严重了，因为「合理地不响」的路径变多了。现在会记 `warning: not sent (switch_off|duplicate|rate_limited)`。唯一的例外是通道本身被关掉或没配密钥：那是用户自己按的开关，每次 set_todos 都警告一遍只是噪音。这条行为由集成测试钉住了 —— 原来那行从来没有测试，这正是它能漂这么远的原因。
-
-- **AI 做完却忘记发通知时，服务端替它说一声。** 既有的无反应监视只管「有未完成任务却长时间没动静」——它的判据里明确要求**存在未完成项**。这就漏掉了正好相反、而且更常见的一种：模型勾完最后一条、在聊天里写完总结，然后**根本没调 `notify`**；不盯着标签页的人因此什么都不知道。指望模型自觉是已经反复失败过的办法（本轮对话里就连续漏了两次），所以改由服务端陈述它自己看得见的事实。
-
-  触发条件收得很紧，因为**误报「已完成」比漏报更糟**：清单存在且**全部完成**、当前**没有请求在飞**（不是做到一半）、最后一次调用后**静默满 45 秒**（留出「`set_todos` → 总结 → `notify`」这个自然收尾的时间，让模型自己的通知先发，本机制绝不抢跑）、且**该完成时刻之后 AI 没有自己推送过任何东西**。闩锁用的是完成时刻，因此一份清单只播报一次，新任务推进了时刻才会重新武装。跑在既有的 60 秒会话清扫节拍上，**不新增定时器**，`idleMinutes = 0` 同时关掉两个监视（不另造开关）。
-
-  「AI 自己发过就闭嘴」这一条是靠**任何一次成功推送都打标记**实现的，这顺带让它自动适配两种模式：频繁模式下清单勾完时完成推送早就响过了，标记已置位，兜底保持沉默；免打扰模式下那些推送被压制、标记不会置位，兜底就成了唯一会出声的东西。判定逻辑是纯函数 `finishNoticeVerdict`，7 条单元测试逐条钉住上述每个条件（含「一份清单只播报一次」和「idleMinutes 很小时结算延迟随之缩短、不会反过来超过阈值」）。
-
-- **日志时间戳按本机时区显示，不再是 UTC。** `bridge.log` 与控制台日志流同源（`FileLog.write()` 一行字符串同时喂给 SSE 监听器和文件），行首时间戳一直是 `new Date().toISOString()` —— 恒定 UTC。在 UTC+8 的机器上，控制台里刚刚发生的一条 `[run_script] running: …` 显示成 8 小时前，人要在脑子里做时区加法才能把日志行和自己刚做的动作对上。现在改用本机挂钟时间并**把偏移量写进文本**：`[2026-09-14 20:02:43.248+08:00]`。保留偏移是有意的——日志文件会被拷走、会被贴进聊天窗口，裸的本地时间一旦离开这台机器就无法解释。格式仍是**前缀零填充、字典序即时间序**，`tail`/`sort`/肉眼扫读都不受影响。**只改人读的这一处**：`audit.log` 的 `at` 字段仍是 ISO-8601 UTC，因为 `activity_log` 的 `since` 过滤会把它反解析成毫秒（`src/mcp/activity-log.ts`）—— 机读要绝对时刻，人读要挂钟时间，这本来就是项目既有取向（内存活动视图早就用 `toLocaleTimeString()`）。仓库里没有任何代码回读这个前缀（已 grep 证实），唯一断言旧 ISO 形状的是 `test/file-log.test.ts` 自己的一条正则，已随之更新；`test/ngrok-failure.test.ts` 里的 ISO 前缀是喂给 ngrok 错误解析器的固定 fixture，不经 `FileLog.write()`，不受影响。
-
-- **无法识别的 `TZ` 会让整个进程静默跑在 UTC —— 现在启动时自动纠正，并由 `doctor` 报出来。** 上面那条改完后实测**仍然**显示 `+00:00`，根因不在代码而在环境：`~/.bashrc` 里的 `export TZ=CST-8`。这是 POSIX 风格的写法，glibc 和 Git Bash 都认（`TZ=CST-8 date` 确实给 `+0800`），但 Node 走 ICU，只认 IANA 名称 —— `Intl.DateTimeFormat().resolvedOptions().timeZone` 返回 `Etc/Unknown`，于是 **Node 一声不吭地把整个进程跑在 UTC**，而系统时区明明是 China Standard Time。没有报错、没有警告、没有日志，唯一症状就是「时间看着不对」，而人第一反应永远是怀疑代码——这次就是这样，改完格式化逻辑才发现真凶在别处。
-
-  更麻烦的是**没有一个 `TZ` 值能同时满足两边**：`CST-8` 对 Git Bash 对、对 Node 错；`Asia/Shanghai` 对 Node 对、对 Git Bash 反而错（实测输出 `+0000`）；只有**不设 `TZ`** 两边才都正确。所以这不能靠「让用户改配置」了事，程序自己得扛住：`main()` 在任何代码有机会打日志之前调用 `normalizeTimezone()`，把 POSIX 写法折算成等价的 IANA 零区名 —— `CST-8` → `Etc/GMT-8`（POSIX 与 `Etc/GMT*` 用的是**同一套反转符号**约定，整点偏移可以原样搬过去，符号不会错）。
-
-  刻意做得很窄，因为「猜」在这里是有代价的：**只在时区已经解析不出来时才动手**（此时进程已经确定是错的，没有正常行为可破坏），**只接受「缩写 + 整点偏移」**，折算完还要再验一次、没变好就原样退回。带夏令时规则的、半小时偏移的（`IST-5:30`）一律不碰 —— `Etc/GMT*` 不含夏令时，硬折算等于把「明显错」换成「隐蔽地错」，那更糟。
-
-  `doctor` 相应新增 timezone 一项，并且**区分三种状态**而不是简单的对错：解析不出来 → `[!!]`，把那个值原样引回来并给出可用的 IANA 名称；被自动折算过 → `[OK]` 但明说「偏移已对，但这是折算来的固定偏移、不含夏令时，根治办法是去掉 shell 配置里那行 `TZ`」；本来就正常 → `[OK]` 回显时区名与**它将要写进日志的那个偏移**（`Asia/Shanghai（+08:00）`），让人一眼确认，而不是等下次读日志时再嘀咕一次。三种状态都有测试（`test/cli-surface-integration.test.mjs` 用子进程 env 分别注入 `TZ=CST-8`、`TZ=IST-5:30`、`TZ=Asia/Shanghai`），外加一条单元测试钉住「环境正常时它必须完全不作为」。
-
-- **刷新 `/console/logs` 之后日志是空的，而磁盘上的 `bridge.log` 有两万多行。** `LogsTab` 的行数组每次挂载都从 `[]` 开始，而它唯一的数据源 `/api/logs/stream` **只推送连接之后新产生的行**，从不回放历史 —— 于是每次刷新都退回「等待日志…」，在一个安静的实例上永远停在那里，看着像功能坏了。全仓库搜过 `onLine|logs/stream`，喂这条 SSE 的地方只有 `api-router.ts` 一处，**没有任何补拉端点**，所以这不是前端少了一次请求，是服务端从来没提供过历史。现在 SSE 一连上先回放文件尾部再转直播：`recentLogLines()` 用 `fs.open` 从**文件末尾**读一个 512 KiB 的窗口（日志按 10 MB 轮转，不把整个文件读进内存），丢掉窗口边界上那半行，取最后 800 行 —— 与前端本来就有的 800 行上限对齐，免得回放比前端肯留的还多。回放走**与直播同一个 `redactSensitiveText()`**：两条路进的是同一个浏览器，脱敏就不该有两套。读不到文件（首次运行、正在轮转）时回放为空而不是让整条流失败 —— 历史是锦上添花，直播才是这条流的本职。`--- log stream connected ---` 仍然是回放与直播的分界，集成测试拿真实 SSE 帧断言「新连接的首批帧里有既有日志行」，并先证伪过：把回放循环删掉，它确实红。
-- **对话结束的通知不再挂在任务清单上。** 服务端兜底的 `finishNoticeVerdict()` 原先第一道门就是 `if (!hasTodos || !allCompleted) return false` —— 也就是说**只有写过清单、且清单全部完成**的会话才配得到一次推送。可日常里占多数的恰恰是没有清单的那种：问一个问题、跑一条命令、改一个文件，结束得同样真实，人也同样不在电脑前，而这套机制对它们完全沉默，等于为最需要它的场景关掉了自己。现在「没有清单」是一种合法的结束，只有「**有清单但没做完**」才否决 —— 那份沉默属于上面那条闲置看门狗，两条看门狗不该为同一段沉默各响一次。两种结束给两种沉淀期，因为证据强度不同：清单整份翻完是一句明确的「做完了」，沿用 45 秒，让走开的人一分钟内听到；**没有清单时唯一的证据只有沉默本身**，而沉默也可能只是人在读一段长回答，所以必须等满运维自己设的整个 idle 阈值，否则就会在对话中间喊「已完成」。`completionSnapshot()` 相应地在无清单时用**最后一次调用的时间**当闩锁键：原来那个 `completedAtMs = 0` 会让每一次推送都被否决，不改这里，上面的解绑一行也不会生效。推送文案区分两种结束，手机上扫一眼就知道是哪一种。
-- **`read_files` 的 `sha256` 会在截断读时整个消失，而不是给 `null`。** 工具说明与 `docs/tools.md` 都写着「返回的 `sha256` **始终覆盖整个文件**，可作 `expected_sha256`」，连接说明里还有一条总契约：「absent facts are explicit nulls or empty strings, so parse by field name and **never by line presence**」。实现却是 `...(fullyRead ? { sha256: r.sha256 } : {})` —— 键被 spread 掉了。后果是 `'sha256' in result` **随文件大小与读法静默翻转**：同一个文件，整读有键、`max_bytes` 截断没键，而「读 → `expected_sha256` 写」这条乐观并发链在截断读之后直接断掉，且沿途不报任何错。**行为本身（不为了一个哈希去重读 2 GB 文件）是对的，改的是字段形状**：现在恒为 `sha256: string | null`，`lines_total` 与两条 base64 路径（含 `readAsBase64` 的 `sha?: string` 签名）同一类问题一并改齐；截断读后要摘要就用 `get_file_info`，文档改成说这件事。`readAsBase64` 的截断分支原本连**前缀的哈希**都不给（正确，给了会让每一次 `expected_sha256` 写入都失败），现在显式写成 `null` 并注明原因。
-- **这个洞能溜过 139 条集成测试，是因为 `sha256` 的断言全都在 `streamReadLines` 的单元测试里**，而那一层**内部一直是 `sha256: null`**（`stream-read.ts:51` 的返回类型就这么写的）—— 把键 spread 掉的是上面的工具处理器，单元测试在结构上就看不见它；`max_bytes` 在整个 `test/` 目录只出现过 1 次。新断言因此加在**工具边界**（`test/file-op-guards-integration.test.mjs`，走真实 HTTP 的 `tools/call`），并且是先证伪过的：把修复还原成旧写法，它确实红。
-- **CORS 头从「对所有响应发 `*`」改成「只发给需要被浏览器跨源访问的路径」，堵住路由令牌的外泄。** `http-listener.ts` 原先在进入路由之前，无条件给每个响应挂上 `Access-Control-Allow-Origin: *`（连带 `/api`、`/console`、`/healthz`），而 `/api` 有**三条只读接口的回包里就带着路由令牌**：`settings`（`state.mcpUrl`，注意信封是 `{ ok, state }`，不是顶层字段）、`prompt`（给客户端粘贴的接入文本）、`status`。回环 Host 门在这里保护不了任何东西：真正危险的读发起方就运行在同一台机器上，它发往 `127.0.0.1` 的请求完全满足那道门，浏览器只要允许跨源读就拿到令牌；私有网络访问（PNA）是各家浏览器的策略而非规范，服务端不能拿它当防线。现在 CORS 只授予 `/mcp/`、`/oauth/`、`/.well-known/`（浏览器托管的 MCP 客户端要走端点与授权流程），管理面回到它本来就该有的「仅同源」—— `api-router.ts` 的安全模型注释早就写着「不发出 CORS 头」，那条一直是假的，现在它成了事实并被 `test/api-integration.test.mjs` 两侧钉住（带令牌的读没有授权、`/mcp` 的预飞行仍有授权；连「回包里确实有令牌」这半边也钉住，否则下一个人只会觉得那道断言多余）。写操作侧不受影响，它靠的是 `X-Open-Bridge-Console` 不在 `Access-Control-Allow-Headers` 白名单里。
-- **实例打自己端口的两条自检，会在停机时把整个进程崩在 Windows 的 libuv 断言上。** 现场：CORS 改动落地后，`api-integration` 末尾「shutdown endpoint stops the process」拿到的退出码是 `3221226505`（`0xC0000409` fastfail），serve 自己吐的最后一行是 `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 94` —— 一次干净停机长得像崩溃。第一反应是「新测试害的」，而这条**证伪**得很快：把新测试整条 skip 掉，崩；只留两条老测试（体检 + shutdown）也崩。真正的原因在 `runHealthCheck` 与启动自检：它们用**全局 `fetch` 打自己的 `127.0.0.1:<port>`**，undici 的全局 dispatcher 于是把这条回环连接留在**同一个进程**的 keep-alive 池里；收尾时 `closeIdleConnections()` / `closeAllConnections()`（`http-listener.ts:59,81`，为的是别让活跃连接把停机挂死）摧毁服务端那一侧，客户端句柄还活着，libuv 断言直接 abort。修法是新增 `src/bridge/self-probe.ts`：本地自检一律走 `node:http` + `agent: false`，读完就关，池子里不留自连接（`agent:false` 就是全部机制，不是又一层抽象）；公网隧道那条**故意**继续用 `fetch` —— 它打的是别人的主机，8 秒预算的语义属于那条路。**一条没解释清的观察留在这里，别装作知道**：那四个 CORS 头存在与否决定崩不崩（把 `corsGrant` 恒真 → 2/2 干净；在非授权路径上改加一个无关头 → 照旧崩），所以诱因不是响应大小也不是时序抖动，但未消费的响应体、我的测试、策略本身都被逐个排除过；能实测到的范围是：**进程自己池化的自检连接**在收尾时被摧毁 → abort；这与 CORS 无关（CORS 只是改变了哪条路径带那四个头）。**「为什么四个头左右了崩不崩」已经查清**（见下条），此处不再是悬案。顺手把 `assert.equal(code, 0)` 改成把 serve 的输出尾巴放进断言消息 —— 光一个 `3221226505` 在 Windows 上永远查不动。
-- **上条留作待查的「为什么那四个 CORS 头决定崩不崩」，查清了：诱因是响应头的**数量**，不是 CORS，也不是响应大小。** 拿一个 40 行的最小复现脚本把变量一个一个拧（同进程建 server → 用全局 `fetch` 打自己 → 照 `http-listener.ts` 的顺序 `closeIdleConnections()` / `closeAllConnections()` / `close()`），在 Node 24.18.0 / Windows 上得到一条很干净的阶跃：**6 个额外响应头干净退出，7 个就 abort**（`Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\\win\\async.c, line 94`，退出码 `3221226505`），8 个、16 个照崩。**「是不是响应变大了」这条直接被证伪**：把同样的字节数塞进**一个** 400 字符的头里，完全干净 —— 所以起作用的是头的**条数**（undici 解析响应头时的分块/回调次数），不是总字节。那四个 CORS 头当初之所以像开关，只是因为它们恰好把某些路径的头数推过了这道坎；换四个无关的头一样崩，这也解释了当时「加一个无关头照旧崩」那条观察。**真正的必要条件仍然是自连接**：同样的头数，把客户端换成 `node:http` + `agent: false`（也就是 `self-probe.ts` 已经在做的事），8 / 16 / 32 个头**全部干净退出**。也就是说修复本身没选错，只是当初没能解释触发阈值；现在两半都对上了 —— 池化的自连接是必要条件，头数≥7 是把它引爆的那一下。复现脚本是一次性的，结论记在这里，不留进仓库。
-- **`search_files` 不再为必然失败的正则白烧一个 ripgrep 进程，也不再只留一句没有信息量的「ripgrep failed」。** 内置扫描用的是 JS `RegExp`，而 ripgrep 默认引擎**不支持先行/后顾（`(?=`、`(?<=`…）与反向引用（`\1`）**：这类查询每次都派生一个进程、拿一次 exit 2、被 catch 成审计日志里那句不带原因的 `ripgrep failed; using built-in scan.`（`record` 是 `progress`，永远进不到调用方的结果里）。这条消息在仓库根那份运行残留的 `audit.log` 里出现过 27 次，而在在线实例的 `~/.open-bridge/audit.log` 里是 0 次 —— 因为消息本身不带原因，无法把这 27 条归因到某一类正则，**能确定的是机制存在**（先行/后顾与反向引用必被 rg 拒绝，`test/search-ripgrep.test.ts` 拿真实二进制对过）。现在 `ripgrepPatternRejection()` 在派发前认出这些构造、直接走内置扫描并把**构造名**写进审计；真失败时（非法正则、读不了的目录）把 ripgrep 自己的诊断压平限长带出去，下次再出现就有据可查。判定只是路由提示，**判错也不会改变答案**：漏判 → rg 报错 → 照旧回落到同一个引擎；误判 → 少跑一次进程，慢一点。`test/search-ripgrep.test.ts` 里那条交叉断言拿真实二进制核对「检测器说是的，rg 真的拒绝」；`docs/tools.md` 补上两个后端的语义差别，免得把空结果当成没命中。
-- **`run_script` 沙箱 worker 源码混入 TypeScript 注解，Node 22 上整个工具瘫痪。**`SCRIPT_WORKER_SOURCE`（`String.raw` 模板）里的 `makeHarness()` 在上一次重构时带上了 `: Record<string, unknown>` 等注解——worker 用 `eval: true` 以纯 JS 解析这段字符串，而 Node 22.x（`package.json` engines 下限、CI 矩阵最低档）对 eval 源码不做类型剥离，解析即 SyntaxError，每次 `run_script` 都以 worker 错误收场；本机 Node 24 恰好默认剥离 eval 的类型注解才一直没暴露。字符串内容本就逃过 tsc 与 eslint，这次把注解还原为纯 JS，并在原位注明「这串只能是 JS」的原因。
-- **控制台 OAuth 客户端「注册时间」显示成 1970 年。**服务器按 RFC 7591 存秒（`client_id_issued_at: Math.floor(Date.now()/1000)`），安全页却把秒直接喂给要毫秒的 `new Date()`，每行都渲染成 1970 年；现在乘 1000 再渲染，测试夹具改为真实的秒值并断言不再出现 1970。
-- **终端输出对齐：手工垫空格改按显示列宽对齐。**中文/全角字符占两列、按字数只算一个，手工垫空格必然错位（`serve` 横幅里「本地/公网 MCP URL」的值就比别的行后退了一列）。`src/cli.ts` 新增 `displayWidth`/`padLabel`，横幅、`status`、`health`/`doctor`、`config list`、`token list`、`instances` 的标签列统一走它（纯 ASCII 标签输出不变）；告警块第二行改为与首行同级缩进（不再假设 ⚠️ 占两列）；`test/display-width.test.ts` 钉住列宽语义。README 架构图的改成两个 Markdown 表格（流程 + 出口：渲染器自动对列，不依赖等宽字体、前导空格和任何宽字符的宽度），serve 示例输出去掉行首缩进，并把三处「宿主能力过滤 / 40 个定义」的过期说法改成 v6 之后的现实（当时 38 个定义、只剩配置档过滤；同一未发布周期里加进 `notify` 之后是 39，以 `README.md` 与运行中的 `tools/list` 为准）。纯显示层改动，不碰任何行为。
-- **`README.md` 与 `docs/tools.md` 各有一条 bullet 被逐字粘贴了两次。** notify 那轮往两份文档里加说明时贴重了：README 的「无反应监视」连着两行完全相同，`docs/tools.md` 的「模式是服务端门，不是约定」在两条其它 bullet 之间又出现一次。两份各删重复的那一份。之所以一直没被发现：钉文档的那组测试只要求「每个工具都被覆盖、且两个共有小节还在」—— 重复一条既不违反覆盖也不违反预算，**覆盖率测试看不见冗余，它只会因为缺失而红**。
+- 修复文件/补丁安全边界、shell 会话、命令输出、启动/关闭、隧道恢复和构建陈旧提示。
 
 ## [1.0.0-alpha.6] — 2026-09-14
+
 ### Added
-- **新增 `AGENTS.md`：把「踩过才知道」的那部分写下来。** `README.md` 是用户视角、`docs/tools.md` 是工具行为全集，都没有承载贡献者约定的地方，于是同一些坑被反复踩（「集成测试跑的是 `dist/` 不是 `src/`」这一条本轮就撞了两次）。里面记的是四件事：改完源码之后该跑什么、参数守卫的既有约定（只拒绝「没有」和「无法兑现」，绝不收紧能力；不要用 `Math.max(0, Number(x))` 兜底）、**哪些「类型说不可能」的守卫不能删**（`JSON.stringify` 会返回 `undefined`、可选捕获组与数组越界在运行时是 `undefined`、只在闭包里赋值的 `let` 会被 TS 收窄成字面量）、以及 `Host` 接口的边界 —— **保留它，但不再新增 host 形状的间接层**：一层间接如果只有一个实现、且没有第二个实现的现实计划，它就不是抽象，是绕路。
+
+- 增加连接技能发现、工具行为标注、活动追踪和更完整的 API/集成测试覆盖。
 
 ### Changed
-- **死代码 / 过度设计 / 重复实现清理一轮（四路审计 + 逐条证伪）。** 每条都以「能否证伪它存在的理由」为准，而不是「看起来没人用」：
-  - **`persist.ts` 的编辑器宿主残留**：`ensureWritableBufferTarget(_fullPath, _allowDirty)` 两个参数都不用、函数体是空的，**连一个调用点都没有**；`PersistOptions.allowDirty` 从不生效；`allow_dirty` 一路从 `write_file`/`edit_block`/`apply_patch` 三个工具的 schema 传下来最终被丢掉。注释说的「kept for interface parity with the editor host」在这个独立 Node 应用里**没有第二实现可兼容** —— `AGENTS.md` 批评的正是这种绕路。整簇删除，`persist.ts` 52 → 19 行。**顺带修掉一个假承诺**：`docs/tools.md` 曾写「`allow_dirty: true` 才会覆盖编辑器里未保存的改动（默认拒绝）」，而该 flag 完全被忽略、写入永远成功。
-  - **`visible` 终端镜像整条链路删除。** `showVisibleTerminal` 是空函数（宿主里根本没有终端面板），它喂的捕获文件**被创建、然后被删除，从来没有任何读者**；`tailCommandForShell` 自始没有生产调用者，只被测试保活。schema 却在承诺「mirror live output into a user-visible terminal」，`docs/tools.md` 也在承诺「在用户可见终端里跑」—— 而 `README.md:301` 早就写明这件事在独立应用里**有意不做**。现在 schema 字段、`CommandState.visibleTerminal`、`visible_terminal` 输出字段、空模块与捕获路径、以及只被测试保活的两个函数全部移除，服务日志那半（`read_service_log` 真的会读）保持不变。
-  - **`oauth-store` 手写的密码学原语合并到 `auth-core`，并修掉一处已发生的漂移。** `hashOAuthSecret` 与 `auth-core.hashSecret` 逐字相同；而 `oauthDigestEquals`（手写 XOR 循环）与 `auth-core.digestEquals`（`timingSafeEqual`）**对同一输入的答案已经不一致**：`digestEquals("","")` 是 `false`（有测试钉住），`oauthDigestEquals("","")` 是 `true`；`"zz…z"` 同理。两者都在 OAuth 安全路径上。现在共用 `hashSecret`/`digestEquals`。`generateOAuthSecret` **没有**合并 —— 它的前缀参数是真在用的（`obc_`/`oba_`/`obr_` 三种），而 `auth-core.generateSecret` 硬编码 `ob_`。
-  - **原子写规则从两份并成一份。** `file-tools.writeAtomic` 与 `persist.persistText` 的唯一差别是 `fs.writeFile` 的 encoding 参数（对 Buffer 无效、对 string 默认即 utf8），合并为 `persist.writeFileAtomic(fullPath, Buffer|string)`。
-  - **`toNative` 的本地副本（两处）合并到已存在的 `workspace/eol.applyEol`** —— 同一份 EOL 还原规则，`applyEol` 早就在 `patch.ts` 里干这件事。
-  - **`stringEnv` 合并到 `processes.ts`**：`process-tools` 与 `service-tools` 各有一份逐字相同的 env 过滤。
-  - **删除的死导出**：`bridge/review.ts` 的 `summarizeFiles` 再导出（无人从该模块导入该名字，测试直接从 `mcp/review-parse` 取）；`dispatcher.ts` 一条紧邻自己长版本、内容重复的一行 JSDoc。
-  - **修掉六处「与代码不符」的注释**（这类是最高价值的，因为它会误导下一个改代码的人）：`network/safe-probe.ts` 的 `ProbeNetworkScope` 文档声称 `any`「never link-local, multicast…」，而同文件的 `case "any"` 明确写着「no address-class filtering at all」并 `return true` —— **安全相关的假文档**，会让后来者以为传 `any` 仍然拦得住云元数据地址；`process-tools.ts` 的 `validateTodos` 声称「读路径是宽松的、会丢弃坏条目」，而 `loadTodoStore` 只是把非数组换成 `[]`、条目一律原样通过（真正的宽松读取器早已不存在）；`shell-sessions.ts` 的 sentinel 注释声称用 `;` 拼接，代码用的是换行（照注释「改回」`;` 会让尾随注释或后台命令吞掉哨兵，正是注释声称支持的场景）；`tunnel.ts` 一段「重连隧道而不拆掉本地服务」的文档错挂在**取消**重连的 `stopReconnectChain` 上方（已移到 `scheduleReconnect`）；`lock-plan.ts` 把 `get_file_info` 描述成「读取文件内容」——它只读元数据，但**仍然必须持共享锁**（大文件 sha256 期间不能被并发写入插入），注释已改写并显式警告不要据此删锁；`oauth-store.ts` 模块头声称授权码也被散列，实际它是内存 Map 的**明文键**（紧邻的下一段自己就写明了）。
-  - **净变化**：`src/` 减少 1 个文件（`visible-terminal.ts`），删除 3 个死导出与 2 个只被测试保活的函数，合并 6 组重复实现，改正 6 处假注释。`npm run verify` 全绿（405 单测 + 126 集成；较清理前少 2 个测试，均属被删函数的用例）。
-  - **明确保留、不动**（审计逐条判定为「正确的防御」，删了会引入 bug）：`AGENTS.md` 保护的「类型说它不可能」守卫、`safe-probe` 的整个 SSRF 分类器与失败即拒绝策略、认证门的失败关闭与限流器、`patch.ts` 的回滚与 hunk 坐标逻辑、`file-tools` 的自毁/EXDEV/ENOENT 守卫、`SharedJsonStore.withFileLock` 的持有者令牌、路由与监听器的安全门、`regex-worker` 两个函数刻意分离的错误契约、`probeWithTimeout` vs `resolveWithDeadline`（解析 vs 拒绝的结算形状不同）、五处端口校验器（范围与文案各不相同），也没有为「去掉重复」去合并 `readBody` 的三个变体（64 KiB 抛错 / 8 MiB 继续排水 / 64 KiB 表单，契约不同）。
-  - **一次自我否决**：`regex-worker` 的 `matchLinesInWorker` 与 `testReadyPattern` 有约 25 行逐字相同的 worker 生命周期骨架，我抽了共享 helper —— 结果文件从 185 行变 197 行（helper + 两个调用方各自的错误工厂），净增代码换一个带泛型参数与四个回调的骨架。已回退，不拿「消除重复」当选美。
-  - 顺带记录一条方法论教训：**「值导出零死代码」这个结论不能靠把 `test/` 当成消费者得出** —— 第一版扫描因此漏掉了 `tailCommandForShell` 这类「只被测试引用、生产已死」的符号；第二版把测试单独列为一类后才看见它。
-- **清理（上一轮）：两处死代码删掉，两对重复 helper 各自并成一份。** 按当时「过度设计 / 防御式编程」审计逐条核对后只动有证据的部分：
-  - `DirtyBufferError`（`src/workspace/persist.ts`）**全仓库从未被 `new`/`throw` 过**，删掉；独立宿主没有「编辑器脏缓冲」这回事，`PersistOptions.allowDirty` 的说明同步改成「仅编辑器宿主、为兼容保留」。**本轮已把 `PersistOptions` 与 `allowDirty` 一并删除**（见上一条）。`describeCanonicalCall()`（`src/bridge/tool-call-shape.ts`）则是**只被本模块的 `normalizeToolCall` 用到**（别名提示里的 `call` 字段），所以只去掉 `export`、实现留着 —— 审计里「单次使用的导出」说的正是它。
-  - `json()`（`src/http/oauth.ts` ↔ `src/server/api-router.ts`）两份实现并成 `src/http/json-response.ts` 的 `sendJson()`。这两份**已经漂移**（api-router 那份多 `charset=utf-8`、多 `headersSent` 守卫；oauth 那份多两个跨域头），信封从此只有一份，OAuth 只在自己那层加 `referrer-policy` 与 `access-control-allow-origin`；`api-router.ts` 31 个、`oauth.ts` 6 个调用点行为不变。
-  - `pick()`（`tool-call-shape.ts` ↔ `tool-families.ts`）只留 `tool-call-shape.ts` 一份，`tool-families.ts` 改为导入。
-  - 审计里点的另一对 `readBody` / `readJsonBody` **没有合并**：两者除了名字几乎什么都不一样（MCP 那条 8 MiB、`aborted`/`close` 也要结算 promise、文案带 `MCP`；控制台 API 那条 64 KiB、超限直接抛错、没有断连监听）。硬合并要么加一个开关参数、要么偷偷改掉其中一边的契约，比留着重复更差。
-- **控制台的实例启停按钮全部撤掉：实例归终端管。** 规则本来就一条，也是用户的原话 —— **终端开着 = 实例在跑，终端关掉 = 全停**（一键启动脚本就是这个语义）。控制台再放一套「启动 / 停止」不但多余，而且会误导：停止会关掉承载页面的那个监听器，页面随之失效，「再启动」根本点不到。前两个提交（`6f88dd4` 的「退出进程」、`053d099` 的「重启」）方向错了 —— 为了让一个**不该存在的按钮**能用，把生命周期从终端手里夺走：重启后实例变成后台进程，关窗口不再停止它，复杂度却成倍上升。现在：
-  - 控制台去掉「启动 / 停止 / 重启 / 退出进程」四个按钮，卡片改为说明这条边界，只保留「轮换端点」（进程内换令牌，不碰进程）与「健康检查」（只读探测）；
-  - 服务端撤掉 `restart` 动作、`setRestartHook` 与 `src/bridge/restart.ts`（及其两个测试文件）；
-  - 「磁盘上的构建比本实例新」的提示改成终端能真正做到的动作：**关掉承载实例的窗口，再双击一次一键启动脚本**（或在该窗口 Ctrl+C 后重新 `open-bridge serve`）——这也正是「重新加载新构建」在本模型下的唯一正解；
-  - `/api/bridge/start|stop|rotate`、`/api/shutdown` 这些接口**保留不动**（CLI、脚本、以及将来的桌面壳仍在用），只是不再从网页暴露；`test/api-surface.test.ts` 的守卫改成：任何路由若无人调用即失败，而「控制台不驱动生命周期路由」变成一条显式断言。
-- **局部变量遮蔽模块级同名导入的 15 处已全部改名，`no-shadow` 现已强制。** 源码 7 处：`paths.ts` 的参数 `root` 遮蔽同文件导出的 `root()`、`service-tools.ts` 的局部 `host` 遮蔽导入的 `host()`、`host.ts` 的 `setHost(host)` 遮蔽同文件导出的 `host()`、`node-host.ts` 的局部 `nodeHost` 遮蔽导出的 `nodeHost()`、`auth.ts` 两处 `record` 遮蔽导入的 `record()`、`patch.ts` 的 `toNative(text)` 遮蔽同一作用域上一行解构出来的 `text`；测试里另有 8 处用局部 `before`/`after`/`token` 遮蔽 `node:test` 的同名导入与本文件自己的 `token()` OAuth 助手。**纯重命名，无行为变化**（`tsc` 本来就能挡住真正的误用，这 15 处没有一处是活的），但每一处都会先被读成 bug、再花一次重读去确认；而 `host`、`root`、`record`、`before`/`after` 恰恰是本仓库已在模块作用域使用的名字，混淆不是假设性的。规则一并写进 `eslint.config.mjs`（TS 用 `@typescript-eslint/no-shadow`，基础规则在 TS 上会误判 enum / namespace / 声明合并），免得回归。
 
-- **做了一次类型感知 lint 审计（`no-floating-promises` / `await-thenable` / `no-misused-promises` / `no-unnecessary-condition` / `no-unnecessary-type-assertion` / `eqeqeq` / `radix` 等），122 条命中，逐条判定后只改了上面两条。** 判定结果本身值得留下来，因为它决定了哪些「看起来该修」的东西**不能动**：
-  - `no-floating-promises` **零命中** —— 没有漏 `await` 的悬空 promise。
-  - `no-unnecessary-condition` 74 条里，绝大多数是**类型在撒谎、守卫是真的**：`JSON.stringify` 声明返回 `string`，但 `JSON.stringify(undefined)`（以及 replacer 对函数返回 `undefined`）运行时返回 `undefined`，`script-sandbox.ts` 正是靠这个判断「返回值没有 JSON 形态」；正则的可选捕获组未参与匹配时 `hunk[1]` 运行时是 `undefined`（`patch.ts`）；`.sort(...)[0]` 在过滤结果为空时是 `undefined`（`session-table.ts` 两处靠它判断「无可淘汰会话」）；`rest[i+1]` 越界是 `undefined`（CLI 参数解析）；`process-tools.ts` 的 `timedOut` 见上。**删掉这些守卫会真的引入 bug。**
-  - 根因是 `noUncheckedIndexedAccess` 没开。实测开启后 `tsc` 报 **85 处**（`patch.ts` 21、`safe-probe.ts` 20 占一半）。当时判断那是严格度迁移而不是修 bug、且要动仓库里最 delicate 的补丁应用器，所以只记录代价 —— **紧接着的一轮已经把它做完了**，见下面那条。
-  - `eqeqeq` 2 处是 `== null` / `!= null` 惯用法（一次覆盖 `null` 与 `undefined`），是正确写法；若要开这条规则应配 `{ null: "ignore" }`。
-  - `http-listener.ts:138` 的 `no-misused-promises`（async 函数交给 void 回调）是**有意为之且已加固**：整个 handler 体包在最外层 try/catch 里，源码注释说明得很清楚 —— 异步 handler 的 rejection 会变成 unhandled rejection，而 Node 的默认处置是杀进程，一行畸形请求就够了。
-  - `require-await` 9 处、`no-unnecessary-type-assertion` 29 处、`return-await` 6 处：无行为影响，未动。
-- **`noUncheckedIndexedAccess` 已在两份 tsconfig 里开启：索引访问不再被当成一定有值。** 上一条把这 74 条 `no-unnecessary-condition` 判成「类型在撒谎、守卫是真的」，并实测开启这个开关要付 85 处报错的代价、当时只记录未执行。这轮做完了（core 85 处 + ui 4 处，共 15 个文件），因为**留着不做才是风险**：`arr[i]`、`match[1]`、`map[k]` 运行时确实可能是 `undefined`，而类型说不是，于是每个读代码的人都得自己把边界重推一遍。判据只有一句 —— **如果它真的是 `undefined`，你希望炸掉，还是希望得到一个看起来合理的错答案？** 想要后者的地方就绝不能用 `??` 兜底。
-  - **能消掉索引访问就消掉**：`batch-plan` 把 push 进去的值存成局部变量，而不是回读 `results[results.length - 1]`；`stream-search` 的 `emitReady` 改成先读队首再判断，顺带把 `pending.shift()!` 也去掉了；`cli.ts` 的实例解析把 `live[0]` 提成 `only`。
-  - **兜底语义无害时用 `??`**：`split()[0] ?? ""`、ripgrep 的上下文行文本、脚本失败的代码预览行、glob 的首段。
-  - **兜底会把错误悄悄算错时用 `!`，并在旁边注明它凭什么成立**：两处 Levenshtein 的 DP 表（`?? 0` 会把一次越界折成一个看起来合理的编辑距离）、补丁的 `chosen` 偏移量（`undefined` 会让 slice 算术变 NaN 并静默改坏文件）、`ipv6Bytes` 的八位组（`?? 0` 会**伪造出另一个 IP 地址**，而这个解析器喂的正是决定「哪些地址允许探测」的分类器）。
-  - **循环头一处收窄，整个函数体受益**：`cli.ts` 的参数解析、`glob.ts` 的 `ch`、`stream-search` 的 `text`、`patch.ts` 的 `block` / `header`（后两者顺带把 `i + 1 < X.length ? X[i + 1].index! : …` 简化成 `next ? next.index! : …` —— `next` 为 `undefined` 恰好就是「这是最后一块」）。
-  - **安全边界一律失败即拒绝**：`classifyIpv4` 读不出前两个八位组时返回 `"reserved"`，而不是往下走到 `"public"`；`classifyIpv6` 同样抛 `INVALID_HOST`。这两处若图省事写 `?? 0`，一个畸形地址就会判成公网并被放行探测 —— SSRF 闸门上的 fail-open。
-  - 顺带修掉一个真实的类型盲点：`patch.ts` 里 EOL 保持那段原来只靠 `Number.isInteger(start)` 把关，但 **`Number.isInteger` 不是收窄守卫**，所以后面的 `start < 0`、`end > rawNext.length` 一直是拿 `number | undefined` 在比较。现在显式加了 `=== undefined` 分支，走同一条「已验证的回退」。
-  - 收益不止于少撒谎：开关一开，上一条那批「恒假 / 类型无交集」里凡是数组越界与索引访问类的误报就**自动消失**了 —— 类型不再撒谎，守卫也就不再像死代码（`session-table` 的 `.sort(...)[0]`、`tool-call-shape` 的 `LEGACY_REWRITES[name]`、CLI 的 `rest[i + 1]`、`patch.ts` 的 `hunk[1]` 都属于这类，它们的守卫本来就是对的，只是编译器看不见）。
-- **`npm run audit` 现在能用了，依赖漏洞不再是盲区。** 本机 registry 指向 `registry.npmmirror.com`（国内镜像），而它没实现 npm 的安全通告端点：`npm audit` 会 POST `/-/npm/v1/security/advisories/bulk`，镜像回 **404 `[NOT_IMPLEMENTED] /-/npm/v1/security/* not implemented yet`**。既不是依赖有问题、也不是 npm 坏了，但结果就是这一项长期查不了。新脚本只给这一条命令换回官方源（`--registry=https://registry.npmjs.org`，经已配置的代理可达），安装依赖仍然走镜像。当前结果：`found 0 vulnerabilities`。
-
-- **小合并三项（第四项经证伪后否决）。** `mcp-endpoint.ts` 的 2025-era `tools/call` 处理器约 40 行与 `runToolCall` 逐行重复（计数器、审计、changes 摘要、structuredContent 规则全同，仅错误形状按时代不同），而文件头注释早已声称“两时代共用一个 tool surface”——现在 legacy 也走 `runToolCall`，注释成真；错误分支保留 `{ isError: true }` 的时代形状，wire 行为不变。`settings-handler.ts` 的 `fallbackState()` 把 11 处手写字面量换成 `CONFIG_DEFAULTS` 引用（已逐项核对与默认值相等，零行为变化），数组拷贝而非别名（之前 `oauth.allowedRedirectHosts` 直接别名了共享数组）。`service-tools.ts` 的日志路径内联块与 `processes.ts` 的 `serviceLogPathFor` 逐行等价（De Morgan 恒等式两侧），现导出共用一份。否决：`readEditableText` ≡ `readPatchableText` 看似重复，但错误文案按工具名与文件 label 定制且面向用户，抽公共函数要加回调参数化文案，行数不减反增间接层——与上一轮否决的 `regex-worker` 伪合并同一类，保持刻意重复（`patch.ts` 注释已写明两者的关系）。
-
-- **`search_files` 默认按正则解析 `query`（行为变化）。** 之前默认字面匹配，`query` 里写 `a|b` 会静默返回空 —— 与 ripgrep 后端默认相反，现在对齐：默认正则，`regex: false` 才字面匹配。非法正则也不再静默：ripgrep 失败（exit 2 且零匹配）直接抛错，错误里带 rg 原文，与内置扫描路径的响亮失败一致。另修正了描述里过时的"path must be a directory"（单个文件路径早就能用）。
-- **删除编辑器专属工具与宿主 capabilities 概念。** `get_diagnostics` / `lsp` 的 handler 是纯 stub（直接 throw），唯一的宿主实现硬编码 `lsp: false`，`tools/list` 永远过滤掉 —— 按仓库自己的规则（只有一个实现且无现实第二计划的就是绕路），连同 `EDITOR_ONLY_TOOLS`、`HostCapabilities` 接口、stub、标注、文档一并删除。`host().globalState` 改名为 `host().state`（VS Code Memento 术语残留，内部接口）。
-- **注释与文档里的 VS Code 扩展时代残留清扫。** 约 30 处注释把已不存在的"extension host / vscode 模块 / commands.ts 镜像"当现行运行时描述，全部改写为独立版词汇；历史事件引用保留但泛化主体。附带：`AGENTS.md` 里写反的换行声明改对（库里是 LF，Windows 工作区是 CRLF），新增 `.gitattributes` 锁定；eslint 允许 `_` 前缀的未使用参数；`read_process_output` 描述注明默认 128 KiB/次；`tools.md` 注明链式命令 exit_code 取最后一段。
+- 改进公开 URL、对等实例注册、隧道借用与控制台状态信息。
 
 ### Fixed
-- **`run_script` 的沙箱能被逃逸成任意命令执行。** 沙箱给 context 的东西里，`tools.*` 是**宿主 realm 的箭头函数**，所以它的 `.constructor` 就是 worker realm 的 `Function` —— 而 `codeGeneration: { strings: false }` 只管得住 vm context 内部，管不住从外面递进去的函数。现场探针：`typeof process` 在沙箱里确实是 `"undefined"`，但 `tools.read_files.constructor("return process")()` 拿回了真的 `process`（正确的 pid 与 `argv[0]`），再接 `process.getBuiltinModule("node:child_process").execSync` 就是任意命令。`RESERVED` 名单挡得住 `tools.constructor`，挡不住**返回值**的 `.constructor`。后果是审计日志、`resource_keys` 资源锁、`redactSensitiveText`、`allowedDirectories` 与工具调用预算**全部绕过** —— 沙箱存在的唯一意义就是不让脚本绕过这些。现在改为：context 只收到纯数据 harness，`tools.*` 与 `console.*` 的函数都在 context realm 内由 bootstrap 生成，harness 里的宿主函数在脚本编译前就被删除。原始 payload 现在被沙箱自己的策略顶回：`Code generation from strings disallowed for this context`。工具调用、枚举、`in`、以及未知名回落到 dispatcher 的 did-you-mean 建议全部保持。顺带记一个坑：bootstrap 必须用 `vm.compileFunction(..., { parsingContext })`，用 `runInContext` 求值只能把 IIFE *创建* 出来而不会调用它。
-- **OAuth 的公开元数据把路由令牌送给任何人，而它同时是授权口令。** `oauthResource()` 把 `state.routeToken` 拼进 `resource`，而 `/.well-known/oauth-protected-resource` 按 RFC 9728 是**无鉴权公开**的（`:639` 的注释写明「by design」），`ownerCredential()` 的默认值又正好是同一个令牌。于是远端攻击者一条链走到底：读元数据拿令牌 → `/oauth/register`（localhost 回调总是放行）→ 拿令牌当口令过 `/oauth/authorize` → 换 access token → `run_command`。讽刺的是 `state.ts` 到处擦这个令牌，`test/oauth-integration.test.mjs` 还断言它「never leaves the server」。现在 `resource` 不再内嵌令牌（它本来也不是资源标识，而是端点路径段）；**只停止发布、不停止接受**带令牌的旧值，所以早先注册、回传旧 `resource` 的客户端不会失配 —— 把披露 bug 修成一次故障是没有道理的。回归测试断言 discovery 文档里不含令牌。
-- **取消待执行的重启会静默丢掉进程持有的 `resource_keys` 锁。** 关闭处理器**刻意保留**已排定重启的 `releaseResourceLocks`（资源仍被即将回来的进程占着），而 `dispatcher.handOffToProcess` 早就把该锁的持有超时兜底**解除**了。于是三条取消重启的路径 —— `terminateProcess`（清掉 `restartTimer` 后 `if (done) return true`）、`set_process_policy{auto_restart:false}`、`cancelPendingRestarts` —— 全都只是清了定时器，没有释放句柄，而那个句柄从此再没有任何人会调用。后果：后面每一个声明同一个 `resource_keys` 的调用都要等满 `concurrency.waitTimeoutMs`（默认 120 s）然后失败，控制台还一直把一个**已经死掉的命令**显示成持有者。`process_control{restart}` 更糟：它 `state.commands.set(s.id, replacement)` 换掉了唯一持有释放闭包的旧对象，连 `pruneCommands` 那条 1 小时兜底都救不回来，**泄漏到 bridge 进程结束**。现在所有取消路径统一走一个 `cancelPendingRestart()`，取消与释放同时发生。
-- **`resource-locks` 的超时等待者出队时不 `pump()`，丢掉一次唤醒。** 写者优先会让一个读者排在一个更早的冲突写者后面（哪怕读者自己要的 key 是空的）。写者等待超时后被 `splice` 出队，但没有任何人 `pump`，于是那个读者继续排在一个**根本没人持有**的 key 后面，最后被自己的截止时间拒绝，报的还是「另一个工具调用仍持有它」。每条释放路径都会 `pump`，这条也必须。一行修复，外加一条钉住「被移出的写者会唤醒它后面的读者」的测试。
-- **`apply_patch` 部分失败时不回滚它已经删除的文件 —— 静默、永久的数据丢失。** 回滚只遍历 `written`，而 `written` 只在非 delete 分支被 push，删除走的是 `fs.unlink`。于是「先 Delete 一个文件、后 Update 一个被占用的文件」这种补丁：前者已经删掉，后者抛错，回滚只处理了后者 —— 被删的文件永不恢复，即便 `originalContent` 里明明存着它的字节，而报错文案还写着「the files it had already written were restored」。同一处记账还有第二个错：「这个文件原本存在吗」用的是**最后一次**操作的类型，而块语法允许 `*** Add File: x` 后接 `*** Update File: x`，于是回滚会往一个由补丁自己创建的文件里写空串，留下一个空文件当作「恢复后的状态」。现在按文件的**第一次**操作判定，并把删除也记进回滚列表（`writeText` 是原子的，恢复同样是）。
-- **`patchFilePath` 连剥两层 `a/` 与 `b/` 前缀，会改错或删错文件。** 连锁两次 `replace` 会把 `b/notes.txt` 变成 `notes.txt`、把 `a/b/notes.txt` 变成 `notes.txt`：一个仓库只要有顶层 `a/` 或 `b/` 目录（夹具里极常见）就中招，而 `*** Delete File:` 的后果是不可逆的。现在按语法区分：经典 diff（`--- a/…` / `+++ b/…`）剥**恰好一层**，因为这里的 `a/`、`b/` 是 diff 的侧标记；ShunCode 块头（`*** Update File: <path>`）是**字面路径**，不剥 —— 块语法自己从不添加这个前缀，所以原先剥一层本身就是 bug。代价是块头不再支持「按 diff 风格写 `b/<path>`」这种语法，而那不是块语法会产生的形式。
-- **`read_files` 读单行大文件时全量缓冲。** 字节预算与 `utf8SafePrefix` 只在 `handleLine` 内部运行，也就是**只有在一整行被收齐之后**才跑；于是没有任何换行的文件被完整读进内存之后才截断。实测：64 MiB、单行、无换行的文件，`max_bytes: 1024` 回答正确，但 RSS 涨了 137 MiB、耗时 14.5 s；而默认预算是 512 KiB，意味着一个 500 MiB 的压缩包或一条巨型 JSONL 记录会按 `paths` 里每个路径各花 500 MiB，与模块自己承诺的「O(requested range)」直接矛盾。现在给待处理缓冲加上限，超限时只保留可返回的前缀（UTF-8 安全）并停止；范围在超长行**之后**时，整行按行号跳过、其余字节永不解码。修复后同一用例：**−23.5 MiB、3 ms**。
-- **`SharedJsonStore` 的锁可以被非持有者删掉，并发写入静默丢更新。** 锁文件原本不记录任何东西（存在即锁），持有者 `finally` 里无条件 `rm`。于是：持有者 A 卡住超过 5 s（休眠唤醒、杀毒扫描、调试断点）→ B 判定其已死、删掉 A 的锁并取得新锁 → A 恢复后 `finally` 删掉了**B 的**锁 → C 与 B 同时持锁，各自读-改-写同一份 JSON，后 rename 的那个把对方的 key 悄悄抹掉，正是这个类存在的理由（「第二个实例吃掉了第一个的路由令牌」）。现在锁文件里写入持有者令牌，只删自己仍持有的那一把。
-- **OAuth 同意限流按 socket 地址计数，运维会被匿名攻击者永久锁在授权之外。** ngrok agent 跑在本机，所以每个请求的来源都是 `127.0.0.1`：任何人向公开的 `/oauth/authorize` 连发几次错口令，运维**自己正确的口令**也会得到 429，而且每个窗口都能重新触发。`auth.ts` 的 bearer 门早就绕开了这个坑并把原因写在注释里（「a socket-keyed limiter would let one remote attacker lock the operator out」），OAuth 这份没跟上。两端现在共用 `remoteKeyOf()`。
-- **`unifiedDiff` 的幽灵上下文行与错误的 hunk 计数。** `split("\n")` 会给以换行结尾的文本追加一个空元素，而它不是文件的一行 —— 只是「没有这一行」。把它当真实行处理，就会给**每个以换行结尾的文件**（也就是常态）产出一行内容为空的幽灵上下文行 `" "`，并让头部计数与正文不符。现在它在两侧同时存在时被丢弃；只改变「只有一侧有它」时的计数。
-- **`boundedText(text, 0)` 返回全文。** `text.slice(-0)` 就是 `text.slice(0)`，于是 head+tail 截断的「尾部」是整个字符串：`review_changes{max_patch_bytes:0}`（文档写明「不含补丁文本」）会把完整 diff 送回来，而 git 输出最多缓冲 50 MiB —— 这个字段唯一的尺寸上限在 0 处正好失效。预算不足以容纳标记时现在返回空串。
-- **`line-diff.ts` 此前零测试覆盖**，这轮补上 `test/line-diff.test.ts`（7 例）。
-- 其余新增测试：`test/patch-rollback.test.ts`（6 例：中途失败后删除被恢复、写入被还原、Add-then-Update 不留下空文件、块头路径字面、经典 diff 只剥一层、块 Delete 删的是它写出的那个文件）、`test/process-lock-release.test.ts`（4 例）、`test/host-lock-ownership.test.ts`（3 例）、`test/probe-scope.test.ts`（4 例），以及 `test/script-sandbox.test.ts`（+2）、`test/resource-locks.test.ts`（+1）、`test/stream-read.test.ts`（+2）、`test/oauth-integration.test.mjs`（+1）。
-- 编辑 `script-sandbox.ts` 时踩到并记下：`SCRIPT_WORKER_SOURCE` 与 `BOOTSTRAP_SOURCE` 都是 `String.raw` 模板，**模板内部（包括注释里）出现一个反引号就会提前闭合它**，报出来的却是一串毫不相干的语法错误；而 `String.raw` 里 `\`` 的反斜杠会被原样保留，所以内部模板也不能靠转义反引号来写。
-- **`interact_with_process` 少了 `input` 不再往进程 stdin 里写 `undefined`。** schema 里 `input` 一直是必填，但处理器用 `String(args.input)` 兜底：调用方漏掉这个字段时，**工具返回成功**，而子进程 stdin 上真的收到了字面量 `undefined\n`（上一轮审计的现场探针：故意启动一个回显 stdin 的子进程，它打印出 `GOT:undefined`）。现在缺字段直接报错并点名 `input`，`read_process_output` 拿去只读；**空字符串照旧是合法输入**（就是一个裸换行），只拒绝「没有」，不收紧能力。端到端测试见 `test/required-args-integration.test.mjs`：漏字段被拒且进程侧什么也没收到、空字符串仍能送达。
-- **同一形状还有三处：漏传必填参数不再被静默兜底，而是一律点名。** 上一轮只跑到 `interact_with_process` 就中断了，这次把 `String(args.x)` / `?? ""` 的 69 处全过了一遍 —— `run_command`、`set_todos`、`apply_patch`、`read_files`、`save_service`、`find_files`、`search_files`、`send_to_shell`、`normalizeScriptSource`、`normalizePort`、`parseHttpProbeUrl`、`activity_log` 都已有守卫，未动；剩下三处真的会静默：
-  - **`command_id`（`process-tools.ts`，7 处查找）** 走的是 `state.commands.get(String(args.command_id))`：漏传时报 `Unknown command id: "undefined"`，把「参数没给」误诊成「id 过期」，客户端会去翻一个它从来没有过的 id。收敛成一个 `commandStateOrThrow()`：缺失点名 `Missing "command_id"`；**存在但未知仍然报 `Unknown command id` 并列出活跃 id** —— 那条 hint 正是客户端找回 id 的手段，不能连同误诊一起改掉。`get_process_snapshot` 的 `command_id` 是**可选**的（省略＝列全部），原语义保留。顺带把 7 份逐字重复的两行查找并成一份。
-  - **`report_progress` 的 `message`** 用 `?? ""` 兜底：漏传时写一条空审计记录、推一条空 logging 通知，然后**返回成功**，调用方完全不知道这次汇报没发生。只拒绝「没有」；显式空串照旧放行（`phase` / `category` / `percent` 本身就能承载一次汇报）。
-  - **`connectivity` 的 `url` / `port`** 分别以字面量 `"undefined"` 和 `NaN` 进入探测，回来的是不点名参数的 `INVALID_URL` / `INVALID_PORT`。现在缺失先点名；**给了但非法仍走 `parseHttpProbeUrl` / `normalizePort` 自己的文案**，没有把它们的诊断吃掉。
-  - 测试：`test/interact-input-integration.test.mjs` 扩写并改名为 `test/required-args-integration.test.mjs`（复用同一个实例、不增加启动开销），7 例覆盖上面四处，外加三条**能力保全**断言：空 `input` 仍是裸换行、空 `message` 仍能汇报、`get_process_snapshot` 仍可省略 `command_id`。
-  - 踩到的一件事，记下来免得下次再踩：**集成测试跑的是 `bin/open-bridge.js` → `dist/`，不是 `src/`。** 源码改完不 `npm run build`，端到端测试会继续报旧行为（本轮就是这样：三处守卫已在 `src` 里、typecheck 与 lint 全绿，测试却仍然失败）。
-- **`set_process_policy` 会把 NaN 写到活进程上：自动重启被静默禁用，或退化成崩溃循环。** `Math.max(0, Number("abc"))` 是 NaN 而不是 0 —— 它并不钳位。NaN 落到 `CommandState` 之后，`restartCount < NaN` 恒为 false（自动重启悄悄失效），`setTimeout(NaN)` 约 0 ms 触发（一次崩溃变成崩溃循环）。**这正是 `save_service` 里那条注释记载过的同一次事故**：当时修了 `save_service`，写同两个字段的兄弟函数漏了，于是两个入口对同一条规则给出不同答案。现在两边共用 `processes.ts` 里的 `requireRestartKnob()`（该模块已被两者导入，不新增依赖边），规则不可能再漂移。负数从「钳到 0」改成报错，同样是为了两个入口一致 ——「重启 -5 次」是调用方的 bug，值得点名而不是悄悄改掉。
-- **`list_directory` 的 `depth` 传垃圾值时静默退化成一层。** `Math.max(Number("abc"), 1)` 是 NaN，而 `level < NaN` 恒为 false，于是所有目录都不展开：**返回一份 depth-1 的列表，且完全不报错**，调用方以为项目就这么浅。只有非有限值被拒；`0` 与负数照旧钳到 1、超大值照旧递归、数字字符串照旧强转，**原本能用的调用一个都不变**。
-- **`save_service` 此前零测试覆盖**，这轮补上：三个垃圾旋钮被拒且**什么都没持久化**、合法值存进去的正是校验过的那个数（而不是重新强转一遍的结果）。`requireRestartKnob` 另有 5 例纯函数单测（`test/restart-knobs.test.ts`），与既有的 `test/clamp-ms.test.ts` 同类同款 —— 那份文件的注释写的就是这一类事故（`Math.max(Number(x), 0)` 放过 NaN、`setTimeout(cb, NaN)` 约 0 ms 触发）。`test/required-args-integration.test.mjs` 从 7 例扩到 10 例。
-- **新加的集成测试会被 `npm test` 静默跳过。** `test:core` 把 15 个 `.mjs` 逐个列了出来，而那份清单恰好等于 `test/*.test.mjs` 的全集 —— 纯冗余枚举，代价是**任何新集成测试都不会被跑，而且不会有任何提示**。本轮就撞上了：新写的 4 例超时测试单跑全绿，`npm run verify` 里却根本不存在，集成计数纹丝不动停在 121。改成 glob（Node v24 的 `--test` 原生支持），计数变为 125。
-- **`run_command` 的超时分支此前零测试覆盖，而类型系统说它是死代码。** `let timedOut = false` 只在 `setTimeout` 回调里被赋值，而 TS 的控制流分析不追踪嵌套函数中的赋值，于是把 `timedOut` 收窄成字面量 `false`，整条 `if (timedOut && !commandState.done)` 被 `no-unnecessary-condition` 报成「值恒为假」—— 任何信任类型的人或工具都会认为它可以删。它不能删：**这正是 agent 在前台启动 dev server 时拿到的那个答案**（`status:"running"` + `command_id`，进程不被杀）。现在让超时结果**从 promise 流出来**，而不是靠被闭包捕获的可变标志：语义完全不变，类型不再撒谎。新增 `test/process-timeout-integration.test.mjs`（4 例）钉住整条契约 —— 调用在命令结束前返回、进程确实活着并自己跑完后一行输出、`force_terminate` 是真正的出路（`shell_alive:false` + `termination_reason:"terminated"`）、垃圾 `timeout_ms`（`"abc"`、`-5`）回落默认值而不是 0 ms 触发（源码注释记载过这次事故，此前无任何测试钉住）。
-- **`open-bridge doctor` 的 ngrok 域名一行，在类型上恒为「未配置」。** `config.get("ngrokDomain", "")` 的 `T` 从字面量 fallback 推断成 `""`，于是 `domain || "未配置…"` 的左支被判定永不可达。运行时是对的（`get` 返回真实配置值），但这是同一类陷阱：读起来像一条永远走不到的分支。补上显式 `<string>`，与仓库里另外三处 `ngrokDomain` 读取点一致 —— 那三处早就写了 `<string>`，只有 CLI 这处漏了。
-- **`required-args` 集成测试的偶发失败：固定 `delay(900)` 被当作「子进程已就绪」的代理。** `node --test` 并行跑各集成文件、每个文件各启一个实例，负载高时 node 冷启动超过 900 ms，stdin 监听器还没挂上，第一个用例就输了这场竞速（本轮全量跑时复现过一次，单跑 10/10 通过）。改用产品自己的 `ready_pattern`：`echo-stdin.mjs` 先注册 stdin 监听器、再打印 `READY`，于是「等到 READY」就等于「等到测试真正依赖的那件事」，且不再多等。
-- **CHANGELOG 的 `[Unreleased]` 分区错位已修。** 上一条改动把 `### Fixed` 插在了 `### Changed` 的正下方，于是 `### Changed` 变成空标题，而原本属于 Changed 的两条（死代码清理、控制台按钮撤除）被归到了 Fixed 下面。按 Keep a Changelog 的 Added → Changed → Fixed 复位。
-- **MCP 与控制台的配置校验漂移：同一设置两套规则，控制台还会静默存错值。** `set_config_value`（MCP）与控制台通用 `setConfig` 各写了一份校验，五个地方给出不同答案：`unrestrictedFileAccess: "yes"` 在 MCP 侧报错、在控制台侧**存成 `false`**；`allowedDirectories` 在 MCP 侧要求绝对路径、在控制台侧接受相对路径；`logMaxBytes` 控制台可设、MCP 不在白名单；`shellArgs` 的数量/长度/去空只在控制台生效；`oauth.allowedRedirectHosts` 只在 MCP 侧小写化。README 还写着两边「共用一套校验」——这句是假的。现在两边委托给同一个零依赖模块 `src/bridge/config-values.ts`（控制台打包不受影响），README 那句成真。以 MCP 为规范：布尔值严格类型、目录必须绝对路径、host 小写化；控制台的无损卫生习惯（trim、去空 shell 参数、枚举归一）保留并扩展到 MCP；控制台原来**静默截断**（超 50 项/超长直接 slice 掉）的部分改成明确拒绝 —— 悄悄改写 spawn 参数或访问白名单比报错更危险。`ngrokDomain` 两边本来就共用 `validateNgrokDomain`（MCP 内联调用、控制台走专用 `saveDomain`），保持不动；鉴权开关、并发、TTL 的专用流程同样不动（它们问的是令牌可用性、TTL 白名单这类「值是否合式」之外的问题，行为已有测试钉住）。测试：新增 `test/config-values.test.ts`（11 例，覆盖共享校验器的全部 19 个键与每个漂移点），`test/settings-model.test.ts` 补漂移回归断言，`test/api-integration.test.mjs` 加端到端用例（垃圾布尔与相对目录被拒且存量不动、合法写入仍成功）。
-- **高危子集三项。** `interact_with_process` 的 `wait_ms` 未封顶：它是“等输出”场景里唯一的盲睡等待（`setTimeout` 到点才醒，没有输出或退出能提前唤醒），`clampMs` 又不设上限，于是超大值能把调用方挂起数天，而语义相同的 `read_process_output` 封 60 s。现在 `clampMs` 加可选 `max` 参数，interact 传 60000；其余调用点行为不变（就绪/超时等待都有事件 bound，restart 的 `delay_ms` 虽然也是盲睡、但长延迟可能是维护窗口的真实意图，不动）。schema 与 `docs/tools.md` 补上上限说明。第二，`services.ts` 读存档的重启旋钮走裸 `Number()`：它是第三个写这两字段的入口（前两个已共用 `requireRestartKnob`），存档里的垃圾值（手动改坏、旧版本漂移）会变成 NaN 进运行时，自动重启静默失效或崩溃循环。现在经 `requireRestartKnob` 校验，坏值回落默认值而不是抛错 —— `loadServices` 的契约就是单个坏条目不能掀掉整个加载（抛错会跳过后面所有服务，比静默默认值更糟；数字字符串与两个 live 入口一致，照旧接受）。第三，`rotateToken("")` 会轮换第一个令牌：三个按前缀匹配的兄弟函数里只有它缺空 needle 守卫（空串是任何 id 的前缀，`find` 直接命中第一条）。补上与 `deleteToken` 同文案的拒绝。测试：`test/clamp-ms.test.ts` 加上限用例；新增 `test/services-load.test.ts`（内存 host：垃圾旋钮回落默认、合法值/数字字符串照旧、坏条目不影响其余加载）；新增 `test/token-id-guards.test.ts`（三个函数的空 id 拒绝，守卫在 store 访问之前，不需要 host）。
 
-- **配置/状态存储不再把可变引用别名出去。** `FileConfig.get` / `FileStateStore.get` 直接返回了内存里的 live 对象（存量值）或调用方传进来的 fallback（常常就是 `CONFIG_DEFAULTS` 的数组），任何一处 `push` 都会悄悄改写 store 或进程全局默认值。现在读写两端都做深拷贝；`CONFIG_DEFAULTS` 本体深冻结，误写会响亮地抛 `TypeError` 而不是静默污染。
+- 修复资源锁、路由轮换、HTTP 超时、运行时记录和跨平台可执行文件定位。
 
 ## [1.0.0-alpha.5] — 2026-09-13
+
 ### Added
-- **控制台按三个真实项目重做了一遍，路径也是真的。** 之前是单页 + 状态切换的页签。现在外壳来自三份星标参考的合并：
-  shadcn-admin 的侧栏 / 面包屑 / KPI 排布、tabler 的表格行与活动列表、kiranism 的单色可折叠侧栏与列筛选；
-  **9 条真实路由** `/console/<id>`（带 URL、可刷新、可直达），细节层（列筛选、状态徽章、分块条形图、设置二级导航）
-  落在各页里。工具页去掉了「≈tokens」这类估算列（省 Token 不是目标），保留 4 条「描述必须与行为一致」的测试。
-  `9b81532` + `e00a6c0`。
-- **重建了 `dist/` 却没重启，现在实例自己会说。** 重新编译对**已经在跑**的进程毫无影响：Node 早就把旧模块加载进内存了，新工具、新修复都要**重启**才生效。这件事此前在**任何地方都看不见**——实例照旧公布上一次的工具清单，唯一的发现方式是数一遍工具再和源码对照（本次开发就真的被绊过一次：运行中的实例公布 55 个工具，仓库里已经是 56 个，没有任何提示解释差在哪）。现在实例在**启动那一刻**记下自己加载的构建时间（`dist` 下所有 `.js` 里最新的 mtime），之后对比磁盘：`get_bridge_status` 多一个 `build_stale`，状态页在「运行控制」里显示橙色提醒（磁盘上的构建比本实例新…停止再启动），体检页多一行「构建」，`open-bridge health` 多一行 `[!!] build:`。只在**编译版**实例上有信号：`npm run dev`（tsx 跑源码）没有构建产物可比，返回 `undefined` 而不是假装「最新」——「没有信号」和「是最新的」是两句不同的话。磁盘侧按 5 秒 TTL 记忆，状态端点被控制台每 2 秒轮询也不会每次去走目录。`src/bridge/build-staleness.ts`，单测 `test/build-staleness.test.ts`。
-- **`run_script`：把多个工具调用写成一个脚本（Code Mode）。** 借鉴自 Chat-Plus 的 Code Mode：与其一次往返调一个工具，
-  不如让调用方写一小段 JavaScript，用 `await tools.<工具名>(args)` 组合调用（循环、条件、`Promise.all`、过滤），
-  **只 `return` 它真正需要的结果**。两件事同时变好：往返次数塌缩；更重要的是——**大块工具输出根本不必进入模型的上下文**，
-  脚本可以在返回前就把它压掉。要点：每个 `tools.x()` 都是**真实的 Bridge 调用**（资源锁、审计日志、脱敏、会话状态、
-  错误语义全部继承，见 `src/bridge/script-sandbox.ts` 的说明）；脚本只能调用本实例**已公布**的工具（`toolProfile` 与
-  宿主能力过滤照样生效），`run_script`/`batch` 自身不可从脚本内调用；**沙箱本身什么都没有**——没有文件系统、网络、进程、
-  `require`、定时器与 `eval`（`vm` 上下文 + 关闭字符串代码生成），工具名在父进程解析，所以写错的工具名会得到和直接调用
-  一样的「did you mean」提示；每次运行都是**全新作用域**，数据只能通过 `return` 传递。失败时返回固定字段的
-  `phase`/`error_type`/`line`/`code_preview`/`hint` 信封，让人（或模型）**改代码重跑，而不是道歉**。
-  参数：`source`（必填）、`timeout_ms`（默认 30s，上限 300s）、`max_calls`（默认 60，上限 200）；返回体超过 64 KB 会截断并置 `truncated`。
-  子调用沿用 `batch` 的口径（`countUsage: false`），保证 `calls == successes + failures` 依旧成立，同时以 `by_tool` 明细
-  保留可见性。单测 `test/script-sandbox.test.ts`。
+
+- 增加多页面 Web 控制台、Code Mode、构建陈旧检测和项目级操作入口。
+
 ### Changed
-- **工具目录收敛：公布 56 → 38，旧名一个都没失效。** 六个 service 动词、四个文件动词、四个自省读、三个日志读、
-  两个探针，各自变成「一个工具族 + 判别参数」（`service{action}`、`file_op{op}`、`process_control{action}`、
-  `bridge_status{section}`、`activity_log{action}`、`connectivity{target}`、`service_status{detail}`、`wait`、
-  `open_shell{list}`）。**能力零损失是结构而不是承诺**：每个族调用的还是原来那个 handler；旧名在**唯一入口**
-  （`src/bridge/tool-call-shape.ts`）改写一次，于是 handler 表、锁规划、标注、用量统计只认规范名；24 个旧名全部可用，
-  对象结果里多一个 `deprecated`（文本里也有），数组与标量原样返回、不破坏旧调用方的解析；`structuredContent`
-  同样按规范名查定义。另一轮把 22 条描述压到 200 字符内，**58/58 个工具的 name/inputSchema/outputSchema 逐字节未变**
-  （`staging/t40-aproof.py` 的机器比对），细节移进 `docs/tools.md`。`a020515` + `553307b`。
-- **`src/bridge/lifecycle.ts` 拆成 9 个模块，一个文件一个职责。** 原文件 1677 行里同时住着：HTTP 监听与两代 MCP 协议分发、ngrok 进程与域名归属、会话表与回收、peer 注册表发布、路由令牌、健康报告、发给客户端的 instructions。现在：
-  - `lifecycle.ts`（277 行）只做编排：start/stop 串行队列、隧道归属决策、路由令牌、`webAiPrompt`、健康报告；
-  - `http-listener.ts`（420 行）loopback 监听器：host/令牌路由（含 peer 代理）、预检、鉴权闸门、请求追踪、两代协议分发、会话查找、自检与停机排空；
-  - `tunnel.ts`（502 行）ngrok 子进程、重连策略、公开健康探测、共享域名观察（沿用 peer 隧道或接手空出的域名）；
-  - `mcp-endpoint.ts`（309 行）instructions 文本、每会话 MCP server、2026-07-28 世代 handler；
-  - `session-table.ts`（64 行）会话表、空闲回收、容量与定期清扫；
-  - `peer-registry.ts`（114 行）peer 注册表读写与定期重发布；
-  - `route-hooks.ts`（55 行）宿主钩子（额外路由 + 「监听已就绪」回调）；
-  - `lifecycle-queue.ts`（17 行）转换串行队列；`http/request-body.ts`（59 行）带体积上限的请求体读取。
 
-  **拆法是机械的，不是手抄**：先按「括号深度回到 0」把原文件切成顶层块（注释/字符串/模板插值感知，并断言原文件每一行恰好属于一个块），再由生成器把块分配到模块、**按块里真正出现的标识符重算 import**、给跨模块引用的声明补 `export`。所以 `tsc --noEmit` 与 `eslint` 就是验收条件：漏 import 编不过，多 import 被判 unused（这套流程当场抓出 4 个真实错误：一个从未被 import 的 `ToolCallOutcome`、三个只在注释/字符串/对象键里「出现过」的假引用）。
+- 统一工具目录、运行生命周期和命令行帮助；保留旧 API 名称兼容。
 
-  **依赖单向、无环**：`lifecycle.ts` → `http-listener.ts` / `tunnel.ts` / `session-table.ts` / `peer-registry.ts` / `mcp-endpoint.ts`；`tunnel.ts` 不 import `lifecycle.ts`，唯一的反向需求（接手空出的共享域名＝重启整个实例）由 `setInstanceRestart()` 注入。独立依赖图检查：`src/` 下 84 个模块、224 条内部 import 边，**没有环**。
-
-  **对外接口一个没动**：全仓库只有 3 个文件 import `lifecycle.ts`（`src/cli.ts`、`src/server/api-router.ts`、`src/server/settings-handler.ts`），签名与行为不变；`cli.ts` 的宿主钩子（`setExtraRouteHandler` / `setLocalServerReadyHook`）改从 `route-hooks.ts` 取，`enqueueLifecycle` 从 `lifecycle-queue.ts` 取。
-
-  验证：`npm run verify` 全绿（355 单测 / 101 集成 / 38 UI，与拆分前完全一致）；声明审计确认原文件 67 个顶层声明**一个不少、没有一个重复**；真机演练 13/13 全绿（临时实例：MCP 握手 + 56 个工具 + 两代协议、`run_command`、`run_script` 调子工具、文件读写往返、`/console/` 与控制台路由、构建新鲜度信号由 false 变 true、停机排空）。
 ### Fixed
-- **参数缺失不再变成「名叫 undefined 的文件」。** `String(args.path)` 把漏传的路径变成一个字面量文件名：
-  `copy_file` 写出一个叫 `undefined` 的文件、`delete_file` 删掉它并回答 `deleted: true`；同一处缺陷还覆盖
-  `write_file`（**覆盖**了真实存在的同名文件并返回 ok）、`edit_block`、`get_file_info`（都去读写它）、
-  `read_files{paths:[null]}`（去 stat 一个叫 `null` 的文件）。现在全部走 `requiredArg`（`Missing "path".`）
-  与逐项非空校验；集成测试里**真的放一个名为 `undefined` 的文件**进去，证明这些调用被拒绝且它逐字节未变。
-  `cee3a9a` + `89625bf`。
-- **文件工具多了自毁护栏。** `file_op{op:"delete", path:".", recursive:true}`（旧名 `delete_file` 同样）会把工作区里的
-  文件递归删光，`path:".."` 连父目录内容与 Bridge 自己的数据目录（`secrets.json`、runtime 记录）一起删；
-  `move` + `overwrite:true` 落到**已存在的目录**上会把整棵目录换成一个文件，还返回成功。现在目标是工作区根 /
-  数据目录 / 盘根或它们的祖先时一律拒绝，文件不能落在目录路径上（错误信息给出正确写法）。
-  **`unrestrictedFileAccess` 一个字没改**：工作区外的普通路径照旧可读写可删（有专门用例钉住这个能力），
-  真要清空项目仍然可以用 `run_command`。
-- **`deprecated` 不再混进 `structuredContent`；字符串布尔按声明归一。** 旧名调用的结构化内容此前带着 schema 里
-  没有的 `deprecated`（现在只留在文本块）；`list:"false"` 这类字符串布尔过去按真值走（该开 shell 却去列 shell），
-  现在在同一个归一化入口按**目录里声明的布尔入参**处理（清单从 `inputSchema` 读出，不留第二份手写表），
-  `"nope"`、`2` 之类仍原样透传给 handler 拒绝。
-- **死代码与「导出噪音」按证据清了一遍，另有一处注释与代码互相矛盾。** 两个脚本（`ob-repo-sweep.py` 粗筛 → `ob-repo-sweep2.py` 精判：**定义处就是该符号唯一的出现**才算死）扫过 `src`、`ui/src`、`scripts`、`test`、`bin` 共 19,412 行，结论是只有 **1 个真正没人用的导出**：`src/http/auth.ts` 的 `invalidateAuthCache`——它的注释写着「给测试用」，但全仓库没有任何测试引用它；而且它要失效的那个缓存是**按内容（字符串相等）**记忆的，永远不会过期，所以正确做法是删掉它，并把文件头那段与代码互相矛盾的说明改成实情（原文说「每次读都直连存储、解析很便宜」，代码其实做了内容级记忆化）。另有 **33 个内部符号挂着 `export`**（`TOOL_ANNOTATIONS`、`EDITOR_ONLY_TOOLS`、`MAX_AUDIT_LOG_BYTES`、`startInternal`/`stopInternal`、`cancelPendingRestarts`、`oauthDigestEquals`…）：全仓库（含测试与 CLI）只有自己模块在引用——多出来的 `export` 不是 API，而是一张没人认领的空头承诺，**它的实际危害是让「未被使用」这件事无法被工具发现**。去掉后模块边界与事实一致；类型与接口的导出保持不动（那是模块的对外契约，测试也在用）。顺手消掉一处复制粘贴：`lifecycle.ts` 里发给客户端的 `instructions` 长文本被 `createMcp` 与 `createSpecMcp`（两代协议）**逐字节抄了两份**，现在收敛为 `SERVER_INSTRUCTIONS_BASE` + `serverInstructions()` 一处来源，两代协议的话术不会再各自漂移。
-- **窗口标题不再被子进程改乱。** Windows 每个控制台只有**一个**标题字符串，任何挂在该控制台上的进程都能改写它
-  （`SetConsoleTitle`），而且**没有恢复机制**。因为我们的子进程是**有意共享控制台**的（关窗要连带停掉隧道与服务，
-  见 `child-console.ts`），我们跑的命令也会往标题里写字：**自己拥有控制台**的 `cmd.exe`（双击 .cmd/.bat、`cmd /k` 新窗口）会把镜像路径写成窗口名：
-  `C:\Windows\system32\cmd.exe`；**只共享**我们控制台的 `cmd /c …` 实测不动标题。npm 则通过 `process.title` 写「npm …」（`npm/lib/cli/entry.js:4`、`npm/lib/npm.js:153`）。
-  子进程退出后窗口就保持它写的样子，操作者看到的就是「窗口名自己乱变」。现在：启动时**认领**标题
-  （`Open Bridge - <工作区名> (:端口)`），并在**每个子进程退出后重新认领**（`run_command` 与常驻 shell 两条路径），
-  停机时释放。纯外观改动，无控制台时（服务/CI/重定向输出）完全不动手；写入失败也绝不抛错影响服务。
-- **公网隧道的接管变快了。** 借用别人隧道的实例（follower）原本每 10 秒固定探一次；持有者退出后，实测
-  **约 2 分钟**才完成接管（`bridge.log`：08:46:48 `Public domain is free again; this window will claim it.`
-  → 08:46:51 已恢复公网），这段时间对所有远端客户端就是纯宕机。现在探测节奏**跟着上一次结果走**：
-  健康时 10 秒一次，一旦发现公网不再服务我们（端点没了/换成别人）就改成 4 秒一次，接管因此提前到
-  两次「free」判定之内。判定规则本身抽成纯函数（`src/bridge/tunnel-watch.ts`）并加了单测：**连续两次**
-  「ngrok 自己说这里没有端点」才允许抢占；`unknown`（超时/5xx）一律清零计数，绝不在猜测上开抢；
-  `busy`（正在重连或已有隧道子进程）时永不抢占，且计数**清零**，保证「连续两次」这条规则字面成立
-  —— 抢占永远不会跨着别人的一次重连拼凑出来。
-- **`open-bridge serve --help` 不再把服务真的起起来。** 分派把 `--help` 交给 `cmdServe` 后没有任何人看这个标志，
-  于是「只想看用法」的一条命令会**真的发布一个实例**：监听端口、写 runtime 记录、占据公网 URL、参与隧道借用。
-  这不是理论问题——开发过程中一次脚本里的 `serve --help`（输出还被重定向到了 /dev/null）就起了一台实例，
-  事后靠进程父链才查出是谁启动的。现在 `serve --help` / `serve -h` 只打印 serve 的参数说明并退出，
-  **不碰锁、不绑端口、不写注册表**；`test/cli-surface-integration.test.mjs` 用「命令必须秒退 + 临时 home 里一个文件都不能有」钉住它。
+
+- 修复参数缺失、副作用顺序、目录自毁、Windows 控制台和 `serve --help` 行为。
 
 ## [1.0.0-alpha.4] — 2026-09-12
+
 ### Added
-- **技能发现（skills），补上对照里唯一被点名的「真缺」**（`docs/refactor-comparison.md` D9）。连接时，
-  服务端说明里现在除了项目约定（`AGENTS.md`/`CLAUDE.md`）还会带一份**技能索引**：工作区的
-  `skills/<名字>/SKILL.md`、`.agents/skills/`、`.claude/skills/`，加上数据目录与 `~/.agents/skills/`。
-  索引只含**名字、描述、路径**——正文留在磁盘上，模型判断任务匹配后用 `read_files` 读取，
-  十个技能和一两个技能的上下文成本一样。做法取自 DevSpace/TaskQuay 的约定，但**没有引入它们的运行时依赖**，
-  也不像它们那样往用户目录里同步「托管技能」：本实现**只读**。
-- **新工具 `list_skills`**（只读，标注 `readOnlyHint`）：返回索引 + 扫过的目录 + 被遮蔽的同名技能数。
-  它在每次调用时重新扫盘，因此**会话中途新增的技能无需重连**即可被发现；`workspace_brief` 也带上技能摘要。
-- 有界：最多 50 个技能、名称 80 字符、描述 200 字符、只解析文件头部 64 KB；说明里最多列 20 行，其余
-  指向 `list_skills`。发现过程**永不抛错**（目录缺失/不可读一律跳过），不会拖住会话建立。
-- 测试：`test/skills.test.ts`（12 条：front matter、CRLF/引号、无 front matter 回退、未闭合围栏、
-  三种目录拼写、同名遮蔽、隐藏目录、缺失文件、数量上限、越界标记、索引渲染与截断、查找顺序）；
-  `test/skills-integration.test.mjs`（5 条端到端：说明里带索引、`list_skills` 在目录里且标注只读、
-  内容不外泄、用既有 `read_files` 读取、**中途新增技能下一次调用即可见**）。
+
+- 增加工作区 `skills` 发现与 `list_skills` MCP 工具。
 
 ## [1.0.0-alpha.3] — 2026-09-12
+
 ### Added
-- **一键启动脚本先问「工作目录」，再启动。** 「工作区」是 AI 权限的边界，而双击启动时它默认等于
-  `.cmd` 所在的目录（也就是本仓库自己）——想给别的项目用只能迂回。现在双击后先提示输入目录
-  （`"D:\work\my-project"` 与 `D:\work\my-project` 都收，引号自动去掉），
-  回车＝沿用上一次输入的目录（记在同目录的 `start-open-bridge.last-dir`，已加进 `.gitignore`）；
-  目录不存在会先问一句再建；也可以把目录当第一个参数传（桌面快捷方式/计划任务用得上）。
-  启动命令相应变成 `serve --root "<你输入的目录>" --open`。
-- **`open-bridge stop` 的「自停保护」。** 用 Bridge 的 MCP 去操作 Bridge 项目本身是安全的（改代码、
-  构建、删 `dist/` 都不影响正在服务的进程，本轮已实测），唯一真会把自己弄断线的动作是 `stop`
-  ——它停掉的正是承载这次会话的进程。现在 `serve` 启动时给自己的 pid 打一个 `OPEN_BRIDGE_HOST_PID`
-  标记，凡它启动的子进程（`run_command`、常驻 shell、服务、隧道）都会继承；当 `stop` 要停的那个实例
-  *就是* 这个标记指向的 pid 时，默认**拒绝执行**并说明原因与出路，`--force` 强制。人自己的终端
-  没有标记、停别的实例也不会被拦，所以 MCP 的用法与速度完全不变。
+
+- 增加 Windows 双击启动器和 `open-bridge stop` 自停保护。
+
 ### Fixed
-- **关窗/挂断不再留下「活着但没人管」的实例。** `serve` 只处理 SIGINT/SIGTERM：控制台窗口关闭（Node 在 Windows 上报成 SIGHUP）与 Ctrl+Break（SIGBREAK）都没人接，于是窗口没了、进程还在，端口、runtime 文件与启动锁都还被它占着——下一次启动因此被拒（「该目录已有实例在运行」）。现在两个信号都走同一条优雅停机，并且停机在任何一步卡住时都有 **10 秒硬期限**（`src/bridge/shutdown-deadline.ts`，在第一次 await 之前就武装好），到点强制退出。
-  实测（本轮探针）：控制台成员表证明长驻子进程与 serve 同属一个控制台——`sleep.exe`/`bash.exe` 出现在那个窗口的控制台进程列表里，修复前它们各自持有独立（隐形）控制台、关窗也不会退出。非交互会话里拿不到可关闭的真实控制台窗口，所以「点 X」这一步依赖 Windows 文档化的行为（关闭控制台窗口会终止其成员进程）＋ SIGHUP 处理作为双保险。新增 `test/shutdown-deadline.test.ts` 三条用例（到点触发、完成后取消、默认期限下限）。
+
+- 修复关闭终端后残留实例、Windows 信号处理和启动锁清理。
 
 ## [1.0.0-alpha.2] — 2026-09-11
-### Added
-- **控制台设置页终于有了 OAuth 的开关。** `oauth.enabled` 之前只能 `open-bridge config set`（或直接打
-  `/api/settings/action`）——设置页里根本没有这一项，README 却说「或者用控制台设置页」。现在新增
-  「OAuth 2.1（可选）」卡片：开关、重定向主机白名单（`oauth.allowedRedirectHosts`，空 = 内置名单）、
-  以及从 `/api/oauth` 读到的已注册客户端与在用凭据数量（只有 `client_id` / 名称 / 回调地址 / 注册时间，
-  不含任何摘要或密钥），并在卡片里写明开关两侧的后果。
-### Fixed
-- **`npm run build:core` 不再顺手删掉控制台前端。** `build:core` 走的是同一支 `scripts/clean.mjs`，
-  而它整目录删 `dist/`——连同 vite 产物 `dist/ui`。**运行中的实例是按请求从 `dist/ui` 读控制台的**：
-  一跑 `build:core`，正开着的网页面板立刻变成 `{"error":"Console UI is not built. Run \`npm run build\`..."}`，
-  而那条提示不会告诉你是刚跑的那条命令干的（本轮就是这么把 18080 的面板弄哑的）。现在 `clean.mjs` 分两个
-  范围：`all`（默认，完整构建用，全删）与 `core`（`build:core` 用，保留 `dist/ui`）；`test/clean-scope.test.mjs`
-  三条用例钉住（core 保留 ui、all 全删、首次构建时 dist 不存在不算错）。
-- **打开 OAuth 不再把已经持有令牌的客户端挡在门外。** `oauth.enabled=true` 而未开个人令牌门禁时，
-  `authorizeRequest` 直接按 OAuth 判定并返回：一个带着有效个人令牌（`Authorization: Bearer` 或
-  `?token=`）的请求照样 401——与 README「不会让原来用路由令牌或 Bearer 令牌的客户端断线」的承诺相反。
-  现在只要请求**出示了**凭据，就继续走个人令牌校验（门禁开不开都校验），只有「什么都没带、只凭 URL」
-  的请求才被 OAuth 拦下。个人令牌校验失败时也带上同一个 `WWW-Authenticate`，好让过期客户端改用 OAuth。
-  顺带把那段声称「不会断线」却与实现相反的注释改成实情：路径里的路由令牌是路由键不是凭据，
-  OAuth 关上的正是「只凭 URL」这扇门。`test/oauth-integration.test.mjs` 新增两条用例钉住行为。
-- **`wait_process` / `interact_with_process` / `send_to_shell` 的时间参数不再被 NaN 打穿。**
-  `Math.max(Number(args.timeout_ms ?? …), 0)` 遇到 LLM 传来的 `"30s"`、`null` 会得到 NaN：
-  `setTimeout(cb, NaN)` 约 0 ms 就触发，wait_process 不等就返回、send_to_shell 直接把命令标成
-  timed_out 并挂上 pendingMarker 卡住会话。这些入口（连同 `ready_timeout_ms`、`restart_process`
-  的 `delay_ms`）统一走新的 `clampMs()`，非法值回落到文档默认值——与 run_command 当年修过的是
-  同一类问题，这次把漏掉的三处补齐（`test/clamp-ms.test.ts`）。
-- **共享 JSON 存储的写失败不再静默成功。** `withFileLock` 抢锁 60 次仍拿不到时，旧实现返回
-  undefined 而 `write()` 照常 resolve——config/secrets/state 的更新可能根本没落盘，调用方却以为
-  成功（症状：签发了令牌却永远 401）。现在锁超时抛错，且每个调用者的 promise 单独可拒绝（串行
-  tail 依旧吞错防污染后续写入）。
-- **日志轮转失败不再清空当前文件。** audit.log / bridge.log / 服务日志的轮转 rename 在 Windows 上
-  因句柄占用失败时，旧回退是 `writeFile(file, "")`——把这次没能轮转的历史直接销毁。现在跳过本次
-  轮转照常追加，下一次再试；最多暂时超限，不再丢历史。
-- **未配置隧道域名不再是一次 ERROR。** 开箱 `open-bridge serve`（没填 ngrokDomain）以前每次启动
-  都在活动日志与 audit.log 里记 "Tunnel failed; local Bridge stays up: 未配置隧道域名…"——用户什么
-  都没做错，活动页首屏却永远是红的。现在按「状态」处理：一条 progress 说明 + 干净的本地模式；
-  保存域名后点 Start 仍会照常发起隧道。
-- **同一目录的并发 `serve` 不再产生双实例。** 原来的 runtime 记录检查是先读后写：两次 serve 在同一
-  秒内启动都看不到对方，各自绑上随机端口，后写的 runtime 文件把先者藏掉。现在绑定前先在数据目录
-  创建 `serve-<workspace>.lock`（`wx` 原子创建），持有方退出或 pid 已死时自动回收；`open-bridge stop` 在本目录没有实例可停时
-也会清掉这种死锁文件——只清 pid 已死的，正在启动的实例照样受保护。
-- **`/api/sessions/close` 的 id 前缀必须唯一。** 旧实现取第一个 `startsWith` 命中，短前缀撞上多个
-  会话时会关掉插入顺序里的第一个——不一定是想关的那个。现在匹配到多个返回 400 并提示加长前缀。
-- **`open-bridge logs --follow` 不再在竞态下崩溃。** 初始 `statSync` 与前面的读取之间文件被轮转/
-  清空会让 CLI 直接抛错；现在从 0 开始跟踪，文件回来后继续。
-- **控制台：设置页不再静默破坏或伪造配置。**
-  「文件访问」的目录白名单改用 `<textarea>`——HTML 会把 `<input type=text>` 值里的换行剥掉，
-  编辑一次就把多个目录合并成一个非法路径直接保存；数值字段（端口/健康检查/并发上限/日志上限）
-  失焦校验失败时弹提示并回弹为已保存值，不再无声地显示一个配置里根本没有的数字；UI 边界改为
-  与服务端 `CONFIG_SPEC` 一致（logMaxBytes 上限 1 GiB、并发上限 3 600 000 ms）。
-- **控制台：破坏性动作补上防重。** 「创建令牌」飞行中禁用——双击曾铸造两个令牌且一次性明文被
-  第二个覆盖，留下一个永远无法认证的幽灵令牌；`ConfirmButton` 支持 `disabled`，体检页「开启第二道锁」
-  arming 时真正禁用；会话页「断开」进行中同样禁用。
-- **控制台：轮询不再让旧响应覆盖新状态。** 状态/统计/服务/会话四个页面的轮询加了过期丢弃：
-  服务页点「停止」后，一个先前发出、尚未返回的轮询曾把"已停止"又翻回"运行中"到下一轮才自愈。
-  文件锁表的 React key 补上序号（两个 waiter 等同一资源时 key 曾重复）。
-- **控制台小项。** 保存域名失败不再清空输入；日志 SSE 断开/重连有页面提示（此前断线段静默缺失）；
-  `getJson` 对非 JSON 响应给出带 HTTP 状态的报错而非裸 SyntaxError；`vite.config.ts` 纳入
-  `typecheck` 范围。
 
 ### Added
-- **OAuth 2.1 授权服务器（可选，默认关闭）。** 有些 MCP 客户端只认标准授权流程，不认「URL 里
-  带令牌」。打开 `oauth.enabled` 后，客户端可以走完整的 2026 规范流程：从
-  `/.well-known/oauth-protected-resource` 发现，`/oauth/register` 动态注册（RFC 7591），
-  `/oauth/authorize` 授权（PKCE），`/oauth/token` 换 access + refresh，`/oauth/revoke` 吊销
-  （RFC 7009）。**为什么要它**：路由令牌能给「只填 URL」的客户端凭据，但给不了**按客户端签发、
-  可单独吊销**的凭据——这才是 OAuth 唯一不可替代的收益，也是它不取代路由令牌、只作为第二把钥匙
-  的原因（两条路并存，开 OAuth 不会让原客户端断线）。
-  安全取舍写死在这几处：**只支持 S256**（公开客户端没有 secret，PKCE 是唯一持有证明，`plain`
-  一律拒绝）；`resource` 必填且必须是本机（RFC 8707，否则这里签发的 token 能拿去打别的服务）；
-  授权码**仅内存** + 5 分钟 TTL（重启丢掉只是让客户端重新授权，比持久化一个重放窗口安全）；
-  refresh **一次性轮换**（消费与读取在同一步，重放找不到东西）；access 1 小时、refresh 30 天；
-  所有密钥**只存 sha256**，与个人令牌同一套比较方式；重定向 host 走白名单且**精确匹配解析后的
-  host**（`https://evil.com/?x=chatgpt.com` 不通过）；授权页的口令默认就是路由令牌，可用
-  `OPEN_BRIDGE_OAUTH_OWNER` 覆盖，且受与 Bearer 同一套失败锁定保护。
-  实现不引入 Express：发现文档与 bearer 校验用 v2 的 Web 标准 helper，四个授权路由按 `node:http`
-  手写。新测试 `test/oauth-protocol.test.ts`（11 项，纯规则）与
-  `test/oauth-integration.test.mjs`（14 项，真起进程走完整流程，含单次性、PKCE 失败、重定向
-  未注册、越权 scope、跨 resource、轮换重放、吊销后 401）。
-- **`logs/bridge.log` 会轮转了。** 长到上限（`logMaxBytes`，默认 10 MiB）就改名成
-  `bridge.log.1`，只留上一代——和审计日志、服务日志同一套做法——磁盘不再只涨不落。
-  设置页新增「日志」卡片可改上限，`open-bridge config set logMaxBytes <字节>` 也行，
-  `0` = 不轮转（旧行为）。轮转失败（例如 Windows 上另一个实例正持有文件）退化为清空当前文件，
-  永远不把错误抛给写日志的调用。
-- **会话页补上「首次连接」与「调用数」两列。** `list_sessions` 与 `/api/sessions` 都带上
-  `connected_at` 与 `calls`：前者回答"这个客户端是什么时候进来的"（此前只能看空闲时长），
-  后者回答"它到底用了多少"（按会话累计，batch 内部子调用不重复计数）。
-- **同一个 `/mcp` 端点现在同时服务两代协议，客户端不用选模式。** 2026-07-28 起 MCP 改成
-  **按请求**：没有 `initialize` 握手、没有 session id，每个请求自带信封
-  （`params._meta["io.modelcontextprotocol/protocolVersion"]` + `MCP-Protocol-Version` /
-  `MCP-Method` / `MCP-Call-Name` 头）。这类请求现在走 `@modelcontextprotocol/server@2` 的
-  `createMcpHandler`，`server/discover` 如实回答 `supportedVersions: ["2026-07-28"]`；
-  原来的 2025 世代会话式客户端走原路径，一行未改——`eventStore` 断线续传、15 s SSE 保活、
-  会话表都照旧。分流由 v2 自己的 `classifyInboundRequest` 判定（请求体是主判据），所以边界
-  就是规范说的边界。工具清单、用量计数、审计行在两条路上是同一份代码。
-  新测试 `test/mcp-modern-protocol-integration.test.mjs`（9 项）真起进程走 HTTP 验证两代共存。
-- **工具带上了 MCP 行为标注（`readOnlyHint` / `destructiveHint` / `idempotentHint` /
-  `openWorldHint`）。** 这是**纯告知**：客户端据此决定怎么展示或提示，Bridge 自身不因此
-  拒绝任何调用、不裁剪工具、不新增确认。标注表在 `src/bridge/tool-annotations.ts`，
-  对全部 56 个定义齐备；两代协议与「工具」页从同一处取，不会各说各话。注意几个刻意的取舍：
-  能覆盖既有内容的工具（`write_file`、`run_command`、`delete_file`…）**不声明**
-  `destructiveHint: false`——规范里缺省就是"可能破坏"，声明 `false` 是 Bridge 兑现不了的承诺；
-  纯新增的（`create_directory`、`copy_file`）才明确声明 `false`；`batch` 继承其中最弱的保证。
-- **`report_progress` 的 `phase` / `category` 改成封闭词表。** `phase` 取
-  `queued|preparing|running|verifying|done`，`category` 取 `read|edit|command|test|build|other`，
-  **词表外的值被丢弃**（结果里就是没有这个字段），而不是被强行归到某个默认值——否则存下来的
-  值就不再反映调用方，封闭集合也就不再约束任何东西。自由文本照旧放 `message`。
-  这三个词表在运行时 `Object.freeze`，因为集合本身就是成员检查读取的依据，一次误 `push` 就能
-  悄悄把它撑开。`src/bridge/progress-vocabulary.ts`，测试 `test/progress-vocabulary.test.ts`。
-- **每次 MCP 交换留下一条有界的追踪行。** 活动日志此前只回答"哪个工具跑了、成不成"，
-  回答不了传输层的问题：这次交换是哪个协议世代服务的、耗时多少、客户端是不是没等回包就走了。
-  现在每个 `/mcp` 请求结束（含客户端中途断开——`close` 事件，`end` 抓不到这种）都会记一行
-  `era/method · HTTP 状态 · 耗时 · 格式 · session 哈希 · tool 哈希 · client-aborted`。
-  **不泄漏是硬约束**：方法名走白名单，白名单外一律记为 `other`；session id 与工具名只留
-  sha256 前 12 位（够关联两行日志，不够反推）；错误只留 16 位指纹 + 截断到 160 字符的单行摘要，
-  换行折叠成空格以免一条错误伪造出多行日志；**不碰**请求体、请求头、参数，也没有任何"原始内容"
-  逃生口。成功的 `ping` / `notifications/initialized` 不记（否则会把真正要看的那条埋掉），
-  但失败的、被中断的一律记。`src/bridge/request-trace.ts`，测试 `test/request-trace.test.ts`。
-- **停机过程在活动日志里可见。** 原来那 1.5 秒宽限是静默的：看不出是在等客户端排空、
-  还是卡住了、还是把谁掐断了。现在按阶段记录——开始关闭监听 → 正在排空 N 个会话（没有会话就不记，
-  空闲停机仍然只有一行）→ 全部排空 / 宽限期到、开始关闭未排空的连接 → 完成。
 
-### Changed
-- **控制台的一次整体视觉与可用性 pass。** 内容宽度 920 → 1040px，九条页签得到悬停/圆角与
-  键盘焦点环，表格行有 hover、数字列用等宽数字（`tabular-nums`），输入框聚焦有 3px 光环，
-  按钮 disabled 不再有假 hover 且光标为 `not-allowed`，暗色模式通过 `color-scheme` 让原生
-  控件跟随主题。补 favicon（内联 SVG，data URI，符合现行 CSP）与顶栏 logo，窄屏 padding 收敛。
+- 增加可选 OAuth 2.1 + PKCE、同一 `/mcp` 端点的双协议支持、日志轮转和会话信息。
 
 ### Fixed
-- **声明了 `resource_keys` 的进程不再在 5 分钟后丢掉资源锁。** `handOffToProcess` 把租约交给
-  派生进程后**没有关掉 hold 超时定时器**，而默认 `concurrency.holdTimeoutMs` 是 300000 ms：
-  一个 dev server 活过 5 分钟，锁就被 `onReclaim` 回收、`pump()` 立刻授予排队中的第二个调用
-  ——此时第一个进程还在跑，两个进程可以同时占住 `port:5173`。这正好违反 README 对
-  `resource_keys` 的承诺（"Two calls naming the same key never start at once"）。
-  现在 `LockRelease` 带一个 `handOff()`，移交时**只关定时器、不释放锁**：holder 仍在
-  `lockSnapshot()` 里、仍占着 slot，锁的寿命从此由**进程退出**决定。定时器退化为它本来的
-  职责——兜住"调用没返回也没释放"的卡死。回归测试在 `test/resource-locks.test.ts`
-  （短超时 + 不移交 → 仍被回收；短超时 + 移交 → 不被回收且第二个调用拿不到 key）。
-- **鉴权热路径不再是每请求一次全量 JSON 解析 + 线性扫描。** `readRecords()` 每个请求都
-  `JSON.parse` 整个令牌数组，`verifySecret()` 再对每条记录做 `digestEquals`（每条分配两个
-  Buffer）。现在令牌以 **digest 为键**建索引做 O(1) 查找，解析结果**按存储原文缓存**：
-  `SecretStore.get` 本来就在 mtime 变化时重新加载，所以原文一变（别的进程铸造/吊销）缓存即
-  失效——**跨进程正确性一格没让**，而稳态下每请求只剩一次 `stat`。用内容而非 TTL 作失效键是
-  刻意的：TTL 缓存会让 CLI 刚吊销的令牌在 TTL 内继续通过。`AuthFailureLimiter.evictIfFull`
-  同时去掉了为了删一个条目而排序整个 Map 的写法，改成一次线性扫描。
-- **一个畸形请求不再能整死 Bridge 进程。** 绝对形式的请求行指向越界端口时 `new URL()`
-  抛 `ERR_INVALID_URL`，`/console/%zz` 这类非法转义让 `decodeURIComponent` 抛
-  `URIError`——两者都从 async 监听器里逃到进程顶层并把进程带走，MCP 会话、后台服务、
-  终端会话一起没了。现在处理器内全部兜住（400），外面还有一层 `unhandledRejection`
-  记录到 `bridge.log`；`/console` 的路径也改用 `path.relative` 判定，`dist/ui-extra`
-  不再被当成 `dist/ui` 内部，`..%2f` 无法上跳。
-- **令牌的新增/吊销立刻生效，跨进程也是。** 授权层原先把令牌表读进模块级缓存，于是
-  CLI 新建的令牌在跑着的实例上是 401，CLI 吊销的令牌要等重启才失效。现在每次都从
-  `secrets.json` 读，写入时在 `<file>.lock` 内合并再原子落盘。
-- **文件写入原子化，读取不再把错误当成空文件。** `persist.ts` / `file-tools.ts` 写文件
-  一律 temp + rename（跨盘 `EXDEV` 退化为 copy + unlink）；`readFileOrAbsent` 只吞
-  `ENOENT`（以前任何读失败都返回空串，会把「没权限」读成「空文件」并被后续写覆盖）；
-  `append` 支持 `expected_sha256` 乐观校验。
-- **`apply_patch` 修掉四个会静默改错/拒绝真实 diff 的形状**：`\ No newline at end of
-  file` 标记、`+++ /dev/null` 的删除段、无内容的 `*** Add File`（应建 0 字节文件）、
-  以及以 `--`/`++` 开头的补丁内容行不再被误认成下一个文件头；另外补了二进制/NUL 守卫、
-  `(?=@@)` 边界、目标目录预检和失败回滚。
-- **串流读取的窗口边界。** 范围读取在剩余尾巴很小时继续读到 EOF，好让 schema 承诺的
-  整文件 `sha256` 仍然给出（深范围读大文件仍提前停止，不为此扫全文件）；`stream_search`
-  修掉跨 chunk 的 CR 残留；shell 会话 marker 与 ready-pattern 扫描各自带上重叠窗口，
-  不再因跨块截断而漏判或报错退出码；glob 的花括号现在按嵌套深度拆分，
-  `{src,lib}/{a,{b,c}}.ts` 能匹配到 b、c。
-- **锁的两处语义。** `start_all_services` / `stop_all_services` 展开成具体服务键——
-  字面量 `svc:*` 与 `svc:<名字>` 从来不会冲突，全量操作可以和单个 start/restart 交错；
-  `holdTimeoutMs: 0` / `waitTimeoutMs: 0` 现在真的等于「不限」（之前会把 0 当成极小值
-  或反之），控制台上那两句「0 = 不限」由新的回归测试兜住。
-- **控制台。** 设置页改为失焦/回车才提交（此前每敲一个字符都写一次 `config.json`，
-  半截的端口号、低于下限的超时值一路弹错误提示）；令牌有效期白名单改为直接从服务端契约
-  导入（UI 自己那份多出「90 天」，服务端一直 400）；会话页的 30 分钟改成实际的 60 分钟。
-- **CLI。** HTTP 请求加 5 秒超时（桥接没起来时不再挂死）、`--port` 类型校验、
-  `taskkill /T /F` 连子进程一起收、`unhandledRejection` 记日志。
-- **A second instance no longer drops the first one's route token.** `secrets.json`
-  (and, by the same construction, `config.json` and `state.json`) was read once in
-  the constructor and written back whole, so two instances sharing the data dir
-  each published a snapshot taken before the other's key existed — the last writer
-  won and one Bridge's token vanished. All three now share one store
-  implementation that re-reads when the file changes and merges immediately
-  before writing, atomically (temp file + rename) so a direct reader such as the
-  CLI never sees a half-written file. Writers also serialise on a `<file>.lock`
-  (created with `open(..., "wx")`, with a staleness escape) and re-read inside
-  it: merging "just before writing" still left a gap where two instances
-  starting in lockstep each published a map missing the other's key — the first
-  attempt at this fix passed on Windows and on ubuntu 22 and still lost a token
-  on ubuntu 24. Found by the new multi-instance suite on Linux CI, where the
-  timing differs from Windows.
-- **`open-bridge stop` no longer reports failure when the instance really did
-  stop.** The shutdown endpoint answers and then closes the listener, so a reset
-  socket can race the reply: the CLI now retries once, treats "the process is
-  gone" as success, and only falls back to killing the process when it is still
-  alive.
-- **控制台表格里的标识符列不再被挤成逐字竖排。** `.mono` 的 `word-break: break-all` 让自动布局
-  表格中该列的最小内容宽度塌缩到 1 个字符（工具目录的名称列整列竖排），CJK 表头与徽章也会任意
-  断行。现在表头不换行、表格内 `.mono` 单行 + 340px 上限 + 省略号（长内容另给 `title`），
-  需要换行的长文本用 `.mono.wrap`（体检「详情」列）。会话/锁/令牌/体检/工具五个表格同时受益。
-- **服务页的表格补上了 `token-table` 类**——它曾是全页唯一裸 `<table>`，无样式、与其他页不一致；
-  测试现在会断言这个类，防止再次漏掉。
-- **「扩展」徽章有了基础样式**（原先透明底、默认色，看起来像渲染错误）；徽章与 pill 一律不换行。
-- **Toast 的淡入淡出真正生效。** 原实现用 `key` 强制重挂载，元素天生带着 `.show` 挂上去，
-  过渡永远不会触发；改为常驻节点切换类，并按错误与否使用 `role="alert"` / `role="status"`。
-- **浏览器标签页标题跟随页面**：`/console/sessions` 的标签是「会话 · Open Bridge 控制台」，
-  同时开着几个实例的控制台时，标签页是唯一能区分它们的地方。
-- **轮换端点后的自动重载走命名接缝** `reloadConsole()`：测试改为直接断言这个接缝，不再去改
-  `window.location`（jsdom 与不同 vitest 池对它能否被重定义的答案不一致）。
 
-### Added
-- **「一键开启第二道锁」。** 开启 Bearer 鉴权一直是两步：先在「令牌」页签发令牌、复制，
-  再回「设置」页打开开关——而这套流程恰恰是"失败关闭"设计下最容易做错的地方。现在公网可达
-  且未开鉴权时，「体检」页会出现一个两步确认的按钮，一次动作 = 签发令牌 + 打开 Bearer，明文令牌
-  照旧只在弹层里显示一次；开启后页面自动复检，`public-open` 会变成 `public-authed`。
-  边界都处理了：已有可用令牌就复用而不是再签一个；已经开着就返回幂等的 no-op；
-  万一打开开关失败，会把刚签发的令牌删掉，绝不留下"有密钥却没有锁"的中间态。
-  接口是 `POST /api/settings/action` 的 `armPublicLock` 命令（标签与 TTL 都可省，缺省用配置里的默认有效期）。
+- 修复配置持久化、超时参数、并发启动、控制台设置、令牌操作和 CLI 诊断。
 
-### Added
-- **The console has real pages, one path each.** The panel was a single page
-  whose "tabs" were component state: the address bar never moved, nothing could
-  be linked, bookmarked, reloaded into place or opened in a second window. Every
-  page now lives at `/console/<name>` — 状态 / 会话 / 工具 / 体检 / 服务 / 日志 /
-  统计 / 令牌 / 设置 — the nav items are real `<a href>` links (ctrl-click and
-  "open in new tab" keep working), the address bar follows, and back/forward move
-  between pages. No server change was needed: `/console/*` already answers with
-  the SPA shell.
-  The bundle is referenced absolutely (`/console/assets/...`) and a missing asset
-  under `/console/` is a 404 rather than the HTML shell — both were real defects
-  the page paths exposed: the relative form resolved against the page path, so
-  `/console/sessions/` asked for `/console/sessions/assets/...` and rendered a
-  blank page, while the shell-for-everything fallback turned a lost asset into a
-  MIME error instead of a clear failure.
-- **会话: who is connected, and a way to act on it.** `active_sessions` was a
-  number with nothing behind it. `GET /api/sessions` returns the table — client
-  name from the MCP handshake (`clientInfo`), idle time, in-flight requests, todo
-  count — together with the file-lock snapshot, and `POST /api/sessions/close`
-  closes one session without touching the instance or the other clients.
-- **工具 and 体检 pages.** `GET /api/tools` returns exactly what `tools/list`
-  advertises (tool profile, then the host-capability filter, with core tools
-  flagged) so "54 tools" is inspectable instead of asserted. `GET /api/health`
-  runs the checks server-side and really sends a request through the tunnel for
-  the public leg — the only way to know a client could connect — with the
-  exposure verdict next to it.
-- **One Bridge per directory, and the CLI knows which is which.** `open-bridge
-  serve` has always used the current directory as its workspace root, but the
-  app could not actually keep that promise for two directories at once: runtime
-  records went into a single shared `runtime.json`, so a second `serve` in
-  another directory overwrote the first record and then refused to start at all
-  ("已有实例在运行"). Records are now keyed by the same per-workspace suffix the
-  route tokens use (`runtime-<suffix>.json`), the legacy file is still read for
-  its own root only, and `serve` refuses only when *this* directory already has
-  an instance. `stop` / `status` / `url` / `prompt` / `health` resolve this
-  directory's instance, fall back to the single live one with a printed note,
-  and never guess between several.
-- **`open-bridge instances`** — every live instance sharing the data dir: pid,
-  port, workspace, tunnel role, exposure, session and tool counts, with the
-  current directory marked.
-- **`open-bridge logs [--tail N] [--follow] [--clear]`** — the log file was
-  reachable from the extension's terminal, copy and clear commands but not from
-  the standalone CLI.
-- **`open-bridge health`** — listener, workspace, state, tool count, tunnel role,
-  exposure, plus a real round trip through the public URL when one is published,
-  which is the only check that proves a client could connect.
-- **`workspace_root` on `get_bridge_status`** and a 工作区 row in the console
-  status card: with one instance per directory, "which workspace am I talking
-  to" is a real question.
-- **A port that is taken is no longer a dead end.** An explicitly requested
-  `--port` still wins and now fails with the exact alternative command; a port
-  that came from configuration falls back to an ephemeral one with a notice.
-- **`test/multi-instance-integration.test.mjs`** — boots two real instances in
-  two directories against one data dir and asserts the whole story: each reports
-  its own workspace root, route tokens differ, `status` answers for the
-  directory it is typed in, `instances` lists both and marks the current
-  directory, `stop` in A leaves B serving, and a duplicate `serve` in the same
-  directory is refused by name.
-- `paths.workspaceSuffixFor(root)` — the per-workspace key is now derived in one
-  place instead of being re-implemented wherever it was needed.
-
-- The console gained the four surfaces the VS Code panel had and the standalone
-  app was missing, each wired to the implementation that already existed:
-  - **服务 tab** — the saved services (`save_service` definitions) listed with
-    live state and 启动 / 停止 / 重启, behind `GET /api/services` and
-    `POST /api/services/action`. `controlService()` had been sitting unused, so
-    a service the agent saved could only be controlled by asking the agent again.
-  - **健康检查** (状态 tab) — `runHealthCheck()`, also previously unreachable,
-    now returns a structured report: the loopback endpoint answers, the advert-
-    ised tunnel answers, and with the bearer gate on an anonymous request is
-    really refused (a gate that silently fails open is worse than no gate).
-  - **清空统计** (统计 tab) — `usage-store.resetUsageStats()` existed with no
-    caller; cumulative counters could only ever grow.
-  - **复制日志** (日志 tab) — the extension's `openBridge.copyLog` equivalent,
-    copying the buffered stream.
-
-- CI pipeline (GitHub Actions): typecheck, lint, build, unit + API integration
-  tests, and a CLI smoke test, across Ubuntu (Node 22 / 24) and Windows (Node 24).
-- README section on ripgrep resolution across platforms.
-- A quick start that actually works today: the README told readers to
-  `npm install -g open-bridge`, which cannot succeed until the package is
-  published. It now leads with the from-source path, names the console address
-  explicitly, and documents `npm start` as the one-command route. `npm start`
-  runs local-only (the default tunnel provider is ngrok, so an unconfigured
-  domain would otherwise warn on every start); exposing the Bridge through a
-  tunnel is its own section, including the one-session-per-domain rule.
-- Onboarding, reachable from all three surfaces: `open-bridge prompt` prints the
-  ready-made opening message, `GET /api/prompt` serves it to local scripts, and
-  the console's endpoint card gained a "复制接入提示词" button. `serve` now points
-  at it in its startup banner.
-- Console test suite (vitest + jsdom + Testing Library, 21 tests) covering the API
-  client, the endpoint card's tunnel-vs-loopback resolution, and the app shell's
-  tabs, toasts and one-time secret mask.
-- `tsconfig.ui.json`, so the React console and its tests are type-checked. The
-  core tsconfig only covers `src/**`, and Vite transpiles without checking types,
-  so `ui/` had never been type-checked at all.
-- Integration coverage for teardown ordering: a rotation must answer with the new
-  endpoint before the listener rebinds, and the console's stop action must answer
-  before the process exits. `test/api-teardown-integration.test.mjs` owns the
-  latter because it consumes the process the main suite still needs.
-
-### Added
-- **The integration coverage the extension had and the app did not.** The VS Code\n  extension carried two end-to-end suites over HTTP that were never ported with\n  the code: a guards suite (18 checks over the bearer gate — self-lockout refusal,\n  anonymous rejection, wrong/right secret, `?token=`, the readiness probe staying\n  exempt, per-client rate limiting with `Retry-After`, revocation re-closing the\n  gate, purge/delete semantics) and a protocol suite (29 checks over session\n  identity, body limits, CORS, usage accounting, result shapes). The app's\n  integration suite covered the app-shell surface but not the guarantees the MCP\n  endpoint makes to every client — which is why an external evaluation found\n  behaviour our own suite could not. Ported and adapted to the standalone host:\n  `test/guards-integration.test.mjs` (14 checks) and\n  `test/mcp-protocol-integration.test.mjs` (8 checks), both wired into\n  `npm run test:core`. Integration tests are now 41, up from 19.\n
-### Changed
-- `ConfirmButton` moved out of TokensTab into its own component: the two-step
-  destructive-action pattern now has one implementation instead of one per tab.
-- Every swallowed error now says why swallowing is safe (ten bare `catch {}`
-  blocks were documented) — a silent catch is indistinguishable from an
-  oversight.
-
-- **Minimum Node.js is now 22** (was 20.3). Node 20 reached end-of-life in
-  March 2026, so it receives no further security fixes — not a defensible
-  support floor for a tool that exposes a local workspace over HTTP. The old
-  floor was inherited from the VS Code extension, where it tracked the
-  editor's bundled runtime; a standalone CLI has no such constraint.
-- **`public_url` now means what it says.** The status payload used to put a
-  loopback URL in `public_url` whenever no tunnel was published, so every reader
-  had to guess which of the two things it was holding — which is how the CLI came
-  to print a private address under "public MCP URL", and how the health check
-  came to probe loopback as if it were a tunnel. Internally the field is now
-  `tunnelUrl`, set only while a tunnel is live; `public_url` is absent without
-  one, `local_url` is unchanged, and a new `mcp_url` carries the URL worth
-  handing to a client. `SettingsState.publicUrl` is renamed `mcpUrl` to match.
-
-### Removed
-- **`autoStart` is gone from every surface.** The key came from the VS Code
-  extension, where the host provides activation; in the standalone app nothing
-  read it, so the settings page offered a switch that could not cause anything
-  to happen. Legacy `autoStart` values in `config.json` are simply ignored.
-- Dead code, found by scanning every export for references outside its own file:
-  `lifecycle.switchWorkspace` (VS Code workspace folders), `host.hostOrNull`,
-  `auth.resetAuthCache`, and `src/mcp/lsp-format.ts` — 106 lines kept alive
-  solely by its own test, since the Node host never advertises the editor-only
-  `lsp` / `get_diagnostics` tools.
-
-### Fixed
-- **A rotation no longer interrupts the listener.** Rotating the MCP URL flipped
-  the route token and then rebound the listening socket — but every route
-  compares `state.routeToken` per request and the port does not change, so the
-  rebind propagated nothing. What it did do was drop the listener for a moment
-  (which on a loaded Windows runner surfaced as `ECONNREFUSED`/`ECONNRESET` for a
-  rotation that had actually succeeded, leaving the console holding a dead token)
-  and, with a tunnel up, tear the tunnel down and re-publish it — an outage risk
-  on ngrok Free's one-session-per-domain budget. Rotation is now a pure token
-  swap plus a refresh of the public URL and the peer registry row, and
-  `restartListener()` / `SettingsActionResult.deferRestart` are gone with it.
-- **The onboarding prompt no longer hands over a local-only address as if it were
-  reachable.** `clientMcpUrl()` resolves correctly (published tunnel URL first,
-  loopback only as a fallback), but the copied text said nothing about which one
-  it held: with no tunnel the console card read "当前仅本机可访问（未开启隧道）"
-  while "复制接入提示词" handed over `http://127.0.0.1:...` with no caveat — and
-  that prompt exists to be pasted into a client that is usually not this machine.
-  The text is now built by a pure, unit-tested function
-  (`src/bridge/onboarding.ts`), the loopback variant leads with the caveat and the
-  way to publish the instance, and the console toast repeats it instead of saying
-  "粘贴给 AI 客户端即可".
-- **The app can borrow the tunnel that is already running next to it.** The
-  instance holding the public tunnel forwards requests for other instances'
-  tokens by looking them up in `bridge-peers.json` — but the standalone app keeps
-  that file under its own `--home` while the VS Code extension keeps it in the
-  editor's `globalStorage`, so on a machine running both the tunnel answered 404
-  for the app's token and the app sat in "domain belongs to another instance"
-  without ever becoming routable, despite its `blocked → adoptSharedTunnel() →
-  follower` path already existing. The app now advertises its row in every
-  registry that already exists (its own plus the editor flavours it finds; only
-  existing files are adopted, nothing is created inside another product's
-  storage), looks peers up across all of them, and publishes before probing for
-  adoption — so `open-bridge serve` with `ngrokDomain` set publishes a real
-  public URL whenever another instance holds the domain, and takes over as owner
-  when it does not. `sharedPeerRegistry` overrides the discovery with one
-  explicit path.
-- **The public URL now says where it comes from, and the default run can publish.**
-  `getBridgeStatus()` carries `tunnel_role` (`owner` / `follower` / `none` /
-  `blocked`), and the console appends "该地址由本机另一个实例的隧道转发，那个实例停止后
-  此地址会失效" when the URL is borrowed — a public URL that silently depends on
-  another process is the kind of thing an operator should not have to discover
-  from an outage. `npm start` no longer forces `--no-tunnel` (the app is the main
-  product now); local-only keeps its own name, `npm run start:local`.
-- **The shared peer registry keeps one row per instance.** It merged on the token
-  digest, so every rotation added a row whose digest could never match a token
-  again — one dead credential entry per rotation, in a file other windows read,
-  until the process exited. Publishing now replaces the row for the same pid
-  (other instances untouched, re-publishing idempotent).
-
-- **The server no longer races the client's keep-alive timer.** It inherited
-  Node's 5 s `keepAliveTimeout`, which destroys idle connections; a pool that
-  owns such a connection (undici keys its own timer off the advertised
-  `Keep-Alive: timeout=5`, plus slack) would then reuse a socket the server had
-  just destroyed and fail with ECONNRESET while writing the request — an
-  intermittently red API test on CI's Windows runner, never locally. The
-  listener now advertises 60 s (`headersTimeout` 66 s, which Node requires to
-  exceed it), so the client is always the one to close an idle connection;
-  leftovers are still closed explicitly by `stopLocalServer()`. Reproduced
-  deterministically: with the default, a pooled connection idle for 6 s and then
-  reused fails with ECONNRESET; with 60 s it answers 200. The api-integration
-  suite now pins that behaviour.
-- **A rotation or a stop could still reach the caller as a connection reset with
-  no response body.** The deferral added earlier waited for the response's
-  `finish` event, but the teardown then destroyed the very socket that reply had
-  travelled on (`stopLocalServer` → `closeIdleConnections`), while the bytes were
-  still only in the peer's kernel buffer — and Windows discards an unread body
-  when a socket is reset, so the caller lost a response the server had already
-  written. Measured on one machine: 2 failures in 6 runs, and 8 in 8 once the
-  teardown was deferred differently. The replies that outlive their own listener
-  — stop, rotate, shutdown, and the settings actions that defer them — now go out
-  through `jsonAndClose()`, which marks the connection non-reusable: Node closes
-  the socket gracefully (FIN *after* the body) instead of leaving one behind for
-  the teardown to destroy. `/shutdown` also moved off `setImmediate` onto the
-  same deferral, for the same reason. The api-integration suite passes 8 of 8
-  runs after the change (it failed 2 of 6 before, and 8 of 8 with the teardown
-  deferred slightly differently).
-- **A tunnel ngrok refuses no longer retries forever, and no longer advertises a
-  dead https endpoint while it does.** `ERR_NGROK_313` (a reserved subdomain the
-  account may not serve), a rejected authtoken and a refused proxy are
-  configuration errors: they fail identically on every attempt. They were treated
-  as transient blips, so the reconnect chain respawned ngrok every 2 s → 5 s →
-  15 s → 60 s, indefinitely, and each doomed attempt published an https URL — via
-  `status`, the console and the prompt — that answered nothing. New
-  `src/network/ngrok-failure.ts` recognises ngrok's own `ERR_NGROK_<code>` marker
-  in the failed attempt's output (the exit code cannot be used: ngrok exits 1 for
-  both kinds); such a failure is surfaced once, in ngrok's own words, and the
-  reconnect chain is cancelled. Transient exits — a killed agent, a dropped
-  session, a network that was not up yet — still reconnect as before.
-  `waitForTunnelReady` also gained a racer for the process's `close` event, so a
-  doomed attempt is reported in ~3 s instead of sitting out the 20 s
-  public-health budget; and `state.tunnelUrl` is now published only once the
-  tunnel actually answers, and cleared when the tunnel process dies.
-- `open-bridge status` reported 「未运行」 while the console was already serving.
-  `runtime.json` — how `status` / `url` / `stop` find the running instance — was
-  written only after `await start()` resolved, and with a tunnel configured that
-  can be seconds later (or never, if the tunnel cannot come up). The CLI now
-  publishes it from a `setLocalServerReadyHook` callback the moment the loopback
-  listener binds, with the post-`start()` write kept as a safety net.
-- Test suite: `path casing cannot split one file's lock on Windows` asserted a
-  Windows-only invariant on every platform, so it failed on Linux. It now pins
-  what each platform must do — fold case on Windows, keep paths distinct on POSIX.
-- Test script used a `**` glob that only Node 21+ expands for `--test`; a
-  single-star pattern lets POSIX shells expand it while Windows still globs
-  through Node.
-- CI bumped to actions/checkout@v7 and actions/setup-node@v7 (v4 targets the
-  Node 20 action runtime, which current runners have deprecated).
-- `webAiPrompt()` — the "connect this MCP" text — was exported but never called
-  anywhere in the standalone build. The VS Code extension offered it from its
-  settings page; the port left it unreachable.
-- Three `resource-locks` tests were cancelled on Node 22 with "Promise
-  resolution is still pending but the event loop has already resolved". Every
-  timer in `resource-locks` is deliberately `unref()`d so a pending lock can
-  never pin a process open; with nothing else holding the loop in a test
-  process, it drained before the deadline fired. The test now holds the loop
-  open across the wait — the product keeps its `unref()` call, since a real
-  server always has its listening socket holding the loop open.
-- **Rotating the endpoint, and stopping, no longer reach the caller as a
-  connection reset with no response body.** Both actions tore down (or rebound)
-  the listener and only then replied — but the reply travels over the very socket
-  they close. The console's "rotate endpoint" button therefore reported a failure
-  for a rotation that had succeeded, and left the page holding a token that no
-  longer worked: every action from then on answered 403 until the operator
-  thought to reload by hand. Responses are now flushed first and the teardown
-  runs on the next tick; a rotation also tells the console to reload, so it picks
-  up the freshly injected token instead of asking the operator to guess.
-- **The teardown ordering only holds if the response has actually left.** The
-  first attempt deferred the stop/rebind by a tick, but `res.end()` merely hands
-  the bytes to the socket; under load the client could read most of the body and
-  then get a socket error as the listener went away. The teardown now waits for
-  the response's `finish` event — the last byte handed to the OS — with a
-  disconnect and a 2 s backstop so a stop can never be stranded.
-- **A rotation no longer relocates the instance to a new port.** The default
-  config asks for port 0, so the rebind that follows a rotation came up on a
-  brand-new ephemeral port, abandoning everything already pointing at the old
-  one: the console page that issued the rotation, the port `runtime.json`
-  advertises to the CLI (`status` / `url` / `stop` all stopped finding the
-  instance), and whatever the tunnel forwards to. The port the listener last
-  bound is now remembered across rebinds.
-
-### Added
-- **双击一次就能跑起来：`start-open-bridge.cmd`。** 仓库根目录的批处理，双击即可——首次运行时
-  自动 `npm install` + `npm run build`，然后在**本窗口**里跑 `open-bridge serve --open`：
-  服务端自己的日志和三个地址就在窗口里，浏览器自动打开控制台。**关掉窗口 = 停止服务**：
-  隧道、后台服务、常驻 shell 都与这个控制台同属一个控制台，Windows 关窗即终止其成员。
-  `Ctrl+C` 是干净停止（删掉启动锁与 runtime 文件）。节点缺失/步骤失败时会留住窗口显示原因。
-- 控制台顶栏与「状态」页显示构建版本；`/api/status`、`/api/settings` 与 MCP 的 `status`、
-  `workspace_brief` 都带上 `version`，与 `open-bridge --version` 是同一个字符串。
-### Fixed
-- **长驻子进程不再从终端里「逃逸」。** ngrok、后台服务、常驻 shell 此前一律以 `windowsHide: true`
-  拉起，等于各自拿一个**独立（隐形）控制台**：关掉终端窗口后它们活着，隧道继续占着域名，
-  下次启动只会得到 `ERR_NGROK_334` 并退回本地模式，屏幕上没有任何线索。实测（Win32
-  `AttachConsole` + `GetConsoleProcessList`）证明 `windowsHide: false` 的子进程会挂在**我们**
-  的控制台上、而隐藏的那个不会。现在只要我们自己有控制台（`stdout`/`stderr` 是 TTY）就共享它，
-  只有在确实没有控制台时（输出被重定向、或 GUI 父进程如旧的 VS Code 扩展宿主）才隐藏。
-- **版本号只剩一处来源。** `src/host/node-host.ts` 曾把 `"1.0.0-alpha.1"` 写成兜底字面量：
-  任何没传 version 的构建（测试、嵌入方、手工重建的 dist）都会带一个过期版本号。现在从
-  `package.json` 读，并由集成测试把 `/api/status`、`/api/settings` 与它钉在一起。
 ## [1.0.0-alpha.1] — 2026-09-11
 
-First standalone release: the VS Code extension (0.5.17, final) is now an
-independent Node process serving the MCP endpoint and the web console from a
-single port. The core (tool set, concurrency locks, auth model) carries over
-byte-for-byte; the host changed from VS Code to a local CLI plus a browser
-console.
-
 ### Added
-- `open-bridge serve` / `stop` / `status` / `url` / `config` / `token` / `doctor`
-  CLI, plus a React web console (`/console/`) with status, settings, tokens,
-  logs and statistics tabs.
-- Host abstraction (`src/host/`) so future shells (Tauri/Electron) implement one
-  interface instead of touching the core.
-- File-backed configuration and secrets under `~/.open-bridge` (override with
-  `OPEN_BRIDGE_HOME` or `--home`).
+
+- 首次发布：本地工作区 MCP Bridge、CLI、文件/命令/进程工具、配置与密钥存储、ngrok 公网入口和基础 Web 控制台。
 
 ### Fixed
-- **Console was unopenable (deadlock).** `/console/` demanded the console token,
-  but the token is delivered *by* that page (injected into `<head>` server-side),
-  so no browser could ever load it. The console route is now loopback-gated only;
-  the token gate applies to mutations (non-GET/HEAD) alone, which keeps the
-  cross-site request path dead by construction.
-- **`open-bridge status` / `url` returned HTTP 403.** Both called `/api/status`
-  without the `X-Open-Bridge-Console` header, so they could never talk to their
-  own instance.
-- **CRASH on Windows when a CLI command exited.** `process.exit()` raced undici's
-  closing keep-alive sockets, tripping a libuv assertion
-  (`!(handle->flags & UV_HANDLE_CLOSING)` in `src\win\async.c`). The CLI now uses
-  a one-shot `node:http` request with `agent: false` for every local call.
-- **`tool_count` disagreed with `tools/list`** (reported 56 where 54 are
-  advertised). The catalog is now computed in one place
-  (`src/bridge/tool-catalog.ts`) and shared by `tools/list`, `getBridgeStatus`
-  and `workspace_brief`.
-- CLI printed "public MCP URL: http://127.0.0.1:…" with no tunnel running. The
-  label now only appears for a real `https://` tunnel URL.
-- README stated 56 tools where the standalone advertises 54 (56 definitions
-  minus the editor-only `lsp` / `get_diagnostics`).
-- Bundled ripgrep resolution is platform-aware: `vendor/rg.exe` on Windows,
-  `vendor/rg` elsewhere, PATH's `rg` as fallback, built-in scanner as the last
-  resort.
 
-### Tests
-- 258 unit tests and 9 API integration tests (up from 7). New coverage locks in
-  token-free loopback reads, the console page being loadable without a token,
-  and the CLI `status` / `url` commands exiting cleanly against a live instance.
-
+- 修复控制台访问、状态/URL 查询、Windows 退出、工具数统计和跨平台 ripgrep 定位。

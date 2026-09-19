@@ -36,25 +36,14 @@ export type ConfigValidation = { ok: true; value: unknown } | { ok: false; error
 /** Shared with the MCP entry so the missing-value refusal cannot drift. */
 export const SETTING_VALUE_REQUIRED = "value is required. (expected 'value': setting value)";
 
-/** Bark delivery styles, per docs on the Bark app's own URL parameters. */
-const NOTIFY_LEVEL_KEYS: ReadonlySet<string> = new Set([
-  "notify.levelAttention", "notify.levelWaiting", "notify.levelFinished", "notify.levelProgress",
-]);
-
 const BOOLEAN_KEYS: ReadonlySet<string> = new Set([
   "sound.enabled",
-  "notify.callAttention",
-  "notify.callWaiting",
-  "notify.callFinished",
-  "notify.callProgress",
   "unrestrictedFileAccess",
   "autoReconnect",
   "ngrokUseHttpProxy",
   "concurrency.enabled",
   "oauth.enabled",
   "notify.enabled",
-  "notify.onTaskDone",
-  "notify.onFinish",
 ]);
 
 const NON_NEGATIVE_INT_KEYS: ReadonlySet<string> = new Set([
@@ -276,36 +265,6 @@ export function validateConfigValue(key: string, value: unknown): ConfigValidati
       };
     }
     return { ok: true, value: parsed };
-  }
-
-  if (key === "notify.mode") {
-    // The enum this replaced. Kept as a REJECTION rather than silently
-    // ignored: someone scripting against the old key deserves to be told
-    // where the setting went, not to watch a write succeed and do nothing.
-    return {
-      ok: false,
-      error: "notify.mode was replaced by two independent switches: notify.onTaskDone (push each completed todo) and notify.onFinish (push when the exchange ends). Set those instead.",
-    };
-  }
-
-  if (key === "notify.idleMinutes") {
-    // Integers only, upper-bounded at one day, and 0 = "the watchdog is off"
-    // (an explicit, meaningful value — never coerce it to the default).
-    if (!isInt(value) || value < 0 || value > 1440) {
-      return { ok: false, error: "notify.idleMinutes must be an integer between 0 and 1440 (minutes; 0 = off). (expected 'notify.idleMinutes': number)" };
-    }
-    return { ok: true, value };
-  }
-
-  if (NOTIFY_LEVEL_KEYS.has(key)) {
-    const allowed = ["active", "timeSensitive", "passive", "critical"];
-    if (typeof value !== "string" || !allowed.includes(value)) {
-      return {
-        ok: false,
-        error: `${key} must be one of: ${allowed.join(", ")}. critical overrides the phone's mute switch and needs Bark's critical-alert permission in iOS. (expected '${key}': string)`,
-      };
-    }
-    return { ok: true, value };
   }
 
 

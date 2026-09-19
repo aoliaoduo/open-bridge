@@ -212,56 +212,16 @@ open-bridge serve                 # without --no-tunnel
 
 ---
 
-## Notifications: why they behave the way they do
-
-The settings page states what each control does. This section holds the
-reasoning behind the parts that surprise people — it used to live on the page
-itself, where a paragraph you read once cost screen space forever.
-
-**Attention and Waiting are not switches.** Every other notification can be
-turned off; these two cannot. When the AI asks a question and nobody answers,
-the exchange does not fail — it stalls indefinitely, and the operator has no
-way to find out except by looking at the screen, which is the exact thing the
-notification exists to avoid. A setting that can swallow those is a setting
-that can strand you.
-
-**The silence alert does not require a task list.** It used to, and that
-requirement disabled it precisely when it mattered most. Measured in this
-repo's own audit log: 2138 tool calls in one day, `set_todos` called zero
-times. A safety net tied to a tool the model is free to forget fails in
-exactly the situation it exists for. Silence alone is now enough.
-
-**The local sound only fires when the AI has stopped.** Waiting on you, or the
-end of an exchange — not task progress. A chime per ticked todo is the
-fastest way to make someone disable the whole feature, and then the alerts
-that mattered are gone too.
-
-**Critical needs an iOS permission.** `level=critical` overrides the mute
-switch, but only if Bark has been granted critical-alert permission under
-iOS Settings → Notifications → Bark. Without it the system quietly downgrades
-the push rather than failing, so a silent phone is not evidence the bridge
-did anything wrong. `timeSensitive` pierces Focus modes but never the mute
-switch — those are different things.
-
 ## Phone notifications (Bark)
 
-You do not have to watch the tab while a web AI works. Paste the link the Bark app shows (`https://api.day.app/<device key>/…` — the whole thing; the key is extracted) into **Settings → Phone notifications** in the console, and the AI can push to your iPhone.
+You do not have to watch the tab while a web AI works. Paste the link the Bark app shows (`https://api.day.app/<device key>/…` — the whole thing; the key is extracted) into **Settings → Phone notifications** in the console.
 
-Two independent switches, both optional, not a choice between them:
+Notifications are deliberately limited to two moments that genuinely need a person: the AI is **waiting for an answer or choice**, and an exchange is **finished**. A single activity episode gets at most one alert. Bark delivery is fixed to `level=timeSensitive&call=1`; `call=1` is one persistent Bark alert, and Open Bridge never sends a server-side repeat.
 
-| Switch | Behaviour |
-| --- | --- |
-| Notify on task done | One push per item ticked off the todo list — the server pushes when `set_todos` is written, not when the AI remembers |
-| Notify on finish | One push when the exchange wraps up |
-
-`attention` (come back to the computer) and `waiting` (the AI asked something and is blocked) **ignore both switches and always arrive**: an unanswered question strands the conversation indefinitely, which is not something a setting should swallow.
-
-- **Per-call Bark knobs**: `sound`; `level` (`timeSensitive` pierces Focus modes, `critical` overrides silent mode); `volume` 0–10 (valid only with `critical`); `call: 1` to ring until opened; `badge`; `url` to open on tap; `group` (defaults to `open-bridge`, so several projects do not interleave on one phone); `icon`; `isArchive` to keep it in Bark's history; and `copy` / `autoCopy` to put a command or an id on the clipboard. The silence watchdog always uses `timeSensitive`.
-  - Whether `critical` truly overrides silent mode depends on you granting Bark critical-alert permission in iOS. `volume` without `critical` is **refused by name** rather than dropped — someone who set it believed the push would be loud.
-- **Silence watchdog**: after the configured number of quiet minutes (default 60, 0 disables), the server pushes by itself. When a web AI's tab dies or it is rate-limited into silence, this is the only channel left. **No todo list required** — the times the AI forgets to write one are exactly when you most need telling. (Measured in this repo's own audit log: 1274 tool calls in a day, 4 of them `set_todos`, zero notifications.)
-- **Flood control**: real sends share a window of 6 per 60 seconds, plus 60-second deduplication of identical content. A suppressed call returns a structured `delivered:false`, not an error. The console's "send test" is a human action and is exempt.
-- **The key only goes one way**: it can push to your phone and nothing else. The console and `get_config` show a mask; the audit and runtime logs never contain it. `notify.serverUrl` can point at a self-hosted Bark (plain http is allowed on loopback only).
-- When the channel is off — switch disabled or no key — a `notify` call returns an explicit reason and the work continues unaffected.
+- Task completion and ordinary progress never notify the phone. The server does retain one conservative fallback for an agent that forgets to announce an ending, but it waits **ten full minutes** of quiet activity first; it never repeats.
+- When an agent asks a blocking question it sends `waiting` once; on a genuine ending it sends `finished` once.
+- The key only goes one way: the console and `get_config` show a mask; the audit and runtime logs never contain it. `notify.serverUrl` can point at a self-hosted Bark (plain http is allowed on loopback only).
+- A configured local sound uses the same two-event, once-per-episode rule and does not require Bark.
 
 ---
 

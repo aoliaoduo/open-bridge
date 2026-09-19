@@ -176,22 +176,11 @@ test("ttlLabel covers permanent, known choices and generic fallbacks", () => {
 
 // --- page rendering ----------------------------------------------------------
 
-/**
- * The bug: notify.call* existed in CONFIG_DEFAULTS, in the state type and in
- * the validator, but not in CONFIG_SPEC -- and normalizeSettingsMessage rejects
- * any setConfig for a key missing there. So the switch rendered, the operator
- * clicked it, and the page answered 无法识别的操作. Four places have to agree
- * for a setting to work; a test that only checks the validator would have
- * stayed green through all of it.
- */
-test("every notify setting the console renders survives normalizeSettingsMessage", () => {
-  for (const event of ["Attention", "Waiting", "Finished", "Progress"]) {
-    const call = normalizeSettingsMessage({ command: "setConfig", key: `notify.call${event}`, value: true });
-    assert.ok(call, `notify.call${event} is rejected by the console gate`);
-
-    const level = normalizeSettingsMessage({ command: "setConfig", key: `notify.level${event}`, value: "passive" });
-    assert.ok(level, `notify.level${event} is rejected by the console gate`);
-  }
+test("the console only accepts the compact notification config surface", () => {
+  assert.ok(normalizeSettingsMessage({ command: "setConfig", key: "notify.enabled", value: true }));
+  assert.ok(normalizeSettingsMessage({ command: "setConfig", key: "notify.serverUrl", value: "https://bark.example" }));
+  assert.equal(normalizeSettingsMessage({ command: "setConfig", key: "notify.levelWaiting", value: "active" }), null);
+  assert.equal(normalizeSettingsMessage({ command: "setConfig", key: "notify.callWaiting", value: true }), null);
 });
 
 // --- the tunnel card ---------------------------------------------------------

@@ -240,15 +240,9 @@ export function playAlertSound(file: string): SoundAlertResult {
 }
 
 /** Resolve the configured path for one event, or "" when this event is silent. */
-export function soundFileForEvent(event: "attention" | "waiting" | "finished" | "progress"): string {
+export function soundFileForEvent(event: "waiting" | "finished"): string {
   const cfg = host().config;
   if (cfg.get<boolean>("sound.enabled", false) !== true) return "";
-  // Only the two blocking events and the end of an exchange can make a noise
-  // by default. A chime on every ticked todo is how someone ends up muting
-  // the whole feature.
-  const key = event === "attention" || event === "waiting"
-    ? "sound.fileWaiting"
-    : event === "finished" ? "sound.fileFinished" : "";
-  if (!key) return "";
+  const key = event === "waiting" ? "sound.fileWaiting" : "sound.fileFinished";
   return String(cfg.get<string>(key, "") ?? "").trim();
 }

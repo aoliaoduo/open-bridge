@@ -2,8 +2,7 @@ import { host } from "../host/host.js";
 import { randomBytes } from "node:crypto";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { testReadyPattern, validateReadyPattern } from "../mcp/regex-worker.js";
-import { persistTodos, loadTodoStore } from "./todo-store.js";
-import { pushTodoCompletions } from "./notify.js";
+import { persistTodos } from "./todo-store.js";
 import {
   MAX_INLINE_OUTPUT,
   READY_PATTERN_WINDOW_BYTES,
@@ -195,7 +194,7 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
       const snapshot = commandState.output.tail(MAX_INLINE_OUTPUT);
       return {
         command_id: id, shell: shellSpec().file, cwd,
-        status: commandState.done ? "completed" : "running", ready,
+        status: commandState.done ? "completed" : "running", ready, ready_checked: true,
         restart_count: commandState.restartCount,
         output: streamText(commandState.output), stdout: streamText(commandState.stdoutOutput), stderr: streamText(commandState.stderrOutput), output_bytes: snapshot.totalBytes,
         dropped_bytes: snapshot.droppedBytes, truncated: snapshot.truncated,
@@ -205,7 +204,10 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
     return {
       command_id: id, shell: shellSpec().file, cwd,
       status: commandState.done ? "completed" : "running",
-      ready: commandState.done || !patternText, restart_count: commandState.restartCount,
+      // `ready: true` remains the compatibility value when no pattern was
+      // requested; ready_checked distinguishes that from an observed readiness signal.
+      ready: commandState.done || !patternText, ready_checked: false,
+      restart_count: commandState.restartCount,
       output: streamText(commandState.output), stdout: streamText(commandState.stdoutOutput), stderr: streamText(commandState.stderrOutput), output_bytes: snapshot.totalBytes,
       dropped_bytes: snapshot.droppedBytes, truncated: snapshot.truncated,
     };
@@ -546,19 +548,12 @@ export function listSessions(): unknown {
 /** Todos live on the MCP session that set them. */
 export function setTodos(args: Args, session?: SessionState): unknown[] {
   const next = validateTodos(args.todos);
-  // Frequent-mode bell: capture the previous list BEFORE overwriting. The
-  // session list is the baseline when the caller has one; the persisted store
-  // covers the legacy/no-session path. Push happens after the write lands —
-  // a notification about a saved state, never about one in flight — and
-  // pushTodoCompletions swallows every failure itself.
-  const previous = session?.todos ?? state.latestSession?.todos ?? loadTodoStore().todos;
   if (session) {
     session.todos = next;
     state.latestSession = session;
   }
   persistTodos(next);
   host().ui.update();
-  pushTodoCompletions(previous, next);
   return next;
 }
 

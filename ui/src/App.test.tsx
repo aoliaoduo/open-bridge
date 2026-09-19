@@ -143,14 +143,6 @@ function settingsState(overrides: Partial<SettingsState> = {}): SettingsState {
       logMaxBytes: 10 * 1024 * 1024,
       "oauth.enabled": false,
       "oauth.allowedRedirectHosts": [],
-    "notify.levelAttention": "timeSensitive",
-    "notify.levelWaiting": "timeSensitive",
-    "notify.levelFinished": "active",
-    "notify.levelProgress": "passive",
-    "notify.callAttention": false,
-    "notify.callWaiting": false,
-    "notify.callFinished": false,
-    "notify.callProgress": false,
     "sound.enabled": false,
     "sound.fileWaiting": "",
     "sound.fileFinished": "",
@@ -164,12 +156,10 @@ function settingsState(overrides: Partial<SettingsState> = {}): SettingsState {
     },
     notify: {
       enabled: true,
-      onTaskDone: true,
-    onFinish: true,
+
       configured: false,
       keyMask: "",
       serverUrl: "https://api.day.app",
-      idleMinutes: 60,
     },
     ...overrides,
   };

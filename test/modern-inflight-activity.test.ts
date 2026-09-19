@@ -4,7 +4,7 @@
  * The 2026-07-28-era (modern, stateless) path stamps one clock and counts
  * nothing: `modernLastUsed` is written when a request ARRIVES, and
  * `activeRequests` only ever counted legacy sessions. A tool call that takes
- * longer than the finish settle window (45 s) therefore looked exactly like
+ * longer than the finish settle window therefore looked exactly like
  * silence — a run whose own duration outlasted the threshold. The exported
  * observation is the one both watchdogs share, so this is where the rule is
  * pinned: an in-flight request is activity, and the clock they read is the END
@@ -69,8 +69,8 @@ test("the activity clock is the END of the last request, not its beginning", () 
   modern.modernInFlight = 0;
 
   assert.equal(finishVerdict(now), false, "the settle window starts at completion, not at arrival");
-  assert.equal(finishVerdict(now + 44_000), false, "44 s of quiet is inside the settle window");
-  assert.equal(finishVerdict(now + 46_000), true, "and a genuinely quiet minute after it is an ending");
+  assert.equal(finishVerdict(now + 599_000), false, "just under ten minutes of quiet is inside the settle window");
+  assert.equal(finishVerdict(now + 600_000), true, "a genuinely quiet ten minutes after it is an ending");
 });
 
 test("no request in flight and nothing recent is still the honest silence it always was", () => {

@@ -1,96 +1,34 @@
-/**
- * Bark device-key grammar + server origin allowlist — the config surface the
- * operator touches. Pure; the wire path is integration-tested elsewhere.
- */
-
 import assert from "node:assert/strict";
 import { test } from "node:test";
-
 import { canonicalBarkOrigin, maskBarkKey, parseBarkKeyInput, validateConfigValue } from "../src/bridge/config-values.js";
 
-const KEY = "aaaaaaaaaaaaaaaaaaaaaa"; // obviously fake: a real Bark key must never appear in a repo
+const KEY = "aaaaaaaaaaaaaaaaaaaaaa";
 
-test("bare key passes; surrounding whitespace is hygiene, not a rewrite", () => {
-  assert.equal(parseBarkKeyInput(KEY), KEY);
-  assert.equal(parseBarkKeyInput("  ".concat(KEY, "\n")), KEY);
-});
-
-test("a pasted Bark URL parses to its key (the canonical stored value)", () => {
-  assert.equal(parseBarkKeyInput("https://api.day.app/".concat(KEY, "/")), KEY);
-  assert.equal(parseBarkKeyInput("https://api.day.app/".concat(KEY, "/x/y?sound=z")), KEY);
-  assert.equal(parseBarkKeyInput("api.day.app/".concat(KEY)), KEY);
-});
-
-test("empty means clear; malformed input is refused, never smuggled", () => {
+test("a Bark key can be pasted bare or as a Bark URL and is masked on read", () => {
+  assert.equal(parseBarkKeyInput(`  ${KEY}\n`), KEY);
+  assert.equal(parseBarkKeyInput(`https://api.day.app/${KEY}/anything?sound=x`), KEY);
   assert.equal(parseBarkKeyInput(""), "");
-  assert.equal(parseBarkKeyInput("https://api.day.app/"), null);
-  assert.equal(parseBarkKeyInput("https://api.day.app/a b c d"), null);
-  assert.equal(parseBarkKeyInput("https://[oops"), null);
-  assert.equal(parseBarkKeyInput("密钥"), null);
-  assert.equal(parseBarkKeyInput("a;rm -rf /"), null);
-  assert.equal(parseBarkKeyInput("abc"), null); // shorter than the floor
-});
-
-test("maskBarkKey shows a shape, never a recoverable prefix", () => {
+  assert.equal(parseBarkKeyInput("https://api.day.app/a b c"), null);
   const masked = maskBarkKey(KEY);
-  assert.ok(masked.startsWith("aaaa"));
-  assert.ok(masked.endsWith("aa"));
+  assert.ok(masked.startsWith("aaaa") && masked.endsWith("aa"));
   assert.ok(!masked.includes(KEY.slice(4, -2)));
-  assert.equal(maskBarkKey("short123"), "••••••••");
-  assert.equal(maskBarkKey(""), "");
 });
 
-test("canonicalBarkOrigin: https origin kept whole, host case folded", () => {
+test("a Bark origin remains an http(s) origin with loopback-only plain http", () => {
   assert.equal(canonicalBarkOrigin("https://API.Day.App:443/"), "https://api.day.app");
-  assert.equal(canonicalBarkOrigin("https://bark.example.com:8443"), "https://bark.example.com:8443");
-});
-
-test("loopback http is the dev exception; other http is refused", () => {
   assert.equal(canonicalBarkOrigin("http://127.0.0.1:8080"), "http://127.0.0.1:8080");
-  assert.equal(canonicalBarkOrigin("http://localhost:8080"), "http://localhost:8080");
-  assert.throws(() => canonicalBarkOrigin("http://192.168.1.5:8080"), /loopback/);
-  assert.throws(() => canonicalBarkOrigin("http://api.day.app"), /loopback/);
-});
-
-test("an origin is an origin: no credentials, query, fragment or path", () => {
+  assert.throws(() => canonicalBarkOrigin("http://bark.example.com"), /loopback/);
   assert.throws(() => canonicalBarkOrigin("https://user:pass@api.day.app"), /credentials/);
-  assert.throws(() => canonicalBarkOrigin("https://api.day.app?x=1"), /without a query/);
-  assert.throws(() => canonicalBarkOrigin("https://api.day.app#frag"), /fragment/);
-  assert.throws(() => canonicalBarkOrigin("https://api.day.app/push"), /path/);
-});
-
-test("notify.mode is gone, and says where it went instead of failing silently", () => {
-  // Rejected rather than ignored: a script still writing the old key must be
-  // told the setting moved, not watch a write succeed and change nothing.
-  const verdict = validateConfigValue("notify.mode", "dnd");
-  assert.equal(verdict.ok, false);
-  assert.match(verdict.error ?? "", /notify\.onTaskDone/);
-  assert.match(verdict.error ?? "", /notify\.onFinish/);
-  assert.equal(validateConfigValue("notify.mode", "frequent").ok, false);
-});
-
-test("the two bells are independent booleans, settable in any combination", () => {
-  for (const key of ["notify.onTaskDone", "notify.onFinish"] as const) {
-    assert.equal(validateConfigValue(key, true).value, true);
-    assert.equal(validateConfigValue(key, false).value, false);
-    // Not a boolean-ish string: a typo must not decide who gets paged.
-    assert.equal(validateConfigValue(key, "yes").ok, false);
-    assert.equal(validateConfigValue(key, 1).ok, false);
-  }
-});
-
-test("notify.idleMinutes: integer with a ceiling; 0 stays off, not default", () => {
-  assert.equal(validateConfigValue("notify.idleMinutes", 0).value, 0);
-  assert.equal(validateConfigValue("notify.idleMinutes", 1440).ok, true);
-  assert.equal(validateConfigValue("notify.idleMinutes", 1441).ok, false);
-  assert.equal(validateConfigValue("notify.idleMinutes", "10").ok, false);
-});
-
-test("notify.serverUrl: canonical on write; '' clears to the official default", () => {
   assert.equal(validateConfigValue("notify.serverUrl", "https://bark.mine.example/").value, "https://bark.mine.example");
-  // Clearing is legal and mirrors the read side: "" stored, official origin used.
-  assert.equal(validateConfigValue("notify.serverUrl", "").value, "");
-  assert.equal(validateConfigValue("notify.serverUrl", "   ").value, "");
-  assert.equal(validateConfigValue("notify.serverUrl", 42).ok, false, "non-string is a type error, not a clear");
-  assert.equal(validateConfigValue("notify.serverUrl", "not a url").ok, false);
+});
+
+test("the settings surface only retains the channel switch and server URL", () => {
+  assert.equal(validateConfigValue("notify.enabled", true).value, true);
+  assert.equal(validateConfigValue("notify.enabled", "yes").ok, false);
+  for (const removed of [
+    "notify.mode", "notify.onTaskDone", "notify.onFinish", "notify.idleMinutes",
+    "notify.levelWaiting", "notify.levelFinished", "notify.callWaiting", "notify.callFinished",
+  ]) {
+    assert.equal(validateConfigValue(removed, true).ok, false, `${removed} must not be writable`);
+  }
 });

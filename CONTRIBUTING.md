@@ -15,7 +15,10 @@ wins and this file gets fixed.
 ## Ground rules
 
 - Node `>= 22`. `npm ci`, then `npm run verify` (typecheck + lint + build +
-  all tests). **A change is not ready until that is green.**
+  all tests). **A change is not ready until that is green.** For a release
+  candidate, run `npm run release:check` as well: it verifies the exact npm
+  publish manifest contains the CLI, compiled server, console, and user docs —
+  but no `src/`, `test/`, or workflow files.
 - Commit messages are in English and explain **why** — the situation, what
   was wrong with it, why the obvious fix was not taken. The history of this
   repo is written that way; `git log` is the style guide.
@@ -61,7 +64,7 @@ How to write each kind — readiness signals instead of fixed `delay()`,
 
 Something that lets a party other than the operator reach the workspace, or
 exposes a secret the masking is supposed to cover, goes to a
-[GitHub security advisory](https://github.com/aoliaoduo/open-bridge-app/security/advisories/new) —
+[GitHub security advisory](https://github.com/aoliaoduo/open-bridge/security/advisories/new) —
 not an issue. See [SECURITY.md](SECURITY.md). Read its "What is deliberately
 not locked down" section before filing: `unrestrictedFileAccess` defaulting
 on, non-zero exit codes not being failures, and the like are documented
@@ -84,7 +87,9 @@ MIT. Submitting a contribution means it is under the same license.
 ## 基本要求
 
 - Node `>= 22`。`npm ci`，然后 `npm run verify`（typecheck + lint + build +
-  全部测试）。**不全绿就不算做完。**
+  全部测试）。**不全绿就不算做完。**候选发布还要运行
+  `npm run release:check`：它检查 npm 实际会发布的清单，确保 CLI、编译后的
+  服务端、控制台和用户文档都在包内，同时不发布 `src/`、`test/` 或工作流文件。
 - 提交信息用英文，重点写**为什么** —— 现场是什么、错在哪、为什么不用那个显而易见的修法。这个仓库的历史就是这么写的，`git log` 就是风格样板。
 - `CHANGELOG.md` 的 `[Unreleased]` 用中文，按 Keep a Changelog 的分区（Added → Changed → Fixed）。用户能观察到的行为变化和修复都该有条目。
 - 文档语言：`README.md` 英文、`README.zh-CN.md` 中文、`docs/` 只有英文。**不要**另起一套翻译的 `docs/` —— 两份参考文档各自漂移的速度，比一份保持正确要快。
@@ -107,7 +112,7 @@ MIT. Submitting a contribution means it is under the same license.
 
 ## 安全
 
-任何让操作者之外的人够到工作区、或让本该被掩码的密钥暴露出来的问题，走 [GitHub 安全通告](https://github.com/aoliaoduo/open-bridge-app/security/advisories/new)，**不要开 issue**。见 [SECURITY.md](SECURITY.md)。开 issue 前先读它的「What is deliberately not locked down」一节：`unrestrictedFileAccess` 默认开、非零退出码不算失败，这些是写明了理由的取舍。想挑战一个取舍，开一个把论据摆出来的 issue。
+任何让操作者之外的人够到工作区、或让本该被掩码的密钥暴露出来的问题，走 [GitHub 安全通告](https://github.com/aoliaoduo/open-bridge/security/advisories/new)，**不要开 issue**。见 [SECURITY.md](SECURITY.md)。开 issue 前先读它的「What is deliberately not locked down」一节：`unrestrictedFileAccess` 默认开、非零退出码不算失败，这些是写明了理由的取舍。想挑战一个取舍，开一个把论据摆出来的 issue。
 
 ## 许可证
 

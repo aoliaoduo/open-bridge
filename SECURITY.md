@@ -77,7 +77,7 @@ backported patch branches yet.
 
 ## Reporting a vulnerability
 
-Open a [GitHub security advisory](https://github.com/aoliaoduo/open-bridge-app/security/advisories/new)
+Open a [GitHub security advisory](https://github.com/aoliaoduo/open-bridge/security/advisories/new)
 for anything that lets a party other than the operator reach the workspace, or
 that exposes a secret the masking above is supposed to cover. Those get
 priority over the issue tracker.

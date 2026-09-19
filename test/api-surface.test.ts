@@ -13,9 +13,9 @@
  * rather than an omission. The clearest case is the lifecycle: the instance is
  * owned by the terminal that runs `serve` (open it, the bridge runs; close it,
  * everything stops), so the console deliberately has no start/stop/restart
- * buttons. `/api/bridge/*` stays as API surface for the CLI, scripts and a future
- * desktop shell — and the previous attempt to turn it into console buttons is
- * exactly the mistake this list documents.
+ * buttons. `/api/bridge/*` stays as API surface for the CLI and scripts — and the
+ * previous attempt to turn it into console buttons is exactly the mistake this
+ * list documents.
  *
  * It is deliberately a source-text check, like `tool-call-shape.test.ts` reading
  * the dispatcher's handler table: importing the router would initialize the host,
@@ -37,10 +37,10 @@ const repoRoot = path.resolve(here, "..");
  * Empty today: every route currently has one (the console, the CLI, or a suite),
  * and the second assertion below keeps this list from rotting when that changes.
  * The expected future entry is the lifecycle pair — `/bridge/start` and
- * `/bridge/stop` exist for the CLI, scripts and a desktop shell, and the console
- * deliberately has no buttons for them (the terminal owns the process; see this
- * file's header). Today the integration and UI suites still exercise them, so
- * they are not orphaned and do not belong here yet.
+ * `/bridge/stop` exist for the CLI and scripts, while the console deliberately
+ * has no buttons for them (the terminal owns the process; see this file's
+ * header). Today the integration and UI suites still exercise them, so they are
+ * not orphaned and do not belong here yet.
  */
 const SERVER_OWNED_ROUTES: Readonly<Record<string, string>> = {};
 

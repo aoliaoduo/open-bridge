@@ -2,7 +2,7 @@
 
 **把本机的一个目录真正交给 ChatGPT、Claude、Cursor —— 文件、命令、进程，通过标准 MCP 端点。**
 
-[![CI](https://github.com/aoliaoduo/open-bridge-app/actions/workflows/ci.yml/badge.svg)](https://github.com/aoliaoduo/open-bridge-app/actions/workflows/ci.yml)
+[![CI](https://github.com/aoliaoduo/open-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/aoliaoduo/open-bridge/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](package.json)
 
@@ -30,7 +30,7 @@ Web 控制台:   http://127.0.0.1:18080/console/
 
 ## 为什么有这个东西
 
-编辑器插件把 AI 绑在编辑器里，这个不会：桥就是一个普通 HTTP 服务，同一个工作区可以从浏览器标签页、桌面应用、手机访问 —— 只要对方会说 MCP。
+编辑器插件把 AI 绑在编辑器里，这个不会：桥就是一个普通 HTTP 服务，同一个工作区可以从浏览器标签页、手机或任何会说 MCP 的客户端访问。
 
 - **39 个工具** —— 读写、打补丁、搜索、跑命令、托管长期进程、编排命名服务。
 - **一个端点同时服务两代 MCP 协议**，按请求自动判断。老客户端不用改任何东西。
@@ -47,7 +47,7 @@ Web 控制台:   http://127.0.0.1:18080/console/
 
 **关掉终端就停。** 那个窗口掌握着实例 —— 这也是控制台没有启动/停止按钮的原因。
 
-Windows 下有 `start-open-bridge.cmd`：双击，输入要用的目录，它会自己装依赖、构建、打开控制台。
+Windows 下有 `start-open-bridge.cmd`：双击后输入要用的目录。若要固定启动**本项目**，请双击 `start-open-bridge-project.cmd`：它始终用本项目作工作区、每次构建后提供控制台（不自动打开浏览器），并固定使用 **8123** 端口。
 
 其余的 —— 每条命令、每项设置、控制台各页、隧道、通知、数据目录 —— 都在 **[docs/configuration.md](docs/configuration.md)**。
 

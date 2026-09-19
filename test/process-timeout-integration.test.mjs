@@ -130,6 +130,15 @@ test("force_terminate is a real way out of a command that never exits", async ()
   assert.equal(snap.termination_reason, "terminated", "and the snapshot says why");
 });
 
+test("a background command distinguishes no readiness check from a ready process", async () => {
+  const started = asObject(await callTool("run_command", { command: "node forever.mjs", background: true }));
+  assert.equal(started.status, "running", "background work returns immediately under supervision");
+  assert.equal(started.ready, true, "the compatibility ready value is preserved when no pattern was requested");
+  assert.equal(started.ready_checked, false, "callers can now distinguish no check from observed readiness");
+  assert.ok(typeof started.command_id === "string" && started.command_id.length > 0);
+  await callTool("process_control", { action: "terminate", command_id: started.command_id });
+});
+
 test("a garbage timeout_ms falls back to the default instead of firing at ~0 ms", async () => {
   // `Number("abc")` is NaN and `setTimeout(cb, NaN)` fires immediately, which
   // used to report a 300 ms command as "still running". The guard in
@@ -248,6 +257,7 @@ test("ready_timeout_ms is the wait, and a process that misses it is reported, no
   assert.ok(elapsed >= 1200, `the wait honoured ready_timeout_ms (${elapsed} ms)`);
   assert.ok(elapsed < 8000, `and did not fall back to the 10 s default (${elapsed} ms)`);
   assert.equal(res.ready, false, "the pattern never matched");
+  assert.equal(res.ready_checked, true, "the result distinguishes an attempted readiness check from an omitted one");
   assert.equal(res.status, "running", "the process is left running for the caller to poll");
   assert.ok(typeof res.command_id === "string" && res.command_id.length > 0,
     "a command_id comes back either way");

@@ -14,7 +14,7 @@
 - 命令类工具（`run_command`、`start_process`、`send_to_shell`、`interact_with_process`）返回**合并输出 `output`**，同时给出**分离的 `stdout` / `stderr`**；分页读取还带 `offset` / `next_offset` / `truncated`。
 - 命令**非零退出码不是调用失败**：调用可以返回 `status: "completed"` 且 `exit_code != 0`，必须自己看 `exit_code`。
 - 声明了 `outputSchema` 的工具同时返回 `structuredContent`（类型化数据）。**被截断过的结果一定明说**：三个列举类工具（`list_directory`、`find_files`、`search_files`）返回 `{ items: [...], truncated: boolean }`，而不是裸数组。`truncated: true` 的意思是"还有更多，别把这一页当全部"；命中上限既不代表"结果为空"，也不代表"就这些"。`list_directory` 另外给 `total`（只在平铺 `depth: 1` 时是真实总数，其余为 `null`）和 `next_offset`（继续翻页时原样回传的入参）。文本块始终保留。
-- **结果里可能多出一个 `Note:` 文本块**，那是服务端主动说的一句话，不改变字段集：连续同类调用值得合并时、长时间没建任务列表时，以及**本进程跑的是比 `dist/` 更旧的构建**时（每个进程只说一次 —— 那种情况下你观察到的行为不是磁盘上代码的行为，重启实例再看）。`deprecated`（见文末旧名表）走的是同一条路：只进文本块，不进 `structuredContent`。
+- **结果里可能多出一个 `Note:` 文本块**，它不改变字段集。目前只用于提示**本进程跑的是比 `dist/` 更旧的构建**（每个进程只说一次；重启实例后再看）。`deprecated`（见文末旧名表）走的是同一条路：只进文本块，不进 `structuredContent`。
 - 出错时返回 `isError: true` 与一句话原因；错误信息通常给出下一步（例如"先 `read_files` 再重试"）。
 
 ---
@@ -53,7 +53,7 @@
 | 建目录 / 复制 / 移动 / 删除 | `file_op{op:…}` | — |
 | 就绪探测 | `connectivity`（`{url}` 或 `{port}`） | 不要用 `run_command curl`（慢且要自己解析） |
 | 连续多次相关调用、或结果很大 | `run_script`（在脚本里循环、过滤、聚合，只把需要的返回） | 逐个调用会浪费往返与上下文 |
-| 手机响一声 | `notify`（或清单勾选自动推） | 不要 `report_progress`（那只进客户端日志流，不碰手机） |
+| 手机响一声 | `notify`（仅等待回答或对话结束） | 不要 `report_progress`（那只进客户端日志流，不碰手机） |
 | 想批量并行调用 | `batch`（`mode: "parallel"`） | 嵌套 `batch` 会被拒绝 |
 
 ---
@@ -105,7 +105,9 @@
 
 ### 命令与进程
 
-**run_command** — 命令文本由 shell 解释：`shellPath` / `shellArgs` 未配置时自动探测（Windows：Git Bash → PowerShell 7 → Windows PowerShell），连接时下发的 instructions 会点名实际解释器与方言——写错方言不一定报错，`2>nul` 在 bash 下会生成一个名为 `nul` 的文件。前台等待最多 `timeout_ms`（默认 120000）。**超时不会杀掉进程**：它继续在监管下运行，返回 `status: "running"` 与 `command_id`，之后用 `read_process_output` / `wait` 继续读，或用 `process_control{action:"terminate"}` 停掉。`background: true` 立刻返回。退出码非零**不是**调用失败。链式命令（`a; b`）的 `exit_code` 取最后一段，要前一段的退出码就以 `echo EXIT=$?` 结尾。
+**run_command** — 命令文本由 shell 解释：`shellPath` / `shellArgs` 未配置时自动探测（Windows：Git Bash → PowerShell 7 → Windows PowerShell），连接时下发的 instructions 会点名实际解释器与方言——写错方言不一定报错，`2>nul` 在 bash 下会生成一个名为 `nul` 的文件。前台等待最多 `timeout_ms`（默认 120000）。**超时不会杀掉进程**：它继续在监管下运行，返回 `status: "running"` 与 `command_id`，之后用 `read_process_output` / `wait` 继续读，或用 `process_control{action:"terminate"}` 停掉。退出码非零**不是**调用失败。链式命令（`a; b`）的 `exit_code` 取最后一段，要前一段的退出码就以 `echo EXIT=$?` 结尾。
+
+**长任务不要占住一次前台 MCP 请求。** 构建、验证、迁移或任何耗时不确定的命令应传 `background: true`，立即取得 `command_id`，再用 `read_process_output`、`wait` 或 `process_control` 续读、等待或终止；不要因客户端/传输层等待超时就重发原命令——那会并发执行两次有副作用的工作。例：`run_command{command:"npm run verify", background:true, resource_keys:["build:dist"]}`，随后按返回的 `command_id` 读取输出。无论命令是后台还是 `start_process` 启动，只在传入 `ready_pattern` 时 `ready` 才是实际观察到的就绪信号；没有该模式时保留的 `ready:true` 只表示**没有请求就绪检查**，请看 `ready_checked:false` 与 `status` / `exit_code`。
 
 **start_process** — 面向**长驻**进程（服务器、watcher、守护进程）：`ready_pattern` 等启动输出，返回 `command_id` 交给进程工具组。就绪等待由 **`ready_timeout_ms`**（毫秒，默认 **10000**，上限 2147483647）控制：等不到就让调用返回 `ready: false` + `status: "running"`，**不会杀进程**（慢启动的构建要放宽，就调这个值）。这里**没有 `timeout_ms`** —— 那是 `run_command` 的（前台运行才有"完成"可限时）；传了会**点名拒绝**，而不是像以前那样被静默忽略。
 
@@ -141,23 +143,18 @@
 
 ### 手机通知（notify）
 
-**notify** — 推一条通知到用户手机（Bark）。`event` 四选一：`progress`（常规进展）/ `attention`（需要用户回电脑）/ **`waiting`（你问了问题、不拿到回答就没法继续）** / `finished`（这轮对话结束）。`title`/`message` 可省，缺省有内置话术。
+**notify** — 只在确实需要人回来处理时推送 Bark。`event` 只能是 **`waiting`**（你问了问题或给出选择，不拿到回答就没法继续）或 **`finished`**（这轮对话结束）。`title` / `message` 可省，缺省有内置话术。
 
-- **提问后必须发 `waiting`**：从服务端看，「AI 答完了」和「AI 在等你选」完全一样——调用都停了。你不说，没人知道对话正卡在一个没人回答的问题上。问完就发，这是硬要求。
-- **门是服务端的，不是约定**：两个独立开关 `notify.onTaskDone`（每项任务完成时通知）与 `notify.onFinish`（对话结束时通知），可以都开、都关。被关掉的事件返回 `delivered:false, reason:"switch_off"`——这是结构化的「没送」，不是错误，照常继续干活，别拿 attention 包装常规进展绕门。**`attention` 与 `waiting` 不受开关影响，永远送达**：没人回答的问题会让对话无限期卡住，那不是设置该吞掉的东西。
-- **可选的 Bark 参数（每次调用自选）**：`sound`（铃声名，如 `minuet`/`bell`）、`level`（`active` 默认 / `timeSensitive` 穿透专注模式 / `passive` 静默入列表 / **`critical` 无视静音**）、`volume`（0-10，**仅 `critical` 有效**）、`call: 1`（持续响铃直到点开，上限 10）、`badge`（角标 0-9999，0 清除）、`url`（点通知跳转）、`group`（通知分组名，默认 `open-bridge`；多个项目各用各的分组，手机上就不会混成一堆）、`icon`（通知图标，http(s)，iOS15+）、`isArchive`（1 = 存进 Bark 历史，横幅划掉后还能翻出来）、`copy` + `autoCopy`（把一段文本放进「复制」动作，比如一条待执行命令或一个 id）。
-  - 非法值一律**点名拒绝**而不是静默丢弃。特别地，`volume` 不配 `critical` 会被拒——设了 volume 的人是**以为它会响**，悄悄忽略等于让一条「紧急」通知变成普通通知。
-  - `critical` 能不能真的无视静音，还取决于用户在 iOS 里给 Bark 开了「重要警告」权限。那是手机侧的事，不是桥拒绝这个参数的理由。加密推送（`ciphertext`）仍未开放：它需要预共享密钥，属于操作员配置，不是单次调用的旋钮。
-- **清单播报是服务端自动的**：`notify.onTaskDone` 开着时，`set_todos` 每把一条推进 completed 就推一条汇总（一次调用改多条只推一条），关掉则静音。所以开着时**不要**再为清单完成手动 notify。另一面是：**做完一条就勾一条**，别攒到最后一次性提交——批量提交会把一串进展压成一条通知，等于白设这个开关。
-- **抑制不消耗预算**：被门挡住的调用不算发送。真实发送有 60 秒 6 条的共享窗口 + 完全相同内容的 60 秒去重；`duplicate`/`rate_limited` 也是 `delivered:false`，改文案或稍后再试。
+- **提问或选择前（或同一轮）发 `waiting` 一次**：必须在会暂停本轮的提问 UI 出现前发出，这是 AI 明确等人回答的信号。一般进度和任务清单完成绝不通知。
+- **结束时发 `finished` 一次**，作为这一轮的最后动作；若遗漏，服务端仅会在**连续十分钟**没有可观察活动后做一次结束兜底。
+- **每轮最多一条提醒**：Bark 固定使用 `level=timeSensitive&call=1`，Bridge 不会重复推送；任一普通工具调用表示工作恢复，才开启新的提醒轮次。
 - **设备密钥只在控制台配置**（设置 → 手机通知，粘贴 `https://api.day.app/<key>` 整条链接会自动摘出密钥）。`get_config` 只回掩码；`notify.serverUrl` 可换自建 Bark（默认官方 `https://api.day.app`，自建 http 仅限本机回环）。
-- **无反应监视**：连接静默超过 `notify.idleMinutes`（默认 60，0 = 关），服务端自己推一条 attention——网页 AI 卡死/断线时唯一能叫回人的通道。**不再要求存在未完成清单**：原先那条前提让监视在「AI 压根没写清单」时全程失效，而那恰好是它最该说话的场合（本仓库审计日志实测：某天 1274 次调用里只有 4 次 `set_todos`、0 条通知）。有清单时文案会说「任务还在进行」，没有清单时只说「连接安静了 N 分钟」——两句都只陈述服务端看得见的事实。
 
 ### 桥自身状态
 
 **bridge_status** — 一次一个 section：`overview`（健康与计数：`state` / `tool_count` / `build_stale` 等）· `auth`（Bearer 门禁状态、默认有效期、每个令牌的 id/标签/到期/最后使用；**密钥只在创建那一刻显示一次、从不落库**，签发与吊销在控制台「安全」页完成）· `locks`（并发准入表：谁持有什么、等了多久、谁在排队）· `sessions`（谁在连：legacy 会话逐条给 `session_id` / `connected_at` / `last_used` / `calls` / `todo_count` / `closable`；无会话的现代协议客户端占一行 `era: "modern"`、`stateless: true`、`closable: false`，带 `connected_at: null` 与 `first_seen`，不谎报挂在会话上的 `calls` / `todo_count`；这一行还带 `in_flight`（此刻正在服务的现代请求数：一次长调用期间它不为 0，而这正是「安静」与「还在干活」的区别）。overview 里的 `active_sessions` **只数 legacy 会话**，旁边的 `modern_last_used`（ISO 时间戳或 `null`）与 `modern_in_flight` 才说明另一端有没有现代客户端在说话、以及它当下忙不忙 —— 「有没有人连着我」要这几个字段一起看。）
 
-**get_config** / **set_config_value** — 读/改运行配置（改完是否需要重启看具体键）。
+**get_config** / **set_config_value** — 读/改运行配置（改完是否需要重启看具体键）。`get_config` 的 `structuredContent` 完整声明当前所有运行时配置字段及其类型；Bark 设备密钥仍仅返回掩码，绝不返回明文。
 
 **activity_log** — `recent`（最近活动，`max_results`）· `search`（按 `tool` / `status` / `query` / `since` 检索 `audit.log` 与轮转文件，`limit` 1–500、`offset` 分页）· `clear`（清空内存缓冲、截断当前审计日志并删掉轮转文件，**不可逆**）。
 

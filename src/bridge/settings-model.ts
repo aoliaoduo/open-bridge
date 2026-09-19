@@ -109,17 +109,9 @@ export interface SettingsConfigView {
   ngrokUseHttpProxy: boolean;
   toolProfile: string;
   logMaxBytes: number;
-  "notify.levelAttention": string;
-  "notify.levelWaiting": string;
-  "notify.levelFinished": string;
-  "notify.levelProgress": string;
   "sound.enabled": boolean;
   "sound.fileWaiting": string;
   "sound.fileFinished": string;
-  "notify.callAttention": boolean;
-  "notify.callWaiting": boolean;
-  "notify.callFinished": boolean;
-  "notify.callProgress": boolean;
   /** OAuth 2.1 authorization server, off by default like the bearer gate. */
   "oauth.enabled": boolean;
   /** Extra redirect hosts a registered client may use; [] means the built-in list. */
@@ -133,16 +125,12 @@ export interface SettingsConfigView {
  */
 export interface SettingsNotifyView {
   enabled: boolean;
-  onTaskDone: boolean;
-  onFinish: boolean;
   /** A usable key is stored (parsed form non-empty). */
   configured: boolean;
   /** Masked device key for display; "" when unconfigured. */
   keyMask: string;
   /** Canonical Bark server origin actually used for sends. */
   serverUrl: string;
-  /** Silence minutes before the idle watchdog bells; 0 = off. */
-  idleMinutes: number;
 }
 
 /**
@@ -255,25 +243,13 @@ const CONFIG_SPEC = {
   port: { kind: "int", min: 0, max: 65535 },
   publicHealthTimeoutMs: { kind: "int", min: 3000, max: 120000 },
   logMaxBytes: { kind: "int", min: 0, max: 1024 * 1024 * 1024 },
-  // The switches of the notification card. The DEVICE KEY is deliberately not
-  // here: it writes through saveNotifyKey (parse-and-store is a dedicated flow,
-  // like saveDomain) and it never appears in the read-only view.
+  // Notification delivery is intentionally fixed; only the channel switch and server can be edited here.
+  // The device key writes through saveNotifyKey and never appears in this read-only view.
   "notify.enabled": { kind: "boolean" },
-  "notify.onTaskDone": { kind: "boolean" },
-  "notify.onFinish": { kind: "boolean" },
   "notify.serverUrl": { kind: "string", max: 500 },
-  "notify.levelAttention": { kind: "string", max: 32 },
-  "notify.levelWaiting": { kind: "string", max: 32 },
-  "notify.levelFinished": { kind: "string", max: 32 },
-  "notify.levelProgress": { kind: "string", max: 32 },
   "sound.enabled": { kind: "boolean" },
   "sound.fileWaiting": { kind: "string", max: 500 },
   "sound.fileFinished": { kind: "string", max: 500 },
-  "notify.callAttention": { kind: "boolean" },
-  "notify.callWaiting": { kind: "boolean" },
-  "notify.callFinished": { kind: "boolean" },
-  "notify.callProgress": { kind: "boolean" },
-  "notify.idleMinutes": { kind: "int", min: 0, max: 1440 },
 } as const;
 
 export type SettingsConfigKey = keyof typeof CONFIG_SPEC;

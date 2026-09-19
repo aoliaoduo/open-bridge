@@ -8,13 +8,13 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/aoliaoduo/open-bridge-app/security/advisories/new
+    url: https://github.com/aoliaoduo/open-bridge/security/advisories/new
     about: >-
       Anything that lets someone other than the operator reach the workspace,
       or exposes a secret the masking should have covered. Advisories are
       private; an issue is not.
   - name: Conventions for changing this repo
-    url: https://github.com/aoliaoduo/open-bridge-app/blob/main/AGENTS.md
+    url: https://github.com/aoliaoduo/open-bridge/blob/main/AGENTS.md
     about: >-
       Before opening an issue about something that looks wrong in the code,
       check whether it is a documented convention.

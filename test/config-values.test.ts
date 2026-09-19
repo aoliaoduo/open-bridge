@@ -164,35 +164,8 @@ test("timeout settings refuse values that overflow the 32-bit timer", () => {
   }
 });
 
-/**
- * The per-event Bark styling is the operator's call, so it has to survive a
- * round trip through the config validator — a select that stores a value the
- * server refuses would look like it worked until the next push arrived wrong.
- */
-test("per-event notify levels accept Bark's four styles and refuse anything else", () => {
-  for (const key of [
-    "notify.levelAttention", "notify.levelWaiting", "notify.levelFinished", "notify.levelProgress",
-  ]) {
-    for (const level of ["active", "timeSensitive", "passive", "critical"]) {
-      assert.equal(ok(key, level), level, `${key} accepts ${level}`);
-    }
-    assert.match(err(key, "loud"), /must be one of/, `${key} refuses an invented level`);
-    assert.match(err(key, ""), /must be one of/, `${key} has no empty state — every event has a style`);
-  }
-});
-/**
- * Every console control writes through setConfig, which refuses any key not
- * in CONFIG_SPEC. Adding a setting means touching CONFIG_DEFAULTS, the
- * validator, the state payload AND that list, and missing the last one fails
- * at the worst moment: the switch renders, the operator clicks it, and the
- * page answers with the generic 无法识别的操作. That is exactly what shipped
- * for notify.call* -- the type declared them, the validator accepted them,
- * and the console could not save them.
- */
-test("every per-event notify key the console renders is actually writable", () => {
-  for (const event of ["Attention", "Waiting", "Finished", "Progress"]) {
-    assert.equal(ok(`notify.call${event}`, true), true, `notify.call${event} must be settable`);
-    assert.equal(ok(`notify.call${event}`, false), false);
-    assert.equal(ok(`notify.level${event}`, "active"), "active");
+test("removed notification presentation keys are not writable", () => {
+  for (const key of ["notify.levelWaiting", "notify.callWaiting", "notify.idleMinutes"]) {
+    assert.equal(validateConfigValue(key, true).ok, false);
   }
 });

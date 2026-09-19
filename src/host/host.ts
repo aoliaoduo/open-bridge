@@ -12,8 +12,7 @@
  * Everything the host provides — configuration, secret storage, persisted
  * state, notifications, the UI push channel — flows through this interface,
  * injected once at startup via `setHost`. The standalone app wires a
- * file-backed NodeHost; a future desktop shell (Tauri/Electron) can wire its
- * own implementation without touching core.
+ * file-backed NodeHost without tying the core to that concrete implementation.
  */
 
 export type NotifyLevel = "info" | "warn" | "error";

@@ -32,7 +32,7 @@ and open a discussion or a feature request arguing the case instead.
 
 If this lets a party other than the operator reach the workspace, or exposes
 a secret that should have been masked: **do not use an issue** — open a
-[security advisory](https://github.com/aoliaoduo/open-bridge-app/security/advisories/new).
+[security advisory](https://github.com/aoliaoduo/open-bridge/security/advisories/new).
 
 ---
 
@@ -64,4 +64,4 @@ locked down」—— 那里列着看起来像 bug、但其实是写明理由的�
 
 如果它让操作者之外的人够到了工作区、或暴露了本该被掩码的密钥：
 **不要用 issue** —— 开一个
-[安全通告](https://github.com/aoliaoduo/open-bridge-app/security/advisories/new)。
+[安全通告](https://github.com/aoliaoduo/open-bridge/security/advisories/new)。

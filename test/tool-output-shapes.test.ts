@@ -29,6 +29,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOOL_DEFINITIONS } from "../src/mcp/tool-definitions.js";
+import { CONFIG_DEFAULTS } from "../src/bridge/config-defaults.js";
 
 /**
  * Tools whose handler returns a bare array. Verified by invoking each one
@@ -56,23 +57,20 @@ function schemaOf(name: string): { type?: string; items?: unknown; required?: st
   return def?.outputSchema as ReturnType<typeof schemaOf>;
 }
 
-test("get_config declares every tunnel setting, both providers", () => {
-  // The declared shape is a curated subset of the config keys on purpose (the
-  // schema ships with every tools/list, and the console is the real editor), but
-  // the subset has to be complete WITHIN a feature area or it misleads exactly
-  // where a client is reading it: tailscaleDomain and tailscaleExecutable were
-  // added to the config, the console and docs/configuration.md while this schema
-  // kept the two ngrok names only. A client that plans against the declaration
-  // then cannot see the settings of the provider it is actually running.
+test("get_config declares every runtime setting with its actual default type", () => {
+  // getConfig() returns every entry in CONFIG_DEFAULTS, including newer settings
+  // such as profiles, OAuth, locks and notification channels. A partial output
+  // schema is worse than none: MCP clients plan against it and silently miss a
+  // setting that the result really carries. Iterate the runtime source of truth
+  // so adding a default cannot create that drift again.
   const properties = schemaOf("get_config")?.properties ?? {};
-  const tunnelKeys = ["tunnelProvider", "ngrokDomain", "ngrokExecutable", "tailscaleDomain", "tailscaleExecutable"];
-  for (const key of tunnelKeys) {
-    assert.ok(properties[key], `get_config must declare ${key}`);
+  for (const [key, value] of Object.entries(CONFIG_DEFAULTS)) {
+    const property = properties[key] as { type?: string; items?: { type?: string } } | undefined;
+    assert.ok(property, `get_config must declare ${key}`);
+    const expected = Array.isArray(value) ? "array" : typeof value;
+    assert.equal(property.type, expected, `get_config.${key} must be ${expected}`);
+    if (Array.isArray(value)) assert.equal(property.items?.type, "string", `${key} array entries are strings`);
   }
-  // Types are the ones the values actually carry: a schema that declares a
-  // number where the config stores a string is the same lie in miniature.
-  assert.equal((properties["tailscaleDomain"] as { type?: string }).type, "string");
-  assert.equal((properties["tailscaleExecutable"] as { type?: string }).type, "string");
 });
 
 test("array-returning tools declare an array", () => {

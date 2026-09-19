@@ -40,6 +40,13 @@ test("every tool description fits the context budget", () => {
   );
 });
 
+test("run_command describes the continuation route for long work", () => {
+  const run = TOOL_DEFINITIONS.find(tool => tool.name === "run_command");
+  assert.ok(run, "run_command remains advertised");
+  assert.match(run.description, /background=true/);
+  assert.match(run.description, /command_id/);
+});
+
 test("every tool description says what the tool does", () => {
   const thin = TOOL_DEFINITIONS
     .filter(tool => tool.description.trim().length < MIN_DESCRIPTION_CHARS)

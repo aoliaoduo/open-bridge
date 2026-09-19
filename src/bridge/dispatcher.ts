@@ -39,7 +39,7 @@ import {
 } from "./tool-families.js";
 import { normalizeToolCall, type CanonicalCall } from "./tool-call-shape.js";
 import { listSkills } from "./skills.js";
-import { notifyTool } from "./notify.js";
+import { beginNotificationEpisode, notifyTool } from "./notify.js";
 import { enrichFsError, suggestionHint } from "./error-hints.js";
 import type { JsonArgs } from "./json-args.js";
 
@@ -125,6 +125,9 @@ export async function invoke(
   const call = normalizeToolCall(name, args ?? {});
   const tool = call.tool;
   const callArgs = call.args;
+  // Any normal tool call means work has resumed. `notify` itself never resets
+  // the one-alert latch, so two notices cannot produce two interruptions.
+  if (tool !== "notify") beginNotificationEpisode();
 
   // Include useful execution context in the log while redacting bridge secrets.
   let requestSummary = "Request received.";

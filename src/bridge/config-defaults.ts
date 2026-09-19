@@ -60,16 +60,6 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = deepFreeze({
   "notify.enabled": true,
   /** The device key path segment of `https://api.day.app/<key>/…`; "" = not set. */
   "notify.barkKey": "",
-  /**
-   * Two independent bells, either/both/neither. They replaced a `notify.mode`
-   * enum whose two values could not be combined — and "a bell per finished
-   * task AND a bell when the exchange ends" is the obvious thing to want.
-   * A stored `notify.mode` is migrated on read (see migrateNotifyMode).
-   */
-  "notify.onTaskDone": true,
-  "notify.onFinish": true,
-  /** Minutes of silence with an open work list before the idle watchdog bells; 0 = off. */
-  "notify.idleMinutes": 60,
   /** Bark server origin; loopback http is allowed (development), other http is refused. */
   "notify.serverUrl": "https://api.day.app",
   /**
@@ -82,28 +72,8 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = deepFreeze({
    * disabling the whole thing.
    */
   "sound.enabled": false,
-  /** Played for attention and waiting: the AI is blocked on you. */
+  /** Played when the AI is waiting for the operator's answer. */
   "sound.fileWaiting": "",
   /** Played when an exchange ends. */
   "sound.fileFinished": "",
-  /**
-   * Per-event Bark delivery style. The switches above decide WHETHER a push is
-   * sent; these decide how loudly it arrives, which is a different question
-   * and was previously hardcoded.
-   *
-   * The defaults encode the urgency each event actually carries: waiting and
-   * attention block the operator, so they pierce Focus; finished is worth
-   * noticing but not interrupting; progress is a log line that should not
-   * buzz at all. `critical` is offered but never a default -- it overrides
-   * the mute switch, which is the operator's decision, not ours.
-   */
-  "notify.levelAttention": "timeSensitive",
-  "notify.levelWaiting": "timeSensitive",
-  "notify.levelFinished": "active",
-  "notify.levelProgress": "passive",
-    /** Ring until opened. Available on every event. */
-  "notify.callAttention": false,
-  "notify.callWaiting": false,
-  "notify.callFinished": false,
-  "notify.callProgress": false,
 });

@@ -93,14 +93,8 @@ export async function buildSettingsState(): Promise<SettingsState> {
       "sound.enabled": cfg.get("sound.enabled", false),
       "sound.fileWaiting": cfg.get("sound.fileWaiting", ""),
       "sound.fileFinished": cfg.get("sound.fileFinished", ""),
-      "notify.levelAttention": cfg.get("notify.levelAttention", CONFIG_DEFAULTS["notify.levelAttention"] as string),
-      "notify.levelWaiting": cfg.get("notify.levelWaiting", CONFIG_DEFAULTS["notify.levelWaiting"] as string),
-      "notify.levelFinished": cfg.get("notify.levelFinished", CONFIG_DEFAULTS["notify.levelFinished"] as string),
-      "notify.levelProgress": cfg.get("notify.levelProgress", CONFIG_DEFAULTS["notify.levelProgress"] as string),
-      "notify.callAttention": cfg.get("notify.callAttention", false),
-      "notify.callWaiting": cfg.get("notify.callWaiting", false),
-      "notify.callFinished": cfg.get("notify.callFinished", false),
-      "notify.callProgress": cfg.get("notify.callProgress", false),
+
+
       shellPath: cfg.get("shellPath", CONFIG_DEFAULTS.shellPath as string),
       shellArgs: cfg.get("shellArgs", CONFIG_DEFAULTS.shellArgs as string[]),
       tailscaleDomain: cfg.get("tailscaleDomain", CONFIG_DEFAULTS.tailscaleDomain as string),
@@ -200,12 +194,9 @@ function notifyView() {
   const settings = resolveNotifySettings();
   return {
     enabled: settings.enabled,
-    onTaskDone: settings.onTaskDone,
-    onFinish: settings.onFinish,
     configured: Boolean(settings.key),
     keyMask: maskBarkKey(settings.key),
     serverUrl: settings.serverUrl,
-    idleMinutes: settings.idleMinutes,
   };
 }
 
@@ -568,21 +559,20 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
     }
 
     case "testNotify": {
-      // "attention" bypasses both switches by design — the operator pressing
-      // this button IS the attention, and a muted test button would report a
-      // broken channel as working.
+      // A deliberate button press is a new diagnostic request, so it bypasses
+      // the automatic one-alert episode latch and tests only the phone channel.
       const result = await pushNotification(
         resolveNotifySettings(),
-        "attention",
+        "waiting",
         NOTIFY_DEFAULT_TITLE,
-        "Open Bridge 测试通知：配置已生效，AI 干活时进度会推送到这里。",
+        "Open Bridge 测试通知：配置已生效。实际提醒只会在等待回答或对话结束时发送一次。",
         Date.now(),
         // 人手动作绕过账本（重新按一次是因为没听见），并用时效性等级让
         // 测试推送在专注模式下也可见——收不到测试是排查的第一现场。
         // silentLocally: this button tests the phone. Letting it also play the
         // desktop sound would mean a operator pressing it gets a music player
         // they did not ask for, and cannot tell which channel actually worked.
-        { bypassLedger: true, silentLocally: true, bark: { level: "timeSensitive" } },
+        { bypassEpisode: true, silentLocally: true },
       );
       return notifyActionVerdict(result, await buildSettingsState());
     }
@@ -607,9 +597,7 @@ function notifyActionVerdict(result: NotifyOutcome, freshState: SettingsState): 
     disabled: "通知开关是关的：先打开本页的「启用通知」。",
     no_key: "还没有设备密钥：粘贴 Bark 里的密钥并保存。",
     send_failed: `推送失败：${result.error || `Bark 返回了 HTTP ${result.status || "0"}`}。密钥可能不对。`,
-    rate_limited: "一分钟内的推送太多，限流保护已触发，稍后再试。",
-    duplicate: "刚推送过完全相同的一条，没有重复发送。",
-    switch_off: "这条不该出现：测试以「attention」事件发送，两个开关都管不到它。",
+    duplicate: "这一轮已经提醒过一次；恢复普通工作后才会开启新的提醒轮次。",
   };
   return { ok: false, state: freshState, error: `测试未送达：${why[result.reason] ?? result.reason}` };
 }
@@ -646,14 +634,8 @@ function fallbackState(): SettingsState {
       "sound.enabled": false,
       "sound.fileWaiting": "",
       "sound.fileFinished": "",
-      "notify.levelAttention": CONFIG_DEFAULTS["notify.levelAttention"] as string,
-      "notify.levelWaiting": CONFIG_DEFAULTS["notify.levelWaiting"] as string,
-      "notify.levelFinished": CONFIG_DEFAULTS["notify.levelFinished"] as string,
-      "notify.levelProgress": CONFIG_DEFAULTS["notify.levelProgress"] as string,
-      "notify.callAttention": false,
-      "notify.callWaiting": false,
-      "notify.callFinished": false,
-      "notify.callProgress": false,
+
+
       shellPath: CONFIG_DEFAULTS.shellPath as string,
       shellArgs: [...(CONFIG_DEFAULTS.shellArgs as string[])],
       tailscaleDomain: CONFIG_DEFAULTS.tailscaleDomain as string,
@@ -673,12 +655,9 @@ function fallbackState(): SettingsState {
       // The canonical defaults, same as every other fallback field: with a
       // possibly-broken config we report "no key", never a guess about one.
       enabled: CONFIG_DEFAULTS["notify.enabled"] as boolean,
-      onTaskDone: CONFIG_DEFAULTS["notify.onTaskDone"] as boolean,
-      onFinish: CONFIG_DEFAULTS["notify.onFinish"] as boolean,
       configured: false,
       keyMask: "",
       serverUrl: CONFIG_DEFAULTS["notify.serverUrl"] as string,
-      idleMinutes: CONFIG_DEFAULTS["notify.idleMinutes"] as number,
     },
   };
 }

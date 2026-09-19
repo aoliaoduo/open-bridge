@@ -145,21 +145,6 @@ export function DraftField({
 
 /** A switch field: label on top, the switch plus its current state under it. */
 /**
- * The four notify events, in the order an operator meets them: the two that
- * block them first, then the two that merely report.
- *
- * `always` is a property of the event, not a preference: attention and waiting
- * bypass the on/off switches because an unanswered question stalls the
- * exchange.
- *
- * There is deliberately no equivalent for ringing. Every event can ring, and
- * whether it should is the operator's call -- deciding on their behalf which
- * events "deserve" it left the page with a distinction it had no room to
- * explain, so it read as a bug. (A `canRing` flag encoding the old rule
- * survived here for a while after the rule went, set on every row and read by
- * nothing.)
- */
-/**
  * The two local-sound slots.
  *
  * Deliberately two, not four: attention and waiting share one file because
@@ -172,10 +157,10 @@ const SOUND_ROWS = [
     key: "waiting",
     which: "waiting" as const,
     configKey: "sound.fileWaiting" as const,
-    label: () => t("等你回答 / 需要你回来", "Waiting on you"),
+    label: () => t("等你回答", "Waiting for your answer"),
     hint: () => t(
-      "AI 提了问题在等你选择，或明确需要你回到电脑前。没人回应的话对话就停在那里。",
-      "The AI asked something and is blocked, or explicitly needs you back. Nothing moves until you answer.",
+      "AI 提了问题在等你选择；没人回应的话对话就停在那里。",
+      "The AI asked something and is blocked. Nothing moves until you answer.",
     ),
   },
   {
@@ -184,8 +169,8 @@ const SOUND_ROWS = [
     configKey: "sound.fileFinished" as const,
     label: () => t("对话结束", "Exchange finished"),
     hint: () => t(
-      "这一轮收尾时响一次。受上面「对话结束时」开关控制。",
-      "One sound when the round wraps up. Follows the end-of-exchange switch above.",
+      "这一轮收尾时响一次。",
+      "One sound when the round wraps up.",
     ),
   },
 ];
@@ -199,33 +184,6 @@ const REACH_LABELS: Record<string, () => string> = {
   public: () => t("公网连通", "Public reach"),
   exposure: () => t("暴露面", "Exposure"),
 };
-
-const NOTIFY_EVENT_ROWS = [
-  {
-    key: "Attention" as const,
-    label: () => t("需要你回来", "Attention"),
-    when: () => t("AI 明确需要你回到电脑前", "The AI explicitly needs you back"),
-    always: true,
-  },
-  {
-    key: "Waiting" as const,
-    label: () => t("等你回答", "Waiting"),
-    when: () => t("AI 提了问题，在等你选择", "The AI asked something and is blocked"),
-    always: true,
-  },
-  {
-    key: "Finished" as const,
-    label: () => t("对话结束", "Finished"),
-    when: () => t("这一轮收尾；AI 忘了发则服务端代发", "The round wraps up; the server covers a forgetful AI"),
-    always: false,
-  },
-  {
-    key: "Progress" as const,
-    label: () => t("进展", "Progress"),
-    when: () => t("勾掉一项任务，或 AI 汇报一行进展", "An item is ticked off, or progress is reported"),
-    always: false,
-  },
-];
 
 function SwitchField(
   { label, hint, checked, onChange }: {
@@ -860,48 +818,14 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
       <Card
         id="set-notify-events"
         collapsibleId="notify-events"
-        summary={[
-          settings.notify.onTaskDone ? t("任务完成", "tasks") : null,
-          settings.notify.onFinish ? t("对话结束", "endings") : null,
-          settings.notify.idleMinutes > 0 ? t(`静默 ${settings.notify.idleMinutes} 分钟`, `${settings.notify.idleMinutes}m silence`) : null,
-        ].filter(Boolean).join(" · ") || t("只有必发的两类", "only the unconditional two")}
-        title={t("什么时候该打扰你", "When to interrupt you")}
-        desc={t("哪些事值得被打断。下面两张卡决定用什么方式告诉你。", "What is worth an interruption. The cards below decide how you hear about it.")}
+        summary={t("两类 · 每轮一次", "two moments · once per round")}
+        title={t("什么时候提醒你", "When we notify you")}
+        desc={t("只在真正需要你回来处理时提醒，避免把进度变成打扰。", "Only interrupt when you genuinely need to return; progress is never an alert.")}
       >
-        <div className="form-grid">
-          <SwitchField
-            label={t("每项任务完成时", "On each finished task")}
-            hint={t("清单每勾掉一条通知一次。", "One alert per item ticked off.")}
-            checked={settings.notify.onTaskDone}
-            onChange={next => setConfig("notify.onTaskDone", next)}
-          />
-          <SwitchField
-            label={t("对话结束时", "When the exchange ends")}
-            hint={t("收尾时通知一次；AI 忘了发则服务端代发。", "One alert when the round ends; the server covers a forgetful AI.")}
-            checked={settings.notify.onFinish}
-            onChange={next => setConfig("notify.onFinish", next)}
-          />
-          <Field
-            label={t("无反应提醒", "Silence alert")}
-            hint={t("静默这么多分钟后叫你一次。0 = 关闭。", "Calls you back after this many minutes of silence. 0 disables it.")}
-          >
-            <DraftField
-              type="number"
-              min={0}
-              max={1440}
-              value={String(settings.notify.idleMinutes)}
-              onCommit={raw => setConfig("notify.idleMinutes", Number(raw.trim()))}
-              onInvalid={() => notify?.(t(
-                "无反应提醒需要 0–1440 的整数分钟，已还原。",
-                "The silence alert needs a whole number of minutes from 0 to 1440; reverted.",
-              ), true)}
-            />
-          </Field>
-          <div className="field span2">
-            <span className="field-hint" style={{ margin: 0 }}>
-              {t("「需要你回来」和「等你回答」始终送达，不受开关影响。", "Attention and Waiting always arrive; the switches above do not apply to them.")}
-            </span>
-          </div>
+        <div className="field">
+          <span className="field-hint" style={{ margin: 0 }}>
+            {t("AI 在等你的回答或选择时提醒一次；一轮对话结束时提醒一次。两者属于同一轮时最多只发一次持续通知（Bark call=1），Bridge 不会重推。", "One alert when the AI is waiting for your answer or choice, and one when a round ends. In the same round, at most one persistent Bark call=1 alert is sent; the Bridge never repeats it.")}
+          </span>
         </div>
       </Card>
 
@@ -970,63 +894,9 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
           </div>
 
           <div className="field span2">
-            <span className="field-label">{t("每类通知怎么响", "How each kind arrives")}</span>
-            <div className="table-wrap">
-              <table className="token-table notify-table">
-                <thead>
-                  <tr>
-                    <th>{t("通知", "Push")}</th>
-                    <th>{t("什么时候发", "When")}</th>
-                    <th>{t("送达方式", "Delivery")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {NOTIFY_EVENT_ROWS.map(row => (
-                    <tr key={row.key}>
-                      <td>
-                        <div className="notify-name">
-                          <span>{row.label()}</span>
-                          {row.always ? (
-                            <span className="always-chip" title={t("不受上面的开关影响", "Not affected by the switches above")}>
-                              {t("总是发", "always")}
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td><span className="field-hint">{row.when()}</span></td>
-                      <td>
-                        <div className="delivery-cell">
-                        <select
-                          value={settings.config[`notify.level${row.key}`] as string}
-                          onChange={e => setConfig(`notify.level${row.key}`, e.target.value)}
-                        >
-                          <option value="passive">{t("安静（只进列表）", "Passive (list only)")}</option>
-                          <option value="active">{t("普通横幅", "Active banner")}</option>
-                          <option value="timeSensitive">{t("穿透专注模式", "Time-sensitive")}</option>
-                          <option value="critical">{t("无视静音", "Critical (ignores mute)")}</option>
-                        </select>
-                        <span className="check-row">
-                          <input
-                            type="checkbox"
-                            className="switch"
-                            checked={settings.config[`notify.call${row.key}`] === true}
-                            onChange={e => setConfig(`notify.call${row.key}`, e.target.checked)}
-                            aria-label={`${row.label()}：${t("持续响铃：不在就每分钟再响一次，直到你回来", "Persistent ring: repeats every minute until you are back")}`}
-                          />
-                          <span className="field-hint">{t("持续响铃：单次约 30 秒；你不在就每分钟再响一次，直到你回来（最多 10 次）", "Persistent ring: ~30 s each, then again every minute until you are back (max 10)")}</span>
-                        </span>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <span className="field-label">{t("固定送达方式", "Fixed delivery")}</span>
             <span className="field-hint">
-              {t(
-                "「穿透专注模式」不管静音键；「无视静音」需要 iOS 里给 Bark 开「重要警告」权限，否则会被降级。「持续响铃」由 Bridge 续推：Bark 自己的 call=1 只响约 30 秒，不会响到你点开。",
-                "Time-sensitive does not pierce the mute switch. Critical does, but needs Bark's critical-alert permission in iOS or it is downgraded. Persistent ring is kept by the Bridge: Bark's own call=1 rings for ~30 s, not until you open it.",
-              )}
+              {t("等待回答和对话结束都以时效性 Bark 通知送达，并使用一次 call=1 持续响铃。送达方式不能逐事件调整，也不会由 Bridge 重复推送。", "Waiting and finished alerts use a time-sensitive Bark notification with one call=1 persistent ring. Delivery is not configurable per event, and the Bridge never sends a repeat.")}
             </span>
           </div>
         </div>

@@ -19,7 +19,6 @@ import { toNodeHandler } from "@modelcontextprotocol/node";
 import { TOOL_DEFINITIONS } from "../mcp/tool-definitions.js";
 import { listToolDefinitions } from "./tool-catalog.js";
 import { asStructuredContent, record, state, text, type SessionState } from "./state.js";
-import { freshRunState, noteToolCall } from "./tool-run-hints.js";
 import { root } from "./paths.js";
 import { discoverWorkspaceSkills, skillsIndexSuffix } from "./skills.js";
 import { invoke } from "./dispatcher.js";
@@ -294,16 +293,6 @@ async function runToolCall(
     const payload: ToolCallPayload = definition?.outputSchema
       ? { ...text(result), structuredContent: structuredPayload(result) }
       : text(result);
-    // A batching observation, appended to a call that already succeeded. Only
-    // on success: after a failure the caller has a more pressing problem than
-    // how many round trips it is spending, and stacking advice onto an error
-    // buries the error. Never alters structuredContent — a client parsing typed
-    // output must not have to strip prose out of it.
-    if (session) {
-      session.runHints ??= freshRunState();
-      const hint = noteToolCall(session.runHints, normalizeToolCall(name).tool);
-      if (hint) payload.content = [...payload.content, { type: "text", text: hint }];
-    }
     // The one note that is not about this call: the process is running older code
     // than the tree on disk. Once per process — it is a fact about the process,
     // not about the call — and outside the `session` branch on purpose: a

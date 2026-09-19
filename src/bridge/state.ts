@@ -5,7 +5,6 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { ProcessOutputBuffer } from "../process/output-buffer.js";
-import type { ToolRunState } from "./tool-run-hints.js";
 import { WorkspaceContext } from "../workspace/context.js";
 
 // --- Payload limits (defaults, not capability caps) ---
@@ -88,13 +87,6 @@ export type SessionState = {
   todos: unknown[];
   /** In-flight MCP requests on this session; idle-only eviction waits for zero. */
   activeRequests: number;
-  /**
-   * Consecutive-call bookkeeping for the batching hints. Optional because a
-   * session created before this existed (or by a test that builds the shape by
-   * hand) must keep working; `noteToolCall` is only reached through a lazy
-   * initialiser.
-   */
-  runHints?: ToolRunState;
 };
 
 export type UsageStats = {
@@ -173,7 +165,7 @@ export const state = {
    * The session table counts this for legacy sessions (`activeRequests`) and the
    * watchdogs read it — "a request in flight is the Bridge being slow, not the
    * human being away". The stateless era had no equivalent, so a modern call
-   * that outlasted the finish settle window (45 s) looked exactly like silence:
+   * that outlasted the ten-minute finish settle window looked exactly like silence:
    * the phone bell announced "the AI stopped" while the AI was waiting on its
    * own `npm run verify`. Counted per request, decremented on the way out.
    */
