@@ -173,7 +173,8 @@ test("service action variants preserve their single and batch result contracts",
   }
   assert.deepEqual(actions[4]?.required, ["items"]);
   assert.equal(itemsOf(actions[4])?.type, "array");
-  assert.equal(itemsOf(actions[4])?.items?.oneOf?.length, 2, "batch rows cover start_all and stop_all");
+  assert.equal(itemsOf(actions[4])?.items?.oneOf?.length, 3,
+    "batch rows cover successful starts, failed starts and stops");
 });
 
 test("command launch tools declare their real foreground and supervised results", () => {

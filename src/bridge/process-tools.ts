@@ -82,7 +82,7 @@ export function waitForSpawnSettled(child: ChildProcessWithoutNullStreams): Prom
 }
 
 /** Surface a spawn failure (bad cwd, missing shell, EACCES, ...) as a real tool error. */
-function throwIfSpawnFailed(commandState: { spawnError?: string }): void {
+export function throwIfSpawnFailed(commandState: { spawnError?: string }): void {
   if (commandState.spawnError) {
     throw new Error(`Command failed to start: ${commandState.spawnError}`);
   }

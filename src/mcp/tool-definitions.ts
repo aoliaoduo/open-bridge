@@ -284,6 +284,11 @@ const SERVICE_BATCH_RESULT_SCHEMA = ARRAY_RESULT_SCHEMA({
   oneOf: [
     SERVICE_START_RESULT_SCHEMA,
     {
+      type: "object", description: "A failed service launch in start_all.", required: ["name", "error"],
+      properties: { name: { type: "string" }, error: { type: "string" } },
+      additionalProperties: false,
+    },
+    {
       type: "object", description: "A service stop result in stop_all.", required: ["name", "command_id", "stopped"],
       properties: { name: { type: "string" }, command_id: { type: ["string", "null"] }, stopped: { type: "boolean" } },
       additionalProperties: false,

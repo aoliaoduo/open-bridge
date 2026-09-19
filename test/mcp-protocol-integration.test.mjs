@@ -311,9 +311,20 @@ test("outputSchema tools answer with structuredContent in the declared shape", a
   assert.equal(startedService.payload?.result?.structuredContent?.status, "running");
   const restartedService = await callTool(sessionId, "service", { action: "restart", name: "typed-service" });
   assert.equal(restartedService.payload?.result?.structuredContent?.restarted, true);
+  const savedBrokenService = await callTool(sessionId, "save_service", {
+    name: "typed-broken-service", group: "typed-group", command: "node -e \"process.stdout.write('never-runs')\"",
+    cwd: "definitely-missing-service-cwd",
+  });
+  assert.equal(savedBrokenService.status, 200, "the broken launch fixture was saved");
   const startedServices = await callTool(sessionId, "service", { action: "start_all", group: "typed-group" });
-  assert.ok(Array.isArray(startedServices.payload?.result?.structuredContent?.items),
-    "service start_all uses the typed items envelope");
+  const startRows = startedServices.payload?.result?.structuredContent?.items;
+  assert.equal(startedServices.payload?.result?.isError, undefined,
+    "one failed service launch does not fail the whole batch");
+  assert.ok(Array.isArray(startRows), "service start_all uses the typed items envelope");
+  assert.match(startRows?.find(item => item.name === "typed-service")?.status ?? "", /^(running|already_running)$/,
+    "the healthy sibling remains available");
+  assert.match(startRows?.find(item => item.name === "typed-broken-service")?.error ?? "", /Command failed to start:/,
+    "the failed service launch stays in its own row");
   const stoppedServices = await callTool(sessionId, "service", { action: "stop_all", group: "typed-group" });
   assert.ok(Array.isArray(stoppedServices.payload?.result?.structuredContent?.items),
     "service stop_all uses the typed items envelope");

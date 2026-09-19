@@ -12,6 +12,7 @@ import { terminateProcess, processSnapshot, spawnServiceProcess, requireRestartK
 import { persistServices } from "./services.js";
 import { availableHint } from "./error-hints.js";
 import { readServiceLogRange } from "./service-log.js";
+import { throwIfSpawnFailed, waitForSpawnSettled } from "./process-tools.js";
 import type { JsonArgs } from "./json-args.js";
 
 type Args = JsonArgs;
@@ -233,6 +234,16 @@ function isServiceRunning(service: ServiceDefinition): boolean {
   return Boolean(service.commandId && state.commands.get(service.commandId) && !state.commands.get(service.commandId)!.done);
 }
 
+/** Do not claim a service is running until its child has either spawned or failed. */
+async function launchServiceProcess(service: ServiceDefinition, serviceName: string): Promise<string> {
+  const id = await spawnServiceProcess(service, serviceName);
+  const command = state.commands.get(id);
+  if (!command) throw new Error(`Service process was not registered: ${serviceName}`);
+  await waitForSpawnSettled(command.child);
+  throwIfSpawnFailed(command);
+  return id;
+}
+
 export function startService(args: Args): Promise<unknown> {
   return serializeServiceOp(String(args.name ?? ""), () => startServiceInner(args));
 }
@@ -244,7 +255,7 @@ async function startServiceInner(args: Args): Promise<unknown> {
   if (isServiceRunning(service)) {
     return { name: serviceName, command_id: service.commandId, status: "already_running" };
   }
-  const id = await spawnServiceProcess(service, serviceName);
+  const id = await launchServiceProcess(service, serviceName);
   service.commandId = id;
   return { name: serviceName, command_id: id, status: "running" };
 }
@@ -295,7 +306,7 @@ async function restartServiceInner(args: Args): Promise<unknown> {
     if (old) await terminateProcess(old, "stopped");
     service.commandId = undefined;
   }
-  const id = await spawnServiceProcess(service, serviceName);
+  const id = await launchServiceProcess(service, serviceName);
   service.commandId = id;
   return { name: serviceName, command_id: id, restarted: true };
 }
@@ -381,7 +392,13 @@ export async function startAllServices(args: Args): Promise<unknown> {
   const group = typeof args.group === "string" ? args.group : "";
   const selected = [...state.services.entries()].filter(([, service]) => !group || service.group === group);
   // Route through startService so every per-service op chain (TOCTOU guard) applies.
-  const startOne = ([name]: [string, ServiceDefinition]) => startService({ name });
+  const startOne = async ([name]: [string, ServiceDefinition]): Promise<unknown> => {
+    try {
+      return await startService({ name });
+    } catch (error) {
+      return { name, error: error instanceof Error ? error.message : String(error) };
+    }
+  };
   if (args.parallel === false) {
     return selected.reduce(async (promise, entry) => [...await promise, await startOne(entry)], Promise.resolve([] as unknown[]));
   }
