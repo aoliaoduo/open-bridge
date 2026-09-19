@@ -179,6 +179,7 @@ export async function reviewChanges(args: JsonArgs): Promise<unknown> {
         patch: bounded.text,
         patch_truncated: bounded.truncated,
         working_tree: workingTree,
+        checkpoint_action: "rebuilt",
         baseline_advanced: true,
         note: "The previous review baseline was missing and has been rebuilt at the current state; the diff above covers everything since the workspace-open checkpoint.",
       };
@@ -192,6 +193,7 @@ export async function reviewChanges(args: JsonArgs): Promise<unknown> {
       patch: "",
       patch_truncated: false,
       working_tree: workingTree,
+      checkpoint_action: "established",
       note: workingTree.clean
         ? "Review checkpoints established at the current workspace state. Call again after edits to see what changed."
         : "Review checkpoints established at the current workspace state. Existing uncommitted changes are summarized in working_tree and form this starting baseline; call again after edits to see what changed.",
@@ -225,6 +227,7 @@ export async function reviewChanges(args: JsonArgs): Promise<unknown> {
     patch: bounded.text,
     patch_truncated: bounded.truncated,
     working_tree: workingTree,
+    checkpoint_action: markReviewed ? "advanced" : "retained",
     note: workingTree.clean
       ? "The current working tree is clean. This review may still list commits made since the selected checkpoint."
       : "The review includes the current uncommitted workspace changes summarized in working_tree, plus any commits made since the selected checkpoint.",

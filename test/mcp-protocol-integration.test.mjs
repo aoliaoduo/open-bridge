@@ -579,6 +579,8 @@ test("the schema audit exercises every remaining published output contract", asy
   const reviewContent = review.payload?.result?.structuredContent;
   assert.equal(typeof reviewContent?.available, "boolean");
   assert.equal(reviewContent?.available, true, "the schema-audit workspace is a Git repository");
+  assert.equal(reviewContent?.checkpoint_action, "established",
+    "the first review establishes checkpoints even when mark_reviewed is false");
   assert.equal(typeof reviewContent?.working_tree?.clean, "boolean");
   assert.equal(reviewContent?.working_tree?.clean, false, "the new audit files are still uncommitted");
   assert.ok((reviewContent?.working_tree?.summary?.files ?? 0) >= 2,
@@ -598,6 +600,14 @@ test("the schema audit exercises every remaining published output contract", asy
   assert.equal(committedContent?.working_tree?.clean, true,
     "a later committed change does not make the current working tree dirty");
   assert.deepEqual(committedContent?.working_tree?.summary, { files: 0, additions: 0, deletions: 0 });
+  assert.equal(committedContent?.checkpoint_action, "retained",
+    "mark_reviewed:false keeps an existing last-shown checkpoint");
+
+  const advancedReview = await callTool(sessionId, "review_changes", { mark_reviewed: true });
+  const advancedContent = advancedReview.payload?.result?.structuredContent;
+  assert.equal(advancedContent?.checkpoint_action, "advanced",
+    "mark_reviewed:true explicitly advances an existing last-shown checkpoint");
+  assert.equal(advancedContent?.baseline_advanced, true);
 
   const interactive = await callTool(sessionId, "start_process", {
     command: `node -e "process.stdin.once('data', data => { process.stdout.write(data); process.exit(0); })"`,

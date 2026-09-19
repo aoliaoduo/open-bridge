@@ -81,7 +81,7 @@
 
 **list_skills** — 列出工作区可用技能（含 `SKILL.md` 的目录）。服务端 instructions 里是**连接时**的快照；中途新增技能后用这个刷新，再 `read_files` 对应 `SKILL.md` 照做。
 
-**review_changes** — 自上次查看以来全部改动的累积 git diff（含编辑、shell 侧效应和之后的提交）。需要 Git 仓库且至少一次提交；`mark_reviewed`（默认 true）展示后推进基线。一批编辑做完后调用，让用户看完整改动集。结果的 `summary` / `files` / `patch` 是整个审阅窗口，可能含已提交历史；另读 `working_tree: { clean, summary }` 判断当前是否还有未提交工作：`clean: true` 时不要把上面的历史 diff 误读为工作区仍有改动。
+**review_changes** — 自上次查看以来全部改动的累积 git diff（含编辑、shell 侧效应和之后的提交）。需要 Git 仓库且至少一次提交；`mark_reviewed`（默认 true）展示后推进已有基线。一批编辑做完后调用，让用户看完整改动集。结果的 `summary` / `files` / `patch` 是整个审阅窗口，可能含已提交历史；另读 `working_tree: { clean, summary }` 判断当前是否还有未提交工作：`clean: true` 时不要把上面的历史 diff 误读为工作区仍有改动。每个可用结果的 `checkpoint_action` 明确本次对“上次展示” checkpoint 的作用：`established` 首次建立、`rebuilt` 补回缺失基线、`advanced` 已推进、`retained` 因 `mark_reviewed:false` 保持不动；首次调用即使传 false 也必须建立 checkpoint。
 
 **get_todos** — 读任务清单与 `last_progress`。
 

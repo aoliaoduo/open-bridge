@@ -226,6 +226,8 @@ test("remaining write, status and batch tools publish concrete structured result
   assert.equal(review?.oneOf?.length, 2, "review distinguishes unavailable and available workspaces");
   const availableReview = review?.oneOf?.find(branch => branch.properties?.available?.enum?.[0] === true);
   assert.ok(availableReview?.required?.includes("working_tree"), "review declares its current-worktree fact");
+  assert.ok(availableReview?.required?.includes("checkpoint_action"), "review declares what it did to the checkpoint");
+  assert.deepEqual(availableReview?.properties?.checkpoint_action?.enum, ["established", "rebuilt", "advanced", "retained"]);
   assert.deepEqual(availableReview?.properties?.working_tree?.required, ["clean", "summary"]);
   assert.equal(availableReview?.properties?.working_tree?.properties?.clean?.type, "boolean");
   assert.equal(availableReview?.properties?.working_tree?.properties?.summary?.type, "object");
