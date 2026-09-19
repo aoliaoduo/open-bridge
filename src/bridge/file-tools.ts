@@ -513,7 +513,11 @@ export async function findFiles(args: Args): Promise<unknown> {
   const probe = offset + limit + 1;
   async function walk(dir: string): Promise<void> {
     if (out.length >= probe) return;
-    for (const e of await fs.readdir(dir, { withFileTypes: true })) {
+    // Offsets name positions in this traversal, so their order must not depend
+    // on the filesystem's directory-entry order from one call to the next.
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    for (const e of entries) {
       // Checked inside the loop as well: the cap used to be enforced only at
       // recursion entry, so a single directory holding more matches than the
       // cap returned all of them (20 files in one folder answered
