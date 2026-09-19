@@ -127,6 +127,9 @@ export async function runRipgrep(opts: RipgrepOptions): Promise<{ matches: Searc
   const cap = opts.maxResults && opts.maxResults > 0 ? opts.maxResults : undefined;
   const args = [
     "--json", "--line-number", "--no-heading", "--color", "never",
+    // Numeric offsets need the same row order on every call. Ripgrep otherwise
+    // traverses files concurrently, so a later page can repeat an earlier row.
+    "--sort", "path",
     // Search hidden files too so results match the built-in fallback walk
     // (which only skips .git/node_modules/dist); ripgrep skips hidden files by
     // default, silently hiding dotfiles/.github from search_files.

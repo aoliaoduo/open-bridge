@@ -648,7 +648,10 @@ export async function searchFiles(args: Args): Promise<unknown> {
   const pageEnd = limit + 1;
   async function walk(dir: string): Promise<void> {
     if (out.length >= pageEnd) return;
-    for (const e of await fs.readdir(dir, { withFileTypes: true })) {
+    // Keep numeric pagination stable when this JavaScript fallback is used.
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    for (const e of entries) {
       if (out.length >= pageEnd) break;
       if ([".git", "node_modules", "dist"].includes(e.name)) continue;
       const f = path.join(dir, e.name);
