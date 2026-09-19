@@ -13,7 +13,7 @@
 - 返回值是 JSON 对象，**每个工具的字段集是固定的**：缺失的事实表现为 `null` 或空字符串，**不会**靠"某个字段不在"来表达。所以永远**按字段名解析，不要按行数/行是否存在来解析**。
 - 命令类工具（`run_command`、`start_process`、`send_to_shell`、`interact_with_process`）返回**合并输出 `output`**，同时给出**分离的 `stdout` / `stderr`**；分页读取还带 `offset` / `next_offset` / `truncated`。
 - 命令**非零退出码不是调用失败**：调用可以返回 `status: "completed"` 且 `exit_code != 0`，必须自己看 `exit_code`。
-- 声明了 `outputSchema` 的工具同时返回 `structuredContent`（类型化数据）。**被截断过的结果一定明说**：三个列举类工具（`list_directory`、`find_files`、`search_files`）返回 `{ items: [...], truncated: boolean }`，而不是裸数组。`truncated: true` 的意思是"还有更多，别把这一页当全部"；命中上限既不代表"结果为空"，也不代表"就这些"。`list_directory` 另外给 `total`（只在平铺 `depth: 1` 时是真实总数，其余为 `null`）和 `next_offset`（继续翻页时原样回传的入参）。文本块始终保留。
+- 声明了 `outputSchema` 的工具同时返回 `structuredContent`（类型化数据，**永远是 JSON 对象**）。处理器的兼容文本仍可能是裸数组；此时类型化载荷用 `{ items: [...] }` 包装——目前包括 `read_files`、`service_status` 和 `activity_log{action:"recent"}`，解析类型化结果时读 `items`。**被截断过的结果一定明说**：三个列举类工具（`list_directory`、`find_files`、`search_files`）返回 `{ items: [...], truncated: boolean }`，而不是裸数组。`truncated: true` 的意思是"还有更多，别把这一页当全部"；命中上限既不代表"结果为空"，也不代表"就这些"。`list_directory` 另外给 `total`（只在平铺 `depth: 1` 时是真实总数，其余为 `null`）和 `next_offset`（继续翻页时原样回传的入参）。文本块始终保留。
 - **结果里可能多出一个 `Note:` 文本块**，它不改变字段集。目前只用于提示**本进程跑的是比 `dist/` 更旧的构建**（每个进程只说一次；重启实例后再看）。`deprecated`（见文末旧名表）走的是同一条路：只进文本块，不进 `structuredContent`。
 - 出错时返回 `isError: true` 与一句话原因；错误信息通常给出下一步（例如"先 `read_files` 再重试"）。
 
@@ -156,7 +156,7 @@
 
 **get_config** / **set_config_value** — 读/改运行配置（改完是否需要重启看具体键）。`get_config` 的 `structuredContent` 完整声明当前所有运行时配置字段及其类型；Bark 设备密钥仍仅返回掩码，绝不返回明文。
 
-**activity_log** — `recent`（最近活动，`max_results`）· `search`（按 `tool` / `status` / `query` / `since` 检索 `audit.log` 与轮转文件，`limit` 1–500、`offset` 分页）· `clear`（清空内存缓冲、截断当前审计日志并删掉轮转文件，**不可逆**）。
+**activity_log** — `recent`（最近活动，`max_results`）· `search`（按 `tool` / `status` / `query` / `since` 检索 `audit.log` 与轮转文件，`limit` 1–500、`offset` 分页）· `clear`（清空内存缓冲、截断当前审计日志并删掉轮转文件，**不可逆**）。其 `structuredContent` 随 action 明确分支：`recent` 为 `{items}`，`search` 为 `{entries, total_scanned, truncated}`，`clear` 为 `{cleared_memory_entries, live_truncated, rotated_removed}`。
 
   - **`at` 是 ISO-8601 UTC，不是操作者的挂钟时间。** 这是刻意的：`since` 过滤要把它反解析成毫秒，机读需要绝对时刻。但 `bridge.log`、控制台日志流和活动视图显示的都是**本机时间**，所以在 UTC+8 的机器上，用户口中的「03:40 那次调用」对应这里的 `19:40Z`。**把时间复述给用户之前先换算**，否则双方会以为在说两件事。`ts`（epoch 毫秒）是同一时刻的另一种表示，做算术时用它更省事。
 

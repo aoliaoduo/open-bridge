@@ -175,10 +175,33 @@ test("tools/list advertises the catalog and get_bridge_status agrees on the coun
 
 test("outputSchema tools answer with structuredContent in the declared shape", async () => {
   const { sessionId } = await openSession();
-  const services = await callTool(sessionId, "list_services", {});
+  const services = await callTool(sessionId, "service_status", { detail: "definitions" });
   const structured = services.payload?.result?.structuredContent;
   assert.ok(structured && typeof structured === "object", "structuredContent is present");
-  assert.ok(Array.isArray(structured.items), "list_services declares { items: [...] } and must answer it");
+  assert.ok(Array.isArray(structured.items), "service_status answers with the declared items envelope");
+
+  // MCP requires structuredContent to be an object. The compatibility text for
+  // these handlers remains a bare JSON array, but their schemas must describe
+  // the actual typed envelope clients validate and read.
+  const catalog = await mcpCall(sessionId, "tools/list", {});
+  const catalogTools = catalog.payload?.result?.tools ?? [];
+  for (const name of ["read_files", "service_status"]) {
+    const definition = catalogTools.find(tool => tool.name === name);
+    assert.equal(definition?.outputSchema?.type, "object", `${name} declares its object envelope`);
+    assert.deepEqual(definition?.outputSchema?.required, ["items"]);
+  }
+  const activityDefinition = catalogTools.find(tool => tool.name === "activity_log");
+  assert.equal(activityDefinition?.outputSchema?.oneOf?.length, 3, "activity_log declares every action variant");
+
+  const written = await callTool(sessionId, "write_file", { path: "typed.txt", content: "typed" });
+  assert.equal(written.status, 200, "the fixture file was written");
+  const files = await callTool(sessionId, "read_files", { paths: ["typed.txt"] });
+  assert.ok(Array.isArray(files.payload?.result?.structuredContent?.items),
+    "read_files wraps its raw row array in typed items");
+  assert.equal(files.payload?.result?.structuredContent?.items?.[0]?.path, "typed.txt");
+  const recent = await callTool(sessionId, "activity_log", { action: "recent" });
+  assert.ok(Array.isArray(recent.payload?.result?.structuredContent?.items),
+    "activity_log recent uses the same object envelope");
 
   const status = await callTool(sessionId, "get_bridge_status", {});
   const shape = status.payload?.result?.structuredContent;
