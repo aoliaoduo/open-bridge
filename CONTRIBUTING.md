@@ -25,9 +25,10 @@ wins and this file gets fixed.
 - `CHANGELOG.md` `[Unreleased]` entries are in Chinese, in Keep a Changelog
   order (Added → Changed → Fixed). Notable changes get an entry; "notable"
   includes behaviour changes and fixes a user could observe.
-- Documentation language: `README.md` is English, `README.zh-CN.md` is
-  Chinese, `docs/` is English only. Do not start a translated `docs/` tree —
-  two reference documents drift apart faster than one stays correct.
+- Documentation language: `README.md` is English and `README.zh-CN.md` is
+  Chinese. References under `docs/` retain their existing language; keep one
+  canonical document per topic rather than starting a parallel translation
+  tree. Update stale claims and implementation pointers when code moves.
 
 ## Two traps that eat contributions
 
@@ -92,7 +93,7 @@ MIT. Submitting a contribution means it is under the same license.
   服务端、控制台和用户文档都在包内，同时不发布 `src/`、`test/` 或工作流文件。
 - 提交信息用英文，重点写**为什么** —— 现场是什么、错在哪、为什么不用那个显而易见的修法。这个仓库的历史就是这么写的，`git log` 就是风格样板。
 - `CHANGELOG.md` 的 `[Unreleased]` 用中文，按 Keep a Changelog 的分区（Added → Changed → Fixed）。用户能观察到的行为变化和修复都该有条目。
-- 文档语言：`README.md` 英文、`README.zh-CN.md` 中文、`docs/` 只有英文。**不要**另起一套翻译的 `docs/` —— 两份参考文档各自漂移的速度，比一份保持正确要快。
+- 文档语言：`README.md` 英文、`README.zh-CN.md` 中文；`docs/` 各参考文档沿用已有语言，每个主题保留一个正本，**不要**另起平行翻译目录。模块移动或行为改变时，同步更新旧说法与源码指针。
 
 ## 两个最容易吃掉外来贡献的坑
 

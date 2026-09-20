@@ -1,9 +1,9 @@
 /**
- * Skills, end to end: the discovery the reference projects had and this app did
- * not (DevSpace D9 in docs/refactor-comparison.md).
+ * Skills, end to end: connection-time discovery and explicit refresh through
+ * the ordinary MCP catalog and file tools.
  *
  * What only a real instance can show: the *instructions* a connecting client
- * actually receives carry the skill index, the new `list_skills` tool comes back
+ * actually receives carry the skill index, and `list_skills` comes back
  * through the normal catalog with annotations, a skill added **after** the
  * handshake still shows up on the next call (the property instructions cannot
  * have), and reading a skill goes through the ordinary file tools — no new path,

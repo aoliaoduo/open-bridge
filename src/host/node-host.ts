@@ -6,10 +6,11 @@
  *
  *   config.json    user configuration (dotted keys, CONFIG_DEFAULTS defaults)
  *   state.json     persisted state (services / todos / usage counters)
- *   secrets.json   route token + hashed auth token records (chmod 600)
+ *   secrets.json   persisted workspace route tokens + hashed personal-token records (chmod 600)
  *   audit.log      append-only activity audit trail (rotates at 1 MiB)
- *   logs/          per-run service and bridge logs
- *   peers.json     shared-tunnel peer registry (same-machine instances)
+ *   logs/          Bridge runtime log
+ *   service-logs/  per-workspace saved-service logs (unless log_file overrides)
+ *   bridge-peers.json shared-tunnel peer registry (same-machine instances)
  */
 
 import * as fs from "node:fs";

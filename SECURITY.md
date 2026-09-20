@@ -53,14 +53,22 @@ someone who forgot the tunnel was on.
 
 ## What is protected
 
-- **The route token is not a password, it is an address** -- but it is still
-  the thing that makes a `public-open` tunnel yours. It is derived from the
-  workspace path, so the same directory keeps the same URL. Three read-only
-  `/api` endpoints return it (`settings`, `prompt`, `status`), which is why
+- **The route token is a per-workspace capability address.** In
+  `public-open` mode, possession grants access, so protect the full URL. The
+  token is randomly generated and persisted in `secrets.json`; the workspace
+  path selects its storage key, not the token value. It stays stable until
+  explicitly rotated. Read-only `/api` endpoints such as `settings`, `prompt`
+  and `status` return it, which is why
   CORS is granted only to `/mcp`, `/oauth` and `/.well-known`, never to `/api`
   or `/console`. A page in your browser cannot read it cross-origin.
 - **The console and `/api` are loopback-only**, and writes additionally require
-  a header no cross-origin request is allowed to send.
+  a header no cross-origin request is allowed to send. Public routes also
+  include the tokenized health probe and, when enabled, OAuth authorization,
+  revocation and discovery endpoints; they do not expose the console API.
+- **Personal bearer-token records are hashed; route tokens must be
+  persisted in recoverable form.** Do not confuse the two or assume
+  `secrets.json` contains no usable credentials. Never publish that file or
+  a live instance URL.
 - **Secrets are masked on the way out, not just on the way in.** The Bark
   device key is write-only: `get_config`, the settings view, audit summaries
   and log lines show a shape (`<set:N chars>`), never the value. Audit lines go

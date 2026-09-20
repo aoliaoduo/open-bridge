@@ -1,6 +1,6 @@
 # AGENTS.md — 在这个仓库里干活的约定
 
-面向**改这个仓库的人和 agent**。用户视角的说明在 `README.md`，每个工具的完整行为在 `docs/tools.md`，架构、分层与依赖在 README 的「开发」一节 —— 那些这里不重复。这里只记**踩过才知道**的部分。
+面向**改这个仓库的人和 agent**。用户视角的说明在 `README.md`，每个工具的完整行为在 `docs/tools.md`，架构、分层与依赖以 `ARCHITECTURE.md` 为准 —— 那些这里不重复。这里只记**踩过才知道**的部分。
 
 **这份文件有两个读者**：改仓库的人，以及每一个连上这个实例的模型 —— `src/bridge/mcp-endpoint.ts` 在建立会话时读工作区根目录的 `AGENTS.md` 与 `CLAUDE.md`，各切 8000 字符（超出会留 `…[truncated]`）注入 server instructions。所以**写错这里的代价是被反复消费**：宁可少写一条，也不要把 README 的内容抄一份进来。`CLAUDE.md` 在本仓库只是一行指针，正文永远只在这里改。
 
@@ -59,6 +59,6 @@ MCP 参数是模型生成的：字段可能整个缺失，也可能是 `"abc"`�
 
 - `core.autocrlf=true` + `.gitattributes`：库里统一 LF，Windows 工作区检出为 CRLF。`git add` 时的 “LF will be replaced by CRLF” 警告是正常的，不用管。按字节锚定的编辑前先确认工作区实际换行（`read_files` 返回的就是工作区字节），不要假设。
 - 提交信息用英文，重点写**为什么**（这个仓库的历史提交都是这个风格：现场是什么、为什么错、为什么不那样修）；`CHANGELOG.md` 的 `[Unreleased]` 用中文，按 Keep a Changelog 的 Added → Changed → Fixed 分区。
-- **`npm audit` 要用 `npm run audit`。** 本机 registry 指向 `registry.npmmirror.com`（国内镜像），而它没实现 npm 的安全通告端点：`npm audit` 会 POST `/-/npm/v1/security/advisories/bulk`，镜像回 **404 `[NOT_IMPLEMENTED] /-/npm/v1/security/* not implemented yet`**。这既不是依赖有问题、也不是 npm 坏了。`npm run audit` 只给这一条命令换回官方源（`--registry=https://registry.npmjs.org`，走已配置的代理可达），装包仍然走镜像。
+- **依赖审计用 `npm run audit`。** 它只给审计命令指定官方源（`--registry=https://registry.npmjs.org`），不改变装包源。若本机使用 `registry.npmmirror.com` 等未实现安全通告端点的镜像，普通 `npm audit` 返回的 404 / `NOT_IMPLEMENTED` 不是依赖漏洞；不要把某台开发机的 registry 或代理配置当成所有环境的前提。
 - **不要从进程里用 `fetch` 打自己**（`127.0.0.1:<自己的端口>`）。undici 会把这条回环连接留在**同一个进程**的 keep-alive 池里；停机时 `closeIdleConnections()` / `closeAllConnections()` 摧毁服务端那一侧，客户端句柄还活着，Node 24 在 Windows 上直接撞 `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)` 把干净停机变成 fastfail 退出码（`3221226505`）。本地自检一律走 `src/bridge/self-probe.ts` 的 `selfProbe()`（`node:http` + `agent: false`，读完即关）；打公网隧道的探测不算，它本来就是另一台主机。
 - 开发过程本身通常就跑在这个 bridge 上（`run_script` / `edit_block` / `read_files`）。注意 `run_script` 沙箱里没有 fs 与网络，要用 `await tools.*`；`console.log` 不等于 `return`；`edit_block` 的 `old_text` 必须在文件里**恰好命中一次**。

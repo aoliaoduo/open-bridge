@@ -26,14 +26,14 @@ this and how do I start it"; this file answers "what are all the knobs".
 No configuration file, no dropdown: **the workspace of `open-bridge serve` is the directory it was launched from**.
 
 ```bash
-cd C:\work\project-a
+cd /path/to/project-a
 open-bridge serve --port 18080        # this instance serves project-a
 
-cd C:\work\project-b
+cd /path/to/project-b
 open-bridge serve                     # a second instance, serving project-b, independent
 ```
 
-- Both can run **at once**, each with its own port, route token and runtime record. Relative paths (`read_file("src/index.ts")`) always resolve against that instance's own directory.
+- Both can run **at once**, each with its own port, route token and runtime record. Relative paths (`read_files({paths:["src/index.ts"]})`) always resolve against that instance's own directory.
 - `open-bridge instances` lists every instance with pid, port and workspace, and marks which one matches the current directory.
 - `stop` / `status` / `url` / `prompt` / `health` **default to the instance for the current directory**. With no instance here but exactly one running machine-wide, that one is used and the output says so. With several running and none here, you are asked to pick with `instances` — it never guesses.
 - `--root DIR` overrides the default; `--home DIR` changes the data directory.
@@ -68,10 +68,11 @@ Open `http://127.0.0.1:18080/console/` (the port follows `--port`). Every page h
 | Page | Path | What it does |
 | --- | --- | --- |
 | Status | `/console/status` | Workspace, MCP URL copy, health check, live sessions and file locks. Warns when publicly reachable without auth and links to Security. Flags a rebuilt `dist/` that has not been restarted |
-| Sessions | `/console/sessions` | Who is connected: client name from the MCP handshake, idle time, in-flight requests, todo count — each can be **disconnected** |
+| Sessions | `/console/sessions` | Stateful clients show handshake/idle/todo facts and can be disconnected; the stateless modern-client activity row cannot be disconnected as a session |
 | Tools | `/console/tools` | The `tools/list` this instance actually publishes, after profile filtering; core tools highlighted, searchable |
 | Health | `/console/health` | Instance, workspace, tools, build, tunnel and exposure checked one by one, including a real `/healthz` request through the tunnel. Read-only diagnosis; exposure problems are fixed on the Security page |
 | Services | `/console/services` | Save, start, stop and restart local service definitions |
+| Tasks | `/console/todos` | Session/persisted task lists and their latest progress, written through MCP |
 | Logs | `/console/logs` | Live log stream over SSE; the full audit trail is `audit.log` in the data directory |
 | Stats | `/console/stats` | Call counts, distribution by tool, recent activity |
 | Security | `/console/security` | Exposure overview, bearer gate (issue and enable in one click), personal tokens — create, rotate, revoke, delete, purge — and OAuth 2.1. The old `/console/tokens` path redirects here |
@@ -81,10 +82,10 @@ The frontend router owns these paths (`ui/src/routes.ts`); the server returns th
 
 ### Security boundaries
 
-- `/api` and `/console` **answer loopback hosts only** (`127.0.0.1`, `localhost`). Reaching them through the public ngrok domain gets a 403; only `/mcp` is public.
+- `/api` and `/console` **answer loopback hosts only** (`127.0.0.1`, `localhost`). Reaching them through a public tunnel gets a 403. Tokenized MCP and health routes are public; enabling OAuth also exposes its authorization/discovery endpoints.
 - **CORS headers go to `/mcp`, `/oauth` and `/.well-known` only** — never to `/api`, `/console` or `/healthz`. The console is same-origin and never needed CORS, while three read-only `/api` endpoints return this instance's MCP address, **route token included** (`settings` in `state.mcpUrl`, `prompt` in its text, and `status`). One `Access-Control-Allow-Origin: *` would let any page open in your browser read it locally — the loopback check cannot stop a page inside the same browser, and private-network rules are vendor policy rather than specification.
 - Every write requires an `X-Open-Bridge-Console` header matching the route token. The server injects it into the page; a cross-site page can neither read nor send it.
-- **The bearer gate is off by default**, because URL-only clients such as the ChatGPT connector cannot send custom headers and would all break. Turn it on from the Security page: issue a token and flip the switch, or use **"issue a token and enable the gate"** to do both at once (an existing token is reused; the plaintext is shown once). With the gate on and no valid token, it **fails closed**. The local console can always turn it back off, so you cannot lock yourself out.
+- **The bearer gate is off by default** to preserve URL-only client access. Enable individually issued credentials from the Security page: issue a token and flip the switch, or use **"issue a token and enable the gate"** to do both at once (an existing token is reused; the plaintext is shown once). With the gate on and no valid token, it **fails closed**. The local console can always turn it back off, so you cannot lock yourself out.
 - **Publicly reachable means whoever has the URL can read and write your files and run commands.** The app will not quietly restrict your permissions, but it says this everywhere: `status`, the console, `health`, and the startup banner. To tighten it, enable the bearer gate — or run `--no-tunnel` and stay local.
 
 > The full threat model, the three exposure levels, and **what is deliberately left unlocked** (`unrestrictedFileAccess` defaults on, exit codes are not verdicts, behaviour hints are information rather than limits) are in [`SECURITY.md`](../SECURITY.md), which is also where vulnerability reports go.
@@ -97,17 +98,15 @@ Some MCP clients only accept a standard authorization flow and will not take a t
 open-bridge config set oauth.enabled true
 ```
 
-The settings page does the same thing. Once on, a client discovers the server at `/.well-known/oauth-protected-resource`, registers at `/oauth/register`, and is sent to `/oauth/authorize` — **that page asks for your route token** (the string in the console URL; `OPEN_BRIDGE_OAUTH_OWNER` can replace it with a different passphrase) — and then receives access and refresh tokens.
+The settings page does the same thing. Once on, a client discovers the server at `/.well-known/oauth-protected-resource`, registers at `/oauth/register`, and is sent to `/oauth/authorize` — **that page asks for your route token** (the string in the MCP URL; `OPEN_BRIDGE_OAUTH_OWNER` can replace it with a different passphrase) — and then receives access and refresh tokens.
 
-- **Off by default.** Once on, `/mcp` requires **OAuth credentials**: a token in the URL no longer suffices. Capable clients receive 401 plus `WWW-Authenticate`, which is not a fault but the signal to begin authorizing, and end up with **individually revocable** credentials of their own. The route token in the path is a routing key, not a credential — "just paste the URL" was never a lock, and OAuth is the first thing here that is one.
-- **Clients holding tokens keep working.** `Authorization: Bearer <token>` and `?token=<token>` still pass, whether or not the personal-token gate is on. (That is a fixed bug: OAuth used to reject before token validation when the gate was off.) For a client that only takes a URL and cannot send headers, give it a `?token=<token>` address, or leave OAuth off.
+- **Off by default.** Once enabled, `/mcp` requires a valid OAuth or personal bearer credential; the route token alone no longer suffices. An unauthenticated, OAuth-capable client receives 401 plus `WWW-Authenticate` to begin authorization, then obtains **individually revocable** credentials. The path token still selects the instance; it is not a substitute for this authentication.
+- **Clients holding tokens keep working.** `Authorization: Bearer <token>` and `?token=<token>` still pass, whether or not the personal-token gate is on. For a client that only takes a URL and cannot send headers, give it a `?token=<token>` address, or leave OAuth off.
 - **Visible and reversible from the console.** The OAuth 2.1 card is the switch, and it lists registered clients and how many credentials are live. `/api` and `/console` stay loopback-only, so the switch is always reachable.
 - **S256 only.** `plain` is refused: these are public clients with no secret, and PKCE is the only proof of possession.
 - **`resource` is required and must be this host**, otherwise a token issued here could be replayed against another service (RFC 8707).
 - **Refresh tokens rotate once.** A used refresh token is dead immediately, so a replay buys nothing.
-- The authorize, register and token endpoints are the only paths this exposes publicly. `/api` and `/console` remain loopback-only, and what the console reads (`/api/oauth`) contains **no secrets or digests**.
-
----
+- OAuth exposes metadata, authorize, register, token and revoke endpoints publicly. `/api` and `/console` remain loopback-only, and what the console reads (`/api/oauth`) contains **no secrets or digests**.
 
 ---
 
@@ -128,7 +127,7 @@ whichever provider is selected:
 | --- | --- | --- |
 | 只有这台机器 | `none` | 什么都不用；不做隧道 |
 | 公网、有自己的域名 | ngrok | 一个 ngrok 账号 + authtoken（本机跑过一次 `ngrok config add-authtoken` 就够） |
-| 公网、已经有 Tailscale | Tailscale Funnel | 装好并登录 Tailscale；在 login.tailscale.com 打开一次 Funnel（免费版只能用 443） |
+| 公网、已经有 Tailscale | Tailscale Funnel | 装好并登录 Tailscale、启用 Funnel；本实现使用 HTTPS 443 |
 
 - **一键自动配置** is one click and it says what it will do *before* you press it:
   the line under the button lists the exact writes (`ngrokExecutable=…`,
@@ -143,15 +142,16 @@ whichever provider is selected:
   `/healthz` request **through the tunnel**, and shows the three rows that decide
   a verdict (隧道 / 公网连通 / 暴露面) plus the next step when something fails.
 - **Reconnaissance is read-only.** It never writes ngrok's or tailscale's own
-  configuration, and it never turns a funnel on: everything that changes this
-  machine happens through the buttons above, which write Open Bridge's config
-  only. The authtoken is the one value that never travels to the page — it is
+  configuration, and it never turns a funnel on. Configuration changes are
+  explicit actions. Starting or stopping Funnel also changes the daemon's
+  mount through the Tailscale CLI; that is not read-only detection. The
+  authtoken never travels to the page — it is
   reported as its source ("已保存在凭据库" / "可以从本机 ngrok 配置导入") and, when
   imported, read server-side.
-- **Nothing was removed, only folded.** The executable pickers, the hand-typed
-  domain, the authtoken field, the proxy switch and auto-reconnect are all in
-  高级设置. The card also keeps `ngrokDomain` in a dropdown of the account's
-  cannot.
+- **Advanced settings** contain the executable pickers, editable domain,
+  authtoken, proxy switch and auto-reconnect. The reserved-domain dropdown is
+  optional: the domain remains editable when an account API listing is
+  unavailable.
 - **The reserved-domain dropdown needs an ngrok *API key*, not your authtoken.**
   ngrok keeps the two credentials apart on purpose: the authtoken opens tunnels,
   and `api.ngrok.com` refuses it outright (`ERR_NGROK_206` — "the authentication
@@ -173,7 +173,7 @@ whichever provider is selected:
 
 ## Public tunnel (ngrok)
 
-Local or LAN only? Add `--no-tunnel` and skip ngrok entirely.
+Local-only access? Add `--no-tunnel` and skip ngrok entirely. The built-in listener binds to loopback; this does not expose a LAN listener.
 
 To let an external client such as ChatGPT on the web reach you:
 
@@ -184,7 +184,7 @@ open-bridge config set ngrokDomain <your-reserved-domain>.ngrok-free.dev
 open-bridge serve                 # note: without --no-tunnel; --open is optional
 ```
 
-- A free ngrok account gets one subdomain, and **one domain can only be held by one instance at a time**. You do not have to stop the instance already holding it: the local instance registry (`bridge-peers.json`) is shared, so the tunnel holder looks up the token digest and forwards to the right instance. A new instance appends its row to the **existing** registry — it never fabricates one in someone else's directory — public requests arrive through that tunnel, `tunnel_role` reads `follower`, and the console notes that this address depends on another instance. When the holder exits, the next probe promotes this instance to `owner`.
+- Account/domain quotas are determined by ngrok. **One reserved domain can only be held by one instance at a time**. You do not have to stop the instance already holding it: the local instance registry (`bridge-peers.json`) is shared, so the tunnel holder looks up the token digest and forwards to the right instance. A new instance appends its row to the **existing** registry — it never fabricates one in someone else's directory — public requests arrive through that tunnel, `tunnel_role` reads `follower`, and the console notes that this address depends on another instance. When the holder exits, the next probe promotes this instance to `owner`.
 - Claiming a domain is deliberately cautious: **only an explicit "nobody holds this" from ngrok counts as free**. Timeouts and 5xx mean "unknown" and it keeps watching. On `ERR_NGROK_334` (already taken) the instance serves locally, keeps watching that tunnel, and switches to `follower` the moment it sees traffic forwarded to it — it neither wedges itself nor starts a second ngrok to fight the first.
 - A missing or misspelled domain produces a clear error such as `ERR_NGROK_313`; the local service is unaffected.
 
@@ -194,7 +194,7 @@ open-bridge serve                 # note: without --no-tunnel; --open is optiona
 
 The other public-tunnel provider. Where ngrok serves a domain you reserved, Tailscale serves **your machine's own stable ts.net hostname** - `https://<machine>.<tailnet>.ts.net/...` - with automatic TLS. Useful when you already run Tailscale and do not want a second account.
 
-One-time setup (per tailnet): open <https://login.tailscale.com/f/funnel> in a browser and enable Funnel. Free-tier limits apply: public traffic only on ports 443/8443/10000 and a small per-machine hostname quota - one Bridge instance fits comfortably.
+Enable Funnel for the tailnet using Tailscale's setup flow at <https://login.tailscale.com/f/funnel>. This Bridge implementation uses HTTPS 443; the tailnet policy and provider's current limits still apply.
 
 ```bash
 open-bridge config set tunnelProvider tailscale
@@ -207,7 +207,7 @@ open-bridge serve                 # without --no-tunnel
 - Stopping the instance turns the funnel off (`tailscale funnel --https=443 off`) — only when the 443 mount still points at this instance. A follower, or an instance whose mount was replaced while it ran, leaves the daemon's config alone on its way out: switching off a peer's public access is worse than leaving a stale mount, and the next claim replaces a stale mount anyway.
 - Tailscale forwards the client IP in `X-Forwarded-For` (appended, same as ngrok), so the auth failure limiter works the same way.
 - The CLI is found the way ngrok's is: `tailscaleExecutable` wins when set, otherwise PATH, otherwise the MSI's default install dir (`C:\Program Files\Tailscale\tailscale.exe` — the MSI does not put `tailscale` on PATH, so on Windows this fallback is the common case, not a curiosity). Leave the setting empty to let the resolver decide.
-- **One funnel per machine.** 443 is a single port and the daemon keeps one mount per port, so two instances in tailscale mode cannot both hold it — and no longer try: the second instance reads the daemon's mount (`funnel status --json`, whose backend port is the holder's listener), finds a live holder behind it and FOLLOWS it rather than replacing it. The two addresses still both work: the holder's listener looks the other instance's token up in the shared registry (`bridge-peers.json`) and forwards to it — the same mechanism the ngrok section describes, and the reason that registry is shared. When the mount is released — the holder stopped, or died without running `funnel off` and left a mount pointing at a dead port — the follower's watch (same cadence and same two-round rule as ngrok) claims it and becomes the owner. The one asymmetry left with ngrok is deliberate: an OWNER does not watch its own mount. ngrok's tunnel is a child process this instance owns, so its exit arms a reconnect; the funnel mount is daemon-side state that outlives this process, and nothing in-process notices if the daemon loses it — `Start`, or a provider switch, rebuilds it.
+- **Bridge instances share the HTTPS 443 mount.** This implementation uses 443 and the daemon keeps one mount per port, so two Bridge instances in tailscale mode cannot both hold it — and no longer try: the second instance reads the daemon's mount (`funnel status --json`, whose backend port is the holder's listener), finds a live holder behind it and FOLLOWS it rather than replacing it. The two addresses still both work: the holder's listener looks the other instance's token up in the shared registry (`bridge-peers.json`) and forwards to it — the same mechanism the ngrok section describes, and the reason that registry is shared. When the mount is released — the holder stopped, or died without running `funnel off` and left a mount pointing at a dead port — the follower's watch (same cadence and same two-round rule as ngrok) claims it and becomes the owner. The one asymmetry left with ngrok is deliberate: an OWNER does not watch its own mount. ngrok's tunnel is a child process this instance owns, so its exit arms a reconnect; the funnel mount is daemon-side state that outlives this process, and nothing in-process notices if the daemon loses it — `Start`, or a provider switch, rebuilds it.
 - Tailscale not installed or not logged in? The start logs `tailscale status failed` and the instance stays local-only; the error names the cause.
 
 ---
@@ -230,17 +230,18 @@ Notifications are deliberately limited to two moments that genuinely need a pers
 Defaults to `~/.open-bridge`; `OPEN_BRIDGE_HOME` or `--home` changes it.
 
 ```
-config.json              Configuration (config-defaults.ts is the schema's single source of truth)
+config.json              Configuration (canonical defaults in config-defaults.ts)
 state.json               Persistent state: service definitions, todos, usage counters
-secrets.json             Route token plus hashed token records; plaintext is never written
+secrets.json             Persisted per-workspace route tokens and hashed personal-token records
 audit.log                Append-only audit log, rotating at 1 MiB
-logs/bridge.log          Bridge and service logs, read by `open-bridge logs`; rotates at 10 MiB
+logs/bridge.log          Bridge log, read by `open-bridge logs`; rotates at 10 MiB
                          to bridge.log.1 (`logMaxBytes` adjusts it, 0 disables rotation)
-runtime-<suffix>.json    One runtime record per workspace: pid, port, root
+service-logs/            Per-workspace saved-service logs (5 MiB rotation; log_file may override path)
+runtime-<suffix>.json     One runtime record per workspace: pid, port, root
 bridge-peers.json        Local instance registry, used when instances share a tunnel
 ```
 
-Instances sharing a data directory share **configuration, tokens and the registry**, while **runtime records and route tokens are per workspace** (the suffix is the first 24 bits of the workspace path hash).
+Instances sharing a data directory share **configuration, tokens and the registry**, while **runtime records and route tokens are per workspace** (the runtime suffix identifies the workspace; the route token is separately generated and persisted, not derived from that suffix).
 
 > Upgrading: an older single `runtime.json` is still read, but only when the root it records is the one being looked for — so an instance for directory A is never mistaken for one for B.
 
@@ -255,7 +256,7 @@ The refusal names the holder — pid and the directory it serves — and offers 
 `open-bridge health` makes a real request over the public URL and reports status and timing. `tunnel_role: follower` means the address is borrowed from another instance; it will change when that instance exits, and this one takes over when it can.
 
 **The MCP client reports a transport error (SSL EOF, connection reset, timeout)?**
-Free ngrok tunnels hiccup occasionally. Wait five seconds and retry once — the connection prompt already says so, and no client configuration is needed.
+A transport interruption is not a tool failure. Wait five seconds and retry once for a safe read or connection request. If a command or write might already have started, inspect its process/activity/file state first; use the existing `command_id` to resume rather than launch a duplicate. Long commands should use `background:true`.
 
 **Worried about being wide open?**
 `status`, `health` and the console all state the current exposure level (`local`, `public-open`, `public-authed`). To tighten it, issue a token on the Security page and enable the bearer gate; to avoid exposure entirely, use `--no-tunnel`.

@@ -1,15 +1,15 @@
 # 控制台界面设计参考（第三方）
 
-控制台的界面语言不是凭空设计的，而是照着四个仍在维护的开源项目**实际在用的版式**做的。这份文件记录「哪一块来自哪里」，以及许可与署名要求。
+控制台的界面语言不是凭空设计的，而是照着四个开源项目的版式与交互做的。这份文件记录「哪一块来自哪里」，以及许可与署名要求。
 
-## 参考项目（星数/许可为 2026-09-12 查询结果）
+## 参考项目（许可记录于最初参考时；直接复用代码前重新核对）
 
-| # | 项目 | 星数 | 许可 | 我们借了什么 |
-| --- | --- | --- | --- | --- |
-| 1 | [satnaing/shadcn-admin](https://github.com/satnaing/shadcn-admin) | 14,183 | MIT | **左侧固定导航**（分组标题 + 当前项高亮 + 可折叠）· **面包屑页头**（`控制台 / 分组 / 页面`）· 页面标题 + 一行说明 + 右侧页面级操作 · 中性灰配色 + 单一强调色 |
-| 2 | [tabler/tabler](https://github.com/tabler/tabler) | 41,686 | MIT | **KPI 大数字卡**（一行四张：会话 / 活动命令 / 对外工具 / 文件锁）· **分区标题下的细横线**（二级下划线标签的同一套语言）· **活动列表**（状态点 + 对象 + 说明 + 右侧时间码）· 服务操作按钮右对齐 |
-| 3 | [Kiranism/next-shadcn-dashboard-starter](https://github.com/Kiranism/next-shadcn-dashboard-starter) | 6,978 | MIT | **可折叠侧栏**（折叠后保留可访问名）· **表格工具栏**（就地搜索/筛选 + 结果计数）· **空状态**（一句话说明这个页面会显示什么、怎么让它有内容）· 黑白克制、只留一个强调色 |
-| 4 | [tremorlabs/tremor](https://github.com/tremorlabs/tremor) | 3,613 | Apache-2.0 | **状态芯片**（圆点 + 文字 + 底色，统一 `ok / warn / err / idle` 四态）· KPI 卡的主数字 + 副文本结构 |
+| # | 项目 | 许可 | 我们借了什么 |
+| --- | --- | --- | --- |
+| 1 | [satnaing/shadcn-admin](https://github.com/satnaing/shadcn-admin) | MIT | **左侧固定导航**（分组标题 + 当前项高亮 + 可折叠）· **面包屑页头**（`控制台 / 分组 / 页面`）· 页面标题 + 一行说明 + 右侧页面级操作 · 中性灰配色 + 单一强调色 |
+| 2 | [tabler/tabler](https://github.com/tabler/tabler) | MIT | **KPI 大数字卡**（一行四张：会话 / 活动命令 / 对外工具 / 文件锁）· **分区标题下的细横线**（二级下划线标签的同一套语言）· **活动列表**（状态点 + 对象 + 说明 + 右侧时间码）· 服务操作按钮右对齐 |
+| 3 | [Kiranism/next-shadcn-dashboard-starter](https://github.com/Kiranism/next-shadcn-dashboard-starter) | MIT | **可折叠侧栏**（折叠后保留可访问名）· **表格工具栏**（就地搜索/筛选 + 结果计数）· **空状态**（一句话说明这个页面会显示什么、怎么让它有内容）· 黑白克制、只留一个强调色 |
+| 4 | [tremorlabs/tremor](https://github.com/tremorlabs/tremor) | Apache-2.0 | **状态芯片**（圆点 + 文字 + 底色，统一 `ok / warn / err / idle` 四态）· KPI 卡的主数字 + 副文本结构 |
 
 ## 落点对照
 

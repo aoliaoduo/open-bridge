@@ -11,7 +11,9 @@
 一个 Node 进程、一个端口。不依赖编辑器、不是插件、没有 Web 框架。
 
 ```bash
-npm install -g .        # 在本仓库执行一次
+npm ci                 # 在检出的本仓库中执行
+npm run build
+npm install -g .
 cd 你的项目目录
 open-bridge serve
 ```
@@ -21,7 +23,7 @@ open-bridge serve
 ```
 Web 控制台:   http://127.0.0.1:18080/console/
 本地 MCP URL: http://127.0.0.1:18080/mcp/<路由令牌>
-公网 MCP URL: https://<你的域名>/mcp/<路由令牌>      ← 配了 ngrok 才有
+公网 MCP URL: https://<你的域名>/mcp/<路由令牌>      ← 配置公网隧道后才有
 ```
 
 > **这个 URL 就是钥匙。** 公网可达时，拿到它的人就能读写你的文件、执行命令。只在本机用就加 `--no-tunnel`；需要公网就去控制台「安全」页打开 Bearer 门禁。
@@ -61,7 +63,7 @@ open-bridge prompt      # 打印一段现成的接入提示词
 
 ## 一段话讲清安全
 
-`/api` 和 `/console` 只响应回环地址；公网隧道只暴露 `/mcp`，别的都不给。Bearer 门禁**默认关着** —— 因为「只能填 URL」的客户端（比如 ChatGPT 连接器）带不了自定义头，一开就全断；需要时去安全页打开。应用不会偷偷缩减你的权限，但会把当前暴露等级（`local` / `public-open` / `public-authed`）明确写在 `status`、`health`、控制台和启动输出里。
+`/api` 和 `/console` 只响应回环地址。公网提供令牌化的 MCP 与健康路由，启用 OAuth 时还提供授权和发现端点。Bearer 门禁**默认关闭**以兼容只接受 URL 的客户端；需要按客户端发放凭据时，可在安全页开启。应用不会偷偷缩减你的权限，但会把当前暴露等级（`local` / `public-open` / `public-authed`）明确写在 `status`、`health`、控制台和启动输出里。
 
 威胁模型、三档暴露面的定义、以及**哪些事是刻意不锁的**，都在 [SECURITY.md](SECURITY.md)，漏洞也报到那里。
 
@@ -72,20 +74,22 @@ open-bridge prompt      # 打印一段现成的接入提示词
 | [docs/configuration.md](docs/configuration.md) | 命令、控制台、隧道、通知、数据目录、常见问题 |
 | [docs/tools.md](docs/tools.md) | 39 个工具各自的准确行为 |
 | [SECURITY.md](SECURITY.md) | 威胁模型与漏洞报告 |
-| [AGENTS.md](AGENTS.md) | 改这个仓库的约定 —— 提 PR 前先读 |
+| [AGENTS.md](https://github.com/aoliaoduo/open-bridge/blob/main/AGENTS.md) | 改这个仓库的约定 —— 提 PR 前先读 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 当前模块职责、执行路径与状态边界 |
+| [Agent 协作流程](https://github.com/aoliaoduo/open-bridge/blob/main/docs/agent-collaboration-workflow.md) | 仓库协作、验证与交接 |
 | [CHANGELOG.md](CHANGELOG.md) | 改了什么，以及为什么 |
 
 ## 开发
 
 ```bash
-npm install
+npm ci
 npm run dev -- serve --no-tunnel   # 直接跑源码，不用先构建
 npm run verify                     # typecheck + lint + build + 全部测试
 ```
 
 提交前 `npm run verify` 必须全绿。集成测试是**真的**启动 `bin/open-bridge.js` 走 HTTP 的，所以**先构建再跑**，否则它报的是旧行为。
 
-架构：`src/bridge|http|mcp|network|process|shell|workspace` 是零宿主依赖的核心，`src/host/` 是唯一的宿主抽象，`src/server/` 是 API 与控制台，`src/cli.ts` 是入口。运行时依赖只有两个 MCP SDK —— `/mcp`、`/api`、`/console` 全部直接挂在 `node:http` 上。
+完整发布验证使用 `npm run release:check`，在全部检查之外核对 npm 实际打包清单。模块地图以 [ARCHITECTURE.md](ARCHITECTURE.md) 为准：核心依赖 `Host` 接口而不是具体宿主实现，但直接使用 Node 内置模块是正常的。运行时依赖为三个官方 MCP 包（v1 SDK、v2 server 与 Node adapter），不是 Web 框架；MCP、API 和控制台都直接挂在 `node:http` 上。
 
 ## License
 

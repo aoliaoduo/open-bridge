@@ -12,7 +12,7 @@
  * involve changing their whole locale.
  */
 
-export type CliLang = "zh" | "en";
+type CliLang = "zh" | "en";
 
 let current: CliLang | null = null;
 
@@ -41,15 +41,10 @@ export function detectCliLang(env: NodeJS.ProcessEnv = process.env): CliLang {
   return "zh";
 }
 
-/** Resolved once per process: the environment cannot change mid-run. */
-export function cliLang(): CliLang {
+/** Resolve lazily once so output stays consistent throughout the process. */
+function cliLang(): CliLang {
   current ??= detectCliLang();
   return current;
-}
-
-/** Test seam; also lets `serve` honour a flag before anything is printed. */
-export function setCliLang(lang: CliLang | null): void {
-  current = lang;
 }
 
 /** Pick a string. Both languages required, so nothing ships half-translated. */

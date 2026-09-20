@@ -11,7 +11,9 @@ English | [简体中文](README.zh-CN.md)
 One Node process, one port. No editor, no extension, no web framework.
 
 ```bash
-npm install -g .        # once, from this repo
+npm ci                 # once, from a checkout of this repo
+npm run build
+npm install -g .
 cd your-project
 open-bridge serve
 ```
@@ -22,7 +24,7 @@ that directory.
 ```
 Web console:    http://127.0.0.1:18080/console/
 Local MCP URL:  http://127.0.0.1:18080/mcp/<route token>
-Public MCP URL: https://<your-domain>/mcp/<route token>      ← with ngrok configured
+Public MCP URL: https://<your-domain>/mcp/<route token>      ← with a public tunnel configured
 ```
 
 > **The URL is the key.** While it is publicly reachable, whoever has it can
@@ -81,11 +83,11 @@ available and off by default — see
 
 ## Security in one paragraph
 
-`/api` and `/console` answer loopback only; the public tunnel exposes `/mcp`
-and nothing else. The bearer gate ships **off**, because URL-only clients like
-the ChatGPT connector cannot send headers and would all break — turn it on
-from the Security page when you need it. The app never quietly narrows your
-permissions, but it does state your exposure level (`local`, `public-open`,
+`/api` and `/console` answer loopback only. The public side serves the
+tokenized MCP and health routes, plus authorization/discovery routes when
+OAuth is enabled. The bearer gate ships **off** to support URL-only clients;
+turn it on from the Security page when you need individually issued tokens.
+The app never quietly narrows your permissions, but it does state your exposure level (`local`, `public-open`,
 `public-authed`) in `status`, in `health`, in the console and at startup.
 
 Threat model, the three exposure levels, and **what is deliberately left
@@ -99,13 +101,15 @@ vulnerability.
 | [docs/configuration.md](docs/configuration.md) | Commands, console, tunnel, notifications, data directory, FAQ |
 | [docs/tools.md](docs/tools.md) | All 39 tools and their exact behaviour |
 | [SECURITY.md](SECURITY.md) | Threat model and reporting |
-| [AGENTS.md](AGENTS.md) | Conventions for changing this repo — read before a PR |
+| [AGENTS.md](https://github.com/aoliaoduo/open-bridge/blob/main/AGENTS.md) | Conventions for changing this repo — read before a PR |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Current module ownership, execution and state boundaries |
+| [Agent workflow](https://github.com/aoliaoduo/open-bridge/blob/main/docs/agent-collaboration-workflow.md) | Repository collaboration, verification and handoff |
 | [CHANGELOG.md](CHANGELOG.md) | What changed and why |
 
 ## Development
 
 ```bash
-npm install
+npm ci
 npm run dev -- serve --no-tunnel   # run from source, no build step
 npm run verify                     # typecheck + lint + build + every test
 ```
@@ -114,11 +118,12 @@ npm run verify                     # typecheck + lint + build + every test
 `bin/open-bridge.js` and speak HTTP, so **build before running them** or they
 will report the old behaviour.
 
-Architecture: `src/bridge|http|mcp|network|process|shell|workspace` is a
-host-independent core, `src/host/` is the one host abstraction, `src/server/`
-is the API and console, `src/cli.ts` is the entry point. Runtime dependencies
-are the two MCP SDKs and nothing else — `/mcp`, `/api` and `/console` all sit
-directly on `node:http`.
+Run `npm run release:check` for the complete verification plus npm package
+preflight. The module map lives in [ARCHITECTURE.md](ARCHITECTURE.md): core
+modules depend on the `Host` interface, not its concrete implementation;
+using Node built-ins is intentional. Runtime dependencies are three official
+MCP packages (the v1 SDK, v2 server and Node adapter), not a web framework;
+MCP, API and console routes all sit directly on `node:http`.
 
 ## License
 

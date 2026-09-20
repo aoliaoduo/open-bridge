@@ -1,10 +1,9 @@
 /**
  * Canonical configuration defaults for Open Bridge.
  *
- * Nothing declares these keys any more — the console settings page and
- * `open-bridge config` are the only surfaces — so this table is the single
- * source of truth. New config read sites should read from here instead of
- * restating a literal default.
+ * Shared by the CLI, console and MCP configuration tools. This table owns
+ * defaults; config-values.ts owns input validation. New read sites should
+ * use these defaults rather than introduce another literal copy.
  */
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === "object") {
@@ -42,7 +41,7 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = deepFreeze({
   "auth.tokenTtlSeconds": 0,
   /**
    * OAuth 2.1 authorization server. OFF by default, like the bearer gate: the
-   * route token inside the MCP URL already authenticates a URL-only client, so
+   * possession of the tokenized MCP URL grants access in public-open mode, so
    * this is an opt-in upgrade to per-client, individually revocable credentials
    * — not a new default that could lock an existing client out.
    */
@@ -66,8 +65,8 @@ export const CONFIG_DEFAULTS: Record<string, unknown> = deepFreeze({
    * Local audio alert: the other half of "tell me something happened".
    *
    * Bark answers "I am away from the desk"; this answers "I am right here
-   * with the tab in the background". Deliberately narrower than the phone
-   * channel — only the events that mean the AI has STOPPED and is waiting on
+   * with the tab in the background". Both channels use the same waiting and
+   * finished events — only moments when the AI has stopped and needs
    * a human. A chime on every completed todo is how a person ends up
    * disabling the whole thing.
    */

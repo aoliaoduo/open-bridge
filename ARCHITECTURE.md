@@ -1,155 +1,88 @@
 # Open Bridge 架构说明
 
-> 本文描述当前独立版 Open Bridge 的运行边界、模块职责和关键约束。它面向维护者；日常配置请看 [配置与运维](docs/configuration.md)，逐项工具契约请看 [工具参考](docs/tools.md)。
+本文描述当前源码的职责边界。运行配置见 [配置与运维](docs/configuration.md)，工具契约见 [工具参考](docs/tools.md)；历史设计过程保留在 Git 历史，不作为未完成任务清单。
 
-## 1. 系统目标与边界
+## 1. 产品边界
 
-Open Bridge 是一个运行在用户本机的、独立的 Streamable HTTP MCP Bridge。它把经过认证的 AI 客户端连接到本地工作区能力，同时提供 CLI、Web 控制台、审计日志和可选的公网入口。
+Open Bridge 是用户主动启动的本地工作区 MCP 服务：一个 Node 进程提供 CLI、Streamable HTTP MCP、Web 控制台、审计和可选公网隧道。
 
-它负责：
+AI 客户端负责推理、选择工具与编排工作；Bridge 负责真实执行、结果契约、资源锁和可观察状态。它不是模型代理、Agent 调度平台或命令沙箱，也不会根据工具的 `readOnlyHint` / `destructiveHint` 自动增加确认步骤。
 
-- 暴露 MCP 工具（文件、搜索、命令、进程、任务、配置、日志等）；
-- 在并发请求间执行资源锁、输入校验和审计；
-- 管理本地配置、令牌、运行时记录和可选隧道；
-- 提供本机控制台和有限的 Bark / 本地声音提醒。
+## 2. 当前模块地图
 
-它**不**是模型代理或任务调度器：模型推理、未通过 Bridge 发起的工具、外部进程的内部进度，对 Bridge 都可能不可见。因此任何“任务是否真正结束”的服务端判断都只能是保守启发式，而不是事实来源。
-
-## 2. 总体结构
-
-```text
-AI client / MCP host
-        │  Streamable HTTP + personal token / OAuth
-        ▼
-┌──────────────────────────────────────────────────────────┐
-│ Open Bridge process                                       │
-│                                                          │
-│  HTTP server ── MCP endpoint ── tool catalog/executor    │
-│       │                 │                 │              │
-│       │                 │                 ├─ workspace   │
-│       │                 │                 ├─ shell       │
-│       │                 │                 ├─ processes   │
-│       │                 │                 ├─ config      │
-│       │                 │                 └─ audit/logs  │
-│       │                 │                                │
-│       ├─ console API ──┴─ shared settings/state          │
-│       ├─ static console UI                                │
-│       └─ lifecycle / tunnel / notification services       │
-└──────────────────────────────────────────────────────────┘
-        │                         │
-        │ loopback                ├─ Bark / local sound (optional)
-        ▼                         └─ ngrok or Tailscale Funnel (optional)
-Browser console                         ▼
-                                      remote MCP client
-```
-
-所有浏览器 API 请求使用相对路径，控制台不依赖浏览器访问 `localhost` 以外的后端；单进程内的 HTTP、MCP、控制台和生命周期状态共享同一个 host/state 层。
-
-## 3. 源码模块
-
-| 目录 / 文件 | 职责 |
+| 位置 | 实际职责 |
 | --- | --- |
-| `src/cli.ts` | CLI 入口；解析 `serve`、`status`、`stop`、`token`、`config`、`doctor` 等命令。 |
-| `src/host/` | 宿主抽象及本地持久化：配置、运行时记录、日志、进程标题和平台差异。核心层通过它访问环境。 |
-| `src/server/` | HTTP 监听、路由、控制台 API、静态 UI 和安全响应边界。 |
-| `src/mcp/` | Streamable HTTP MCP 协议接入、工具定义、输入 schema 和响应格式。 |
-| `src/bridge/` | 会话/活动状态、工具执行、资源锁、审计、任务列表、通知和 MCP endpoint 编排。 |
-| `src/workspace/` | 工作区文件、搜索、编辑、批处理、路径约束和内容处理。 |
-| `src/shell/`、`src/process/` | 前台命令、长驻进程、交互、输出、超时与生命周期控制。 |
-| `src/network/` | ngrok、Tailscale Funnel 等隧道的探测、启动、健康检查和清理。 |
-| `ui/` | React/Vite 控制台源代码；产物由构建写入 `dist/ui/`。 |
-| `test/` | 单元、协议、集成和 UI 测试；通知、认证、隧道和并发均有独立覆盖。 |
-| `scripts/`、`bin/` | 构建清理、发布辅助和安装后的 CLI 启动器。 |
+| `src/cli.ts`、`src/cli/` | CLI 入口、参数、实例定位、检查和本地管理命令。 |
+| `src/host/host.ts` | 唯一的宿主接口：配置、持久化、日志、UI 通知等共享能力。 |
+| `src/host/node-host.ts` | 文件版宿主实现；仅由 CLI 和控制台 API 安装或访问具体实现。 |
+| `src/bridge/http-listener.ts` | HTTP 监听、Host/CORS/认证边界、健康路由、对等转发，以及两代 MCP 请求分流。 |
+| `src/bridge/mcp-endpoint.ts` | 两代 MCP 的发现/初始化、说明注入、工具调用适配及共享结果构造。 |
+| `src/bridge/tool-catalog.ts`、`src/bridge/tool-families.ts` | 工具档过滤、规范工具名和兼容别名归一化。 |
+| `src/bridge/dispatcher.ts`、`src/bridge/lock-plan.ts` | 调用分发、输入检查、资源锁计划、审计和统计。 |
+| `src/bridge/` 的工具与生命周期模块 | 文件/进程/服务/脚本工具执行，会话、任务、通知、隧道和启停编排。 |
+| `src/mcp/` | 工具 schema，以及 glob、搜索、流式读取、补丁、diff 等算法；不是 HTTP 协议入口。 |
+| `src/http/` | 个人令牌与 OAuth、请求体/响应、安全策略和对等实例通信。 |
+| `src/workspace/` | 工作区上下文、路径、换行、文件版本和持久化辅助。 |
+| `src/shell/`、`src/process/` | Shell 选择/参数/标记，以及进程输出缓冲、游标、ANSI 和捕获；工具入口在 `src/bridge/`。 |
+| `src/network/` | 安全网络探测与网络/ngrok 错误分类；隧道生命周期在 `src/bridge/`。 |
+| `src/server/` | 本机控制台 API、设置处理与静态 UI 路由。 |
+| `ui/src/` | React 控制台及其 UI 测试；Vite 产物进入 `dist/ui/`。 |
+| `test/` | 核心单元测试和会启动真实进程的协议/集成测试，不包含 UI 测试。 |
+| `scripts/`、`bin/` | 构建清理、npm 发布清单检查和安装后的 CLI 启动器。 |
 
-## 4. 请求和工具执行路径
+“核心只依赖 Host 接口”不等于“核心不能使用 Node 内置模块”。文件、Shell 和网络工具本来就直接使用 Node 能力；不要为消除这些依赖增加第二套宿主抽象。
 
-1. 客户端向 `/mcp` 建立或继续 Streamable HTTP MCP 请求。
-2. `src/server/` 完成来源、认证、请求大小和方法边界检查。
-3. `src/mcp/` 将协议请求映射为由 `tool-definitions` 声明的工具调用。
-4. `src/bridge/mcp-endpoint.ts` 建立执行上下文，记录活动，并调用统一的工具执行路径。
-5. 执行前由资源锁根据文件、端口、进程或其他资源键进行串行化；互不冲突的调用可并行。
-6. 工具模块完成工作，返回文本和（适用时）`structuredContent`；审计记录结果摘要、耗时和失败原因，但不记录密钥明文。
-7. 结束时更新活动时钟和 in-flight 计数，再将协议响应写回客户端。
+## 3. 请求与结果路径
 
-批处理和 todo 看板仍是 MCP 的一等能力；它们不通过额外的“行为教练”层改变工具结果或要求模型创建任务。
+1. 客户端访问 `/mcp/<route-token>`。监听器检查 Host、可选认证和请求边界；`/api`、`/console` 由独立的本机路由处理。
+2. 2025 世代使用 SDK v1 的 `initialize` / session / SSE 路径；2026-07-28 世代使用 SDK v2 的无状态发现与请求路径。按请求分类，每代只有一个处理者。
+3. 两条路径共用工具目录、执行入口和结果构造。`tools/list` 只公布规范名称；旧别名仍归一到同一实现，不是待删除的死代码。
+4. 分发器校验参数并按文件、进程、端口或显式资源键申请锁；互不冲突的调用可以并行。
+5. 工具返回文本和类型化的 `structuredContent`。数组型兼容文本可对应 `{items: [...]}` 类型化载荷；工具错误、部分行失败和命令非零退出码不是同一件事。
+6. 审计、统计和 in-flight 状态随调用更新。`batch` 与 `run_script` 子调用也走真实执行路径，不绕过锁、权限或审计。
 
-## 5. 状态、持久化与生命周期
+发现/初始化时发送项目说明；`tools/list` 时发送工具目录。普通工具调用不会重复附带整份说明或目录。客户端怎样放入模型上下文不由 Bridge 决定。
 
-### 进程内状态
+## 4. 状态、存储与生命周期
 
-`src/bridge/state.ts` 保存临时的会话、现代无状态请求活动、in-flight 计数、todo 和通知轮次。它只代表当前 Bridge 进程；重启会清空这类易失状态。
+- 进程内保存会话、受监管进程、in-flight 请求、通知轮次等状态；不要把内存状态当成重启后仍存在的记录。
+- 数据目录默认 `~/.open-bridge`，可由 `OPEN_BRIDGE_HOME` 或 `--home` 改变。`config.json` 保存配置；`state.json` 保存服务定义、任务和统计；`secrets.json` 保存工作区路由令牌及个人令牌的哈希记录。
+- 路由令牌由随机字节生成并按工作区持久化，不是从路径直接推导出来的令牌。工作区路径用于存储键和 runtime 文件的后缀。
+- `runtime-<suffix>.json` 用于定位实例，`bridge-peers.json` 用于同机隧道共享。审计在 `audit.log`，Bridge 日志在 `logs/bridge.log`，服务日志默认在 `service-logs/`，详见配置参考。
+- 只保存服务定义，不把旧的 `command_id` 当成新进程。前台命令等待超时不会杀进程，客户端应沿返回的 id 继续读取或等待。
+- 构建不会热更新运行中的 Node 进程。`bridge_status` 的 `build_stale` 是判断是否仍在运行旧构建的依据。
 
-传统会话和现代 Streamable HTTP 请求的活动会被汇总为同一份“最近活动”快照。in-flight 请求被视为活动，活动时钟在请求结束时更新，避免把仍在服务的长请求当成静默。
+## 5. 安全与网络边界
 
-### 本地持久化
+- 默认监听回环地址；公网隧道显式可选。公网可提供令牌化 MCP 和健康路由；启用 OAuth 时还有授权与发现端点，并非“只公开 `/mcp`”。
+- `/api` 与 `/console` 是本机管理面，不向跨来源网页开放 CORS；变更 API 还要求控制台令牌头。
+- Bearer 门禁和 OAuth 默认关闭。公开模式下应把完整 MCP URL 当作访问凭据保护；开启认证是操作者的选择，不在清理或升级中自动改变。
+- `unrestrictedFileAccess` 默认开启：工作区固定相对路径的含义，但不是文件系统沙箱。关闭该设置时才按允许目录限制访问；删除/移动工作区根、数据目录或盘根的自毁护栏另行存在。
+- 密钥掩码、路径保护、运行时守卫和兼容输入不能因为“看起来多余”而删除。完整威胁模型见 [SECURITY.md](SECURITY.md)。
 
-宿主层在 Open Bridge 数据目录（默认 `~/.open-bridge`，可用 `OPEN_BRIDGE_HOME` 或 CLI 参数覆盖）保存配置、令牌、运行时记录和日志。写入采用校验、掩码和必要的跨进程合并策略；浏览器控制台和 `get_config` 只显示敏感值的掩码。
+隧道由 `src/bridge/` 管理：ngrok 使用受监管子进程，Tailscale Funnel 使用本机守护进程；实例可以通过共享注册表跟随同机隧道持有者。两种提供商的生命周期并不相同，不能用一次返回的成功布尔值替代实际健康状态。
 
-运行中的实例发布 runtime 记录，供 `open-bridge status`、`url` 和 `stop` 定位。服务停止、重绑或旋转端点时，响应会优先完成写回，再释放监听器，避免调用方收到“动作已成功但连接被重置”的假失败。
+## 6. 通知与控制台
 
-## 6. 安全模型
+`notify` 只有 `waiting` 和 `finished` 两个事件。每轮最多一次 Bark/本机声音提醒；普通工具活动恢复后才开启新轮次，进度和 todo 更新不直接通知手机。
 
-- MCP 入口支持个人令牌；兼容 OAuth 的认证路径也保留。
-- 控制台页面可在本机安全地加载，但变更类 API 有独立的控制台令牌 / 来源边界，不把机密暴露进页面或普通读取接口。
-- 工作区工具遵从允许目录和路径规范化规则，拒绝越界路径。
-- 工具参数受 schema 与服务端校验双重约束；shell、进程、文件和网络操作均进入审计日志。
-- Bark 设备密钥为单向配置：配置页、MCP 读取结果、审计与运行日志不回显其明文。
-- 公网入口是显式可选能力；不开隧道时服务只在本机可达。
+遗漏显式结束通知时，兜底只在连续十分钟无 Bridge 可观察活动、且没有 in-flight MCP 请求后触发一次。这是启发式，不证明模型或外部任务已经结束。
 
-## 7. 通知架构与准确性边界
+控制台通过相对 URL 调用同一进程的 API，和 CLI、MCP 共用配置与状态，不另行实现工具逻辑。默认 `full` 工具档和可选 `core` 子集由 `src/bridge/tool-catalog.ts` 决定。
 
-通知只有两个对外事件：
-
-- `waiting`：模型已经提出阻塞性问题或选择，必须等待用户回答；
-- `finished`：本轮工作真实完成，由模型显式作为最后动作发送。
-
-每个活动轮次最多对外提醒一次。Bark 固定采用时效性、持续响铃的单次投递；普通工具活动恢复后才打开新轮次。普通进度、todo 更新和命令输出不会推送手机。
-
-为覆盖模型遗漏显式 `finished` 的情况，服务端保留一次兜底，但阈值固定为**连续十分钟没有 Bridge 可观察活动**且不存在 in-flight MCP 请求。该兜底不会重复发送。它并不声称准确检测了 AI 的真实停止：模型思考、外部工具或未被 Bridge 包装的长任务仍可能不可见。因此正确的结束信号始终优先是显式 `notify(event:"finished")`。
-
-## 8. 配置、工具档和控制台
-
-配置只有一个共享真源：控制台设置页和 MCP 的 `get_config` / `set_config_value` 使用同一验证模型。常用领域包括网络与隧道、文件范围、shell、通知、锁和日志。
-
-工具目录默认使用 `full` 档，另保留 `core` 档给只需要基础能力的部署。`core` 是可选收缩档，不改变 `full` 的默认能力，也不删除 todo、批处理或其他完整工具能力。
-
-控制台提供状态、设置、令牌、日志、会话和工具等页面。它是管理界面，不是 MCP 执行逻辑的第二套实现；所有有副作用的操作最终回到同一宿主、bridge 或 server 服务。
-
-## 9. 网络与隧道
-
-本地监听器是服务的基础；端口可由 CLI/配置决定。项目专用的 Windows 启动器 `start-open-bridge-project.cmd` 固定从项目根目录启动并使用端口 `8123`，且不自动打开浏览器。
-
-可选公网能力由网络层管理：
-
-- **ngrok**：按进程生命周期启动、健康检查和重连；明确的配置错误不会无限重试或发布不可用 URL。
-- **Tailscale Funnel**：保留为独立提供商能力，不因控制台或精简档而移除。
-
-隧道 URL 仅在端点真实健康后发布；停止或失败会清除失效公开地址。
-
-## 10. 构建、测试和发布
+## 7. 构建、验证与维护
 
 ```bash
-npm run typecheck   # TypeScript（服务端和 UI）
-npm run lint        # ESLint
-npm run build       # 清理旧产物，编译 src，并构建 ui 到 dist/ui
-npm test            # 核心、协议、集成与 UI 测试
-npm run verify      # typecheck + lint + build + test
+npm ci
+npm run typecheck       # 核心和 UI 类型检查
+npm run lint
+npm run build           # 清理产物，编译核心并构建控制台
+npm test                # 核心、协议、集成和 UI
+npm run release:check   # verify 全流程 + npm 实际打包清单检查
 ```
 
-运行中的 Node 进程不会自动加载新的 `dist`。修改服务端或 UI 后，应先构建，再重启 Bridge。启动器会在启动前构建，适合本项目的日常 Windows 使用。
+集成测试启动 `bin/open-bridge.js` 并读取 `dist/`，所以必须先构建。源码、测试和 UI 测试的放置约定见仓库的 `AGENTS.md`；一批修改完成后还需审阅差异、检查工作树并只提交相关文件。
 
-## 11. 维护原则
+Windows 项目启动器 `start-open-bridge-project.cmd` 从项目目录构建并启动，固定端口 `8123`，不自动打开浏览器。重启后先确认 `state: "running"` 与 `build_stale: false`，再做与改动对应的真实 MCP 验证；源码测试通过不能代替这一步。
 
-1. **一个真源**：协议、控制台和 CLI 对同一配置和生命周期事实达成一致。
-2. **先安全、后便利**：本地默认、显式公开、秘密不回显、失败可诊断。
-3. **工具结果是契约**：不要在工具结果中注入隐藏的行为教练、todo 催促或改变 schema 的副作用。
-4. **异步动作必须诚实**：网络、隧道、停止、重绑和通知都要区分“已请求”与“已送达/已完成”。
-5. **启发式必须标明边界**：尤其是活动和结束判断；不要把不可观察的 AI 行为伪装成确定事实。
-6. **先测试再扩展**：涉及协议、认证、持久化、并发或公开网络时，同时覆盖成功、失败、重试和清理路径。
-
-## 12. 快速排障入口
-
-- 配置、目录、隧道、令牌：[`docs/configuration.md`](docs/configuration.md)
-- MCP 工具、参数和通知使用规则：[`docs/tools.md`](docs/tools.md)
-- 变更摘要：[`CHANGELOG.md`](CHANGELOG.md)
-- 运行状况：`open-bridge status`、`open-bridge doctor`，或控制台的状态/日志页。
+维护时优先保持一个配置/契约真源、最小直接的改动、可恢复且诚实的异步结果。不要恢复行为教练层，也不要把已完成的迁移报告当成新的待办任务。
