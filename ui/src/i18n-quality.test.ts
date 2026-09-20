@@ -108,3 +108,50 @@ test("no translation is missing its English half", () => {
   }
   assert.deepEqual(offenders, [], `translations with an empty English side:\n  ${offenders.join("\n  ")}`);
 });
+
+test("no raw Han characters in UI code outside comments and t() translations", () => {
+  const offenders: string[] = [];
+  for (const file of uiSources()) {
+    let source = readFileSync(path.join(process.cwd(), file), "utf8");
+    source = source.replace(/\/\*[\s\S]*?\*\//g, "");
+    source = source.replace(/\/\/.*$/gm, "");
+    source = source.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+
+    let stripped = "";
+    let i = 0;
+    while (i < source.length) {
+      const start = source.indexOf("t(", i);
+      if (start < 0) {
+        stripped += source.slice(i);
+        break;
+      }
+      const before = start > 0 ? source[start - 1] ?? "" : "";
+      if (/[\w$.]/.test(before)) {
+        stripped += source.slice(i, start + 2);
+        i = start + 2;
+        continue;
+      }
+      stripped += source.slice(i, start);
+      let depth = 0;
+      let end = start + 1;
+      for (let k = start + 1; k < source.length; k += 1) {
+        const ch = source[k];
+        if (ch === "(") depth += 1;
+        else if (ch === ")") {
+          depth -= 1;
+          if (depth === 0) { end = k; break; }
+        }
+      }
+      i = end + 1;
+    }
+
+    const lines = stripped.split("\n");
+    for (let lineNo = 1; lineNo <= lines.length; lineNo += 1) {
+      const line = lines[lineNo - 1] ?? "";
+      if (HAN.test(line)) {
+        offenders.push(`${path.basename(file)}:${lineNo}: ${line.trim().slice(0, 60)}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `Raw Han characters found outside t():\n  ${offenders.join("\n  ")}`);
+});
