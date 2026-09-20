@@ -4,7 +4,7 @@
 >
 > 更新：2026-09-20（Asia/Shanghai）｜项目：Open Bridge
 >
-> 当前状态：P5“输出/恢复契约整治”的功能已在重启后的真实 MCP 中验证：`bridge_status` 为 `running` 且 `build_stale:false`；文本、Base64 续读和 `search_files.partial` 均按契约返回。随后发现工具简介把“空游标”说得过于绝对，已作措辞修正并通过完整发布检查；该最终简介仍待下一次重启加载。
+> 当前状态：P5“输出/恢复契约整治”已完成并在两次重启后的真实 MCP 中闭环验证：`bridge_status` 为 `running` 且 `build_stale:false`；文本、Base64 续读、`search_files.partial` 和最终工具简介均按契约返回。
 >
 > 最近真实验证：P8 已在重启后通过。`read_files` 同批请求一个可读文件和一个缺失文件时，返回两个同序结果；Bridge 的 `build_stale` 为 `false`。
 
@@ -201,7 +201,7 @@ Endpoint： POST /chat/completions
 
 问题二：`read_files` 虽能标记 `truncated`，但二进制/Base64 内容没有可继续读取的字节游标，文本分页也没有安全的下一行游标；schema 也没有完整描述成功行、错误行和恢复字段。
 
-结果：提交 `8fb1aa8 fix explicit output recovery contracts` 后，`search_files` 始终返回 `partial:boolean`，并与分页 `truncated` 分离。`read_files` 的文本成功行会返回 `encoding:"utf8"`、行元数据及可用时的 `next_start_line`；Base64 成功行返回 `offset`/`next_offset`，可逐页恢复。单路径失败继续作为 `{path,error}` 行保留。重启后的真实 MCP 已验证：二进制页以 0、4、8 三个偏移完整恢复，文本页从 `next_start_line:3` 继续，普通空搜索明确返回 `partial:false`。随后仅修正了“空游标”说明的措辞，完整 `npm run release:check` 已再次通过，仍需重启加载这句最新简介。
+结果：提交 `8fb1aa8 fix explicit output recovery contracts` 后，`search_files` 始终返回 `partial:boolean`，并与分页 `truncated` 分离。`read_files` 的文本成功行会返回 `encoding:"utf8"`、行元数据及可用时的 `next_start_line`；Base64 成功行返回 `offset`/`next_offset`，可逐页恢复。单路径失败继续作为 `{path,error}` 行保留。重启后的真实 MCP 已验证：二进制页以 0、4、8 三个偏移完整恢复，文本页从 `next_start_line:3` 继续，普通空搜索明确返回 `partial:false`。随后仅修正了“空游标”说明的措辞，完整 `npm run release:check` 已再次通过；第二次重启后的 `tools/list` 已确认最终简介及 Base64 `offset` 输入、两种 `read_files` 行结构均已加载。
 
 ### P8 已完成示例
 
