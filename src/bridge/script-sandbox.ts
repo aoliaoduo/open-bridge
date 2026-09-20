@@ -60,10 +60,29 @@ const SCRIPT_FILENAME = "open-bridge-script.js";
 
 export type ScriptPhase = "compile" | "run" | "tool" | "timeout" | "return" | "limit" | "worker";
 
+export type ScriptToolOutcomeStatus = "running" | "succeeded" | "failed";
+
+/**
+ * A real tool call seen during a script that did not finish successfully.
+ * `running` means the sandbox timed out or crashed before the Bridge call
+ * settled; inspect the named tool's normal status surface before retrying it.
+ */
+export interface ScriptToolOutcome {
+  call_id: number;
+  tool: string;
+  status: ScriptToolOutcomeStatus;
+  result?: unknown;
+  result_bytes?: number;
+  result_truncated?: boolean;
+  error?: string;
+}
+
 /**
  * One script run's result. `result_bytes`/`truncated` describe the returned value,
  * `calls`/`by_tool` the tool use inside the run, `console` whatever it logged.
- * Failures use `ok: false` plus the diagnosing fields.
+ * On failure, `tool_outcomes` preserves the tool calls that were already started;
+ * their result snapshots are bounded so recovery data cannot defeat Code Mode's
+ * context budget.
  */
 export interface ScriptRunEnvelope {
   ok: boolean;
@@ -74,6 +93,7 @@ export interface ScriptRunEnvelope {
   by_tool: Record<string, number>;
   duration_ms: number;
   console: string[];
+  tool_outcomes?: ScriptToolOutcome[];
   phase?: ScriptPhase;
   error?: string;
   error_type?: string;
@@ -160,13 +180,14 @@ function toolError(name, message) {
 }
 
 function callTool(name, args) {
-  if (++calls > limits.maxCalls) {
+  if (calls >= limits.maxCalls) {
     const error = new Error(
       "This script exceeded its tool-call budget (" + limits.maxCalls + " calls). Split the work across several run_script calls or raise max_calls."
     );
     error.name = "CallLimitError";
     return Promise.reject(error);
   }
+  calls += 1;
   byTool[name] = (byTool[name] || 0) + 1;
   const id = nextId++;
   return new Promise((resolve, reject) => {
@@ -484,6 +505,33 @@ export function truncateScriptText(text: string, maxBytes: number): { text: stri
   return { text: "", truncated: true };
 }
 
+/**
+ * A failed script must leave enough evidence to recover from calls it already
+ * started, but Code Mode must not turn a failure into N full tool payloads.
+ */
+const FAILURE_TOOL_OUTCOME_MAX_BYTES = 4 * 1024;
+
+function snapshotToolOutcomeResult(value: unknown): Pick<ScriptToolOutcome, "result" | "result_bytes" | "result_truncated"> {
+  const serialized = safeJsonText(value);
+  if (!serialized.ok) {
+    return {
+      result: `[The tool returned a value without a JSON form: ${serialized.reason}]`,
+      result_bytes: 0,
+      result_truncated: true,
+    };
+  }
+  const resultBytes = Buffer.byteLength(serialized.text, "utf8");
+  const capped = truncateScriptText(serialized.text, FAILURE_TOOL_OUTCOME_MAX_BYTES);
+  if (capped.truncated) {
+    return { result: capped.text, result_bytes: resultBytes, result_truncated: true };
+  }
+  try {
+    return { result: JSON.parse(capped.text), result_bytes: resultBytes, result_truncated: false };
+  } catch {
+    return { result: capped.text, result_bytes: resultBytes, result_truncated: false };
+  }
+}
+
 /** Locate the failing line in the caller's own coordinates and show it with context. */
 export function scriptCodePreview(
   stack: string | undefined,
@@ -554,8 +602,12 @@ export async function runScriptInSandbox(options: RunScriptOptions): Promise<Scr
   const source = options.source;
   const startedAt = Date.now();
   const consoleLines: string[] = [];
-  let relayedCalls = 0;
-  const relayedByTool: Record<string, number> = {};
+  // The worker normally reports these exact totals when it finishes. They are
+  // also maintained here so a wall-clock timeout can truthfully name calls
+  // already handed to the parent, even though the worker can no longer reply.
+  let observedCalls = 0;
+  const observedByTool: Record<string, number> = {};
+  const toolOutcomes: ScriptToolOutcome[] = [];
 
   // The one added line is the async wrapper, hence lineOffset -1 in the worker:
   // a reported line number is the line the caller wrote.
@@ -585,10 +637,11 @@ export async function runScriptInSandbox(options: RunScriptOptions): Promise<Scr
       void worker.terminate().catch(() => undefined);
       resolve({
         ok: envelope.ok === true,
-        calls: envelope.calls ?? relayedCalls,
-        by_tool: envelope.by_tool ?? relayedByTool,
+        calls: envelope.calls ?? observedCalls,
+        by_tool: envelope.by_tool ?? observedByTool,
         console: envelope.console ?? consoleLines,
         duration_ms: Date.now() - startedAt,
+        ...(envelope.ok === true ? {} : { tool_outcomes: toolOutcomes.map(outcome => ({ ...outcome })) }),
         ...envelope,
       });
     };
@@ -611,8 +664,8 @@ export async function runScriptInSandbox(options: RunScriptOptions): Promise<Scr
         return;
       }
       if (item.type !== "done") return;
-      const calls = typeof item.calls === "number" ? item.calls : relayedCalls;
-      const byTool = (item.byTool ?? relayedByTool) as Record<string, number>;
+      const calls = typeof item.calls === "number" ? item.calls : observedCalls;
+      const byTool = (item.byTool ?? observedByTool) as Record<string, number>;
       const logs = Array.isArray(item.console) ? (item.console as string[]) : consoleLines;
       if (item.ok === true) {
         const serialized = safeJsonText(item.result);
@@ -695,9 +748,19 @@ export async function runScriptInSandbox(options: RunScriptOptions): Promise<Scr
     /** Relay one composed call into the Bridge, with the same refusal rules a direct call would meet. */
     async function handleToolCall(item: Record<string, unknown>): Promise<void> {
       const id = item.id;
+      const callId = typeof id === "number" && Number.isInteger(id) && id > 0 ? id : 0;
       const name = typeof item.name === "string" ? item.name : "";
       const args = (item.args && typeof item.args === "object" && !Array.isArray(item.args) ? item.args : {}) as Record<string, unknown>;
+      // Record before validation or dispatch. A caller that times out after this
+      // message needs to know whether it must inspect or clean up this tool call,
+      // not merely that a script timed out after an opaque count.
+      observedCalls += 1;
+      observedByTool[name] = (observedByTool[name] ?? 0) + 1;
+      const outcome: ScriptToolOutcome = { call_id: callId, tool: name, status: "running" };
+      toolOutcomes.push(outcome);
       const deny = (reason: string): void => {
+        outcome.status = "failed";
+        outcome.error = reason;
         if (settled) return;
         safePost({ type: "tool-result", id, ok: false, tool: name, error: reason });
       };
@@ -720,10 +783,10 @@ export async function runScriptInSandbox(options: RunScriptOptions): Promise<Scr
         deny(`Unknown tool "${name}".${toolNameHint(name, options.allowedTools)}`);
         return;
       }
-      relayedCalls += 1;
-      relayedByTool[name] = (relayedByTool[name] ?? 0) + 1;
       try {
         const value = await options.callTool(name, args);
+        outcome.status = "succeeded";
+        Object.assign(outcome, snapshotToolOutcomeResult(value));
         if (settled) return;
         safePost({ type: "tool-result", id, ok: true, value });
       } catch (error) {

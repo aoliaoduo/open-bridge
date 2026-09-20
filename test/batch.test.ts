@@ -30,8 +30,10 @@ test("sequential: all succeed, counts and results are right", async () => {
   assert.equal(r.failed, 0);
   assert.equal(r.stopped_early, false);
   assert.equal(r.results.length, 2);
+  assert.equal(r.results[0].index, 0);
   assert.equal(r.results[0].ok, true);
   assert.equal(r.results[0].result, "ok:a:{\"x\":1}");
+  assert.equal(r.results[1].index, 1);
   assert.equal(r.results[1].result, "ok:b:{}");
 });
 
@@ -132,4 +134,31 @@ test("normalizeBatchCalls: non-object args is ignored", () => {
   assert.equal(normalized[0].arguments, undefined);
   assert.equal(normalized[1].arguments, undefined);
   assert.equal(normalized[2].arguments, undefined);
+});
+
+test("result indices identify duplicate tool calls and the first unstarted fail-fast item", async () => {
+  const called: number[] = [];
+  const r = await runBatchPlan(
+    [
+      { tool: "read_files", arguments: { slot: 0 } },
+      { tool: "read_files", arguments: { slot: 1 } },
+      { tool: "read_files", arguments: { slot: 2 } },
+    ],
+    "sequential",
+    true,
+    async (_tool, args) => {
+      const slot = Number(args.slot);
+      called.push(slot);
+      if (slot === 1) throw new Error("second read failed");
+      return { slot };
+    },
+  );
+  assert.deepEqual(called, [0, 1]);
+  assert.equal(r.stopped_early, true);
+  assert.deepEqual(r.results.map(item => [item.index, item.tool, item.ok]), [
+    [0, "read_files", true],
+    [1, "read_files", false],
+  ]);
+  assert.equal(r.results[1].error, "second read failed");
+  assert.equal(r.results.find(item => item.index === 2), undefined, "index 2 is the precise resume point");
 });

@@ -178,7 +178,50 @@ test("the tool-call budget is enforced with a distinct phase", async () => {
   assert.equal(envelope.ok, false);
   assert.equal(envelope.phase, "limit");
   assert.equal(envelope.error_type, "CallLimitError");
+  assert.equal(envelope.calls, 2, "the rejected third attempt is not reported as a Bridge call");
+  assert.deepEqual(envelope.by_tool, { read_files: 2 });
+  assert.deepEqual(envelope.tool_outcomes?.map(outcome => [outcome.call_id, outcome.tool, outcome.status]), [
+    [1, "read_files", "succeeded"],
+    [2, "read_files", "succeeded"],
+  ]);
   assert.equal(h.calls.length, 2, "the third call never reached the Bridge");
+});
+
+test("a failed script keeps completed tool outcomes needed for recovery", async () => {
+  const h = harness((name, args) => ({ command_id: "script-owned-process", name, args }));
+  const envelope = await h.run(
+    'await tools.start_process({ command: "node server.js" }); throw new Error("script failed after launch");',
+    { tools: ["start_process"] },
+  );
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.calls, 1);
+  assert.equal(envelope.phase, "run");
+  assert.deepEqual(envelope.tool_outcomes, [{
+    call_id: 1,
+    tool: "start_process",
+    status: "succeeded",
+    result: { command_id: "script-owned-process", name: "start_process", args: { command: "node server.js" } },
+    result_bytes: 96,
+    result_truncated: false,
+  }]);
+});
+
+test("a timeout names tool calls that already settled instead of discarding their cleanup handle", async () => {
+  const h = harness(() => ({ command_id: "timeout-owned-process" }));
+  const envelope = await h.run(
+    'await tools.start_process({ command: "node server.js" }); await new Promise(() => {});',
+    { timeoutMs: 1_000, tools: ["start_process"] },
+  );
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.phase, "timeout");
+  assert.deepEqual(envelope.tool_outcomes, [{
+    call_id: 1,
+    tool: "start_process",
+    status: "succeeded",
+    result: { command_id: "timeout-owned-process" },
+    result_bytes: 38,
+    result_truncated: false,
+  }]);
 });
 
 test("an endless script is stopped by the wall clock (async hang and sync spin)", async () => {

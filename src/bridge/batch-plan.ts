@@ -14,6 +14,8 @@ export type BatchCall = {
 };
 
 export type BatchResultItem = {
+  /** Zero-based position in the submitted calls array; stable even for duplicate tool names. */
+  index: number;
   tool: string;
   ok: boolean;
   result?: unknown;
@@ -39,14 +41,14 @@ const NESTED_BATCH_ERROR = "nested batch not allowed (a batch call cannot contai
  * against 20^N fan-out); executor errors are captured as {ok:false, error}
  * and never thrown.
  */
-function runOneBatchCall(call: BatchCall, exec: BatchExecutor): Promise<BatchResultItem> {
+function runOneBatchCall(call: BatchCall, index: number, exec: BatchExecutor): Promise<BatchResultItem> {
   const tool = call.tool;
   if (tool === "batch") {
-    return Promise.resolve({ tool, ok: false, error: NESTED_BATCH_ERROR });
+    return Promise.resolve({ index, tool, ok: false, error: NESTED_BATCH_ERROR });
   }
   return exec(tool, call.arguments ?? {}).then(
-    result => ({ tool, ok: true, result }),
-    error => ({ tool, ok: false, error: error instanceof Error ? error.message : String(error) }),
+    result => ({ index, tool, ok: true, result }),
+    error => ({ index, tool, ok: false, error: error instanceof Error ? error.message : String(error) }),
   );
 }
 
@@ -63,10 +65,10 @@ function summarize(calls: BatchCall[], results: BatchResultItem[], mode: BatchMo
 }
 
 /**
- * Execute a batch plan. sequential + failFast stops at the first failure
- * (later items are not executed and absent from results); parallel runs
- * everything via Promise.all and always reports stopped_early:false
- * (failFast is ignored in that mode).
+ * Execute a batch plan. Every result carries its zero-based submitted index, so
+ * a caller can distinguish repeated tools and, after sequential failFast, resume
+ * from the first index absent from results. Parallel runs everything via
+ * Promise.all and always reports stopped_early:false (failFast is ignored there).
  */
 export async function runBatchPlan(
   calls: BatchCall[],
@@ -75,15 +77,13 @@ export async function runBatchPlan(
   exec: BatchExecutor,
 ): Promise<BatchSummary> {
   if (mode === "parallel") {
-    const results = await Promise.all(calls.map(call => runOneBatchCall(call, exec)));
+    const results = await Promise.all(calls.map((call, index) => runOneBatchCall(call, index, exec)));
     return summarize(calls, results, "parallel", false);
   }
   const results: BatchResultItem[] = [];
   let stoppedEarly = false;
-  for (const call of calls) {
-    // Held in a local rather than read back as `results[results.length - 1]`:
-    // same value, and it stops relying on an index the compiler cannot prove.
-    const result = await runOneBatchCall(call, exec);
+  for (const [index, call] of calls.entries()) {
+    const result = await runOneBatchCall(call, index, exec);
     results.push(result);
     if (failFast && !result.ok) {
       stoppedEarly = true;

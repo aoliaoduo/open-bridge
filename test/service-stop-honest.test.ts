@@ -14,7 +14,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { installNodeHost } from "../src/host/node-host.js";
-import { stopService } from "../src/bridge/service-tools.js";
+import { restartService, stopService } from "../src/bridge/service-tools.js";
 import { state, type ServiceDefinition } from "../src/bridge/state.js";
 import type { CommandState } from "../src/bridge/processes.js";
 
@@ -71,6 +71,28 @@ function stuckCommand(id: string): CommandState {
     lastEvent: "started",
   } as unknown as CommandState;
 }
+
+test("restart_service refuses a second child when the existing one will not stop", { timeout: 30_000 }, async () => {
+  const command = stuckCommand("stuck-restart");
+  state.commands.set(command.id, command);
+  state.services.set("web", {
+    command: "node forever.js",
+    cwd: ".",
+    env: {},
+    group: "default",
+    autoRestart: false,
+    maxRestarts: 3,
+    restartDelayMs: 1000,
+    commandId: command.id,
+  } as ServiceDefinition & { commandId: string });
+
+  await assert.rejects(
+    restartService({ name: "web" }),
+    /did not stop within the termination budget; refusing restart/i,
+  );
+  assert.equal(state.services.get("web")?.commandId, command.id,
+    "the surviving service remains attributable and restartable instead of being replaced");
+});
 
 test("stop_service keeps the handle and reports stopped:false when the process refuses to die", { timeout: 30_000 }, async () => {
   const command = stuckCommand("stuck-1");

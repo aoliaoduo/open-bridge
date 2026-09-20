@@ -303,7 +303,15 @@ async function restartServiceInner(args: Args): Promise<unknown> {
     // terminateProcess now clears a pending auto-restart even for an already
     // exited process, so a crashed service cannot resurrect alongside the
     // fresh instance spawned below.
-    if (old) await terminateProcess(old, "stopped");
+    if (old) {
+      const stopped = await terminateProcess(old, "stopped");
+      if (!stopped) {
+        throw new Error(
+          `Service "${serviceName}" did not stop within the termination budget; refusing restart to avoid a duplicate process. `
+          + `Retry service {action: "stop", name: "${serviceName}"} or process_control {action: "terminate", command_id: "${service.commandId}"}.`,
+        );
+      }
+    }
     service.commandId = undefined;
   }
   const id = await launchServiceProcess(service, serviceName);

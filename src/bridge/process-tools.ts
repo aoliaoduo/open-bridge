@@ -400,12 +400,26 @@ export async function restartProcess(args: Args): Promise<Record<string, unknown
   // exited — because that is what cancels a pending auto-restart timer. A
   // crashed command with autoRestart waiting out restartDelayMs would
   // otherwise respawn a duplicate (orphan) instance while we spawn ours.
-  await terminateProcess(s, "stopped");
+  const stopped = await terminateProcess(s, "stopped");
+  if (!stopped) {
+    // The old record is still the live owner. Restore the transferred lease so
+    // a later terminate/retry can release it, then refuse to create a second
+    // process against the same port, files or resource keys.
+    s.releaseResourceLocks = carriedLocks;
+    throw new Error(
+      `Process ${s.id} did not stop within the termination budget; refusing restart to avoid a duplicate process. `
+      + `Retry process_control {action: "terminate", command_id: "${s.id}"}.`,
+    );
+  }
   const delay = clampMs(args.delay_ms, 0);
   if (delay) await new Promise(resolve => setTimeout(resolve, delay));
   const replacement = spawnManaged(s.command, s.cwd, s.env, s.id, s.restartCount + 1, policy);
   replacement.releaseResourceLocks = carriedLocks;
   state.commands.set(s.id, replacement);
+  // Match start_process: a replacement is not honestly restarted until its
+  // child emits spawn rather than an asynchronous spawn error.
+  await waitForSpawnSettled(replacement.child);
+  throwIfSpawnFailed(replacement);
   return {
     command_id: s.id, restarted: true,
     restart_count: replacement.restartCount, auto_restart: replacement.autoRestart,
