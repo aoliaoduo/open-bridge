@@ -31,6 +31,7 @@ interface Listing {
 interface Matches {
   items: Array<{ path: string; line: number; text: string }>;
   truncated: boolean;
+  partial: boolean;
 }
 interface Found {
   items: string[];
@@ -160,4 +161,7 @@ test("search_files reports the cap, and offset paging stays exact", async () => 
   const last = (await searchFiles({ query: "needle", max_results: 4, offset: 12 })) as unknown as Matches;
   assert.equal(last.items.length, 1);
   assert.equal(last.truncated, false, "a partially filled final page is complete");
+  for (const page of [capped, full, last]) {
+    assert.equal(page.partial, false, "a normally readable search is exhaustive even when its page is capped");
+  }
 });

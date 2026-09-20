@@ -82,6 +82,18 @@ test("bare-array handlers declare the object envelope used for structuredContent
   }
 });
 
+test("read_files declares successful rows, failed rows, and their recovery cursors", () => {
+  const rows = itemsOf(schemaOf("read_files"))?.items;
+  assert.equal(rows?.oneOf?.length, 2, "each requested path returns either an error row or a data row");
+  const success = rows?.oneOf?.find(variant => variant.required?.includes("content"));
+  assert.deepEqual(success?.required, ["path", "content", "encoding", "sha256", "truncated", "bytes_returned", "bytes_total"]);
+  assert.deepEqual(success?.properties?.encoding?.enum, ["utf8", "base64"]);
+  assert.deepEqual(success?.properties?.next_offset?.type, ["number", "null"]);
+  assert.deepEqual(success?.properties?.next_start_line?.type, ["number", "null"]);
+  const failure = rows?.oneOf?.find(variant => variant.required?.includes("error"));
+  assert.deepEqual(failure?.required, ["path", "error"]);
+});
+
 test("activity_log declares all three action result variants", () => {
   const variants = schemaOf("activity_log")?.oneOf ?? [];
   assert.equal(variants.length, 3, "recent, search and clear each have a schema");
@@ -113,11 +125,15 @@ test("row-page tools publish a nullable continuation cursor", () => {
       `${name} uses a nullable terminal continuation cursor`);
     const expected = name === "list_directory"
       ? ["items", "next_offset", "total", "truncated"]
-      : ["items", "next_offset", "truncated"];
+      : name === "search_files"
+        ? ["items", "next_offset", "partial", "truncated"]
+        : ["items", "next_offset", "truncated"];
     assert.deepEqual([...(schema?.required ?? [])].sort(), expected);
   }
   assert.deepEqual(schemaOf("list_directory")?.properties?.total?.type, ["number", "null"],
     "directory pages always state whether an exact flat total is available");
+  assert.equal(schemaOf("search_files")?.properties?.partial?.type, "boolean",
+    "search pages distinguish a full search from one with unreadable/errored paths");
 });
 
 test("every paged schema describes the row array", () => {

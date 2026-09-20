@@ -213,23 +213,29 @@ async function sha256File(fullPath: string): Promise<string> {
 }
 
 /**
- * Read (up to) `maxBytes` from the head of a file into one buffer without
- * buffering the whole file, for bounded base64/binary responses.
+ * Read one bounded byte page without buffering the whole file. Binary/base64
+ * callers use the returned offset as an actual continuation cursor.
  */
-async function readHeadBytes(fullPath: string, size: number, maxBytes: number): Promise<{ buf: Buffer; truncated: boolean }> {
-  const want = Math.min(size, Math.max(0, maxBytes));
-  if (want === 0) return { buf: Buffer.alloc(0), truncated: size > 0 };
+async function readBytesAt(
+  fullPath: string,
+  size: number,
+  offset: number,
+  maxBytes: number,
+): Promise<{ buf: Buffer; offset: number; truncated: boolean }> {
+  const start = Math.max(0, Math.min(offset, size));
+  const want = Math.min(size - start, Math.max(0, maxBytes));
+  if (want === 0) return { buf: Buffer.alloc(0), offset: start, truncated: start < size };
   const handle = await fs.open(fullPath, "r");
   try {
     const buf = Buffer.allocUnsafe(want);
     let got = 0;
     while (got < want) {
-      const read = await handle.read(buf, got, want - got, got);
+      const read = await handle.read(buf, got, want - got, start + got);
       if (read.bytesRead === 0) break;
       got += read.bytesRead;
     }
     const data = got === want ? buf : buf.subarray(0, got);
-    return { buf: data, truncated: got < size };
+    return { buf: data, offset: start, truncated: start + got < size };
   } finally {
     await handle.close();
   }
@@ -240,27 +246,36 @@ async function readAsBase64(
   fullPath: string,
   size: number,
   maxBytesArg: unknown,
-): Promise<{ content: string; bytes: number; truncated: boolean; sha: string | null }> {
+  offsetArg = 0,
+): Promise<{ content: string; bytes: number; offset: number; truncated: boolean; sha: string | null }> {
   const requested = Number.isFinite(Number(maxBytesArg)) && Number(maxBytesArg) >= 0
     ? Math.floor(Number(maxBytesArg))
     : undefined;
-  const readWhole = size <= WHOLE_BINARY_READ_CAP && (requested === undefined || size <= requested);
+  const offset = Math.max(0, Math.min(offsetArg, size));
+  const readWhole = offset === 0 && size <= WHOLE_BINARY_READ_CAP && (requested === undefined || size <= requested);
   if (readWhole) {
     const buf = await fs.readFile(fullPath);
     return {
       content: buf.toString("base64"),
       bytes: buf.length,
+      offset,
       truncated: false,
       sha: createHash("sha256").update(buf).digest("hex"),
     };
   }
-  // Large file: serve a bounded head (default max_bytes) so the call returns
-  // instead of OOM-ing the host; sha256 is only meaningful over the whole file.
+  // A bounded byte page preserves a usable recovery cursor instead of making a
+  // large binary's first prefix look like the only bytes it has.
   const budget = requested ?? DEFAULT_MAX_READ_BYTES;
-  const { buf, truncated } = await readHeadBytes(fullPath, size, budget);
-  // A bounded head read cannot speak for the whole file: report null, never a
-  // hash of the prefix (it would silently fail every expected_sha256 write).
-  return { content: buf.toString("base64"), bytes: buf.length, truncated, sha: truncated ? null : createHash("sha256").update(buf).digest("hex") };
+  const { buf, truncated } = await readBytesAt(fullPath, size, offset, budget);
+  // A page is not a whole-file digest, even if it happens to reach EOF.
+  const completeFile = offset === 0 && !truncated;
+  return {
+    content: buf.toString("base64"),
+    bytes: buf.length,
+    offset,
+    truncated,
+    sha: completeFile ? createHash("sha256").update(buf).digest("hex") : null,
+  };
 }
 
 /**
@@ -586,6 +601,11 @@ export async function searchFiles(args: Args): Promise<unknown> {
   const withPrefix = (p: string): string =>
     prefix && prefix !== "." ? path.join(prefix, p).replace(/\\/g, "/") : p;
 
+  // A page can be complete relative to its cap yet still incomplete relative to
+  // the workspace when a backend had to skip unreadable paths. Keep that fact
+  // separate from `truncated`, which only says this response has a next page.
+  let partial = false;
+
   // Prefer ripgrep when available (fast, regex/globs, context). It is invoked with
   // --no-ignore so it sees the same file set as the built-in walk below -- the
   // engines must not disagree about which files exist (see search-ripgrep.ts).
@@ -603,7 +623,7 @@ export async function searchFiles(args: Args): Promise<unknown> {
   }
   if (!singleRel && !rgDeclined && (await ripgrepAvailable(rgExe))) {
     try {
-      const { matches: rgMatches, partial } = await runRipgrep({
+      const { matches: rgMatches, partial: ripgrepPartial } = await runRipgrep({
         query: needle,
         cwd: base,
         regex: useRegex,
@@ -613,6 +633,7 @@ export async function searchFiles(args: Args): Promise<unknown> {
         contextLines,
         executable: rgExe,
       });
+      partial = ripgrepPartial;
       if (partial) {
         // rg exit code 2: unreadable/errored files — the matches are real but incomplete.
         record("search_files", "progress", "ripgrep finished partially (exit code 2); results may be incomplete.");
@@ -629,6 +650,7 @@ export async function searchFiles(args: Args): Promise<unknown> {
         })),
         truncated: page.length > limit,
         next_offset: page.length > limit && page.length > 1 ? offset + limit : null,
+        partial,
       };
     } catch (error) {
       // Say WHAT failed, not just that something did. record() redacts and bounds
@@ -693,8 +715,10 @@ export async function searchFiles(args: Args): Promise<unknown> {
             return out.length < pageEnd;
           });
         } catch (error) {
-          // Unreadable files are skipped; regex/worker failures surface to the caller.
+          // A skipped unreadable file is not the same as no matches. Keep the
+          // usable rows, but tell the caller this page cannot prove absence.
           if (error instanceof SafeRegexError) throw error;
+          partial = true;
         }
       }
     }
@@ -719,12 +743,12 @@ export async function searchFiles(args: Args): Promise<unknown> {
     }
     const items = out.slice(0, limit);
     const truncated = out.length > limit;
-    return { items, truncated, next_offset: truncated && items.length > 0 ? offset + items.length : null };
+    return { items, truncated, next_offset: truncated && items.length > 0 ? offset + items.length : null, partial };
   }
   await walk(base);
   const items = out.slice(0, limit);
   const truncated = out.length > limit;
-  return { items, truncated, next_offset: truncated && items.length > 0 ? offset + items.length : null };
+  return { items, truncated, next_offset: truncated && items.length > 0 ? offset + items.length : null, partial };
 }
 
 export async function readFiles(args: Args): Promise<unknown> {
@@ -732,6 +756,16 @@ export async function readFiles(args: Args): Promise<unknown> {
   if (!paths.length) throw new Error("paths must contain at least one workspace file. (expected 'paths': string[])");
   const asBase64 = args.encoding === "base64";
   const lineRange = args.start_line !== undefined || args.end_line !== undefined;
+  if (args.offset !== undefined && !asBase64) {
+    throw new Error("offset is only supported with encoding=base64; use start_line/end_line for text.");
+  }
+  if (asBase64 && lineRange) {
+    throw new Error("encoding=base64 cannot be combined with start_line or end_line.");
+  }
+  const base64Offset = args.offset === undefined ? 0 : Number(args.offset);
+  if (!Number.isSafeInteger(base64Offset) || base64Offset < 0) {
+    throw new Error("offset must be a non-negative safe integer.");
+  }
   return Promise.all(paths.map(async (p, index) => {
     // `String(null)` is "null" and `String("")` resolves to the workspace root:
     // both used to be read as if the caller had named a file that way.
@@ -747,10 +781,10 @@ export async function readFiles(args: Args): Promise<unknown> {
     const fullPath = await securePath(p);
     const stat = await fs.stat(fullPath);
 
-    // Explicit base64: bounded by max_bytes only for genuinely large files
-    // (see readAsBase64); small files are returned whole as before.
+    // Explicit base64 uses max_bytes as its page budget; small uncapped files
+    // still return whole (see readAsBase64).
     if (asBase64) {
-      const { content, bytes, truncated, sha } = await readAsBase64(fullPath, stat.size, args.max_bytes);
+      const { content, bytes, offset, truncated, sha } = await readAsBase64(fullPath, stat.size, args.max_bytes, base64Offset);
       return {
         path: String(p),
         content,
@@ -758,6 +792,8 @@ export async function readFiles(args: Args): Promise<unknown> {
         sha256: sha ?? null,
         bytes_total: stat.size,
         bytes_returned: bytes,
+        offset,
+        next_offset: truncated && bytes > 0 ? offset + bytes : null,
         truncated,
       };
     }
@@ -779,9 +815,9 @@ export async function readFiles(args: Args): Promise<unknown> {
     });
 
     if ("binary" in result && result.binary === true) {
-      // Auto-detected binary (NUL bytes or non-UTF-8 content): same bounded
-      // base64 response as the explicit path.
-      const { content, bytes, truncated, sha } = await readAsBase64(fullPath, stat.size, args.max_bytes);
+      // Auto-detected binary starts at zero. A later page is an explicit
+      // encoding=base64 request using this returned cursor.
+      const { content, bytes, offset, truncated, sha } = await readAsBase64(fullPath, stat.size, args.max_bytes);
       return {
         path: String(p),
         content,
@@ -790,6 +826,8 @@ export async function readFiles(args: Args): Promise<unknown> {
         sha256: sha ?? null,
         bytes_total: stat.size,
         bytes_returned: bytes,
+        offset,
+        next_offset: truncated && bytes > 0 ? offset + bytes : null,
         truncated,
       };
     }
@@ -815,21 +853,27 @@ export async function readFiles(args: Args): Promise<unknown> {
     const rangeTruncated = lineRange
       ? !(fullyRead && r.start_line <= 1 && r.lines_total !== null && r.end_line >= r.lines_total)
       : false;
+    const truncated = lineRange ? rangeTruncated || byteTruncated : byteTruncated;
+    // A byte cap may end inside one enormous line. Only advertise a line cursor
+    // when the returned text ends at a newline; otherwise start_line would skip
+    // bytes that were never returned and the safe recovery is a larger max_bytes.
+    const hasLaterLines = r.lines_total === null || r.end_line < r.lines_total;
+    const nextStartLine = truncated && hasLaterLines && r.lines_returned > 0 && content.endsWith("\n")
+      ? r.end_line + 1
+      : null;
     return {
       path: String(p),
-      sha256: fullyRead ? r.sha256 : null,
       content,
-      truncated: lineRange ? rangeTruncated || byteTruncated : byteTruncated,
+      encoding: "utf8" as const,
+      sha256: fullyRead ? r.sha256 : null,
+      truncated,
       bytes_returned: Buffer.byteLength(content, "utf8"),
       bytes_total: stat.size,
-      ...(lineRange
-        ? {
-            lines_returned: r.lines_returned,
-            start_line: r.start_line,
-            end_line: r.end_line,
-            lines_total: r.lines_total,
-          }
-        : {}),
+      lines_returned: r.lines_returned,
+      start_line: r.start_line,
+      end_line: r.end_line,
+      lines_total: r.lines_total,
+      next_start_line: nextStartLine,
     };
     } catch (error) {
       const enriched = enrichFsError(error);
