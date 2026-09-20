@@ -127,3 +127,35 @@ test("a diff of a file with no trailing newline keeps every real line", () => {
   assert.deepEqual(diff.split("\n").slice(1), [" a", "-b", "+c"]);
   assert.deepEqual(countDiffLines(diff), { additions: 1, deletions: 1 });
 });
+
+test("creating a file: no phantom deletion, counts are real", () => {
+  // The empty side has ZERO lines. "".split("\n") yields [""], which used to
+  // render a phantom "-" line and inflate deletions for every created file —
+  // the same invented-line class as the trailing-newline fixes above, on the
+  // other boundary.
+  const diff = unifiedDiff("", "hello\nworld\n");
+  assert.ok(diff !== undefined);
+  const body = diff.split("\n").slice(1);
+  assert.deepEqual(body, ["+hello", "+world"], `body: ${JSON.stringify(body)}`);
+  assert.deepEqual(countDiffLines(diff), { additions: 2, deletions: 0 });
+  assert.ok(!diff.includes("\\ No newline"), "a newline-terminated new file needs no marker");
+  assert.match(diff, /^@@ -0,0 \+1,2 @@/, "git-style creation header");
+});
+
+test("deleting a file: no phantom addition, counts are real", () => {
+  const diff = unifiedDiff("gone\n", "");
+  assert.ok(diff !== undefined);
+  const body = diff.split("\n").slice(1);
+  assert.deepEqual(body, ["-gone"], `body: ${JSON.stringify(body)}`);
+  assert.deepEqual(countDiffLines(diff), { additions: 0, deletions: 1 });
+  assert.ok(!diff.includes("\\ No newline"), "the deleted file ended with a newline");
+  assert.match(diff, /^@@ -1,1 \+0,0 @@/, "git-style deletion header");
+});
+
+test("creating a file without a trailing newline keeps the git marker", () => {
+  const diff = unifiedDiff("", "x");
+  assert.ok(diff !== undefined);
+  assert.match(diff, /^\+x$/m);
+  assert.match(diff, /^\\ No newline at end of file$/m, "the new file's own termination speaks");
+  assert.deepEqual(countDiffLines(diff), { additions: 1, deletions: 0 });
+});

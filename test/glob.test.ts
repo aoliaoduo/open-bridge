@@ -84,3 +84,17 @@ test("character-class negation via ''!'' matches the complement", () => {
   assert.equal(matchFile("d.ts", "[!a-c].ts"), true);
   assert.equal(matchFile("b.ts", "[!a-c].ts"), false);
 });
+
+test("`**/` matches whole segments only — no partial-name false positives", () => {
+  // Regression: `**/` used to compile to a bare `.*` that also swallowed the
+  // following separator, so "**/host.ts" matched "node-host.ts" — the `.*`
+  // happily ate "src/host/node-". A `**` path segment must align to segment
+  // boundaries (or match zero segments); only a bare trailing `**` may end
+  // mid-segment.
+  assert.equal(matchFile("src/host/host.ts", "**/host.ts"), true);
+  assert.equal(matchFile("host.ts", "**/host.ts"), true, "`**/` matches zero leading segments");
+  assert.equal(matchFile("src/host/node-host.ts", "**/host.ts"), false);
+  assert.equal(matchFile("xhost.ts", "**/host.ts"), false);
+  assert.equal(globToRegExp("**/host.ts").test("src/host/node-host.ts"), false);
+  assert.equal(globToRegExp("**/host.ts").test("src/host/host.ts"), true);
+});

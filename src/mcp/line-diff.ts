@@ -13,8 +13,14 @@ export interface LineDiffStats {
 
 export function unifiedDiff(before: string, after: string, contextLines = 3): string | undefined {
   if (before === after) return undefined;
-  const a = before.split("\n");
-  const b = after.split("\n");
+  // A side that is the empty string has ZERO lines, not one empty line:
+  // "".split("\n") yields [""], which rendered a phantom "-"/"+" body line and
+  // an invented deletion/addition for every created or deleted file — the same
+  // class of bug as the trailing-newline phantom below, on the empty boundary.
+  const aEmpty = before === "";
+  const bEmpty = after === "";
+  const a = aEmpty ? [] : before.split("\n");
+  const b = bEmpty ? [] : after.split("\n");
   // `split("\n")` appends an empty element for text that ends with a newline.
   // That element is not a line of the file — it is the absence of one — and
   // including it emitted a phantom `" "` body line for every newline-terminated
@@ -37,7 +43,10 @@ export function unifiedDiff(before: string, after: string, contextLines = 3): st
   ) {
     suffix += 1;
   }
-  if (aHadTerminator !== bHadTerminator) {
+  // Terminator asymmetry is only a change when BOTH sides have a last line;
+  // on create/delete the empty side has nothing whose terminator could differ.
+  const bothSides = !aEmpty && !bEmpty;
+  if (bothSides && aHadTerminator !== bHadTerminator) {
     // The last content line is NOT identical across sides even when its text
     // matches (its terminator differs), so it may not be trimmed into the
     // common region: back one shared pair out of it so the change renders as
@@ -56,10 +65,22 @@ export function unifiedDiff(before: string, after: string, contextLines = 3): st
   for (const line of added) lines.push(`+${line}`);
   for (let index = a.length - suffix; index < contextEnd; index += 1) lines.push(` ${a[index]}`);
   // The marker is banner text, never counted in the header's old/new tallies.
-  if (aHadTerminator !== bHadTerminator) lines.push("\\ No newline at end of file");
+  // With content on both sides, terminator asymmetry names the change (git's
+  // rule). On create/delete only the present side speaks: the marker appears
+  // exactly when ITS last line lacks a newline; the empty side never asks.
+  const needsMarker = bothSides
+    ? aHadTerminator !== bHadTerminator
+    : aEmpty
+      ? b.length > 0 && !bHadTerminator
+      : a.length > 0 && !aHadTerminator;
+  if (needsMarker) lines.push("\\ No newline at end of file");
   const oldCount = contextEnd - contextStart;
   const newCount = oldCount - removed.length + added.length;
-  const header = `@@ -${contextStart + 1},${oldCount} +${contextStart + 1},${newCount} @@`;
+  // An empty side starts at line 0, the way git writes a creation/deletion
+  // hunk ("@@ -0,0 +1,N @@"); a non-empty side keeps its 1-based start.
+  const oldStart = a.length === 0 ? 0 : contextStart + 1;
+  const newStart = b.length === 0 ? 0 : contextStart + 1;
+  const header = `@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`;
   return [header, ...lines].join("\n");
 }
 

@@ -417,3 +417,40 @@ test("a relative path cannot walk out of the workspace, whatever the tool", asyn
   assert.equal(existsSync(escaped), false, "nothing outside the workspace was created");
   assert.ok(existsSync(path.join(workspace, "escape-canary.txt")), "and the project is intact");
 });
+
+/**
+ * create_directory used to answer `created: true` unconditionally — a repeat
+ * call "created" the same directory again on paper. fs.mkdir({recursive:true})
+ * resolves to the first path it made (undefined when nothing was made), which
+ * is exactly the fact the field claims.
+ */
+test("create_directory reports whether THIS call created the directory", async () => {
+  const first = await callToolPayload("file_op", { op: "create_directory", path: "made-once" });
+  const firstBody = JSON.parse(first.result.content?.[0]?.text ?? "{}");
+  assert.equal(firstBody.created, true, "the first call really creates");
+
+  const second = await callToolPayload("file_op", { op: "create_directory", path: "made-once" });
+  const secondBody = JSON.parse(second.result.content?.[0]?.text ?? "{}");
+  assert.equal(secondBody.created, false, "an existing directory is not created again");
+  assert.equal(secondBody.path, "made-once");
+});
+
+/**
+ * A misspelled `mode` used to fall through to overwrite — mode:"Append" would
+ * silently clobber the file it was asked to append to. A silent fallback on a
+ * destructive switch is data loss; the error vocabulary already has the word
+ * for this: Invalid.
+ */
+test("write_file rejects an unknown mode instead of silently overwriting", async () => {
+  writeFileSync(path.join(workspace, "mode-guard.txt"), "original\n", "utf8");
+  const res = await callTool("write_file", { path: "mode-guard.txt", content: "clobbered\n", mode: "Append" });
+  assert.equal(res.isError, true, "a misspelled mode must be an error, not a fallback");
+  assert.match(res.text, /Invalid "mode"/);
+  assert.equal(readFileSync(path.join(workspace, "mode-guard.txt"), "utf8"), "original\n", "the file must be untouched");
+});
+
+test("read_files rejects an unknown encoding instead of silently reading utf8", async () => {
+  const res = await callTool("read_files", { paths: ["canary.txt"], encoding: "base32" });
+  assert.equal(res.isError, true);
+  assert.match(res.text, /Invalid "encoding"/);
+});

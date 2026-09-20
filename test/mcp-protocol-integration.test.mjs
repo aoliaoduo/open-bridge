@@ -925,3 +925,27 @@ test("closing a session needs an unambiguous id; an ambiguous prefix closes noth
   assert.equal(remaining.includes(pair[0]), false, "the intended session is gone");
   assert.ok(remaining.includes(pair[1]), "the other one is still connected");
 });
+
+/**
+ * `activity_log{action:"recent"}` used to answer with `at` pre-formatted by
+ * toLocaleTimeString() in the server's locale, while `action:"search"` —
+ * parsing the very same events out of audit.log — answered ISO-8601 UTC. One
+ * event, two timestamp formats, depending on which half of one tool you asked.
+ * The in-memory buffer now keeps the instant; display formatting lives in the
+ * console UI, where display decisions belong.
+ */
+test("activity_log recent reports at as ISO-8601 UTC, like search does", async () => {
+  const { sessionId } = await openSession();
+  await callTool(sessionId, "list_directory", { path: "." });
+  const recent = await callTool(sessionId, "activity_log", { action: "recent", max_results: 5 });
+  const items = JSON.parse(recent.text || "[]");
+  assert.ok(Array.isArray(items) && items.length > 0, "the call above was recorded");
+  for (const item of items) {
+    assert.match(item.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, `at is ISO-8601 UTC, got ${JSON.stringify(item.at)}`);
+  }
+  const searched = await callTool(sessionId, "activity_log", { action: "search", max_results: 3 });
+  const found = JSON.parse(searched.text || "{}").entries ?? [];
+  for (const item of found) {
+    assert.match(item.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, `search at stays ISO, got ${JSON.stringify(item.at)}`);
+  }
+});

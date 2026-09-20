@@ -19,10 +19,18 @@ function globToRegExpSource(pattern: string): string {
     if (ch === undefined) break;
     if (ch === "*") {
       if (p[i + 1] === "*") {
-        // ** across path separators
-        out += ".*";
         i++;
-        if (p[i + 1] === "/") i++; // consume a following separator
+        if (p[i + 1] === "/") {
+          // `**/` matches zero or more COMPLETE path segments. The old bare
+          // `.*` also swallowed the separator, so "**/host.ts" matched
+          // "node-host.ts" (`.*` ate "src/host/node-"): a `**` segment must
+          // align to segment boundaries — or match none at all.
+          i++;
+          out += "(?:.*/)?";
+        } else {
+          // a bare ** still crosses path separators
+          out += ".*";
+        }
       } else {
         out += "[^/]*";
       }

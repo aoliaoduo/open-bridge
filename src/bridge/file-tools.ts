@@ -754,6 +754,12 @@ export async function searchFiles(args: Args): Promise<unknown> {
 export async function readFiles(args: Args): Promise<unknown> {
   const paths: unknown[] = Array.isArray(args.paths) ? args.paths : [];
   if (!paths.length) throw new Error("paths must contain at least one workspace file. (expected 'paths': string[])");
+  // An unknown encoding used to fall through to utf8 silently: a client that
+  // misspelled "base64" got raw binary decoded as text back, reported as a
+  // success. Unknown values get the error vocabulary's word: Invalid.
+  if (args.encoding !== undefined && args.encoding !== null && args.encoding !== "utf8" && args.encoding !== "base64") {
+    throw new Error(`Invalid "encoding" value ${JSON.stringify(String(args.encoding))} for read_files. Expected one of: utf8, base64.`);
+  }
   const asBase64 = args.encoding === "base64";
   const lineRange = args.start_line !== undefined || args.end_line !== undefined;
   if (args.offset !== undefined && !asBase64) {
@@ -918,6 +924,13 @@ async function existingEolStyle(file: string): Promise<EolStyle | null> {
 
 export async function writeFile(args: Args): Promise<unknown> {
   const file = await securePath(requiredArg(args, "path"), true);
+  // A silent fallback on a destructive switch is data loss: an unknown mode
+  // (mode:"Append") used to fall through to overwrite and clobber the file it
+  // was asked to append to. Unknown values get the error vocabulary's word
+  // for them: Invalid.
+  if (args.mode !== undefined && args.mode !== null && args.mode !== "append" && args.mode !== "overwrite") {
+    throw new Error(`Invalid "mode" value ${JSON.stringify(String(args.mode))} for write_file. Expected one of: overwrite, append.`);
+  }
   // A write with NEITHER payload silently truncated the target to zero bytes
   // (content defaulted to ""). Both payloads are optional in the schema only
   // so an explicit empty string can still create an empty file; a call that
@@ -1149,8 +1162,11 @@ export async function editBlock(args: Args): Promise<unknown> {
 
 export async function createDirectory(args: Args): Promise<unknown> {
   const dir = await securePath(requiredArg(args, "path"), true);
-  await fs.mkdir(dir, { recursive: true });
-  return { path: String(args.path), created: true };
+  // fs.mkdir({recursive:true}) resolves to the first directory path it CREATED
+  // and to undefined when the target already existed. A constant created:true
+  // claimed a creation that did not happen on every repeat call.
+  const firstCreated = await fs.mkdir(dir, { recursive: true });
+  return { path: String(args.path), created: firstCreated !== undefined };
 }
 
 export async function moveFile(args: Args): Promise<unknown> {

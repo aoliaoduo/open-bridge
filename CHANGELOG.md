@@ -6,6 +6,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `find_files` 的 `**/` 现在只按**完整路径段**匹配（或匹配零段）：`**/host.ts` 不再误中 `node-host.ts`；裸 `**` 照旧可跨分隔符。
+- 创建/删除文件的结果 diff（`apply_patch`、`edit_block` 等）不再产生幻影空行与多计一次增删：空的一侧按 0 行处理，`\ No newline at end of file` 只在真实缺少尾换行时出现，与 git 一致。
+- `file_op{op:"create_directory"}` 的 `created` 如实反映**本次调用**是否建了目录：目录已存在时返回 `created: false`（此前恒为 `true`）。
+- `write_file` 的 `mode` 与 `read_files` 的 `encoding` 收到非法值时报 `Invalid` 并列出合法值，不再静默回退（此前 `mode:"Append"` 会按覆盖写、拼错的 `encoding` 会按 utf8 读二进制）。
+- `activity_log{action:"recent"}` 的 `at` 与 `search`、审计日志、`/api/activity` 一致，为 ISO-8601 UTC（此前是服务器本地时间串）；控制台活动视图仍显示本地时间（改在渲染层格式化）。
+- 文档与实现对齐：`read_files` 的 `sha256` 尾部预算行为、`edit_block` 的 `replace_all` 参数、`process_control{action:"restart"}` 返回新 `command_id` 均已写明。
+
 ## [1.0.0-rc.1] — 2026-09-20
 
 ### Added

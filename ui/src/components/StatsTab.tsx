@@ -26,6 +26,13 @@ const ACTIVITY_LABEL: Record<string, () => string> = {
   warning: () => t("警告", "Warning"),
 };
 
+/** The activity buffer carries the ISO-8601 UTC instant; the console shows
+ *  local wall-clock time. A value that does not parse passes through as-is. */
+function formatActivityTime(at: string): string {
+  const parsed = new Date(at);
+  return Number.isNaN(parsed.getTime()) ? at : parsed.toLocaleTimeString();
+}
+
 type ActivityView = "all" | "error" | "success";
 
 export function StatsTab() {
@@ -176,7 +183,7 @@ export function StatsTab() {
             </span>
             <span className="act-tool">{entry.tool}</span>
             <span className="act-msg">{entry.message}</span>
-            <span className="act-time">{entry.at}</span>
+            <span className="act-time">{formatActivityTime(entry.at)}</span>
           </div>
         ))}
       </Card>
