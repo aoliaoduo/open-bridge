@@ -22,6 +22,7 @@ export interface TuiStateView {
     command: string;
     done: boolean;
     startedAt: number;
+    endedAt?: number;
     output: { state(): { totalBytes: number; capacityBytes: number } };
   }>;
   services: Map<unknown, { commandId?: string }>;
@@ -88,28 +89,60 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     serviceRows.push({ name: String(name), running });
   }
 
-  // Duration matching: the activity log records the invoke ("running") and the
-  // outcome as two rows, NEWEST FIRST. Pair them by tool + args summary — the
-  // same key the dispatcher stamps on both — walking oldest → newest so the
-  // invoke is always seen before its outcome, and only report a duration when
-  // the pair was actually observed in the retained window (never invent one).
-  // When the outcome lands, the invoke row RETIRES: one line per call, carrying
-  // the duration — the same single-row lifecycle ainovel-cli's event stream
-  // shows. A still-open invoke stays as a live row (the renderer animates it).
+  // Duration matching, against the rows the producers REALLY write:
+  //
+  //   dispatcher (invoke):    record(name, "running", summary, argsSummary)
+  //   mcp endpoint (outcome): record(name, "completed"|"error", message) — no args summary
+  //   processes (lifecycle):  record("process", "running", "Started <id>: ...") — no outcome row at all
+  //
+  // So exact-key pairing can never succeed (the first live screenshot showed
+  // every invoke row spinning and counting forever), and process rows have no
+  // outcome to wait for. Two rules instead:
+  //
+  //   1. An outcome row closes the OLDEST still-open invoke of the same tool
+  //      (FIFO). Concurrent same-tool calls can attribute durations crosswise;
+  //      for a viewing surface that beats an invoke that never retires.
+  //   2. A "process · Started <id>" row is a lifecycle fact, not a call: its
+  //      truth comes from the command table. A live process legitimately
+  //      counts; a finished one shows its real lifetime (endedAt − startedAt);
+  //      a pruned one degrades to a neutral marker with no invented time.
   const entries = view.activity.slice(0, MAX_EVENTS);
   const collected: Array<TuiSnapshot["events"][number] | null> = [];
-  const open = new Map<string, { idx: number; startedAt: number }>();
+  const openByTool = new Map<string, { idx: number; startedAt: number }[]>();
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const entry = entries[i]!;
-    const key = `${entry.tool}\u0000${(entry.args_summary ?? entry.message).slice(0, 120)}`;
     const ts = entry.ts ?? Date.parse(entry.at);
+
+    if (entry.tool === "process" && entry.status === "running") {
+      const id = /^Started ([0-9a-f]{8,}):/.exec(entry.message)?.[1];
+      const command = id === undefined ? undefined : view.commands.get(id);
+      if (command === undefined) {
+        // Pruned from the table: the fact stays, the animation does not.
+        collected.push({ at: entry.at, tool: entry.tool, status: "progress", message: entry.message });
+      } else if (command.done) {
+        collected.push({
+          at: entry.at,
+          tool: entry.tool,
+          status: "completed",
+          message: entry.message,
+          ...(command.endedAt !== undefined && Number.isFinite(command.endedAt) && command.endedAt >= command.startedAt
+            ? { durationMs: command.endedAt - command.startedAt }
+            : {}),
+        });
+      } else {
+        collected.push({ at: entry.at, tool: entry.tool, status: "running", message: entry.message });
+      }
+      continue;
+    }
+
     if (entry.status === "running") {
-      if (Number.isFinite(ts)) open.set(key, { idx: collected.length, startedAt: ts });
+      const queue = openByTool.get(entry.tool) ?? [];
+      if (Number.isFinite(ts)) queue.push({ idx: collected.length, startedAt: ts });
+      openByTool.set(entry.tool, queue);
       collected.push({ at: entry.at, tool: entry.tool, status: "running", message: entry.message });
       continue;
     }
-    const pending = open.get(key);
-    open.delete(key);
+    const pending = openByTool.get(entry.tool)?.shift();
     if (pending !== undefined) collected[pending.idx] = null;
     collected.push({
       at: entry.at,

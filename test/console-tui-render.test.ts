@@ -122,6 +122,49 @@ test("buildSnapshot reports a duration only for observed invoke/outcome pairs", 
   assert.equal(orphan.events[0]?.durationMs, undefined);
 });
 
+test("invoke rows retire against outcome rows that carry no args summary", () => {
+  // The shapes the producers really write: the dispatcher logs the invoke WITH
+  // an args summary; the MCP endpoint logs the outcome WITHOUT one. FIFO by
+  // tool name must pair them — exact-key pairing never could.
+  const view = {
+    ...fixtureView(),
+    activity: [
+      { at: "1970-01-01T00:00:04.000Z", ts: 4000, tool: "read_files", status: "completed", message: "Completed in 30 ms." },
+      { at: "1970-01-01T00:00:03.000Z", ts: 3000, tool: "run_command", status: "completed", message: "Completed in 900 ms." },
+      { at: "1970-01-01T00:00:02.000Z", ts: 2000, tool: "run_command", status: "running", message: "Request received.", args_summary: "cmd: sleep" },
+      { at: "1970-01-01T00:00:01.000Z", ts: 1000, tool: "read_files", status: "running", message: "Request received.", args_summary: "paths: [a]" },
+    ],
+  };
+  const snap = buildSnapshot(view, { version: "v", rootName: "r", logPath: "l", now: 60_000 });
+  assert.equal(snap.events.length, 2, "both invokes retired into their outcomes");
+  assert.equal(snap.events[0]?.tool, "read_files");
+  assert.equal(snap.events[0]?.durationMs, 3000);
+  assert.equal(snap.events[1]?.tool, "run_command");
+  assert.equal(snap.events[1]?.durationMs, 1000);
+});
+
+test("process Started rows resolve their truth from the command table", () => {
+  const base = {
+    ...fixtureView(),
+    activity: [
+      { at: "1970-01-01T00:00:05.000Z", ts: 5000, tool: "process", status: "running", message: "Started aaaa0000bbbb1111: live one" },
+      { at: "1970-01-01T00:00:04.000Z", ts: 4000, tool: "process", status: "running", message: "Started aaaa0000bbbb2222: finished one" },
+      { at: "1970-01-01T00:00:03.000Z", ts: 3000, tool: "process", status: "running", message: "Started aaaa0000bbbb3333: pruned one" },
+    ],
+  };
+  base.commands = new Map([
+    ["aaaa0000bbbb1111", { id: "aaaa0000bbbb1111", command: "live one", done: false, startedAt: 1000, output: { state: () => ({ totalBytes: 1, capacityBytes: 1 }) } }],
+    ["aaaa0000bbbb2222", { id: "aaaa0000bbbb2222", command: "finished one", done: true, startedAt: 1000, endedAt: 3500, output: { state: () => ({ totalBytes: 1, capacityBytes: 1 }) } }],
+  ]);
+  const snap = buildSnapshot(base, { version: "v", rootName: "r", logPath: "l", now: 60_000 });
+  assert.equal(snap.events[0]?.status, "running", "a live process keeps its spinner");
+  assert.equal(snap.events[0]?.durationMs, undefined, "a lifecycle row never shows a paired-call duration");
+  assert.equal(snap.events[1]?.status, "completed", "a finished process shows its real lifetime");
+  assert.equal(snap.events[1]?.durationMs, 2500);
+  assert.equal(snap.events[2]?.status, "progress", "a pruned process degrades to a neutral marker");
+  assert.equal(snap.events[2]?.durationMs, undefined);
+});
+
 test("renderFrame fills the exact geometry and shows the dashboard vocabulary", () => {
   const snap = buildSnapshot(fixtureView(), {
     version: "1.0.0-rc.2",
