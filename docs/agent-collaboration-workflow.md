@@ -2,7 +2,9 @@
 
 > 用途：把本文件交给新的 Agent，或在长会话压缩、换模型、换窗口后恢复同一套协作节奏。它记录的是本项目当前已实际使用的流程和连接配置。
 >
-> 更新：2026-09-19（Asia/Shanghai）｜项目：Open Bridge
+> 更新：2026-09-20（Asia/Shanghai）｜项目：Open Bridge
+>
+> 当前状态：P5“输出/恢复契约整治”已完成源码、回归和完整发布检查，提交为 `8fb1aa8 fix explicit output recovery contracts`；尚待操作者重启 Bridge 后完成真实 MCP 验证。不得将此状态表述为“已重启验证”。
 >
 > 最近真实验证：P8 已在重启后通过。`read_files` 同批请求一个可读文件和一个缺失文件时，返回两个同序结果；Bridge 的 `build_stale` 为 `false`。
 
@@ -193,6 +195,14 @@ Endpoint： POST /chat/completions
 8. **重启与真实验证**：涉及 build 的改动必须等待用户重启；之后检查 `bridge_status` 和真实 MCP 行为。
 9. **推进**：真实验证成功后自动提出下一工作组选择。
 
+### P5 已提交、等待重启验证示例
+
+问题一：`search_files` 的 ripgrep 路径发生单文件错误时，内部虽已知道结果 `partial`，但公开响应和 schema 只返回了 `truncated`；AI 会把“有真实命中但搜索范围不完整”误判为完整结果。
+
+问题二：`read_files` 虽能标记 `truncated`，但二进制/Base64 内容没有可继续读取的字节游标，文本分页也没有安全的下一行游标；schema 也没有完整描述成功行、错误行和恢复字段。
+
+结果：提交 `8fb1aa8 fix explicit output recovery contracts` 后，`search_files` 始终返回 `partial:boolean`，并与分页 `truncated` 分离。`read_files` 的文本成功行会返回 `encoding:"utf8"`、行元数据及可用时的 `next_start_line`；Base64 成功行返回 `offset`/`next_offset`，可逐页恢复。单路径失败继续作为 `{path,error}` 行保留。完整 `npm run release:check` 已通过；下一步必须等待用户重启，再用真实 MCP 验证这些恢复游标。
+
 ### P8 已完成示例
 
 问题：`read_files` 使用 `Promise.all`，一条缺失文件会让同批可读文件丢失并产生工具级 `isError:true`。
@@ -204,7 +214,7 @@ Endpoint： POST /chat/completions
 ## 5. 日常注意点
 
 - 用 `bridge_status` 做服务事实来源；构建命令结束不代表新代码已在线。
-- `read_files` 的批量结果与请求路径同序。单条路径的解析、状态或读取失败应落在对应 `error` 行；缺少 `paths`、非字符串和空字符串仍应是调用参数错误。
+- `read_files` 的批量结果与请求路径同序。成功行包含 `encoding`、`truncated` 和字节计数；文本页在可安全续行时给出 `next_start_line`，Base64 页给出 `offset`/`next_offset`。游标为 `null` 而仍截断时，应以更大的 `max_bytes` 重试；单条路径的解析、状态或读取失败落在对应 `{path,error}` 行。缺少 `paths`、非字符串和空字符串仍应是调用参数错误。
 - 对文件、进程和网络工具，先读 schema/说明再猜字段。公开 schema、工具说明和 live structured-content 是同一契约的不同层面。
 - 不把测试失败简单“重试到绿”。先找根因；若工作组改变了预期契约，同步更新准确反映新契约的测试。
 - 构建/测试产生的缓存和构建目录不应误提交；以 `git status --short` 为最终判断。
