@@ -4,7 +4,7 @@
 >
 > 更新：2026-09-20（Asia/Shanghai）｜项目：Open Bridge
 >
-> 当前状态：P5“输出/恢复契约整治”已完成源码、回归和完整发布检查，提交为 `8fb1aa8 fix explicit output recovery contracts`；尚待操作者重启 Bridge 后完成真实 MCP 验证。不得将此状态表述为“已重启验证”。
+> 当前状态：P5“输出/恢复契约整治”的功能已在重启后的真实 MCP 中验证：`bridge_status` 为 `running` 且 `build_stale:false`；文本、Base64 续读和 `search_files.partial` 均按契约返回。随后发现工具简介把“空游标”说得过于绝对，已作措辞修正并通过完整发布检查；该最终简介仍待下一次重启加载。
 >
 > 最近真实验证：P8 已在重启后通过。`read_files` 同批请求一个可读文件和一个缺失文件时，返回两个同序结果；Bridge 的 `build_stale` 为 `false`。
 
@@ -201,7 +201,7 @@ Endpoint： POST /chat/completions
 
 问题二：`read_files` 虽能标记 `truncated`，但二进制/Base64 内容没有可继续读取的字节游标，文本分页也没有安全的下一行游标；schema 也没有完整描述成功行、错误行和恢复字段。
 
-结果：提交 `8fb1aa8 fix explicit output recovery contracts` 后，`search_files` 始终返回 `partial:boolean`，并与分页 `truncated` 分离。`read_files` 的文本成功行会返回 `encoding:"utf8"`、行元数据及可用时的 `next_start_line`；Base64 成功行返回 `offset`/`next_offset`，可逐页恢复。单路径失败继续作为 `{path,error}` 行保留。完整 `npm run release:check` 已通过；下一步必须等待用户重启，再用真实 MCP 验证这些恢复游标。
+结果：提交 `8fb1aa8 fix explicit output recovery contracts` 后，`search_files` 始终返回 `partial:boolean`，并与分页 `truncated` 分离。`read_files` 的文本成功行会返回 `encoding:"utf8"`、行元数据及可用时的 `next_start_line`；Base64 成功行返回 `offset`/`next_offset`，可逐页恢复。单路径失败继续作为 `{path,error}` 行保留。重启后的真实 MCP 已验证：二进制页以 0、4、8 三个偏移完整恢复，文本页从 `next_start_line:3` 继续，普通空搜索明确返回 `partial:false`。随后仅修正了“空游标”说明的措辞，完整 `npm run release:check` 已再次通过，仍需重启加载这句最新简介。
 
 ### P8 已完成示例
 
@@ -214,7 +214,7 @@ Endpoint： POST /chat/completions
 ## 5. 日常注意点
 
 - 用 `bridge_status` 做服务事实来源；构建命令结束不代表新代码已在线。
-- `read_files` 的批量结果与请求路径同序。成功行包含 `encoding`、`truncated` 和字节计数；文本页在可安全续行时给出 `next_start_line`，Base64 页给出 `offset`/`next_offset`。游标为 `null` 而仍截断时，应以更大的 `max_bytes` 重试；单条路径的解析、状态或读取失败落在对应 `{path,error}` 行。缺少 `paths`、非字符串和空字符串仍应是调用参数错误。
+- `read_files` 的批量结果与请求路径同序。成功行包含 `encoding`、`truncated` 和字节计数；文本页在可安全续行时给出 `next_start_line`，Base64 页给出 `offset`/`next_offset`。Base64 或文本被字节上限截断却没有安全游标时，以更大的 `max_bytes` 重试；而有意从后续 `start_line` 读取的文本页可在到达 EOF 时保持 `truncated:true`、游标为 `null`，应结合 `start_line`、`end_line` 与 `lines_total` 判定。单条路径的解析、状态或读取失败落在对应 `{path,error}` 行。缺少 `paths`、非字符串和空字符串仍应是调用参数错误。
 - 对文件、进程和网络工具，先读 schema/说明再猜字段。公开 schema、工具说明和 live structured-content 是同一契约的不同层面。
 - 不把测试失败简单“重试到绿”。先找根因；若工作组改变了预期契约，同步更新准确反映新契约的测试。
 - 构建/测试产生的缓存和构建目录不应误提交；以 `git status --short` 为最终判断。
