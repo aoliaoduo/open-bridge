@@ -141,6 +141,22 @@ test("renderFrame fills the exact geometry and shows the dashboard vocabulary", 
   assert.match(text, /概览/);
 });
 
+test("renderFrame pins the footer to the bottom rows however few the events", () => {
+  const snap = buildSnapshot(fixtureView(), {
+    version: "1.0.0-rc.2",
+    rootName: "open-bridge",
+    logPath: "C:/x/bridge.log",
+    now: 60_000,
+  });
+  const lines = renderFrame(snap, { width: 80, height: 40, now: 60_000 });
+  assert.equal(lines.length, 40, "a tall window gets a full-height frame");
+  for (const [i, line] of lines.entries()) {
+    assert.equal(visualWidth(line), 80, `tall line ${i} must be exactly 80 columns`);
+  }
+  assert.match(stripAnsi(lines[38] ?? ""), /open-bridge/, "usage footer on the second-to-last row");
+  assert.match(stripAnsi(lines[39] ?? ""), /Ctrl\+C 停止/, "hint row on the last row");
+});
+
 test("renderFrame degrades gracefully on a small window", () => {
   const snap = buildSnapshot(fixtureView(), {
     version: "1.0.0-rc.2",

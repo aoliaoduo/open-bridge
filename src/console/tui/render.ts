@@ -275,7 +275,13 @@ export function renderFrame(
   }
   eventsBudget = Math.max(0, eventsBudget);
 
-  lines.push(...overview, ...processes, ...renderEvents(snap, width, eventsBudget, spin, now), ...footer);
+  lines.push(...overview, ...processes, ...renderEvents(snap, width, eventsBudget, spin, now));
+  // Pin the footer to the bottom rows: with few events the frame would
+  // otherwise top-pack, leaving the lower terminal dark and the footer
+  // floating mid-screen. ainovel-cli's layout keeps its status bar on the
+  // last line whatever the content height; so does this one.
+  while (lines.length < height - footer.length) lines.push("");
+  lines.push(...footer);
   // Final safety net: a row that still measures past `width` (a corner the
   // budget math above could not foresee) is degraded to unpainted truncation
   // rather than wrapping and smearing the repaint.
