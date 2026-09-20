@@ -379,6 +379,46 @@ async function descendantPids(rootPid: number): Promise<number[]> {
   }
 }
 
+/** True when the configured shell is a POSIX-style (MSYS) shell whose process family shares a group. */
+function shellIsBashLike(): boolean {
+  const n = shellSpec().file.toLowerCase().replace(/\\/g, "/");
+  return n.includes("bash") || n.endsWith("/sh") || n.endsWith("/sh.exe") || n.includes("/bin/sh");
+}
+
+/**
+ * Kill the MSYS process GROUPS of a Windows-visible process family.
+ *
+ * Windows parent links do not survive MSYS fork/exec emulation: every external
+ * child (sleep, node, ...) is spawned through a short-lived intermediate that
+ * exits at once, leaving orphans whose ParentProcessId points at a dead pid —
+ * `taskkill /T` and the CIM walk both MISS them, they keep the stdio pipes
+ * open, 'close' never fires, and terminate degrades into an honest refusal
+ * (empirically: a `while true; do sleep 30 & sleep 1; done` tree refused at
+ * ~6-10 s with the root bash dead and every sleep alive).
+ *
+ * The MSYS process table still knows the real family: the running
+ * `/usr/bin/bash` executor — whose MSYS PPID reparents to 1, so it is only
+ * reachable through its intact WINDOWS link to the win32 launcher we spawned —
+ * leads a process group that every loop child shares. So: for each
+ * Windows-visible member, look up its MSYS row and kill its whole group.
+ *
+ * Group 0 must NEVER be killed: processes spawned from non-MSYS parents report
+ * PGID 0, and so does every unrelated system process in `ps -W` — a group-0
+ * kill is a massacre (probed empirically: it signalled the probing shell
+ * itself). Hence the `$3>0` awk guard and the `-gt 0` test.
+ */
+async function terminateMsysGroups(winPids: number[]): Promise<void> {
+  if (!shellIsBashLike() || winPids.length === 0) return;
+  const list = winPids.filter(n => Number.isSafeInteger(n) && n > 0).join(" ");
+  if (!list) return;
+  const script =
+    `for w in ${list}; do ps -W | awk -v w="$w" '$4==w && $3>0 {print $3}'; done | sort -u ` +
+    `| while read -r g; do if [ "$g" -gt 0 ] 2>/dev/null; then kill -9 -- -"$g" 2>/dev/null; fi; done`;
+  try {
+    await execFileAsync(shellSpec().file, ["-c", script], { windowsHide: true, timeout: 5000 });
+  } catch { /* family already gone, ps unavailable, or the helper refused — taskkill follows */ }
+}
+
 /** Kill the shell and every child it launched. Git Bash otherwise leaves jobs running on Windows. */
 export async function terminateProcess(
   commandState: CommandState,
@@ -397,10 +437,30 @@ export async function terminateProcess(
   const pid = commandState.child.pid;
   try {
     if (process.platform === "win32" && pid) {
-      const pids = await descendantPids(pid);
-      for (const targetPid of pids) {
+      if (shellIsBashLike()) {
+        // MSYS family: the process groups must die BEFORE taskkill removes the
+        // members whose MSYS rows are the only way to discover those groups
+        // (a dead member's row — and its PGID — is gone from `ps -W`). The
+        // enumeration yields the Windows-visible members (the win32 launcher we
+        // spawned and the `/usr/bin/bash` executor linked to it); the group
+        // kill then reaps the executor plus every background child it ever
+        // spawned, including the exec-emulation orphans that Windows parent
+        // links cannot see.
+        const pids = await descendantPids(pid);
+        await terminateMsysGroups(pids);
+        for (const targetPid of pids) {
+          try {
+            await execFileAsync("taskkill.exe", ["/pid", String(targetPid), "/f"], {
+              windowsHide: true,
+              timeout: 3000,
+            });
+          } catch { /* taskkill refuses an already-dead pid; kill() follows */ }
+        }
+      } else {
+        // Native shell (PowerShell/cmd): Windows parent links are intact, so
+        // one atomic tree-kill ends the whole family.
         try {
-          await execFileAsync("taskkill.exe", ["/pid", String(targetPid), "/f"], {
+          await execFileAsync("taskkill.exe", ["/pid", String(pid), "/T", "/F"], {
             windowsHide: true,
             timeout: 3000,
           });
@@ -408,8 +468,7 @@ export async function terminateProcess(
       }
     } else {
       commandState.child.kill();
-    }
-  } catch {
+    }  } catch {
     if (!commandState.child.killed) commandState.child.kill();
   }
   return await waitForProcessClose(commandState, options.closeTimeoutMs);

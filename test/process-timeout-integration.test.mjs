@@ -130,6 +130,39 @@ test("force_terminate is a real way out of a command that never exits", async ()
   assert.equal(snap.termination_reason, "terminated", "and the snapshot says why");
 });
 
+test("terminate kills a shell tree whose children outlive the shell itself", {
+  skip: process.platform !== "win32"
+    ? "the atomic tree-kill path is win32-only (taskkill /T); POSIX tree-kill would need process groups"
+    : false,
+}, async () => {
+  // Every loop iteration leaves a `sleep 30` background child that outlives any
+  // single kill. The old enumerate-then-kill-each path (PowerShell full process
+  // table scan, 1-4 s cold, then sequential taskkills, root LAST) burned the
+  // 5 s close budget before the kills landed — and gave the loop a window to
+  // respawn in between — so an orphan held the stdio pipes, 'close' never
+  // fired, and terminate honestly REFUSED a tree one atomic `taskkill /T /F`
+  // handles. Empirically this exact shape refused at ~6 s; pinned live first.
+  const started = asObject(await callTool("run_command", {
+    command: "while true; do sleep 30 & sleep 1; done",
+    background: true,
+  }));
+  assert.equal(started.status, "running");
+  await delay(3500); // let the loop leave a couple of long-lived children behind
+
+  const alive = asObject(await callTool("get_process_snapshot", { command_id: started.command_id }));
+  assert.equal(alive.status, "running", "precondition: the bash loop is still running (Git Bash present)");
+
+  const startedAt = Date.now();
+  const killed = asObject(await callTool("process_control", { action: "terminate", command_id: started.command_id }));
+  const elapsed = Date.now() - startedAt;
+  assert.equal(killed.terminated, true,
+    `the whole tree terminates inside the budget: ${JSON.stringify(killed).slice(0, 400)}`);
+  assert.ok(elapsed < 20_000, `and it took ${elapsed} ms, not minutes`);
+
+  const snap = asObject(await callTool("get_process_snapshot", { command_id: started.command_id }));
+  assert.equal(snap.shell_alive, false, "the shell is gone");
+});
+
 test("a background command distinguishes no readiness check from a ready process", async () => {
   const started = asObject(await callTool("run_command", { command: "node forever.mjs", background: true }));
   assert.equal(started.status, "running", "background work returns immediately under supervision");

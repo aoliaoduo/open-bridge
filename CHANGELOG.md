@@ -20,6 +20,7 @@
 - `write_file` 的 `mode` 与 `read_files` 的 `encoding` 收到非法值时报 `Invalid` 并列出合法值，不再静默回退（此前 `mode:"Append"` 会按覆盖写、拼错的 `encoding` 会按 utf8 读二进制）。
 - `activity_log{action:"recent"}` 的 `at` 与 `search`、审计日志、`/api/activity` 一致，为 ISO-8601 UTC（此前是服务器本地时间串）；控制台活动视图仍显示本地时间（改在渲染层格式化）。
 - 文档与实现对齐：`read_files` 的 `sha256` 尾部预算行为、`edit_block` 的 `replace_all` 参数、`process_control{action:"restart"}` 返回新 `command_id` 均已写明。
+- 修复 Windows + Git Bash 下停止/重启/删除被监控命令时误报「无法终止」的问题：MSYS 的 fork/exec 模拟会切断 Windows 父子链接，后台子进程（如 `while` 循环里的 `sleep 30 &`）成为 `taskkill /T` 与进程树枚举都看不见的孤儿，占住 stdio 管道导致 close 永不触发、5 秒预算耗尽。现在对 bash 类 shell 先枚举 Windows 可见成员，再经 `ps -W` 的 PGID 按 MSYS 进程组整组 `kill -9`（严格跳过组 0，防止波及无关系统进程），最后 taskkill 收尾；原生 shell（PowerShell/cmd）改为单次原子 `taskkill /T /F`。附 win32 门控的进程树集成测试。
 
 ## [1.0.0-rc.1] — 2026-09-20
 
