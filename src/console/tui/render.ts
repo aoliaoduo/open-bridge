@@ -229,12 +229,11 @@ function renderEvents(snap: TuiSnapshot, width: number, budget: number, spin: nu
   const out: string[] = [];
   const head = "─ 活动 ";
   out.push(paint("dim", `${head}${fillVisualWidth("─", Math.max(1, width - visualWidth(head)))}`));
-  // Events are chronological (oldest first), so the newest — what an
-  // operator glances for — sit at the END: take from the back. Slicing from
-  // the front would freeze the stream on the session's oldest rows the
-  // moment the budget shrank.
+  // Events are newest-first: the budget takes the NEWEST from the front —
+  // slicing from the back would freeze the stream on the session's oldest
+  // rows the moment the budget shrank.
   const take = Math.max(0, budget - 1);
-  for (const event of snap.events.slice(Math.max(0, snap.events.length - take))) {
+  for (const event of snap.events.slice(0, take)) {
     out.push(eventRow(event, width, spin, now));
   }
   return out;
@@ -246,7 +245,7 @@ function renderFooter(snap: TuiSnapshot, width: number): string[] {
   // — the thing an operator reaches for. The first live screen printed the
   // port three times, sessions and calls twice, and the workspace name twice.
   const line1 = padEndVisual(paint("muted", truncateVisual(`MCP ${snap.mcpUrl}`, width)), width);
-  const line2 = paint("dim", truncateVisual(`Ctrl+C 停止 · ↑↓ 滚动 · End 最新 · 日志 ${snap.logPath} · --no-tui 关闭界面`, width));
+  const line2 = paint("dim", truncateVisual(`Ctrl+C 停止 · ↑↓ 滚动 · Home 最新 · 日志 ${snap.logPath} · --no-tui 关闭界面`, width));
   return [line1, line2];
 }
 
@@ -262,15 +261,15 @@ export function workbenchPanelRows(width: number, height: number): number {
   return Math.max(1, height - 5); // top bar + divider (2) + panel title (1) + footer (2)
 }
 
-/** Largest first-visible index that still shows the newest event (the tail). */
+/** Largest first-visible index that still shows the oldest event (the bottom). */
 export function maxFirstVisible(eventCount: number, rows: number): number {
   return Math.max(0, eventCount - rows);
 }
 
 /**
- * Which events the panel shows. `firstVisible` beyond the tail clamps to the
- * tail, so "follow the latest" is simply "a first-visible larger than the
- * event count" — the same value the driver keeps until the user scrolls.
+ * Which events the panel shows. `firstVisible` below zero clamps to the head
+ * — index 0, the newest event — so "follow the latest" is simply "a
+ * first-visible of -1", the value the driver keeps until the user scrolls.
  */
 export function visibleEvents<T>(events: readonly T[], firstVisible: number, rows: number): T[] {
   const max = maxFirstVisible(events.length, rows);
@@ -280,7 +279,7 @@ export function visibleEvents<T>(events: readonly T[], firstVisible: number, row
 
 export type ScrollKey = "up" | "down" | "pageup" | "pagedown" | "home" | "end";
 
-/** One pure scroll step: older = smaller index, `end` re-locks to the tail. */
+/** One pure scroll step: newer = smaller index, `home` re-locks to the head. */
 export function advanceScroll(key: ScrollKey, current: number, eventCount: number, rows: number): number {
   const max = maxFirstVisible(eventCount, rows);
   const page = Math.max(1, rows - 1);
@@ -356,12 +355,10 @@ function renderWorkbench(
 
   const maxFirst = maxFirstVisible(snap.events.length, rows);
   const first = Math.min(Math.max(0, Math.floor(options.firstVisible)), maxFirst);
-  const older = first; // rows of retained history above the current view
-  // Off the tail (older events exist below the view) the way back deserves a
-  // hint even when no rows sit above the view yet.
-  const offTail = first < maxFirst;
+  // Newer events (indices below `first`) render ABOVE the view, so leaving
+  // the head — index 0, the newest — is the only state that deserves a hint.
   const titleLeft = `─ 活动 (${snap.events.length}) `;
-  const hint = offTail ? (older > 0 ? `↑${older} 行 · End 回底 ` : "End 回底 ") : "";
+  const hint = first > 0 ? `↑${first} 行 · Home 回顶 ` : "";
   const panel: string[] = [
     `${padEndVisual(paint("dim", titleLeft), Math.max(1, panelW - visualWidth(hint)))}${hint === "" ? "" : paint("accent", hint)}`,
     ...visibleEvents(snap.events, first, rows).map(event => eventRow(event, panelW, spin, now)),
@@ -402,7 +399,9 @@ export function renderFrame(
   // The workbench split needs room for both columns; a narrow or short
   // terminal keeps the stage-1 stacked layout, which packs small frames best.
   if (width >= 76 && height >= 22) {
-    return renderWorkbench(snap, { width, height, spin, now, busy, firstVisible: options.firstVisible ?? Number.MAX_SAFE_INTEGER });
+    // The follow default is the head sentinel: below zero clamps to index 0,
+    // the newest event — never the array tail, which is the oldest window.
+    return renderWorkbench(snap, { width, height, spin, now, busy, firstVisible: options.firstVisible ?? -1 });
   }
 
   const lines: string[] = [renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width))];

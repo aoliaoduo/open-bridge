@@ -141,13 +141,12 @@ test("buildSnapshot counts live state and redacts the route token", () => {
 
 test("buildSnapshot reports a duration only for observed invoke/outcome pairs", () => {
   const snap = buildSnapshot(fixtureView(), { version: "v", rootName: "r", logPath: "l", now: 60_000 });
-  // Chronological: the completed call first — its invoke row retired when the
-  // outcome landed, leaving ONE row with the real duration — then the
-  // still-open invoke, which is the array tail the panel follows.
-  assert.equal(snap.events[0]?.tool, "run_command");
-  assert.equal(snap.events[0]?.durationMs, 1000);
-  assert.equal(snap.events[1]?.tool, "send_to_shell");
-  assert.equal(snap.events[1]?.status, "running");
+  // Newest first: the still-open invoke, then the completed call — whose own
+  // invoke row retired when the outcome landed, leaving ONE row with duration.
+  assert.equal(snap.events[0]?.tool, "send_to_shell");
+  assert.equal(snap.events[0]?.status, "running");
+  assert.equal(snap.events[1]?.tool, "run_command");
+  assert.equal(snap.events[1]?.durationMs, 1000);
   assert.equal(snap.events.length, 2);
 
   const orphan = buildSnapshot(
@@ -172,10 +171,10 @@ test("invoke rows retire against outcome rows that carry no args summary", () =>
   };
   const snap = buildSnapshot(view, { version: "v", rootName: "r", logPath: "l", now: 60_000 });
   assert.equal(snap.events.length, 2, "both invokes retired into their outcomes");
-  assert.equal(snap.events[0]?.tool, "run_command");
-  assert.equal(snap.events[0]?.durationMs, 1000);
-  assert.equal(snap.events[1]?.tool, "read_files");
-  assert.equal(snap.events[1]?.durationMs, 3000);
+  assert.equal(snap.events[0]?.tool, "read_files");
+  assert.equal(snap.events[0]?.durationMs, 3000);
+  assert.equal(snap.events[1]?.tool, "run_command");
+  assert.equal(snap.events[1]?.durationMs, 1000);
 });
 
 test("process Started rows resolve their truth from the command table", () => {
@@ -192,12 +191,12 @@ test("process Started rows resolve their truth from the command table", () => {
     ["aaaa0000bbbb2222", { id: "aaaa0000bbbb2222", command: "finished one", done: true, startedAt: 1000, endedAt: 3500, output: { state: () => ({ totalBytes: 1, capacityBytes: 1 }) } }],
   ]);
   const snap = buildSnapshot(base, { version: "v", rootName: "r", logPath: "l", now: 60_000 });
-  assert.equal(snap.events[0]?.status, "progress", "a pruned process degrades to a neutral marker");
-  assert.equal(snap.events[0]?.durationMs, undefined);
+  assert.equal(snap.events[0]?.status, "running", "a live process keeps its spinner");
+  assert.equal(snap.events[0]?.durationMs, undefined, "a lifecycle row never shows a paired-call duration");
   assert.equal(snap.events[1]?.status, "completed", "a finished process shows its real lifetime");
   assert.equal(snap.events[1]?.durationMs, 2500);
-  assert.equal(snap.events[2]?.status, "running", "a live process keeps its spinner");
-  assert.equal(snap.events[2]?.durationMs, undefined, "a lifecycle row never shows a paired-call duration");
+  assert.equal(snap.events[2]?.status, "progress", "a pruned process degrades to a neutral marker");
+  assert.equal(snap.events[2]?.durationMs, undefined);
 });
 
 test("renderFrame fills the exact geometry and shows the dashboard vocabulary", () => {
@@ -285,7 +284,7 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   assert.match(joined, /活动 \(\d+\)/);
   assert.match(plain[28] ?? "", /MCP http/, "the address footer on the second-to-last row");
   assert.doesNotMatch(plain[28] ?? "", /会话|调用|端口/, "counters live in the sidebar, not repeated in the footer");
-  assert.match(plain[29] ?? "", /End 最新/, "scroll hint on the last row");
+  assert.match(plain[29] ?? "", /Home 最新/, "scroll hint on the last row");
 });
 
 test("workbench panel follows the tail and reports history when scrolled", () => {
@@ -298,13 +297,12 @@ test("workbench panel follows the tail and reports history when scrolled", () =>
   const tail = renderFrame(snap, { width: 110, height: 30, now: 60_000 });
   const tailText = tail.map(stripAnsi).join("\n");
   assert.match(tailText, /send_to_shell/, "the newest event is visible in tail mode");
-  assert.doesNotMatch(tailText, /End 回底/, "no history indicator while following the tail");
+  assert.doesNotMatch(tailText, /Home 回顶/, "no history indicator while following the head");
 
-  // 30 events, 25 visible rows: the tail starts five rows in. Scrolling to
-  // firstVisible 2 leaves two rows of history above the view. The array
-  // mirrors the real log (state.activity.unshift): NEWEST FIRST, so tool_29
-  // (ts 1029) at index 0 is the newest event — follow must land on it, never
-  // on the oldest window.
+  // 30 events, 25 visible rows: the history below the head starts five rows
+  // in. The array mirrors the real log (state.activity.unshift): NEWEST
+  // FIRST — tool_29 (ts 1029) at index 0 is the live head, and follow keeps
+  // it on screen, never the oldest window.
   const many = Array.from({ length: 30 }, (_, j) => ({
     at: new Date(1029 - j).toISOString(),
     ts: 1029 - j,
@@ -322,21 +320,22 @@ test("workbench panel follows the tail and reports history when scrolled", () =>
   assert.doesNotMatch(followText, /tool_0 /, "the oldest events are history when the panel overflows");
   const scrolled = renderFrame(manySnap, { width: 110, height: 30, now: 60_000, firstVisible: 2 });
   const scrollText = scrolled.map(stripAnsi).join("\n");
-  assert.match(scrollText, /↑2 行 · End 回底/, "scrolled view shows rows-above and the way back");
-  assert.match(scrollText, /tool_2/, "the view starts at the requested event");
-  assert.doesNotMatch(scrollText, /tool_0 /, "events above the view are not shown");
+  assert.match(scrollText, /↑2 行 · Home 回顶/, "scrolled view shows rows-above and the way back");
+  assert.match(scrollText, /tool_27 /, "the view starts at the requested event");
+  assert.doesNotMatch(scrollText, /tool_29 /, "events above the view are not shown");
 });
 
 test("advanceScroll steps and clamps around the retained history", () => {
-  // 10 events, 4 visible rows -> the tail starts at index 6.
+  // 10 events, 4 visible rows -> the oldest window starts at index 6. Index 0
+  // is the head: the newest event, where follow mode stays.
   assert.equal(advanceScroll("up", 6, 10, 4), 5);
-  assert.equal(advanceScroll("up", 0, 10, 4), 0, "cannot scroll past the oldest");
+  assert.equal(advanceScroll("up", 0, 10, 4), 0, "cannot scroll past the newest");
   assert.equal(advanceScroll("down", 5, 10, 4), 6);
-  assert.equal(advanceScroll("down", 6, 10, 4), 6, "cannot scroll past the newest");
+  assert.equal(advanceScroll("down", 6, 10, 4), 6, "cannot scroll past the oldest");
   assert.equal(advanceScroll("home", 6, 10, 4), 0);
   assert.equal(advanceScroll("end", 0, 10, 4), 6);
   assert.equal(advanceScroll("pageup", 6, 10, 4), 3);
-  // A first-visible beyond the event count (the follow sentinel) behaves as
-  // the tail, so the first scroll step is always one row of history.
-  assert.equal(advanceScroll("up", Number.MAX_SAFE_INTEGER, 10, 4), 5);
+  // A first-visible below zero (the follow sentinel) behaves as the head, so
+  // the first scroll step into history is always one row.
+  assert.equal(advanceScroll("down", -1, 10, 4), 1);
 });

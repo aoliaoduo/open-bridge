@@ -159,11 +159,13 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     });
   }
   // The activity log is newest-first (state.activity.unshift) and the loop
-  // above walks it backwards, so `collected` already comes out chronological:
-  // oldest first, newest last. That tail is exactly what "follow" and the End
-  // key lock onto — a reverse here once left the panel newest-at-top and
-  // froze follow mode on the OLDEST window once events overflowed the rows.
-  const events = collected.filter((event): event is TuiSnapshot["events"][number] => event !== null);
+  // above walks it backwards, so `collected` comes out chronological; flip it
+  // back to newest-first — the order the panel renders (newest on top, the
+  // reading direction the operator chose). The scroll machinery treats
+  // index 0, the head, as the live position.
+  const events = collected
+    .filter((event): event is TuiSnapshot["events"][number] => event !== null)
+    .reverse();
 
   const mcpUrl = view.tunnelUrl || `http://127.0.0.1:${view.port}/mcp/${view.routeToken}`;
   // The route token grants the workspace; the dashboard shows the address, not

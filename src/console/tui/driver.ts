@@ -34,7 +34,7 @@ const KEY_MAP: Record<string, ScrollKey> = {
   pagedown: "pagedown",
   home: "home",
   end: "end",
-  escape: "end", // Esc snaps back to the newest events, like End
+  escape: "home", // Esc snaps back to the newest events, like Home
 };
 
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -42,8 +42,8 @@ let resizeHandler: (() => void) | undefined;
 let keyListener: ((ch: string, key: { name?: string; ctrl?: boolean }) => void) | undefined;
 let frameIndex = 0;
 let active = false;
-/** Panel scroll position; larger than any event count = locked to the tail. */
-let scrollFirst = Number.MAX_SAFE_INTEGER;
+/** Panel scroll position; negative = locked to the head (the newest event). */
+let scrollFirst = -1;
 /** Event count of the last painted frame, so scroll steps clamp correctly. */
 let lastEventCount = 0;
 
