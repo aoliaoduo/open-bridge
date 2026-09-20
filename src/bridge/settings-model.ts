@@ -280,11 +280,12 @@ export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
       return { command, token: message.token.trim().slice(0, 500) };
     }
     case "saveDomain": {
-      // Trim only — a domain with embedded spaces must reach the host's
-      // validator as-is so the user sees the refusal instead of a silently
-      // rewritten value that can never come up as a tunnel.
-      const domain = str(message.domain, 253);
-      return domain ? { command, domain } : null;
+      // An explicit empty string clears the domain (local-only on the next
+      // ngrok start). Missing or non-string input must never clear it.
+      // Trim, but do not truncate: the shared validator must see invalid
+      // characters and overlong hostnames instead of a laundered value.
+      if (typeof message.domain !== "string") return null;
+      return { command, domain: message.domain.trim() };
     }
     case "setAuthEnabled":
       return { command, enabled: message.enabled === true };

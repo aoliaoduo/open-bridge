@@ -104,7 +104,7 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
           the same values at body-text size among eight other rows. */}
       <div className="stats">
         <Stat
-          label={t("会话", "Sessions")}
+          label={t("有状态会话", "Stateful sessions")}
           value={status?.active_sessions ?? "…"}
           hint={t("上限 64 · 空闲 60 分钟回收", "Cap 64 · reclaimed after 60 min idle")}
           tone={(status?.active_sessions ?? 0) > 0 ? "accent" : "plain"}

@@ -389,3 +389,63 @@ test("bridge_status reports a modern caller even though it has no session", asyn
   assert.match(String(shape.modern_last_used), /^\d{4}-\d\d-\d\dT/,
     "overview dates the modern-era traffic instead of leaving active_sessions to imply nobody is there");
 });
+
+
+test("console sessions includes the same stateless activity as the MCP session view", async () => {
+  const listed = await modern("tools/call", { name: "bridge_status", arguments: { section: "sessions" } });
+  assert.equal(listed.status, 200);
+  const mcpRows = JSON.parse(listed.payload.result.content[0].text);
+  const mcpModern = mcpRows.find(row => row.era === "modern");
+  assert.ok(mcpModern);
+  const response = await rawRequest("GET", "/api/sessions", null);
+  assert.equal(response.status, 200);
+  const rows = JSON.parse(response.body).sessions;
+  const activity = rows.find(row => row.era === "modern");
+  assert.ok(activity, "Console must not say nobody is here while MCP reports modern activity");
+  assert.equal(activity.id, "modern");
+  assert.equal(activity.stateless, true);
+  assert.equal(activity.closable, false);
+  assert.equal(activity.connected_at, null);
+  assert.equal(activity.first_seen, mcpModern.first_seen);
+  assert.ok(Date.parse(activity.last_used) >= Date.parse(mcpModern.last_used));
+  assert.equal(activity.calls, null, "no per-client call counter is available for a stateless summary");
+  assert.equal(activity.todos, null, "no synthetic session owns a todo count");
+  assert.equal(activity.active_requests, 0);
+  assert.ok(activity.idle_ms >= 0);
+  for (const legacy of mcpRows.filter(row => row.era === "legacy")) {
+    const consoleRow = rows.find(row => row.id === legacy.session_id);
+    assert.ok(consoleRow);
+    assert.equal(consoleRow.closable, true);
+    assert.equal(consoleRow.stateless, false);
+    assert.equal(consoleRow.calls, legacy.calls);
+    assert.equal(consoleRow.connected_at, legacy.connected_at);
+  }
+
+  const refused = await rawRequest("POST", "/api/sessions/close", JSON.stringify({ id: activity.id }), {
+    "content-type": "application/json", "x-open-bridge-console": routeToken,
+  });
+  assert.equal(refused.status, 404, "there is no modern session transport to disconnect");
+});
+
+test("console stateless activity reports requests that are still in flight", async () => {
+  const pending = modern("tools/call", { name: "wait", arguments: { ms: 2000 } });
+  try {
+    let activity;
+    const deadline = Date.now() + 5000;
+    // Wait for the observable condition, not a guessed server-start delay.
+    do {
+      const response = await rawRequest("GET", "/api/sessions", null);
+      assert.equal(response.status, 200);
+      activity = JSON.parse(response.body).sessions.find(row => row.era === "modern");
+      if (activity?.active_requests > 0) break;
+      await delay(20);
+    } while (Date.now() < deadline);
+    assert.equal(activity?.active_requests, 1, "the pending stateless request must be visible");
+    assert.equal(activity.closable, false);
+  } finally {
+    const completed = await pending;
+    assert.equal(completed.status, 200);
+  }
+  const response = await rawRequest("GET", "/api/sessions", null);
+  assert.equal(JSON.parse(response.body).sessions.find(row => row.era === "modern").active_requests, 0);
+});

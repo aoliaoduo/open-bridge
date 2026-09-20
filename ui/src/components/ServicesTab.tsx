@@ -18,7 +18,8 @@ import { Skeleton } from "./Skeleton";
 export function ServicesTab({ notify }: { notify?: (text: string, isError?: boolean) => void } = {}) {
   const [services, setServices] = useState<ServiceView[] | null>(null);
   const [note, setNote] = useState("");
-  const [busy, setBusy] = useState("");
+  const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
+  const inFlight = useRef(new Set<string>());
   // Expired-response guard. Without it a poll that left BEFORE an action and
   // landed AFTER it resurrected the old running badge over the action's fresh
   // answer (a stopped service looked running until the next tick).
@@ -41,7 +42,9 @@ export function ServicesTab({ notify }: { notify?: (text: string, isError?: bool
   }, [refresh]);
 
   const run = async (name: string, action: "start" | "stop" | "restart") => {
-    setBusy(name);
+    if (inFlight.current.has(name)) return;
+    inFlight.current.add(name);
+    setBusy(new Set(inFlight.current));
     try {
       const result = await api.serviceAction(action, name);
       // Invalidate any poll still in flight before applying the action's own
@@ -52,8 +55,10 @@ export function ServicesTab({ notify }: { notify?: (text: string, isError?: bool
         : action === "stop" ? t("已停止", "stopped") : t("已重启", "restarted")}`);
     } catch (error) {
       setNote(error instanceof Error ? error.message : String(error));
+    } finally {
+      inFlight.current.delete(name);
+      setBusy(new Set(inFlight.current));
     }
-    setBusy("");
   };
 
   const logName = (file: string | null): string => (file ? file.split(/[\\/]/).pop() ?? file : "—");
@@ -135,21 +140,21 @@ export function ServicesTab({ notify }: { notify?: (text: string, isError?: bool
                     <span className="row-actions">
                       <button
                         className="small"
-                        disabled={busy === service.name || service.running}
+                        disabled={busy.has(service.name) || service.running}
                         onClick={() => void run(service.name, "start")}
                       >
                         {t("启动", "Start")}
                       </button>
                       <button
                         className="small"
-                        disabled={busy === service.name || !service.running}
+                        disabled={busy.has(service.name) || !service.running}
                         onClick={() => void run(service.name, "stop")}
                       >
                         {t("停止", "Stop")}
                       </button>
                       <button
                         className="small"
-                        disabled={busy === service.name || !service.running}
+                        disabled={busy.has(service.name) || !service.running}
                         onClick={() => void run(service.name, "restart")}
                       >
                         {t("重启", "Restart")}

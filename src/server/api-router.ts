@@ -560,21 +560,39 @@ export async function apiRouteHandler(
   }
 }
 
-/** One row per live MCP session: who, how idle, what it is doing. */
+/** Live legacy sessions plus one aggregate row for observed stateless traffic. */
 function sessionViews(): Array<Record<string, unknown>> {
   const now = Date.now();
-  return [...state.sessions.entries()]
-    .sort((a, b) => b[1].lastUsed - a[1].lastUsed)
-    .map(([id, session]) => ({
-      id,
-      client: session.client ?? "未标识客户端",
-      connected_at: new Date(session.connectedAt ?? session.lastUsed).toISOString(),
-      calls: session.calls ?? 0,
-      last_used: new Date(session.lastUsed).toISOString(),
-      idle_ms: Math.max(0, now - session.lastUsed),
-      active_requests: session.activeRequests,
-      todos: Array.isArray(session.todos) ? session.todos.length : 0,
-    }));
+  const legacy = [...state.sessions.entries()].map(([id, session]) => ({
+    id,
+    client: session.client ?? "未标识客户端",
+    era: "legacy",
+    stateless: false,
+    closable: true,
+    connected_at: new Date(session.connectedAt ?? session.lastUsed).toISOString(),
+    calls: session.calls ?? 0,
+    last_used: new Date(session.lastUsed).toISOString(),
+    idle_ms: Math.max(0, now - session.lastUsed),
+    active_requests: session.activeRequests,
+    todos: Array.isArray(session.todos) ? session.todos.length : 0,
+  }));
+  // Match listSessions()'s distinction: this is traffic, not a made-up client
+  // or transport. Unknown per-session totals stay unknown rather than zero.
+  const modern = state.modernLastUsed > 0 ? [{
+    id: "modern",
+    client: "Modern MCP (stateless)",
+    era: "modern",
+    stateless: true,
+    closable: false,
+    connected_at: null,
+    first_seen: new Date(state.modernSince || state.modernLastUsed).toISOString(),
+    calls: null,
+    last_used: new Date(state.modernLastUsed).toISOString(),
+    idle_ms: Math.max(0, now - state.modernLastUsed),
+    active_requests: state.modernInFlight,
+    todos: null,
+  }] : [];
+  return [...legacy, ...modern].sort((a, b) => Date.parse(b.last_used) - Date.parse(a.last_used));
 }
 
 /** A todo as `set_todos` validates it: id, title, and one of three states. */
@@ -619,7 +637,11 @@ function asTodo(value: unknown): TodoView | undefined {
  */
 function todoView(): Record<string, unknown> {
   const stored = loadTodoStore();
-  const session = state.latestSession;
+  // API close, MCP DELETE and eviction may leave latestSession pointing at
+  // a removed entry. Only a member of the live table can drive this board;
+  // otherwise retain the persisted plan as explicitly historical data.
+  const liveEntry = [...state.sessions.entries()].find(([, candidate]) => candidate === state.latestSession);
+  const session = liveEntry?.[1];
   const live = Array.isArray(session?.todos) ? session.todos : undefined;
   // An empty live list is still an answer ("the agent cleared its plan"), so
   // the fallback tests for a session, not for a non-empty array.
@@ -635,9 +657,7 @@ function todoView(): Record<string, unknown> {
   }
   // Whose progress line this is. An entry with no sessionId predates the field
   // and therefore cannot belong to the session connected right now.
-  const liveSessionId = session
-    ? [...state.sessions.entries()].find(([, candidate]) => candidate === session)?.[0]
-    : undefined;
+  const liveSessionId = liveEntry?.[0];
   const progressStale = stored.lastProgress
     ? !liveSessionId || stored.lastProgress.sessionId !== liveSessionId
     : false;

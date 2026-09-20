@@ -184,7 +184,8 @@ describe("StatusTab KPIs and state labels", () => {
     renderTab();
 
     expect(await screen.findByText("对外工具")).toBeTruthy();
-    expect(screen.getByText("会话")).toBeTruthy();
+    const sessions = screen.getByText("有状态会话");
+    expect(sessions.parentElement?.querySelector(".stat-value")?.textContent).toBe("2");
     expect(screen.getByText("活动命令")).toBeTruthy();
     expect(screen.getByText("56")).toBeTruthy();
     // The waiting count is the half of the lock line that says whether anything

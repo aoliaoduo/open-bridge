@@ -322,12 +322,13 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
     case "saveDomain": {
       let domain: string;
       try {
-        domain = validateNgrokDomain(action.domain);
+        // Clearing is this action's explicit opt-out, not a valid hostname.
+        domain = action.domain === "" ? "" : validateNgrokDomain(action.domain);
       } catch {
         return { ok: false, state: await buildSettingsState(), error: "域名格式不对。示例：my-tunnel.ngrok-free.dev（在你的 ngrok 控制台可以找到）。" };
       }
       await cfg.update("ngrokDomain", domain);
-      return done({ info: "ngrok 域名已保存。" });
+      return done({ info: domain ? "ngrok 域名已保存。" : "ngrok 域名已清除；未配置域名时仅本机可用。此操作不停止当前隧道。" });
     }
 
     case "setAuthEnabled": {

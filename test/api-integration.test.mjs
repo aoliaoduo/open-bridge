@@ -313,6 +313,111 @@ test("closing an unknown session reports 404 instead of silently succeeding", as
   assert.equal(body.ok, false);
 });
 
+test("console saveDomain persists a hostname and clears it without promising a random tunnel", async () => {
+  const save = domain => fetch(`${base()}/api/settings/action`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-open-bridge-console": routeToken },
+    body: JSON.stringify({ command: "saveDomain", domain }),
+  });
+  const saved = await save(" Manual.Example.Test ");
+  assert.equal(saved.status, 200);
+  assert.equal((await saved.json()).state.configuredDomain, "manual.example.test");
+  for (const invalid of [undefined, null, 42, "https://example.test/path", "not a hostname"]) {
+    const refused = await save(invalid);
+    assert.equal(refused.status, 400, `invalid domain ${String(invalid)} must be refused`);
+    assert.equal((await refused.json()).state.configuredDomain, "manual.example.test");
+  }
+  for (const empty of ["", "   "]) {
+    const cleared = await save(empty);
+    assert.equal(cleared.status, 200, "an explicit empty domain clears the setting");
+    const result = await cleared.json();
+    assert.equal(result.state.configuredDomain, "");
+    assert.doesNotMatch(result.info, /随机/, "saving must not promise an unsupported random tunnel");
+    assert.match(result.info, /仅本机/, "the outcome describes the existing empty-domain contract");
+    const reloaded = await (await fetch(`${base()}/api/settings`)).json();
+    assert.equal(reloaded.state.configuredDomain, "", "clearing survives a fresh settings read");
+  }
+});
+
+/** A legacy exchange on this suite's temporary listener, not the user's Bridge. */
+let consoleRpcId = 10_000;
+async function consoleLegacyRpc(method, params, sessionId) {
+  const response = await fetch(`${base()}/mcp/${routeToken}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json", accept: "application/json, text/event-stream",
+      ...(sessionId ? { "mcp-session-id": sessionId, "mcp-protocol-version": "2025-06-18" } : {}),
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id: consoleRpcId++, method, params }),
+  });
+  const body = await response.text();
+  const frame = body.split(/\r?\n/).find(line => line.startsWith("data: "));
+  const payload = JSON.parse(frame ? frame.slice(6) : body);
+  assert.equal(response.status, 200, body);
+  assert.equal(payload.error, undefined, body);
+  assert.notEqual(payload.result?.isError, true, body);
+  return { sessionId: response.headers.get("mcp-session-id"), payload };
+}
+
+for (const closeVia of ["console", "MCP DELETE"]) {
+  test(`todos become historical after the last session is removed through ${closeVia}`, async () => {
+    const init = await consoleLegacyRpc("initialize", {
+      protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "console-todo-regression", version: "1" },
+    });
+    const sessionId = init.sessionId;
+    assert.ok(sessionId);
+    const todos = [{ id: "kept-plan", title: "Preserve this historical plan", status: "in_progress" }];
+    try {
+      await consoleLegacyRpc("tools/call", { name: "set_todos", arguments: { todos } }, sessionId);
+      await consoleLegacyRpc("tools/call", {
+        name: "report_progress", arguments: { message: "Last known progress", phase: "running" },
+      }, sessionId);
+      let live;
+      for (let i = 0; i < 20; i += 1) {
+        live = await (await fetch(`${base()}/api/todos`)).json();
+        if (live.last_progress?.sessionId === sessionId && !live.progress_stale) break;
+        await delay(50);
+      }
+      assert.deepEqual(live.todos, todos);
+      assert.equal(live.stale, false);
+      assert.equal(live.progress_stale, false);
+      if (closeVia === "console") {
+        const response = await fetch(`${base()}/api/sessions/close`, {
+          method: "POST", headers: { "content-type": "application/json", "x-open-bridge-console": routeToken },
+          body: JSON.stringify({ id: sessionId }),
+        });
+        assert.equal(response.status, 200);
+        assert.equal((await response.json()).closed, sessionId);
+      } else {
+        const response = await fetch(`${base()}/mcp/${routeToken}`, {
+          method: "DELETE", headers: { "mcp-session-id": sessionId, "mcp-protocol-version": "2025-06-18" },
+        });
+        assert.equal(response.status, 200);
+        await response.body?.cancel();
+      }
+      const sessions = await (await fetch(`${base()}/api/sessions`)).json();
+      assert.equal(sessions.sessions.length, 0);
+      let historical;
+      for (let i = 0; i < 20; i += 1) {
+        historical = await (await fetch(`${base()}/api/todos`)).json();
+        if (historical.stale === true && historical.progress_stale === true) break;
+        await delay(50);
+      }
+      assert.equal(historical.stale, true, "a dangling latestSession is not a live source");
+      assert.equal(historical.progress_stale, true);
+      assert.equal(historical.idle_ms, null);
+      assert.deepEqual(historical.todos, todos, "do not erase history to hide an offline badge");
+      assert.equal(historical.last_progress.message, "Last known progress");
+    } finally {
+      const response = await fetch(`${base()}/api/sessions/close`, {
+        method: "POST", headers: { "content-type": "application/json", "x-open-bridge-console": routeToken },
+        body: JSON.stringify({ id: sessionId }),
+      });
+      await response.body?.cancel();
+    }
+  });
+}
+
 test("one step arms the second lock: mint, enable, and /mcp really refuses", async () => {
   // 「签发令牌并启用门禁」exists because the guarded two-step flow (mint on 安全,
   // then flip the switch) is easy to get wrong. The only proof that matters is

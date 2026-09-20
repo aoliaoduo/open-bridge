@@ -98,3 +98,22 @@ describe("copyText", () => {
     expect(document.querySelector("textarea")).toBeNull();
   });
 });
+
+
+describe("POST unknown outcomes", () => {
+  test.each(["", "{broken", "<html>proxy response</html>"])("rejects a malformed HTTP-200 body: %j", async body => {
+    const fetchMock = vi.fn(async () => new Response(body, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const pending = api.settingsAction({ command: "saveDomain", domain: "demo.example.test" });
+    await expect(pending).rejects.toThrow(/POST \/api\/settings\/action.*HTTP 200/);
+    await expect(pending).rejects.toThrow(/结果未知/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([{ value: null }, { value: [] }, { value: "ok" }])("rejects a non-object action response: $value", async ({ value }) => {
+    const fetchMock = vi.fn(async () => jsonResponse(value));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(api.settingsAction({ command: "clearStats" })).rejects.toThrow(/结果未知/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

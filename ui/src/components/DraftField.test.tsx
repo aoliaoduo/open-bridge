@@ -84,3 +84,50 @@ describe("DraftField", () => {
     expect(onCommit).toHaveBeenCalledWith("anything at all");
   });
 });
+
+
+describe("DraftField save acknowledgements", () => {
+  test.each([false, true])("keeps a newer unsubmitted draft (multiline=%s)", multiline => {
+    const onCommit = vi.fn();
+    const { rerender } = render(<DraftField value="saved" onCommit={onCommit} multiline={multiline} />);
+    const input = screen.getByRole("textbox") as HTMLInputElement | HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "first edit" } });
+    fireEvent.blur(input);
+    expect(onCommit).toHaveBeenCalledWith("first edit");
+
+    fireEvent.change(input, { target: { value: "newer draft" } });
+    rerender(<DraftField value="first edit" onCommit={onCommit} multiline={multiline} />);
+    expect(input.value).toBe("newer draft");
+    expect(onCommit).toHaveBeenCalledTimes(1);
+
+    fireEvent.blur(input);
+    expect(onCommit).toHaveBeenLastCalledWith("newer draft");
+    rerender(<DraftField value="newer draft" onCommit={onCommit} multiline={multiline} />);
+    expect(input.value).toBe("newer draft");
+  });
+
+  test("an explicit edit back to the old baseline is still a newer draft", () => {
+    const onCommit = vi.fn();
+    const { rerender } = render(<DraftField value="old" onCommit={onCommit} />);
+    const input = screen.getByRole("textbox") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "submitted" } });
+    fireEvent.blur(input);
+    fireEvent.change(input, { target: { value: "old" } });
+    rerender(<DraftField value="submitted" onCommit={onCommit} />);
+    expect(input.value).toBe("old");
+    fireEvent.blur(input);
+    expect(onCommit).toHaveBeenLastCalledWith("old");
+  });
+
+  test("pristine fields and unchanged submitted drafts still follow authoritative values", () => {
+    const onCommit = vi.fn();
+    const { rerender } = render(<DraftField value="20000" onCommit={onCommit} type="number" />);
+    const input = screen.getByRole("spinbutton") as HTMLInputElement;
+    rerender(<DraftField value="21000" onCommit={onCommit} type="number" />);
+    expect(input.value).toBe("21000");
+    fireEvent.change(input, { target: { value: "03000" } });
+    fireEvent.blur(input);
+    rerender(<DraftField value="3000" onCommit={onCommit} type="number" />);
+    expect(input.value).toBe("3000");
+  });
+});

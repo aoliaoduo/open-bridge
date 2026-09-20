@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type SettingsActionResult, type SettingsState, type SettingsTunnelView } from "../api";
 import { SETTINGS_SECTIONS, type SettingsSectionId } from "../routes";
 import { t } from "../i18n";
@@ -95,9 +95,19 @@ export function DraftField({
   multiline?: boolean;
 }) {
   const [draft, setDraft] = useState(value);
-  // Follow authoritative changes while the operator is not editing.
-  useEffect(() => { setDraft(value); }, [value]);
+  // A reply to the previous commit may arrive after the next edit. Only
+  // pristine / submitted drafts follow it; newer unsubmitted edits belong to
+  // the operator, even when they happen to equal the old saved value.
+  const editedSinceCommit = useRef(false);
+  useEffect(() => {
+    if (!editedSinceCommit.current) setDraft(value);
+  }, [value]);
+  const change = (next: string): void => {
+    editedSinceCommit.current = true;
+    setDraft(next);
+  };
   const commit = (): void => {
+    editedSinceCommit.current = false;
     if (draft === value) return;
     if (type === "number") {
       const n = Number(draft.trim());
@@ -123,7 +133,7 @@ export function DraftField({
         rows={4}
         value={draft}
         placeholder={placeholder}
-        onChange={e => setDraft(e.target.value)}
+        onChange={e => change(e.target.value)}
         onBlur={commit}
       />
     );
@@ -136,7 +146,7 @@ export function DraftField({
       step={step}
       value={draft}
       placeholder={placeholder}
-      onChange={e => setDraft(e.target.value)}
+      onChange={e => change(e.target.value)}
       onBlur={commit}
       onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
     />
@@ -219,6 +229,8 @@ function SwitchField(
 
 export function SettingsTab({ settings, act, notify, section, onSectionChange }: Props) {
   const [domain, setDomain] = useState<string | null>(null);
+  const [domainBusy, setDomainBusy] = useState(false);
+  const domainInFlight = useRef(false);
   /**
    * What the machine has for each tunnel provider, and the plan 「自动配置」
    * would run. Fetched after the page renders (producing it spawns the provider
@@ -273,6 +285,7 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
 
   // ---- the tunnel card's derived state -----------------------------------
   const tunnelFacts = tunnel?.facts;
+  const typedDomain = manualDomain || (domainValue !== "" && !tunnelFacts?.ngrok.domains.includes(domainValue));
   const provider = cfg.tunnelProvider;
   // Published = the URL the page is showing is not a loopback one.
   const tunnelReady = Boolean(settings.mcpUrl) && !/127\.0\.0\.1|localhost/.test(settings.mcpUrl);
@@ -350,6 +363,30 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
     setConfig(key, Number(raw.trim()));
   };
 
+  /** One explicit domain write, shared by the dropdown and manual save. */
+  const saveDomain = async (raw: string): Promise<void> => {
+    if (domainInFlight.current) return;
+    const next = raw.trim();
+    if (next === settings.configuredDomain) {
+      setDomain(current => current === raw ? null : current);
+      return;
+    }
+    domainInFlight.current = true;
+    setDomainBusy(true);
+    try {
+      const result = await act({ command: "saveDomain", domain: next }) as SettingsActionResult | null;
+      if (result?.ok) {
+        // Do not clear a newer draft typed while this save was outstanding.
+        setDomain(current => current === raw ? null : current);
+        setReach(null);
+        void reloadTunnel();
+      }
+    } finally {
+      domainInFlight.current = false;
+      setDomainBusy(false);
+    }
+  };
+
   /** Rejection feedback for a DraftField; the revert is DraftField's own job. */
   const invalidFor = (key: keyof typeof NUMBER_BOUNDS) => (): void => {
     const { label, min, max } = NUMBER_BOUNDS[key];
@@ -407,39 +444,49 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
             <Field
               label={t("公网地址", "Public address")}
               hint={tunnelFacts.ngrok.domains.length
-                ? t("来自你 ngrok 账号里的保留域名；不选则用 ngrok 分配的随机地址。",
-                    "Your account's reserved domains; leave it unset to use ngrok's random address.")
-                : t("留空则用 ngrok 分配的随机地址。想让保留域名出现在下拉里：把 ngrok 后台的 API key 写进 ngrok.yml 的 api_key 一行（authtoken 不能用于 API）。",
-                    "Leave empty to use ngrok's random address. For a dropdown here, put an API key on the api_key line of ngrok.yml — an authtoken does not work for the API.")}
+                ? t("来自你 ngrok 账号里的保留域名；留空时下次启动仅本机可用，保存不会立即重启现有隧道。",
+                    "Your account's reserved domains. An empty value keeps the next tunnel start local-only; saving does not restart the current tunnel.")
+                : t("留空时下次启动仅本机可用，保存不会立即重启现有隧道。想让保留域名出现在下拉里：把 ngrok 后台的 API key 写进 ngrok.yml 的 api_key 一行（authtoken 不能用于 API）。",
+                    "An empty value keeps the next tunnel start local-only; saving does not restart the current tunnel. For a domain dropdown here, put an API key on the api_key line of ngrok.yml — an authtoken does not work for the API.")}
             >
               {tunnelFacts.ngrok.domains.length > 0 ? (
                 <select
                   aria-label={t("公网地址", "Public address")}
-                  value={tunnelFacts.ngrok.domains.includes(domainValue) ? domainValue : manualDomain ? "__manual__" : ""}
+                  value={typedDomain ? "__manual__" : domainValue}
+                  disabled={domainBusy}
                   onChange={e => {
                     const next = e.target.value;
                     if (next === "__manual__") { setManualDomain(true); return; }
                     setManualDomain(false);
                     setDomain(next);
-                    void act({ command: "saveDomain", domain: next }).then(result => {
-                      if ((result as SettingsActionResult | null)?.ok) setDomain(null);
-                      void reloadTunnel();
-                    });
+                    void saveDomain(next);
                   }}
                 >
-                  <option value="">{t("ngrok 分配的随机地址", "ngrok's random address")}</option>
+                  <option value="">{t("未设置域名（下次启动仅本机）", "No domain (local-only on next start)")}</option>
                   {tunnelFacts.ngrok.domains.map(name => <option key={name} value={name}>{name}</option>)}
                   <option value="__manual__">{t("手动填写…", "Type one…")}</option>
                 </select>
               ) : null}
-              {(tunnelFacts.ngrok.domains.length === 0 || manualDomain) && (
-                <input
-                  type="text"
-                  aria-label={t("公网地址（手动填写）", "Public address (typed)")}
-                  value={domainValue}
-                  placeholder="example.ngrok-free.dev"
-                  onChange={e => setDomain(e.target.value)}
-                />
+              {(tunnelFacts.ngrok.domains.length === 0 || typedDomain) && (
+                <span className="field-control">
+                  <input
+                    type="text"
+                    aria-label={t("公网地址（手动填写）", "Public address (typed)")}
+                    value={domainValue}
+                    placeholder="example.ngrok-free.dev"
+                    onChange={e => setDomain(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") { e.preventDefault(); void saveDomain(domainValue); }
+                    }}
+                  />
+                  <button
+                    className="small"
+                    disabled={domainBusy || domain === null || domainValue.trim() === settings.configuredDomain}
+                    onClick={() => void saveDomain(domainValue)}
+                  >
+                    {t("保存域名", "Save domain")}
+                  </button>
+                </span>
               )}
             </Field>
           )}
@@ -502,14 +549,20 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
                       const wanted = ["tunnel", "public", "exposure"];
                       const rows = report.checks.filter(check => wanted.includes(check.name));
                       const failed = rows.some(row => (row.level ?? (row.ok ? "ok" : "fail")) === "fail");
+                      const publicCheck = rows.find(row => row.name === "public");
+                      // Local-only reports legitimately omit this probe. No
+                      // failed rows is not evidence that the internet got in.
+                      const verified = publicCheck?.ok === true && (publicCheck.level ?? "ok") === "ok";
                       setReach({
-                        tone: failed ? "err" : "ok",
+                        tone: failed ? "err" : verified ? "ok" : "warn",
                         lines: [
                           ...rows.map(row => `${REACH_LABELS[row.name]?.() ?? row.name}：${row.detail}`),
                           failed
                             ? t("下一步：确认隧道进程在跑（「状态」页有隧道日志），或先点「重新检测」看本机环境。",
                                 "Next: check the tunnel process (the status page logs it), or press Detect again to see what this machine has.")
-                            : t("公网上的客户端现在可以连到这个地址。", "A client on the internet can reach this address now."),
+                            : verified
+                              ? t("公网上的客户端现在可以连到这个地址。", "A client on the internet can reach this address now.")
+                              : t("尚无成功的公网探测；请先发布隧道地址，再重新测试。", "No successful public probe yet; publish a tunnel address, then test again."),
                         ],
                       });
                     })
@@ -527,7 +580,9 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
               <span className="field-control">
                 <Chip tone={reach.tone}>{reach.tone === "ok"
                   ? t("公网可达", "reachable")
-                  : t("有问题", "problem")}</Chip>
+                  : reach.tone === "warn"
+                    ? t("公网未验证", "public reach unverified")
+                    : t("有问题", "problem")}</Chip>
               </span>
             ) : null}
             {reach?.lines.map(line => <span className="field-hint" key={line}>{line}</span>)}

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { App } from "./App";
 import { applyLang } from "./i18n";
 import type {
@@ -329,10 +329,10 @@ describe("App shell", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("已连接的客户端")).toBeTruthy();
+    expect(await screen.findByText("客户端与活动")).toBeTruthy();
     expect(await screen.findByText("cursor/0.42")).toBeTruthy();
     // 「首次连接」/「调用数」: the two columns the table was missing.
-    expect(await screen.findByText("首次连接")).toBeTruthy();
+    expect(await screen.findByText("连接 / 首次观察")).toBeTruthy();
     expect(await screen.findByText("调用数")).toBeTruthy();
     expect(await screen.findByText("47")).toBeTruthy();
   });
@@ -766,7 +766,7 @@ describe("App shell: in-page filtering and rails", () => {
 
     expect(screen.queryByText("cursor/0.42")).toBeNull();
     expect(screen.getByText("claude/1.0")).toBeTruthy();
-    expect(screen.getByText(/显示 1 \/ 共 2 个会话/)).toBeTruthy();
+    expect(screen.getByText(/显示 1 \/ 共 2 项/)).toBeTruthy();
   });
 
   test("the 设置 rail marks the section it jumps to", async () => {
@@ -1136,5 +1136,172 @@ describe("App shell: keyboard reach", () => {
       return el.hasAttribute("onclick");
     });
     expect(suspicious.map(el => el.outerHTML.slice(0, 70))).toEqual([]);
+  });
+});
+
+
+describe("console audit regressions", () => {
+  test.each([true, false])("saves a typed ngrok domain explicitly (reserved choices=%s)", async hasChoices => {
+    window.history.pushState({}, "", "/console/settings/tunnel");
+    const initial = withProvider("ngrok");
+    mocks.settings.mockResolvedValue(initial);
+    const facts = tunnelFactsFixture();
+    if (!hasChoices) facts.ngrok.domains = [];
+    mocks.tunnel.mockResolvedValue(tunnelView("ngrok", facts));
+    mocks.settingsAction.mockResolvedValue({ ok: true, state: { ...initial, configuredDomain: "typed.example.test" } });
+    render(<App />);
+    if (hasChoices) {
+      fireEvent.change(await screen.findByLabelText("公网地址"), { target: { value: "__manual__" } });
+    }
+    const input = await screen.findByLabelText("公网地址（手动填写）") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: " typed.example.test " } });
+    expect(mocks.settingsAction).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "保存域名" }));
+    await waitFor(() => expect(mocks.settingsAction).toHaveBeenCalledWith({ command: "saveDomain", domain: "typed.example.test" }));
+    await waitFor(() => expect(input.value).toBe("typed.example.test"));
+    expect(mocks.settingsAction).toHaveBeenCalledTimes(1);
+  });
+
+  test("a saved custom domain remains visible after reloading the tunnel page", async () => {
+    window.history.pushState({}, "", "/console/settings/tunnel");
+    mocks.settings.mockResolvedValue({ ...withProvider("ngrok"), configuredDomain: "custom.example.test" });
+    render(<App />);
+    const input = await screen.findByLabelText("公网地址（手动填写）") as HTMLInputElement;
+    expect(input.value).toBe("custom.example.test");
+    expect((screen.getByLabelText("公网地址") as HTMLSelectElement).value).toBe("__manual__");
+    expect(mocks.settingsAction).not.toHaveBeenCalled();
+  });
+
+  test("choosing the unset domain option explicitly clears a saved domain", async () => {
+    window.history.pushState({}, "", "/console/settings/tunnel");
+    const initial = { ...withProvider("ngrok"), configuredDomain: "demo.ngrok-free.app" };
+    mocks.settings.mockResolvedValue(initial);
+    mocks.settingsAction.mockResolvedValue({ ok: true, state: { ...initial, configuredDomain: "" } });
+    render(<App />);
+    const select = await screen.findByLabelText("公网地址") as HTMLSelectElement;
+    expect(select.value).toBe("demo.ngrok-free.app");
+    fireEvent.change(select, { target: { value: "" } });
+    await waitFor(() => expect(mocks.settingsAction).toHaveBeenCalledWith({ command: "saveDomain", domain: "" }));
+    expect(select.value).toBe("");
+  });
+
+  test("a domain save acknowledgement does not clear a newer typed draft", async () => {
+    window.history.pushState({}, "", "/console/settings/tunnel");
+    const initial = withProvider("ngrok");
+    mocks.settings.mockResolvedValue(initial);
+    let resolve!: (result: SettingsActionResult) => void;
+    mocks.settingsAction.mockImplementationOnce(() => new Promise<SettingsActionResult>(done => { resolve = done; }));
+    render(<App />);
+    fireEvent.change(await screen.findByLabelText("公网地址"), { target: { value: "__manual__" } });
+    const input = screen.getByLabelText("公网地址（手动填写）") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "first.example.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存域名" }));
+    fireEvent.change(input, { target: { value: "newer.example.test" } });
+    await act(async () => { resolve({ ok: true, state: { ...initial, configuredDomain: "first.example.test" } }); });
+    expect(input.value).toBe("newer.example.test");
+    expect(mocks.settingsAction).toHaveBeenCalledTimes(1);
+  });
+
+  test("a rejected domain stays editable and is not reported as saved", async () => {
+    window.history.pushState({}, "", "/console/settings/tunnel");
+    const initial = withProvider("ngrok");
+    mocks.settings.mockResolvedValue(initial);
+    mocks.settingsAction.mockResolvedValue({ ok: false, state: initial, error: "域名格式不对。" });
+    render(<App />);
+    fireEvent.change(await screen.findByLabelText("公网地址"), { target: { value: "__manual__" } });
+    const input = screen.getByLabelText("公网地址（手动填写）") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "not a hostname" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存域名" }));
+    expect(await screen.findByText("域名格式不对。")).toBeTruthy();
+    expect(input.value).toBe("not a hostname");
+    await waitFor(() => expect((screen.getByRole("button", { name: "保存域名" }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  test.each([false, true])("never claims public reach without a public probe (empty checks=%s)", async empty => {
+    window.history.pushState({}, "", "/console/settings/tunnel");
+    mocks.settings.mockResolvedValue(withProvider("ngrok"));
+    const report: HealthReport = {
+      exposure: "local",
+      checks: empty ? [] : [
+        { name: "tunnel", level: "ok", ok: true, detail: "未开启（仅本机可用）" },
+        { name: "exposure", level: "ok", ok: true, detail: "local" },
+      ],
+    };
+    mocks.health.mockResolvedValue(report);
+    render(<App />);
+    const button = await screen.findByRole("button", { name: "测试公网可达" });
+    await act(async () => { fireEvent.click(button); });
+    expect(screen.queryByText("公网上的客户端现在可以连到这个地址。")).toBeNull();
+    expect(screen.queryByText("公网可达")).toBeNull();
+    expect(screen.getByText("公网未验证")).toBeTruthy();
+  });
+
+  test("a failed public probe is not converted to an untested or reachable result", async () => {
+    window.history.pushState({}, "", "/console/settings/tunnel");
+    mocks.settings.mockResolvedValue(withProvider("ngrok"));
+    mocks.health.mockResolvedValue({ exposure: "public-open", checks: [
+      { name: "public", level: "fail", ok: false, detail: "HTTP 503" },
+      { name: "exposure", level: "warn", ok: false, detail: "public-open" },
+    ] } satisfies HealthReport);
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "测试公网可达" }));
+    expect(await screen.findByText("有问题")).toBeTruthy();
+    expect(screen.getByText(/公网连通：HTTP 503/)).toBeTruthy();
+    expect(screen.getByText(/public-open/)).toBeTruthy();
+    expect(screen.queryByText("公网可达")).toBeNull();
+  });
+
+  test("modern activity is visible but has no fabricated session or disconnect action", async () => {
+    window.history.pushState({}, "", "/console/sessions");
+    mocks.sessions.mockResolvedValue({ sessions: [sessionView(), {
+      id: "modern", client: "Modern MCP (stateless)", era: "modern", stateless: true, closable: false,
+      connected_at: null, first_seen: "2026-09-11T01:02:03.000Z", last_used: "2026-09-11T01:03:03.000Z",
+      idle_ms: 0, calls: null, todos: null, active_requests: 2,
+    }], locks: lockSnapshot() });
+    render(<App />);
+    await screen.findByText("cursor/0.42");
+    const rows = within(screen.getByRole("table")).getAllByRole("row");
+    expect(rows).toHaveLength(3);
+    const modern = within(rows[2]!);
+    expect(modern.queryByRole("button", { name: "断开" })).toBeNull();
+    expect(modern.queryByRole("button", { name: "复制会话 ID" })).toBeNull();
+    expect(modern.getByText(/首次观察/)).toBeTruthy();
+    expect(modern.getByText("2")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "断开" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "活跃 1" }));
+    expect(screen.queryByText("cursor/0.42")).toBeNull();
+    expect(mocks.closeSession).not.toHaveBeenCalled();
+  });
+
+  test("an unknown POST outcome leaves settings and the entered value on screen", async () => {
+    window.history.pushState({}, "", "/console/settings/network");
+    const error = "POST /api/settings/action → 响应不是有效 JSON (HTTP 200)；操作结果未知，请刷新核对。";
+    mocks.settingsAction.mockRejectedValue(new Error(error));
+    render(<App />);
+    const field = await screen.findByDisplayValue("20000") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "25000" } });
+    fireEvent.blur(field);
+    expect(await screen.findByText(error)).toBeTruthy();
+    expect(field.value).toBe("25000");
+    expect(screen.getByText("公网健康检查")).toBeTruthy();
+    expect(mocks.settingsAction).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe("ngrok empty-domain semantics", () => {
+  test.each([true, false])("does not promise an unsupported random tunnel (choices=%s)", async hasChoices => {
+    window.history.pushState({}, "", "/console/settings/tunnel");
+    mocks.settings.mockResolvedValue(withProvider("ngrok"));
+    const facts = tunnelFactsFixture();
+    if (!hasChoices) facts.ngrok.domains = [];
+    mocks.tunnel.mockResolvedValue(tunnelView("ngrok", facts));
+    render(<App />);
+    await screen.findByText("ngrok：已安装（PATH）");
+    expect(screen.queryAllByText(/随机地址/)).toHaveLength(0);
+    expect(screen.getByText(/留空时下次启动仅本机可用/)).toBeTruthy();
+    if (hasChoices) {
+      expect(screen.getByRole("option", { name: "未设置域名（下次启动仅本机）" })).toBeTruthy();
+    }
   });
 });

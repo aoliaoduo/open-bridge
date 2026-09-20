@@ -24,14 +24,19 @@ export function idleLabel(ms: number): string {
  * idle; 「首次连接」 answers the other half — since when — which is what tells an
  * operator whether a client is theirs or something that appeared overnight.
  */
-function connectedLabel(iso: string): string {
+function connectedLabel(iso: string | null | undefined): string {
+  if (!iso) return "—";
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return "—";
   const pad = (value: number): string => String(value).padStart(2, "0");
   return `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`;
 }
 
-/** A session is 活跃 while it is serving a request. */
+function clientLabel(session: SessionView): string {
+  return session.stateless ? t("现代 MCP（无状态）", "Modern MCP (stateless)") : session.client;
+}
+
+/** A session or activity summary is 活跃 while it is serving a request. */
 const STALE_MS = 5 * 60 * 1000;
 
 type View = "all" | "active" | "idle";
@@ -84,7 +89,8 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
       if (view === "active" && session.active_requests <= 0) return false;
       if (view === "idle" && session.idle_ms < STALE_MS) return false;
       if (!needle) return true;
-      return session.client.toLowerCase().includes(needle) || session.id.toLowerCase().includes(needle);
+      return clientLabel(session).toLowerCase().includes(needle)
+        || session.client.toLowerCase().includes(needle) || session.id.toLowerCase().includes(needle);
     });
   }, [sessions, query, view]);
 
@@ -92,7 +98,8 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
   const staleCount = (sessions ?? []).filter(session => session.idle_ms >= STALE_MS).length;
 
   const close = async (id: string) => {
-    if (closingId) return;
+    const session = sessions?.find(row => row.id === id);
+    if (closingId || !session || session.stateless || session.closable === false) return;
     setClosingId(id);
     setNote(t(`正在断开 ${id.slice(0, 8)}…`, `Disconnecting ${id.slice(0, 8)}…`));
     try {
@@ -113,14 +120,14 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
   return (
     <>
       <Card
-        title={t("已连接的客户端", "Connected clients")}
+        title={t("客户端与活动", "Clients and activity")}
         desc={
           <>
-            {t("一行是一个活着的 MCP 会话：客户端在 ", "One row per live MCP session: a client appears after ")}
+            {t("有会话客户端在 ", "Stateful clients appear after ")}
             <span className="mono">initialize</span>
             {t(
-              " 之后出现，空闲超过 60 分钟或被容量挤出时自动消失。断开 只关掉这一个会话。",
-              " and disappears after 60 minutes idle or when capacity evicts it. Disconnect closes just that one session.",
+              " 之后出现，空闲超过 60 分钟或被容量挤出时自动消失。断开只关闭一个会话。现代协议显示无状态活动汇总，不代表单个客户端，也没有可断开的会话。",
+              " and disappear after 60 minutes idle or when capacity evicts them. Disconnect closes one session. Modern traffic is a stateless activity summary, not an individual client or a disconnectable session.",
             )}
           </>
         }
@@ -155,7 +162,7 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
             </label>
             <span className="grow" />
             <span className="count">
-              {t(`显示 ${visible.length} / 共 ${sessions.length} 个会话`, `${visible.length} of ${sessions.length} sessions`)}
+              {t(`显示 ${visible.length} / 共 ${sessions.length} 项`, `${visible.length} of ${sessions.length} entries`)}
             </span>
           </div>
         )}
@@ -182,7 +189,7 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
                 <tr>
                   <th>{t("客户端", "Client")}</th>
                   <th>{t("会话", "Session")}</th>
-                  <th>{t("首次连接", "Connected")}</th>
+                  <th>{t("连接 / 首次观察", "Connected / first seen")}</th>
                   <th>{t("空闲", "Idle")}</th>
                   <th className="num">{t("调用数", "Calls")}</th>
                   <th className="num">{t("进行中", "In flight")}</th>
@@ -193,9 +200,9 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
               <tbody>
                 {visible.map(session => (
                   <tr key={session.id}>
-                    <td className="name">{session.client}</td>
-                    <td className="mono" title={session.id}>
-                      <span className="row-actions">
+                    <td className="name">{clientLabel(session)}</td>
+                    <td className="mono" title={session.stateless ? undefined : session.id}>
+                      {session.stateless ? t("无会话 ID", "No session ID") : <span className="row-actions">
                         {session.id.slice(0, 8)}…
                         <CopyButton
                           value={session.id}
@@ -205,21 +212,27 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
                             `Copied session ID ${session.id.slice(0, 8)}…`,
                           ))}
                         />
-                      </span>
+                      </span>}
                     </td>
-                    <td className="muted" title={session.connected_at}>{connectedLabel(session.connected_at)}</td>
+                    <td className="muted" title={(session.stateless ? session.first_seen : session.connected_at) ?? undefined}>
+                      {session.stateless
+                        ? `${t("首次观察", "First seen")} ${connectedLabel(session.first_seen)}`
+                        : connectedLabel(session.connected_at)}
+                    </td>
                     <td>{idleLabel(session.idle_ms)}</td>
-                    <td className="num">{session.calls > 0 ? session.calls : "—"}</td>
+                    <td className="num">{(session.calls ?? 0) > 0 ? session.calls : "—"}</td>
                     <td className="num">{session.active_requests > 0 ? session.active_requests : "—"}</td>
-                    <td className="num">{session.todos > 0 ? session.todos : "—"}</td>
+                    <td className="num">{(session.todos ?? 0) > 0 ? session.todos : "—"}</td>
                     <td className="actions">
-                      <span className="row-actions">
+                      {session.stateless || session.closable === false ? (
+                        <span className="muted">{t("不可断开", "Not disconnectable")}</span>
+                      ) : <span className="row-actions">
                         <ConfirmButton
                           label={t("断开", "Disconnect")}
                           disabled={closingId === session.id}
                           onConfirm={() => void close(session.id)}
                         />
-                      </span>
+                      </span>}
                     </td>
                   </tr>
                 ))}

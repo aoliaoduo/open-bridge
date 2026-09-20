@@ -74,7 +74,12 @@ test("normalize accepts the one-step lock command, TTL optional", () => {
 
 test("normalize validates the domain and concurrency payloads", () => {
   assert.deepEqual(normalizeSettingsMessage({ command: "saveDomain", domain: " my.ngrok-free.dev " }), { command: "saveDomain", domain: "my.ngrok-free.dev" });
-  assert.equal(normalizeSettingsMessage({ command: "saveDomain", domain: "   " }), null);
+  assert.deepEqual(normalizeSettingsMessage({ command: "saveDomain", domain: "   " }), { command: "saveDomain", domain: "" });
+  assert.deepEqual(normalizeSettingsMessage({ command: "saveDomain", domain: "" }), { command: "saveDomain", domain: "" });
+  for (const domain of [undefined, null, false, 123]) {
+    assert.equal(normalizeSettingsMessage({ command: "saveDomain", domain }), null,
+      "only an explicit string can clear the configured domain");
+  }
   // Embedded spaces pass through untouched — rewriting the user's input here
   // would launder "not a domain" into a plausible-looking hostname.
   assert.deepEqual(normalizeSettingsMessage({ command: "saveDomain", domain: "not a domain" }), { command: "saveDomain", domain: "not a domain" });
@@ -209,4 +214,11 @@ test("a key that is not a real setting is still refused", () => {
   assert.equal(normalizeSettingsMessage({ command: "setConfig", key: "notify.callNope", value: true }), null);
   assert.equal(normalizeSettingsMessage({ command: "setConfig", key: "notify.soundAttention", value: "x" }), null,
     "the ringtone setting was removed; writing to it must not silently succeed");
+});
+
+
+test("saveDomain leaves hostname length validation to the validator, not a truncation", () => {
+  const domain = `${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(62)}`;
+  assert.equal(domain.length, 254);
+  assert.deepEqual(normalizeSettingsMessage({ command: "saveDomain", domain }), { command: "saveDomain", domain });
 });

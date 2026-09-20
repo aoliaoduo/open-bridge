@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { ServicesTab } from "./ServicesTab";
 import type { ServiceView } from "../api";
 
@@ -58,5 +58,59 @@ describe("ServicesTab", () => {
     servicesMock.mockResolvedValue([]);
     render(<ServicesTab />);
     expect(await screen.findByText(/还没有保存过服务/)).toBeTruthy();
+  });
+});
+
+
+describe("ServicesTab concurrent actions", () => {
+  test.each(["web", "worker"])("keeps each row busy when %s finishes first", async first => {
+    const services = [web(true), { ...web(true), name: "worker", port: 5174 }];
+    servicesMock.mockResolvedValue(services);
+    const pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+    serviceActionMock.mockImplementation((_action: string, name: string) => new Promise((resolve, reject) => {
+      pending.set(name, { resolve, reject });
+    }));
+    render(<ServicesTab />);
+    await screen.findByText("worker");
+    const restart = (name: string) => within(screen.getByText(name).closest("tr")!)
+      .getByRole("button", { name: "重启" }) as HTMLButtonElement;
+
+    fireEvent.click(restart("web"));
+    fireEvent.click(restart("worker"));
+    fireEvent.click(restart("web"));
+    expect(serviceActionMock).toHaveBeenCalledTimes(2);
+    expect(serviceActionMock).toHaveBeenNthCalledWith(1, "restart", "web");
+    expect(serviceActionMock).toHaveBeenNthCalledWith(2, "restart", "worker");
+    expect(restart("web").disabled).toBe(true);
+    expect(restart("worker").disabled).toBe(true);
+
+    const other = first === "web" ? "worker" : "web";
+    await act(async () => { pending.get(first)!.resolve({ result: {}, services }); });
+    expect(restart(first).disabled).toBe(false);
+    expect(restart(other).disabled).toBe(true);
+    fireEvent.click(restart(other));
+    expect(serviceActionMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => { pending.get(other)!.reject(new Error(`${other}: restart failed`)); });
+    expect(screen.getByText(`${other}: restart failed`)).toBeTruthy();
+    expect(restart("web").disabled).toBe(false);
+    expect(restart("worker").disabled).toBe(false);
+
+    serviceActionMock.mockResolvedValueOnce({ result: {}, services });
+    await act(async () => { fireEvent.click(restart(other)); });
+    expect(serviceActionMock).toHaveBeenCalledTimes(3);
+  });
+
+  test("rejects same-row re-entry before React paints the disabled button", async () => {
+    servicesMock.mockResolvedValue([web(true)]);
+    serviceActionMock.mockReturnValue(new Promise(() => {}));
+    render(<ServicesTab />);
+    await screen.findByText("web");
+    const button = screen.getByRole("button", { name: "重启" });
+    act(() => {
+      fireEvent.click(button);
+      fireEvent.click(button);
+    });
+    expect(serviceActionMock).toHaveBeenCalledTimes(1);
   });
 });

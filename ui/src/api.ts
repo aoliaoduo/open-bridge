@@ -85,15 +85,21 @@ export interface SessionView {
   id: string;
   /** clientInfo from the handshake, or 未标识客户端 when the client sent none. */
   client: string;
-  /** When this session handshook — the row's 「首次连接」. */
-  connected_at: string;
-  /** Requests served on this session since it connected. */
-  calls: number;
+  /** Older Console servers omit these flags; those rows are legacy sessions. */
+  era?: "legacy" | "modern";
+  stateless?: boolean;
+  closable?: boolean;
+  /** A modern activity summary has no handshake or persistent session. */
+  connected_at: string | null;
+  first_seen?: string;
+  /** Requests served on this session; null when no per-session counter exists. */
+  calls: number | null;
   last_used: string;
   /** Milliseconds since this session's last request — the reason to show the table. */
   idle_ms: number;
   active_requests: number;
-  todos: number;
+  /** null for stateless activity, which does not own a session todo list. */
+  todos: number | null;
 }
 
 export interface LockRow { key: string; mode?: string; label?: string; held_ms?: number }
@@ -193,8 +199,16 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
     },
     body: body === undefined ? "{}" : JSON.stringify(body),
   });
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(data.error ?? `POST ${path} → HTTP ${res.status}`);
+  const data = (await res.json().catch(() => undefined)) as (T & { error?: string }) | undefined;
+  if (!res.ok) throw new Error(data?.error ?? `POST ${path} → HTTP ${res.status}`);
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    // A broken reply does not prove that the write failed. Keep the existing
+    // screen state, report uncertainty, and never replay a mutation here.
+    throw new Error(t(
+      `POST ${path} → 响应不是有效 JSON 对象 (HTTP ${res.status})；操作结果未知，请刷新核对，勿直接重复提交。`,
+      `POST ${path} → response was not a valid JSON object (HTTP ${res.status}); outcome unknown. Refresh to verify before submitting again.`,
+    ));
+  }
   return data;
 }
 
