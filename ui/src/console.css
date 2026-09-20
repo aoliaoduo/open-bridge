@@ -579,7 +579,6 @@ button {
 }
 button:not(:disabled):hover { border-color: var(--accent); }
 button:not(:disabled):active { transform: translateY(1px); }
-button:disabled { opacity: .5; cursor: not-allowed; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 500; }
 button.primary:not(:disabled):hover { filter: brightness(1.08); }
 button.ghost { background: transparent; border-color: transparent; color: var(--muted); }
@@ -635,6 +634,42 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:foc
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--ring);
+}
+input[type="text"].is-readonly, input[type="number"].is-readonly, input[readonly] {
+  /* Reads as "set, not editing": lighter surface, hint-coloured text so the
+     masked Bark key does not invite clicks. The plain readOnly attribute
+     does nothing visually, and a lock-with-no-feedback is what operators
+     report as "the field is broken". */
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: default;
+}
+input[type="text"].is-readonly:focus, input[type="number"].is-readonly:focus, input[readonly]:focus {
+  outline: none;
+  box-shadow: none;
+}
+.card-summary-badge {
+  /* Card-head-actions lays its children out as flex chips; this rule keeps
+     the summary badge on the right edge of the header without crowding
+     neighbouring buttons. */
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  white-space: nowrap;
+}
+button:disabled, input:disabled, select:disabled, textarea:disabled {
+  /* The previous rule lowered opacity only, which on a busy background
+     blends back in. Desaturate as well so the disabled state is legible
+     without changing layout or colour of any enabled control. */
+  opacity: .55;
+  filter: saturate(.6);
+  cursor: not-allowed;
 }
 input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; }
 input[type="text"] { width: 260px; max-width: 100%; }

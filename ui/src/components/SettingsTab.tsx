@@ -815,10 +815,10 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
           moment a second channel existed: the event switches and the silence
           watchdog are not Bark's, they decide what is worth interrupting a
           person for, and each channel then answers it in its own way. */}
+      {/* The two events are fixed (waiting / finished), so this card has no
+          settings to fold — it is a description, and stays a plain Card. */}
       <Card
         id="set-notify-events"
-        collapsibleId="notify-events"
-        summary={t("两类 · 每轮一次", "two moments · once per round")}
         title={t("什么时候提醒你", "When we notify you")}
         desc={t("只在真正需要你回来处理时提醒，避免把进度变成打扰。", "Only interrupt when you genuinely need to return; progress is never an alert.")}
       >
@@ -852,11 +852,13 @@ export function SettingsTab({ settings, act, notify, section, onSectionChange }:
             <span className="field-control">
               <input
                 type="text"
+                className={settings.notify.configured && barkKeyDraft === null ? "is-readonly" : ""}
                 value={barkKeyDraft ?? (settings.notify.configured ? settings.notify.keyMask : "")}
                 placeholder={settings.notify.configured
                   ? t("粘贴新密钥可替换（输入框仅显示掩码）", "Paste a new key to replace it (the field only shows a mask)")
                   : t("https://api.day.app/ 后面的那串专属路径", "The unique path that follows https://api.day.app/")}
                 readOnly={settings.notify.configured && barkKeyDraft === null}
+                aria-readonly={settings.notify.configured && barkKeyDraft === null}
                 onChange={e => setBarkKeyDraft(e.target.value)}
               />
               <button

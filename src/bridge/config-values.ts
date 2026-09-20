@@ -383,5 +383,8 @@ export function canonicalBarkOrigin(input: string): string {
 export function maskBarkKey(key: string): string {
   if (!key) return "";
   if (key.length <= 8) return "••••••••";
-  return `${key.slice(0, 4)}…${"•".repeat(Math.min(key.length - 6, 20))}…${key.slice(-2)}`;
+  // Prefix4 … 8 dots … suffix2 — keeps the part the operator needs to spot
+  // a key next to the rest of the screen, and the spaces around `…` keep
+  // the masked middle from merging into either end visually.
+  return `${key.slice(0, 4)} … ${"•".repeat(8)} … ${key.slice(-2)}`;
 }

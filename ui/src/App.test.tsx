@@ -707,8 +707,12 @@ describe("App shell: grouped navigation", () => {
     const { unmount } = render(<App />);
     const header = await screen.findByRole("button", { name: /手机（Bark）/ });
     expect(header.getAttribute("aria-expanded")).toBe("true");
-    // Open: the device key field is reachable.
+    // Open: the device key field is reachable. The same status summary that
+    // the collapsed card shows must also be visible as a badge next to the
+    // title, otherwise an operator who never folds the card has no way to
+    // tell whether a key is configured.
     expect(screen.getByText("Bark 设备密钥")).toBeTruthy();
+    expect(screen.getAllByText(/已配置|缺设备密钥|已关闭/).length).toBeGreaterThanOrEqual(1);
 
     fireEvent.click(header);
     expect(header.getAttribute("aria-expanded")).toBe("false");
@@ -721,6 +725,22 @@ describe("App shell: grouped navigation", () => {
     render(<App />);
     const again = await screen.findByRole("button", { name: /手机（Bark）/ });
     expect(again.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  /**
+   * The "when we notify you" card is a description of the two fixed events,
+   * not a settings row. Folding it would be a click that does nothing.
+   */
+  test("the explanation card has nothing to fold", async () => {
+    window.history.pushState({}, "", "/console/settings/notify");
+    render(<App />);
+    // Explanation text is reachable without any fold target.
+    expect(await screen.findByText(/一轮对话结束时提醒一次/)).toBeTruthy();
+    // And there is no fold button on the explanation card — only the two
+    // channel cards (Bark + Local sound) carry aria-expanded.
+    expect(
+      screen.queryByRole("button", { name: /什么时候提醒你/ }),
+    ).toBeNull();
   });
 
 });

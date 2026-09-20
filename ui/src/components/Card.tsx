@@ -56,9 +56,12 @@ export function Card({ id, title, desc, actions, children, collapsibleId, summar
   const toggle = useCallback(() => setOpen(value => !value), []);
 
   if (!collapsibleId) {
+    const headActions = summary
+      ? <>{actions}<span className="card-summary-badge">{summary}</span></>
+      : actions;
     return (
       <div className="card" id={id}>
-        <CardHead title={title} desc={desc} actions={actions} />
+        <CardHead title={title} desc={desc} actions={headActions} />
         {children}
       </div>
     );
@@ -82,6 +85,7 @@ export function Card({ id, title, desc, actions, children, collapsibleId, summar
         <>
           {desc ? <p className="card-desc">{desc}</p> : null}
           {actions ? <div className="card-head-actions">{actions}</div> : null}
+          {summary ? <div className="card-head-actions"><span className="card-summary-badge">{summary}</span></div> : null}
           {children}
         </>
       ) : null}

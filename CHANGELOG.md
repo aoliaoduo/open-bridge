@@ -35,6 +35,8 @@
 ### Fixed
 
 
+- 修复通知设置页：折叠与展开状态都显示「手机/本机声音」状态徽章；Bark 设备密钥在锁定时新增只读视觉反馈；按钮 disabled 同时降饱和度便于辨识；「什么时候提醒你」从可折叠改为静态描述卡（无可揭示内容）；Bark 密钥掩码格式改为 `前缀4 … 8 个点 … 后缀2`，避免前后省略号与圆点合并。新增对应 UI 测试。
+
 - 审计依赖、打包清单与发布资产：`@modelcontextprotocol/sdk`、`@modelcontextprotocol/server`、`@modelcontextprotocol/node` 各自是必要的 v1/v2 协议直接依赖；其余 devDep 全部由 vitest/vite/jsdom 与 typescript-eslint 实际使用，无可删除的冗余。`scripts/`、`vendor/`、`package.json` `files` 与 package-check 三方一致；当前没有发现需要删除或更新的过期资产。
 - 补全行为准则遗留的举报联系方式占位符，使用项目已公开的维护者联系渠道，并添加回归检查。
 - 加固文件复制、补丁、路径、自毁保护和换行处理，避免静默覆盖或错误 diff。
