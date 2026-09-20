@@ -1,10 +1,4 @@
-# Without this file GitHub keeps an "Open a blank issue" link next to the
-# templates, and a blank issue is how a report arrives with no version, no
-# exposure level and no pasted output — the three things the bug template
-# exists to collect.
-#
-# blank_issues_enabled: false does not block anyone. It removes the path of
-# least resistance, which is what a template competes with.
+# Use templates for ordinary reports; report vulnerabilities privately below.
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
@@ -13,8 +7,8 @@ contact_links:
       Anything that lets someone other than the operator reach the workspace,
       or exposes a secret the masking should have covered. Advisories are
       private; an issue is not.
-  - name: Conventions for changing this repo
-    url: https://github.com/aoliaoduo/open-bridge/blob/main/AGENTS.md
+  - name: Contributing to this repo
+    url: https://github.com/aoliaoduo/open-bridge/blob/main/CONTRIBUTING.md
     about: >-
-      Before opening an issue about something that looks wrong in the code,
-      check whether it is a documented convention.
+      Contributor setup, validation and pull-request guidance. Ordinary bug
+      reports do not require learning the implementation rules first.

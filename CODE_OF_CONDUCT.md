@@ -60,8 +60,9 @@ further defined and clarified by project maintainers.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
-TODO.
+reported privately to the project maintainer at
+[aoliaoduo@126.com](mailto:aoliaoduo@126.com) (the maintainer contact published in `package.json`).
+Do not post incident details in public issues.
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the

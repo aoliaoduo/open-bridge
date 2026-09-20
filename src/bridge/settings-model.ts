@@ -1,27 +1,12 @@
 /**
- * The settings contract: action shapes, page state, validation, labels.
- *
- * Deliberately dependency-free — no host, no bridge state, and imports only
- * from dependency-free sibling modules (`config-values.js`) — so it stays
- * the single definition shared by the HTTP layer (which validates and serves
- * it) and the React console (which imports these types instead of restating
- * them). Two copies of a contract drift; one cannot.
- *
- * Design contract (carried over from the original panel rework):
- *  - three type sizes only (11px labels / 12px body / 11px meta), no more
- *  - rows, not boxes-in-boxes; section separators are the only chrome
- *  - everything is a click: no QuickPick, no InputBox, no command palette.
- *    Two-step inline confirm ("确认?" arms a button for 3s) replaces modal
- *    warnings for destructive token actions.
- *  - the freshly minted secret is held by the HOST (never re-rendered away),
- *    displayed once in a full-page mask with copy + "I saved it" buttons.
+ * Shared console action/state types and input validation. Rendering belongs
+ * to ui/; value rules are shared with MCP through config-values.ts.
  */
 
 import { validateConfigValue } from "./config-values.js";
 import type { AutoConfigPlan, TunnelFacts } from "./tunnel-plan.js";
-// Type-only, so the dependency-free rule above still holds: this is erased at
-// compile time and the React console can import this file without dragging
-// node:fs in behind it.
+// Type-only: the console can use these shared types without importing the
+// executable resolver and its node:fs dependency at runtime.
 import type { ExecutableChoice } from "../shell/which.js";
 
 /** Whitelisted lifetimes for a newly created token (seconds; 0 = permanent). */
@@ -57,7 +42,6 @@ export interface SettingsTokenRow {
   use_count: number;
 }
 
-/** Config keys the page edits beyond the managed flows (tokens/domain/concurrency). */
 /** A one-time secret returned by minting or rotating a token. */
 export interface SecretPayload {
   kind: "minted" | "rotated";
@@ -216,88 +200,33 @@ export type SettingsAction =
 const COMMANDS_WITH_ID: ReadonlySet<string> = new Set(["rotateToken", "revokeToken", "deleteToken"]);
 const TTL_SET: ReadonlySet<number> = new Set(TTL_CHOICES.map(choice => choice.seconds));
 
-/**
- * Keys the page's generic config writes may touch. Deliberately does NOT
- * include auth/concurrency/domain/TTL: those have dedicated, guarded flows
- * and must never be reachable through the generic path. This is only the key
- * allowlist (plus the bounds the console mirrors); the per-key rules live in
- * config-values.ts, shared with `set_config_value`.
- */
-const CONFIG_SPEC = {
-  unrestrictedFileAccess: { kind: "boolean" },
-  autoReconnect: { kind: "boolean" },
-  ngrokUseHttpProxy: { kind: "boolean" },
-  // OAuth is a plain on/off switch plus a redirect-host allowlist, so it fits the
-  // generic path. The host list is validated as hosts by meta-tools; here it only
-  // has to be an array of non-empty strings.
-  "oauth.enabled": { kind: "boolean" },
-  "oauth.allowedRedirectHosts": { kind: "stringArray", maxItems: 50, maxLen: 253 },
-  tunnelProvider: { kind: "enum", values: ["none", "ngrok", "tailscale"] },
-  toolProfile: { kind: "enum", values: ["full", "core"] },
-  ngrokExecutable: { kind: "string", max: 500 },
-  tailscaleDomain: { kind: "string", max: 253 },
-  tailscaleExecutable: { kind: "string", max: 500 },
-  shellPath: { kind: "string", max: 500 },
-  allowedDirectories: { kind: "stringArray", maxItems: 50, maxLen: 500 },
-  shellArgs: { kind: "stringArray", maxItems: 50, maxLen: 500 },
-  port: { kind: "int", min: 0, max: 65535 },
-  publicHealthTimeoutMs: { kind: "int", min: 3000, max: 120000 },
-  logMaxBytes: { kind: "int", min: 0, max: 1024 * 1024 * 1024 },
-  // Notification delivery is intentionally fixed; only the channel switch and server can be edited here.
-  // The device key writes through saveNotifyKey and never appears in this read-only view.
-  "notify.enabled": { kind: "boolean" },
-  "notify.serverUrl": { kind: "string", max: 500 },
-  "sound.enabled": { kind: "boolean" },
-  "sound.fileWaiting": { kind: "string", max: 500 },
-  "sound.fileFinished": { kind: "string", max: 500 },
-} as const;
-
-export type SettingsConfigKey = keyof typeof CONFIG_SPEC;
-
-/**
- * Which CONTROL a key gets in the console, where its kind does not already say.
- *
- * The rule the settings page is being simplified under: choose, do not type.
- * A key whose value the machine can find is a pick-list, a key whose value only
- * the network knows is a choice out of what it returned, and a key that is
- * discovered on every start is read-only. Everything else keeps the control its
- * kind implies (boolean → a switch, enum → a select, int → a number…).
- *
- * Declared here, next to the key allowlist rather than in the component that
- * renders it, so a key cannot arrive on the page with an input shape nobody
- * declared — the same reason CONFIG_SPEC is not restated in the console.
- */
-const CONFIG_CONTROL_SHAPES = {
-  /** A path the machine can find: a list of what was found, plus "auto". */
-  ngrokExecutable: "detected-executable",
-  tailscaleExecutable: "detected-executable",
-  // The ts.net name is filled in from the CLI when the tunnel starts: the card
-  // shows it read-only, and the manual override lives in 高级设置.
-  tailscaleDomain: "discovered",
-} as const;
-
-export type ConfigControlShape = (typeof CONFIG_CONTROL_SHAPES)[keyof typeof CONFIG_CONTROL_SHAPES];
-
-/** The declared control for a key, or undefined when its kind already says. */
-export function configControlShape(key: SettingsConfigKey): ConfigControlShape | undefined {
-  return (CONFIG_CONTROL_SHAPES as Partial<Record<SettingsConfigKey, ConfigControlShape>>)[key];
-}
-
-/** The keys the tunnel card owns, in the order an operator meets them. */
-export const TUNNEL_CONFIG_KEYS: readonly SettingsConfigKey[] = [
-  "tunnelProvider",
-  "ngrokExecutable",
-  "tailscaleExecutable",
-  "tailscaleDomain",
+/** Generic console writes allow only these keys; value rules live in config-values.ts. */
+const CONFIG_KEYS = [
+  "unrestrictedFileAccess",
   "autoReconnect",
   "ngrokUseHttpProxy",
-];
-// The ngrok domain is NOT in this list on purpose: it is not a generic config
-// key at all (validateNgrokDomain owns its grammar, so CONFIG_SPEC excludes it),
-// and the card writes it through the dedicated saveDomain flow. Its control is
-// still 选择-over-填空 — a list of the account's reserved domains, read from the
-// same detection the rest of the card uses.
+  "oauth.enabled",
+  "oauth.allowedRedirectHosts",
+  "tunnelProvider",
+  "toolProfile",
+  "ngrokExecutable",
+  "tailscaleDomain",
+  "tailscaleExecutable",
+  "shellPath",
+  "allowedDirectories",
+  "shellArgs",
+  "port",
+  "publicHealthTimeoutMs",
+  "logMaxBytes",
+  "notify.enabled",
+  "notify.serverUrl",
+  "sound.enabled",
+  "sound.fileWaiting",
+  "sound.fileFinished",
+] as const;
 
+export type SettingsConfigKey = (typeof CONFIG_KEYS)[number];
+const CONFIG_KEY_SET: ReadonlySet<string> = new Set(CONFIG_KEYS);
 
 /**
  * Validate an inbound console action against a strict allowlist. Anything
@@ -404,7 +333,7 @@ export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
     }
     case "setConfig": {
       const key = typeof message.key === "string" ? message.key : "";
-      if (!(CONFIG_SPEC as Record<string, unknown>)[key]) return null;
+      if (!CONFIG_KEY_SET.has(key)) return null;
       // Same validator as `set_config_value`: one function, no drift. A
       // rejection here surfaces as the generic "无法识别的操作" — the same
       // shape every invalid console input already gets.

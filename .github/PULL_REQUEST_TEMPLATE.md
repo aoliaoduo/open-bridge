@@ -19,19 +19,17 @@ template.
 
 ## Checklist
 
-- [ ] `npm run verify` is green (typecheck + lint + build + all tests).
-      If you ran test layers individually: integration tests load `dist/`,
-      not `src/` -- build first.
-- [ ] New tests were run against the unfixed code and observed to fail
-      before being kept. If a test cannot be made to fail, that is stated
-      in its comment as reasoned, not reproduced.
+- [ ] `npm run release:check` passed; exact outcomes and any skipped or
+      unexecuted checks are listed below.
+- [ ] Test evidence follows [AGENTS.md](../AGENTS.md): bug regressions are
+      reproduced before the fix; added coverage is not claimed as a reproduced bug.
 - [ ] `CHANGELOG.md` `[Unreleased]` has an entry (Chinese, Keep a
       Changelog order) -- or this change is not observable by a user and
       that is stated here.
 
 ---
 
-# pull-request
+# pull-request（中文）
 
 **语言**：见上方的英文版。
 
@@ -47,10 +45,8 @@ template.
 
 ## Checklist
 
-- [ ] `npm run verify` 全绿（typecheck + lint + build + 全部测试）。
-      如果单独跑过某一层测试：集成测试加载的是 `dist/` 不是 `src/`，
-      先 build。
-- [ ] 新测试先跑给未修复的代码、确认红过才保留。做不出会失败的
-      测试的话，在它的注释里写明是推理而非复现。
+- [ ] `npm run release:check` 通过，列明结果、跳过或未执行项。
+- [ ] 测试证据遵循 [AGENTS.md](../AGENTS.md)：缺陷回归先复现；
+      新增覆盖不冒充已复现的缺陷。
 - [ ] `CHANGELOG.md` 的 `[Unreleased]` 有条目（中文，按 Keep a
       Changelog 分区）—— 或者这个改动用户观察不到，并在此说明。

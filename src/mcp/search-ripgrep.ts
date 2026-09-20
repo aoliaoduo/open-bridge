@@ -60,27 +60,6 @@ export function normalizeRgPath(p: string): string {
   return String(p).replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
-/**
- * Build context line references for a 0-based hit index into `lines`.
- * Shared by the ripgrep path and the built-in fallback walk.
- */
-export function buildContext(
-  lines: string[],
-  hitIndex: number,
-  contextLines: number,
-): { context_before: LineRef[]; context_after: LineRef[] } {
-  const n = Math.max(0, Math.floor(contextLines));
-  const context_before: LineRef[] = [];
-  const context_after: LineRef[] = [];
-  for (let i = Math.max(0, hitIndex - n); i < hitIndex; i++) {
-    context_before.push({ line: i + 1, text: lines[i] ?? "" });
-  }
-  for (let i = hitIndex + 1; i <= Math.min(lines.length - 1, hitIndex + n); i++) {
-    context_after.push({ line: i + 1, text: lines[i] ?? "" });
-  }
-  return { context_before, context_after };
-}
-
 export interface RipgrepOptions {
   query: string;
   cwd: string;

@@ -1,7 +1,7 @@
 <!--
-  Report what you actually saw. Do not paraphrase tool output -- paste it.
-  Wrong assumptions in a bug report are cheap to read; missing output is
-  expensive to reconstruct.
+  Report observed behavior with the smallest relevant command/output excerpt.
+  Redact MCP URLs, tokens, credentials and private paths before posting.
+  Do not upload a whole unreviewed log or conversation.
 -->
 
 **Language**: English below · [中文](#bug-report中文) at the bottom of this
@@ -9,7 +9,7 @@ template.
 
 ### What happened
 
-<!-- What you observed, including the exact command and the exact output. -->
+<!-- Observed behavior and a relevant command/output excerpt, with credentials and private paths redacted. -->
 
 ### What you expected
 
@@ -42,7 +42,7 @@ a secret that should have been masked: **do not use an issue** — open a
 
 ### 实际发生了什么
 
-<!-- 你看到的，包括确切的命令和确切的输出。 -->
+<!-- 实际现象和相关命令/输出片段。先移除 MCP URL、令牌、密钥及私人路径，不要直接上传整份日志或对话。 -->
 
 ### 你期望的是什么
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { emptyTunnelFacts, planTunnelAutoConfig, type AutoConfigInput, type AutoConfigWrite } from "../src/bridge/tunnel-plan.js";
+import { planTunnelAutoConfig, type AutoConfigInput, type AutoConfigWrite, type TunnelFacts } from "../src/bridge/tunnel-plan.js";
 import { detectNgrok } from "../src/bridge/ngrok-locate.js";
 
 /**
@@ -15,6 +15,30 @@ import { detectNgrok } from "../src/bridge/ngrok-locate.js";
  *    at every start and a stored copy that goes stale turns into a start-up
  *    error instead of a tunnel.
  */
+
+/** Unprobed facts are a test fixture, not a production fallback. */
+function emptyTunnelFacts(): TunnelFacts {
+  return {
+    ngrok: {
+      installed: false,
+      executable: "",
+      executableLabel: "",
+      authtokenSource: "none",
+      domains: [],
+      domainsError: null,
+    },
+    tailscale: {
+      installed: false,
+      executable: "",
+      executableLabel: "",
+      loggedIn: false,
+      domain: "",
+      online: false,
+      mountPort: null,
+      mountPublic: false,
+    },
+  };
+}
 
 function input(overrides: Partial<AutoConfigInput> = {}): AutoConfigInput {
   return {

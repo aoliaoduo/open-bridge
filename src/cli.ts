@@ -31,10 +31,9 @@
  * (a live instance / the local data dir / nothing), because that is what
  * determines how it can fail — not the alphabet.
  *
- * Two dependencies are INJECTED into those modules rather than imported by
- * them (setDefaultHome, setHostInstaller). AGENTS.md pins node-host.ts to
- * exactly two importers and this file is one of them; splitting the CLI must
- * not quietly become a third. See the note in cli/registry.ts.
+ * This composition root resolves the default home and installs the concrete
+ * host. Command modules receive those dependencies without depending on the
+ * file-backed host implementation themselves.
  */
 
 import * as fs from "node:fs";

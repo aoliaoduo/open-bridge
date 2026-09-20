@@ -95,11 +95,6 @@ export function buildBarkUrl(serverUrl: string, key: string, title: string, body
   return `${origin}/${encodeURIComponent(key)}${segments.join("")}?${query.toString()}`;
 }
 
-/** The only choices a model may make are what happened and the human wording. */
-export function notifyToolArgKeys(): readonly string[] {
-  return ["event", "title", "message"];
-}
-
 /**
  * One alert is enough while work is stopped. This latch is reset only when the
  * Bridge begins another ordinary tool call, which is the observable sign that
@@ -109,10 +104,6 @@ let alertSentInEpisode = false;
 
 export function beginNotificationEpisode(): void {
   alertSentInEpisode = false;
-}
-
-export function notificationEpisodeIsAlerted(): boolean {
-  return alertSentInEpisode;
 }
 
 export async function pushNotification(
@@ -226,10 +217,6 @@ export function finishNoticeVerdict(input: {
 let finishAnnouncedForMs = 0;
 let lastEndingSelfNotifyMs = 0;
 
-export function selfNotifyAnnouncementMs(): number {
-  return lastEndingSelfNotifyMs;
-}
-
 function markSelfNotified(atMs: number): void {
   if (atMs > lastEndingSelfNotifyMs) lastEndingSelfNotifyMs = atMs;
 }
@@ -242,7 +229,7 @@ export function finishNoticeTick(nowMs: number = Date.now()): boolean {
     ...activity,
     nowMs,
     canSpeak: canAnnounce(settings, "finished"),
-    notifiedSinceMs: selfNotifyAnnouncementMs(),
+    notifiedSinceMs: lastEndingSelfNotifyMs,
     announcedForMs: finishAnnouncedForMs,
   })) return false;
 

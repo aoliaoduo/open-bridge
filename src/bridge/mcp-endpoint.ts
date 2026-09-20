@@ -100,18 +100,7 @@ export const sharedEventStore = new BoundedInMemoryEventStore();
 // The advertised catalog (toolProfile + host-capability filters) lives in
 // tool-catalog.ts so tools/list and the status surface's tool_count agree.
 
-/**
- * Project instruction files (AGENTS.md / CLAUDE.md — DevSpace two-layer model,
- * root layer only): injected into server instructions so every session sees
- * the project's conventions. Bounded; absent files are simply skipped.
- */
-/**
- * The instructions every protocol era hands to a client: the base text, the
- * workspace's own instructions, and whatever skills were discovered. Held as
- * ONE literal because `createMcp` (stateful era) and `createSpecMcp`
- * (2026-07-28 era) both hand their client the same guidance — two copies of a
- * long prompt is how the two eras drift apart without anyone noticing.
- */
+/** Shared discovery guidance for both protocol eras, with bounded root project files. */
 function serverInstructions(): string {
   return SERVER_INSTRUCTIONS_BASE + shellSuffix() + notifySuffix() + projectInstructionSuffix() + skillsSuffix();
 }

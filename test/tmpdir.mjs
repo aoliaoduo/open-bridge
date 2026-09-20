@@ -1,22 +1,8 @@
 /**
- * Removing a temp workspace on Windows is not reliably synchronous.
- *
- * A test that spawns the bridge leaves the OS holding handles for a moment
- * after SIGTERM: the child's own exit is asynchronous, and antivirus or the
- * indexer may still have the directory open. `rmSync` then fails with EPERM
- * (or EBUSY/ENOTEMPTY) on a tree that is about to become deletable. The test
- * body has already passed at that point, so the failure lands in `after` and
- * reports a green suite as a red run.
- *
- * Seen on CI at run 34875097474: a docs-only commit failed on
- * `ob-timeout-ws-*` while the identical tree passed on the commit before and
- * the commit after. That is the shape of the problem -- it is not a bug the
- * suite is meant to catch, and a random red teaches contributors to ignore
- * CI, which is worse than the flake.
- *
- * So: retry briefly, then give up quietly. Cleanup failing is not a test
- * result. The OS reclaims the temp directory regardless, and a leaked folder
- * under TMPDIR costs nothing compared to a suite nobody trusts.
+ * Best-effort teardown for temporary workspaces. Windows child processes,
+ * antivirus and indexers may hold handles briefly after termination.
+ * Retry briefly; if cleanup still fails, warn and return false rather than
+ * mask the test result. A reported leftover is not claimed to be removed.
  */
 import { rmSync } from "node:fs";
 

@@ -56,30 +56,6 @@ export interface TunnelFacts {
   tailscale: TailscaleFacts;
 }
 
-/** The facts before anything was probed — used by the pre-host fallback state. */
-export function emptyTunnelFacts(): TunnelFacts {
-  return {
-    ngrok: {
-      installed: false,
-      executable: "",
-      executableLabel: "",
-      authtokenSource: "none",
-      domains: [],
-      domainsError: null,
-    },
-    tailscale: {
-      installed: false,
-      executable: "",
-      executableLabel: "",
-      loggedIn: false,
-      domain: "",
-      online: false,
-      mountPort: null,
-      mountPublic: false,
-    },
-  };
-}
-
 /**
  * One thing 「自动配置」 decides to write.
  *

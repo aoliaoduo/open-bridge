@@ -6,10 +6,8 @@
  * the readers, the loopback JSON client and the small path/pid helpers live
  * together here rather than being duplicated per command module.
  *
- * `resolveDefaultHome` is deliberately taken as a PARAMETER by the callers
- * rather than imported: AGENTS.md pins `node-host.js` to exactly two importers
- * (src/cli.ts and src/server/api-router.ts), and splitting the CLI must not
- * quietly add a third. cli.ts passes the resolved home in.
+ * cli.ts resolves the default home at the composition root and passes it in;
+ * registry lookup does not need a dependency on the concrete host.
  */
 
 import * as fs from "node:fs";
@@ -187,10 +185,8 @@ export function httpJson(
 /**
  * The default data dir, injected once by cli.ts at startup.
  *
- * This indirection exists for exactly one reason: `resolveDefaultHome` lives
- * in node-host.ts, which AGENTS.md pins to two importers. Splitting the CLI
- * into modules must not add a third, so the entry point — already one of the
- * two — hands the value down instead.
+ * The entry point owns environment/default-home resolution; command modules
+ * only need the resolved path, not the file-backed host implementation.
  */
 let defaultHome = "";
 

@@ -80,13 +80,6 @@ export async function withdrawPeer(filePath: string, token: string): Promise<voi
   await writePeers(filePath, (await readPeers(filePath)).filter(row => row.hash !== hash));
 }
 
-/** Looked up per request so a window that starts later is reachable at once. */
-export async function findPeerForToken(filePath: string, token: string): Promise<PeerRecord | undefined> {
-  if (!token) return undefined;
-  const hash = peerHash(token);
-  return (await readPeers(filePath)).find(row => row.hash === hash && row.pid !== process.pid);
-}
-
 export type PeerWriteResult = { file: string; ok: boolean; error?: string };
 
 export interface PeerRegistryEnvironment {

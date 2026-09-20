@@ -2,78 +2,47 @@
 
 English · [中文](#贡献指南)
 
-## Read AGENTS.md first
+## Prepare and verify
 
-[AGENTS.md](AGENTS.md) is the single source of truth for conventions inside
-this repository: parameter-guard rules, `noUncheckedIndexedAccess`
-discipline, Windows teardown traps, the `Host` interface boundary, how to
-audit dependencies on this machine. This file covers how to get a change in
-and deliberately does **not** repeat any of that — two copies of a rule are
-two copies that drift apart. When this file and AGENTS.md disagree, AGENTS.md
-wins and this file gets fixed.
+Use a Node version supported by [package.json](package.json), then:
 
-## Ground rules
+```bash
+npm ci
+npm run release:check
+```
 
-- Node `>= 22`. `npm ci`, then `npm run verify` (typecheck + lint + build +
-  all tests). **A change is not ready until that is green.** For a release
-  candidate, run `npm run release:check` as well: it verifies the exact npm
-  publish manifest contains the CLI, compiled server, console, and user docs —
-  but no `src/`, `test/`, or workflow files.
-- Commit messages are in English and explain **why** — the situation, what
-  was wrong with it, why the obvious fix was not taken. The history of this
-  repo is written that way; `git log` is the style guide.
-- `CHANGELOG.md` `[Unreleased]` entries are in Chinese, in Keep a Changelog
-  order (Added → Changed → Fixed). Notable changes get an entry; "notable"
-  includes behaviour changes and fixes a user could observe.
-- Documentation language: `README.md` is English and `README.zh-CN.md` is
-  Chinese. References under `docs/` retain their existing language; keep one
-  canonical document per topic rather than starting a parallel translation
-  tree. Update stale claims and implementation pointers when code moves.
+The release check runs typechecking, lint, build, all test layers and the npm
+package preflight. Include the exact checks and outcomes in your PR; explain
+failures, skips or checks you could not run instead of implying they passed.
 
-## Two traps that eat contributions
+[AGENTS.md](AGENTS.md) is the canonical source for implementation boundaries,
+test locations and regression evidence. Do not copy those rules here.
+[ARCHITECTURE.md](ARCHITECTURE.md) owns the module map; the optional
+[Agent workflow](docs/agent-collaboration-workflow.md) owns task selection,
+commit authorization and restart verification.
 
-**1. Integration tests run `dist/`, not `src/`.** `test/*.test.mjs` boots
-`bin/open-bridge.js`, which loads the compiled output. Change source, run
-the integration suite without `npm run build` first, and you will see the
-*old* behaviour — it looks exactly like "my fix didn't work". `npm run
-verify` builds before testing; if you run test layers individually, build
-first.
+## Keep the change focused
 
-**2. A new test must be shown to fail before it is kept.** Run it against
-the unfixed code and watch it go red. This repo has shipped tests that
-passed against the very bug they were named after; one pinned a bug as the
-expected behaviour (`idleMinutes 0 switches off both watchdogs, not just
-one`), so every later correct fix was marked broken by it. A test that
-cannot fail is worse than no test — it tells the next person that someone
-is guarding this. If a bug genuinely cannot be reproduced, say so in a
-comment (reasoned, not reproduced) instead of dressing inference up as
-regression coverage.
+- Explain the problem, behavior change and verification in the PR. Preserve
+  unrelated work and do not include generated output or credentials.
+- Commit messages are English and explain why. User-visible changes belong
+  in the Chinese `[Unreleased]` section of `CHANGELOG.md`.
+- Keep the two READMEs in their existing languages. Other reference documents
+  keep one canonical version per topic; update links and implementation
+  pointers rather than creating parallel copies of the rules.
+- Use the PR template as a report of evidence, not an extra implementation
+  policy. A new coverage test is not automatically a reproduced bug.
 
-## Where tests go
+## Security and conduct
 
-| Layer | Location | Runner |
-| --- | --- | --- |
-| Unit | `test/*.test.ts` | tsx |
-| Integration | `test/*.test.mjs` (glob-discovered, files run in parallel) | `node --test` |
-| UI | `ui/src/**` — **not** `test/`: `vitest.config.ts` only includes that location, and a UI test placed in `test/` silently never runs | vitest |
+Report vulnerabilities through a
+[private security advisory](https://github.com/aoliaoduo/open-bridge/security/advisories/new),
+not a public issue. Read [SECURITY.md](SECURITY.md) for the threat model and
+intentional product boundaries. Redact credentials and private paths from
+ordinary bug reports and transcripts.
 
-How to write each kind — readiness signals instead of fixed `delay()`,
-`removeTempDir()` for teardown, validator-test exemplars — is in
-[AGENTS.md](AGENTS.md).
-
-## Security
-
-Something that lets a party other than the operator reach the workspace, or
-exposes a secret the masking is supposed to cover, goes to a
-[GitHub security advisory](https://github.com/aoliaoduo/open-bridge/security/advisories/new) —
-not an issue. See [SECURITY.md](SECURITY.md). Read its "What is deliberately
-not locked down" section before filing: `unrestrictedFileAccess` defaulting
-on, non-zero exit codes not being failures, and the like are documented
-choices. The place to challenge a choice is an issue that argues the case.
-
-## License
-
-MIT. Submitting a contribution means it is under the same license.
+Follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Contributions are under
+[MIT](LICENSE).
 
 ---
 
@@ -81,40 +50,18 @@ MIT. Submitting a contribution means it is under the same license.
 
 [English](#contributing) · 中文
 
-## 先读 AGENTS.md
+使用 [package.json](package.json) 声明支持的 Node 版本，执行 `npm ci` 和
+`npm run release:check`。在 PR 中列出实际检查和结果；失败、跳过或未执行项都要说明。
 
-[AGENTS.md](AGENTS.md) 是这个仓库内部约定的**唯一正本**：参数守卫的规矩、`noUncheckedIndexedAccess` 的处理方式、Windows 上清理句柄的坑、`Host` 接口的边界、本机怎么跑依赖审计。本文件只讲「怎么把一个改动送进来」，**刻意不重复那些内容** —— 一条规矩写两份，就是两份各自漂移的开始。本文件和 AGENTS.md 冲突时，以 AGENTS.md 为准，然后来修本文件。
+实现边界、测试位置与回归证据只维护在 [AGENTS.md](AGENTS.md)，不要在这里复制。
+模块地图见 [ARCHITECTURE.md](ARCHITECTURE.md)；采用 Agent 协作时，选择、提交授权和
+重启验证见 [协作流程](docs/agent-collaboration-workflow.md)。
 
-## 基本要求
+- 改动围绕当前问题，保留无关工作；不提交产物、缓存、连接凭据或密钥。
+- 提交信息用英文说明原因；用户可观察变化写入中文 `CHANGELOG.md` 的 `[Unreleased]`。
+- 两份 README 沿用各自语言，其他参考文档每个主题保留一个正本，并及时更新链接。
+- PR 模板用于汇报证据，不另立一套规则；新增覆盖不应被冒充为已复现的缺陷。
+- 漏洞走[私密安全通告](https://github.com/aoliaoduo/open-bridge/security/advisories/new)；
+  普通问题报告和对话片段先脱敏。边界见 [SECURITY.md](SECURITY.md)。
 
-- Node `>= 22`。`npm ci`，然后 `npm run verify`（typecheck + lint + build +
-  全部测试）。**不全绿就不算做完。**候选发布还要运行
-  `npm run release:check`：它检查 npm 实际会发布的清单，确保 CLI、编译后的
-  服务端、控制台和用户文档都在包内，同时不发布 `src/`、`test/` 或工作流文件。
-- 提交信息用英文，重点写**为什么** —— 现场是什么、错在哪、为什么不用那个显而易见的修法。这个仓库的历史就是这么写的，`git log` 就是风格样板。
-- `CHANGELOG.md` 的 `[Unreleased]` 用中文，按 Keep a Changelog 的分区（Added → Changed → Fixed）。用户能观察到的行为变化和修复都该有条目。
-- 文档语言：`README.md` 英文、`README.zh-CN.md` 中文；`docs/` 各参考文档沿用已有语言，每个主题保留一个正本，**不要**另起平行翻译目录。模块移动或行为改变时，同步更新旧说法与源码指针。
-
-## 两个最容易吃掉外来贡献的坑
-
-**1. 集成测试跑的是 `dist/`，不是 `src/`。** `test/*.test.mjs` 启动 `bin/open-bridge.js`，加载的是编译产物。改完源码、不先 `npm run build` 就跑集成测试，看到的是**旧行为** —— 症状和「我的修复没生效」一模一样。`npm run verify` 会先 build 再测；单独跑某一层测试时，先 build。
-
-**2. 新测试在保留之前，必须先证明它会失败。** 把它跑给未修复的代码看一次，确认它红。这个仓库出过「测试对着它名字里那个 bug 照样通过」的事；还有一条把 bug 当成规格钉住（名字叫 `idleMinutes 0 switches off both watchdogs, not just one`），后来任何修对了行为的人都会被它判定为改坏。不会失败的测试比没有测试更糟 —— 它让下一个人以为这里有人守着。实在复现不了的，就在注释里写明这是推理而非复现，不要把推断包装成回归覆盖。
-
-## 测试放哪一层
-
-| 层 | 位置 | 运行器 |
-| --- | --- | --- |
-| 单元 | `test/*.test.ts` | tsx |
-| 集成（glob 自动收录，文件间并行） | `test/*.test.mjs` | `node --test` |
-| UI | `ui/src/**` —— **不是** `test/`：`vitest.config.ts` 的 include 只认那个位置，放进 `test/` 的 UI 测试会静默地不跑 | vitest |
-
-各层怎么写 —— 用就绪信号而不是固定 `delay()`、清理走 `removeTempDir()`、校验器测试的样板 —— 见 [AGENTS.md](AGENTS.md)。
-
-## 安全
-
-任何让操作者之外的人够到工作区、或让本该被掩码的密钥暴露出来的问题，走 [GitHub 安全通告](https://github.com/aoliaoduo/open-bridge/security/advisories/new)，**不要开 issue**。见 [SECURITY.md](SECURITY.md)。开 issue 前先读它的「What is deliberately not locked down」一节：`unrestrictedFileAccess` 默认开、非零退出码不算失败，这些是写明了理由的取舍。想挑战一个取舍，开一个把论据摆出来的 issue。
-
-## 许可证
-
-MIT。提交贡献即表示接受同一许可。
+遵守 [行为准则](CODE_OF_CONDUCT.md)。贡献采用 [MIT 许可](LICENSE)。

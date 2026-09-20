@@ -18,7 +18,7 @@ this template.
 ### Who is it for
 
 <!-- If this is about how the bridge behaves with AI clients: which
-     behaviour prompted it? Concrete transcripts beat imagined ones. -->
+     behaviour prompted it? Redacted, relevant transcripts beat imagined ones. -->
 
 ### Trade-offs you see
 
@@ -42,7 +42,7 @@ this template.
 ### 它是给谁的
 
 <!-- 如果这个需求和 AI 客户端的交互方式有关：是哪一种行为引出的？
-     真实的对话记录比想象的更有说服力。 -->
+     已脱敏的相关对话片段比想象的更有说服力。 -->
 
 ### 你看到的取舍
 

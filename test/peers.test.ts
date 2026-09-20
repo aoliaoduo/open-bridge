@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { bridgeTokenFromPath, findPeerIn, findPeerForToken, peerHash, peerRegistryCandidates, probePublicBridge, proxyToPeer, publishPeer, publishPeerTo, readPeers, withdrawPeer, withdrawPeerFrom, type PeerRecord } from "../src/http/peers.js";
+import { bridgeTokenFromPath, findPeerIn, peerHash, peerRegistryCandidates, probePublicBridge, proxyToPeer, publishPeer, publishPeerTo, readPeers, withdrawPeer, withdrawPeerFrom, type PeerRecord } from "../src/http/peers.js";
 
 const TOKEN_A = "a".repeat(32);
 const TOKEN_B = "b".repeat(32);
@@ -48,11 +48,11 @@ test("the shared registry stores a digest, never the token itself", async () => 
     assert.ok(!raw.includes(TOKEN_A) && !raw.includes(TOKEN_B), "registry leaked a route token");
     assert.ok(raw.includes(peerHash(TOKEN_A)), "registry should carry the token digest");
     assert.deepEqual((await readPeers(file)).map(row => row.port), [41_001, 41_002]);
-    assert.equal(await findPeerForToken(file, TOKEN_A), undefined);
-    assert.equal((await findPeerForToken(file, TOKEN_B))?.port, 41_002);
+    assert.equal(await findPeerIn([file], TOKEN_A), undefined);
+    assert.equal((await findPeerIn([file], TOKEN_B))?.port, 41_002);
     await withdrawPeer(file, TOKEN_B);
     assert.deepEqual((await readPeers(file)).map(row => row.port), [41_001]);
-    assert.equal(await findPeerForToken(file, TOKEN_B), undefined);
+    assert.equal(await findPeerIn([file], TOKEN_B), undefined);
     await writeFile(file, "[{\"hash\":\"");
     assert.deepEqual(await readPeers(file), []);
   } finally { peer.stop(); }
@@ -65,7 +65,7 @@ test("a rotation replaces the instance row instead of leaving a dead digest behi
     await publishPeer(file, { token: TOKEN_A, port: 41_001, pid: process.pid, root: "C:/self", at: Date.now() });
     await publishPeer(file, { token: TOKEN_B, port: 41_001, pid: process.pid, root: "C:/self", at: Date.now() });
     assert.deepEqual((await readPeers(file)).map(row => row.hash), [peerHash(TOKEN_B)], "the old digest must not linger");
-    assert.equal(await findPeerForToken(file, TOKEN_A), undefined, "a rotated-away digest must not resolve");
+    assert.equal(await findPeerIn([file], TOKEN_A), undefined, "a rotated-away digest must not resolve");
     await publishPeer(file, { token: TOKEN_B, port: 41_001, pid: process.pid, root: "C:/self", at: Date.now() });
     assert.equal((await readPeers(file)).length, 1, "re-publishing the same token stays idempotent");
     await publishPeer(file, { token: TOKEN_A, port: 41_002, pid: peer.pid, root: "C:/peer", at: Date.now() });

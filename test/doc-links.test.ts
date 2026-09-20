@@ -77,3 +77,12 @@ test("shared documentation uses placeholders for MCP connection credentials", ()
     .map(file => path.relative(root, file));
   assert.deepEqual(exposed, [], "replace instance-specific MCP addresses with placeholders in these documents");
 });
+
+// A copied policy with an unfinished reporting channel cannot be used safely.
+test("the conduct policy has a usable reporting contact, not a template placeholder", () => {
+  const policy = readFileSync(path.join(process.cwd(), "CODE_OF_CONDUCT.md"), "utf8");
+  const reporting = policy.match(/## Enforcement\r?\n([\s\S]*?)\r?\n## /)?.[1];
+  assert.ok(reporting, "missing reporting section");
+  assert.doesNotMatch(reporting, /\b(?:TODO|TBD|INSERT CONTACT)\b/i);
+  assert.match(reporting, /\]\((?:mailto:|https:\/\/)[^)]+\)/, "publish an actionable reporting channel");
+});

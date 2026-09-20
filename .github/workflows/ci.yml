@@ -3,7 +3,7 @@ name: CI
 # Current documentation has executable contracts: relative/source references
 # must resolve and connection examples must not contain live credentials.
 # Do not skip those checks merely because a change only touches Markdown.
-# Release history, conduct text and the license remain prose-only exceptions;
+# Release history and the license remain prose-only exceptions;
 # manual runs are still available for release verification.
 on:
   push:
@@ -11,7 +11,6 @@ on:
     paths:
       - "**"
       - "!CHANGELOG.md"
-      - "!CODE_OF_CONDUCT.md"
       - "!LICENSE"
   pull_request:
   workflow_dispatch:
