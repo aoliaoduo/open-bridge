@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] — 2026-09-20
+
 ### Changed
 
 - `list_directory` / `search_files` 的已公布 inputSchema 与运行时对齐：`depth` 移除 1–3 枚举（小于 1 钳制为 1、更大的值按请求递归），`context` 移除 0–20 上下限（超界钳制）——运行时接受的合法调用不再违反自己公布的契约。
