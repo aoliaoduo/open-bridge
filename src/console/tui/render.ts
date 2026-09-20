@@ -229,7 +229,12 @@ function renderEvents(snap: TuiSnapshot, width: number, budget: number, spin: nu
   const out: string[] = [];
   const head = "─ 活动 ";
   out.push(paint("dim", `${head}${fillVisualWidth("─", Math.max(1, width - visualWidth(head)))}`));
-  for (const event of snap.events.slice(0, Math.max(0, budget - 1))) {
+  // Events are chronological (oldest first), so the newest — what an
+  // operator glances for — sit at the END: take from the back. Slicing from
+  // the front would freeze the stream on the session's oldest rows the
+  // moment the budget shrank.
+  const take = Math.max(0, budget - 1);
+  for (const event of snap.events.slice(Math.max(0, snap.events.length - take))) {
     out.push(eventRow(event, width, spin, now));
   }
   return out;

@@ -141,12 +141,13 @@ test("buildSnapshot counts live state and redacts the route token", () => {
 
 test("buildSnapshot reports a duration only for observed invoke/outcome pairs", () => {
   const snap = buildSnapshot(fixtureView(), { version: "v", rootName: "r", logPath: "l", now: 60_000 });
-  // Newest first: the still-open invoke, then the completed call — whose own
-  // invoke row retired when the outcome landed, leaving ONE row with duration.
-  assert.equal(snap.events[0]?.tool, "send_to_shell");
-  assert.equal(snap.events[0]?.status, "running");
-  assert.equal(snap.events[1]?.tool, "run_command");
-  assert.equal(snap.events[1]?.durationMs, 1000);
+  // Chronological: the completed call first — its invoke row retired when the
+  // outcome landed, leaving ONE row with the real duration — then the
+  // still-open invoke, which is the array tail the panel follows.
+  assert.equal(snap.events[0]?.tool, "run_command");
+  assert.equal(snap.events[0]?.durationMs, 1000);
+  assert.equal(snap.events[1]?.tool, "send_to_shell");
+  assert.equal(snap.events[1]?.status, "running");
   assert.equal(snap.events.length, 2);
 
   const orphan = buildSnapshot(
@@ -171,10 +172,10 @@ test("invoke rows retire against outcome rows that carry no args summary", () =>
   };
   const snap = buildSnapshot(view, { version: "v", rootName: "r", logPath: "l", now: 60_000 });
   assert.equal(snap.events.length, 2, "both invokes retired into their outcomes");
-  assert.equal(snap.events[0]?.tool, "read_files");
-  assert.equal(snap.events[0]?.durationMs, 3000);
-  assert.equal(snap.events[1]?.tool, "run_command");
-  assert.equal(snap.events[1]?.durationMs, 1000);
+  assert.equal(snap.events[0]?.tool, "run_command");
+  assert.equal(snap.events[0]?.durationMs, 1000);
+  assert.equal(snap.events[1]?.tool, "read_files");
+  assert.equal(snap.events[1]?.durationMs, 3000);
 });
 
 test("process Started rows resolve their truth from the command table", () => {
@@ -191,12 +192,12 @@ test("process Started rows resolve their truth from the command table", () => {
     ["aaaa0000bbbb2222", { id: "aaaa0000bbbb2222", command: "finished one", done: true, startedAt: 1000, endedAt: 3500, output: { state: () => ({ totalBytes: 1, capacityBytes: 1 }) } }],
   ]);
   const snap = buildSnapshot(base, { version: "v", rootName: "r", logPath: "l", now: 60_000 });
-  assert.equal(snap.events[0]?.status, "running", "a live process keeps its spinner");
-  assert.equal(snap.events[0]?.durationMs, undefined, "a lifecycle row never shows a paired-call duration");
+  assert.equal(snap.events[0]?.status, "progress", "a pruned process degrades to a neutral marker");
+  assert.equal(snap.events[0]?.durationMs, undefined);
   assert.equal(snap.events[1]?.status, "completed", "a finished process shows its real lifetime");
   assert.equal(snap.events[1]?.durationMs, 2500);
-  assert.equal(snap.events[2]?.status, "progress", "a pruned process degrades to a neutral marker");
-  assert.equal(snap.events[2]?.durationMs, undefined);
+  assert.equal(snap.events[2]?.status, "running", "a live process keeps its spinner");
+  assert.equal(snap.events[2]?.durationMs, undefined, "a lifecycle row never shows a paired-call duration");
 });
 
 test("renderFrame fills the exact geometry and shows the dashboard vocabulary", () => {
@@ -300,18 +301,25 @@ test("workbench panel follows the tail and reports history when scrolled", () =>
   assert.doesNotMatch(tailText, /End 回底/, "no history indicator while following the tail");
 
   // 30 events, 25 visible rows: the tail starts five rows in. Scrolling to
-  // firstVisible 2 leaves two rows of history above the view.
-  const many = Array.from({ length: 30 }, (_, i) => ({
-    at: new Date(1000 + i).toISOString(),
-    ts: 1000 + i,
-    tool: `tool_${i}`,
+  // firstVisible 2 leaves two rows of history above the view. The array
+  // mirrors the real log (state.activity.unshift): NEWEST FIRST, so tool_29
+  // (ts 1029) at index 0 is the newest event — follow must land on it, never
+  // on the oldest window.
+  const many = Array.from({ length: 30 }, (_, j) => ({
+    at: new Date(1029 - j).toISOString(),
+    ts: 1029 - j,
+    tool: `tool_${29 - j}`,
     status: "completed" as const,
-    message: `m${i}`,
+    message: `m${29 - j}`,
   }));
   const manySnap = buildSnapshot(
     { ...fixtureView(), activity: many },
     { version: "v", rootName: "r", logPath: "l", now: 60_000 },
   );
+  const follow = renderFrame(manySnap, { width: 110, height: 30, now: 60_000 });
+  const followText = follow.map(stripAnsi).join("\n");
+  assert.match(followText, /tool_29/, "follow locks onto the newest event once the panel overflows");
+  assert.doesNotMatch(followText, /tool_0 /, "the oldest events are history when the panel overflows");
   const scrolled = renderFrame(manySnap, { width: 110, height: 30, now: 60_000, firstVisible: 2 });
   const scrollText = scrolled.map(stripAnsi).join("\n");
   assert.match(scrollText, /↑2 行 · End 回底/, "scrolled view shows rows-above and the way back");
