@@ -50,6 +50,7 @@ import { setExtraRouteHandler, setLocalServerReadyHook } from "./bridge/route-ho
 import { markHostProcess } from "./bridge/stop-guard.js";
 import { armShutdownDeadline } from "./bridge/shutdown-deadline.js";
 import { apiRouteHandler, setShutdownHook } from "./server/api-router.js";
+import { startConsoleTui, stopConsoleTui } from "./console/tui/driver.js";
 
 import { fail, parseArgs, type ParsedArgs } from "./cli/args.js";
 import { padLabel } from "./cli/format.js";
@@ -294,6 +295,9 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
+    // Leave the alternate screen FIRST: the "stopping..." line below belongs on
+    // the operator's real terminal, not inside a frame that is about to die.
+    try { stopConsoleTui(); } catch { /* never block shutdown */ }
     console.log(`\n[open-bridge] ${signal} received, stopping...`);
     // Armed before the first await: whatever the graceful path ends up waiting
     // on, the operator said stop and this ends with a dead process.
@@ -389,6 +393,19 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   ));
   console.log("");
   console.log(t("Ctrl+C 停止。", "Ctrl+C to stop."));
+
+  // Stage-1 serve console (ainovel-cli-style): an alternate-screen dashboard
+  // that repaints in place. Ctrl+C keeps its normal meaning (no raw mode) and
+  // the original screen — banner included — comes back on stop. Anything
+  // without a real console (service, CI, redirect, --no-tui) keeps the plain
+  // output path untouched.
+  if (!parsed.flags.has("no-tui")) {
+    startConsoleTui({
+      version: VERSION,
+      rootName: path.basename(projectRoot),
+      logPath: nodeHost.bridgeLog.path(),
+    });
+  }
 
   if (openConsole) {
     const { spawn } = await import("node:child_process");
