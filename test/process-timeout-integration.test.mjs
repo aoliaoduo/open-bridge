@@ -297,3 +297,76 @@ test("ready_timeout_ms is the wait, and a process that misses it is reported, no
   // An endless process is not a nice thing to leave behind on the machine.
   await callTool("process_control", { action: "terminate", command_id: res.command_id });
 });
+
+test("close_shell takes the session's background jobs with it", {
+  skip: process.platform !== "win32"
+    ? "the MSYS process-group reap is win32-only; POSIX close relies on the shell's own exit"
+    : false,
+  timeout: 120_000,
+}, async () => {
+  // A session shell exists so jobs can outlive one send_to_shell call —
+  // watchers, `npm run dev &`, `sleep 300 &`. close_shell answered closed:true
+  // while leaking exactly those jobs: the graceful "exit\n" made bash exit
+  // (bash does NOT take background children with it), which set cmd.done and
+  // skipped the kill path entirely; and even when the kill ran, a single
+  // `taskkill /T /F` cannot see MSYS exec-emulation orphans — their Windows
+  // parent links point at dead intermediate pids. Same root cause as the
+  // terminate-budget refusal above, different symptom: a silent leak of
+  // unstoppable strays instead of an honest refusal.
+  //
+  // The orphans are renamed copies of sleep so this assertion cannot be
+  // disturbed by the plain `sleep` other integration files run in parallel.
+  const cp = asObject(await callTool("run_command", { command: "cp /usr/bin/sleep ob-sleep && echo copied", timeout_ms: 20_000 }));
+  assert.match(cp.output ?? "", /copied/, "the unique orphan binary is in place");
+
+  const name = "ob-close-tree";
+  const opened = await callTool("open_shell", { name });
+  assert.equal(opened.isError, false, `open_shell answered: ${opened.text.slice(0, 200)}`);
+
+  /** Live (msys pid, winpid) pairs of our orphan binaries, per `ps -W`. */
+  const alivePairs = async () => {
+    const snap = asObject(await callTool("run_command", {
+      command: "ps -W | awk '$8 ~ /ob-sleep/ {print $1, $4}'",
+      timeout_ms: 20_000,
+    }));
+    return new Set(
+      (snap.output ?? "").split(/\r?\n/).map(l => l.trim()).filter(l => /^\d+ \d+$/.test(l)),
+    );
+  };
+
+  let rows = [];
+  try {
+    const sent = asObject(await callTool("send_to_shell", {
+      name,
+      command: "./ob-sleep 300 & ./ob-sleep 300 & ./ob-sleep 300 & echo spawned",
+      timeout_ms: 20_000,
+    }));
+    assert.equal(sent.timed_out, false, `backgrounding returns at once: ${JSON.stringify(sent).slice(0, 200)}`);
+    assert.match(sent.output ?? "", /spawned/, "the session ran the line");
+
+    rows = [...(await alivePairs())];
+    assert.ok(rows.length >= 3, `three background jobs are visible in ps -W: ${rows.join(", ")}`);
+
+    const closed = asObject(await callTool("close_shell", { name }));
+    assert.equal(closed.closed, true, `close_shell reports closed: ${JSON.stringify(closed).slice(0, 200)}`);
+
+    await delay(2500);
+    const still = await alivePairs();
+    const survivors = rows.filter(r => still.has(r));
+    assert.equal(survivors.length, 0,
+      `close_shell killed the session's background jobs; survivors (msys pid, winpid): ${survivors.join(", ")}`);
+  } finally {
+    await callTool("close_shell", { name }).catch(() => {});
+    const still = await alivePairs().catch(() => new Set());
+    const strays = rows.filter(r => still.has(r));
+    if (strays.length) {
+      // Never leave five-minute strays on the machine, red or green. Kill by
+      // the recorded MSYS pid only after re-verifying the (pid, winpid) pair
+      // still exists, so a recycled pid can never be hit.
+      await callTool("run_command", {
+        command: strays.map(r => `kill -9 ${r.split(" ")[0]} 2>/dev/null`).join("; "),
+        timeout_ms: 20_000,
+      }).catch(() => {});
+    }
+  }
+});

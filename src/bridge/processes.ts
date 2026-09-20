@@ -380,7 +380,7 @@ async function descendantPids(rootPid: number): Promise<number[]> {
 }
 
 /** True when the configured shell is a POSIX-style (MSYS) shell whose process family shares a group. */
-function shellIsBashLike(): boolean {
+export function shellIsBashLike(): boolean {
   const n = shellSpec().file.toLowerCase().replace(/\\/g, "/");
   return n.includes("bash") || n.endsWith("/sh") || n.endsWith("/sh.exe") || n.includes("/bin/sh");
 }
@@ -419,6 +419,40 @@ async function terminateMsysGroups(winPids: number[]): Promise<void> {
   } catch { /* family already gone, ps unavailable, or the helper refused — taskkill follows */ }
 }
 
+/**
+ * Kill a Windows process family, MSYS-aware. Shared by terminateProcess and
+ * closeShell so the two cannot drift apart — closeShell's "like
+ * terminateProcess" tree-kill comment predated the MSYS group fix and silently
+ * leaked session background jobs.
+ *
+ * bash-like shells: enumerate the Windows-visible members, kill their MSYS
+ * process groups FIRST (the only view that still knows the real family, and
+ * discoverable only while the members live), then taskkill the members.
+ * Native shells (PowerShell/cmd): Windows parent links are intact, so one
+ * atomic `taskkill /T /F` ends the whole family.
+ */
+export async function killWindowsProcessFamily(pid: number): Promise<void> {
+  if (shellIsBashLike()) {
+    const pids = await descendantPids(pid);
+    await terminateMsysGroups(pids);
+    for (const targetPid of pids) {
+      try {
+        await execFileAsync("taskkill.exe", ["/pid", String(targetPid), "/f"], {
+          windowsHide: true,
+          timeout: 3000,
+        });
+      } catch { /* taskkill refuses an already-dead pid */ }
+    }
+  } else {
+    try {
+      await execFileAsync("taskkill.exe", ["/pid", String(pid), "/T", "/F"], {
+        windowsHide: true,
+        timeout: 3000,
+      });
+    } catch { /* taskkill refuses an already-dead pid; the caller's kill() follows */ }
+  }
+}
+
 /** Kill the shell and every child it launched. Git Bash otherwise leaves jobs running on Windows. */
 export async function terminateProcess(
   commandState: CommandState,
@@ -437,38 +471,11 @@ export async function terminateProcess(
   const pid = commandState.child.pid;
   try {
     if (process.platform === "win32" && pid) {
-      if (shellIsBashLike()) {
-        // MSYS family: the process groups must die BEFORE taskkill removes the
-        // members whose MSYS rows are the only way to discover those groups
-        // (a dead member's row — and its PGID — is gone from `ps -W`). The
-        // enumeration yields the Windows-visible members (the win32 launcher we
-        // spawned and the `/usr/bin/bash` executor linked to it); the group
-        // kill then reaps the executor plus every background child it ever
-        // spawned, including the exec-emulation orphans that Windows parent
-        // links cannot see.
-        const pids = await descendantPids(pid);
-        await terminateMsysGroups(pids);
-        for (const targetPid of pids) {
-          try {
-            await execFileAsync("taskkill.exe", ["/pid", String(targetPid), "/f"], {
-              windowsHide: true,
-              timeout: 3000,
-            });
-          } catch { /* taskkill refuses an already-dead pid; kill() follows */ }
-        }
-      } else {
-        // Native shell (PowerShell/cmd): Windows parent links are intact, so
-        // one atomic tree-kill ends the whole family.
-        try {
-          await execFileAsync("taskkill.exe", ["/pid", String(pid), "/T", "/F"], {
-            windowsHide: true,
-            timeout: 3000,
-          });
-        } catch { /* taskkill refuses an already-dead pid; kill() follows */ }
-      }
+      await killWindowsProcessFamily(pid);
     } else {
       commandState.child.kill();
-    }  } catch {
+    }
+  } catch {
     if (!commandState.child.killed) commandState.child.kill();
   }
   return await waitForProcessClose(commandState, options.closeTimeoutMs);

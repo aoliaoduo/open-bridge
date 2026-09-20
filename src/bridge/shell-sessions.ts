@@ -13,11 +13,10 @@ import { host } from "../host/host.js";
  * dies), then return everything emitted since the command started.
  */
 import { randomBytes } from "node:crypto";
-import { spawn, execFile, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { record, state, type CommandState } from "./state.js";
 import { workspacePath } from "./paths.js";
-import { shellSpec } from "./processes.js";
+import { killWindowsProcessFamily, shellIsBashLike, shellSpec } from "./processes.js";
 import { ProcessOutputBuffer, type ProcessOutputRead } from "../process/output-buffer.js";
 import { MAX_CAPTURED_OUTPUT } from "./state.js";
 import { windowsHideForChild } from "./child-console.js";
@@ -33,8 +32,6 @@ import { waitForSpawnSettled, clampMs } from "./process-tools.js";
 import type { JsonArgs } from "./json-args.js";
 
 type Args = JsonArgs;
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Bytes of merged output scanned for a completion marker per poll/self-heal
@@ -346,34 +343,45 @@ export async function closeShell(args: Args): Promise<Record<string, unknown>> {
   const cmd = state.commands.get(s.commandId);
   shellSessions.delete(name);
   if (cmd && !cmd.done) {
-    try { cmd.child.stdin.write("exit\n"); } catch { /* ignore */ }
-    await new Promise(r => setTimeout(r, 150));
-    if (!cmd.done) {
-      // Terminate the whole process tree (taskkill /T) like terminateProcess:
-      // a bare single-PID kill on Windows would leave children of the session
-      // shell (dev servers, background jobs) running as unstoppable orphans.
-      const pid = cmd.child.pid;
+    const pid = cmd.child.pid;
+    if (process.platform === "win32" && pid && shellIsBashLike()) {
+      // Straight to the family kill — no graceful "exit\n" first. Bash does
+      // NOT take background jobs with it when it exits, and once the executor
+      // dies, its MSYS process-group row — the only way to find those orphans
+      // (see killWindowsProcessFamily) — dies with it: a session closed
+      // "cleanly" leaked every `job &` as an unstoppable stray while still
+      // answering closed:true. Kill while the family is discoverable.
       try {
-        if (process.platform === "win32" && pid) {
-          await execFileAsync("taskkill.exe", ["/pid", String(pid), "/T", "/F"], {
-            windowsHide: true,
-            timeout: 3000,
-          });
-        } else {
-          cmd.child.kill();
-        }
+        await killWindowsProcessFamily(pid);
       } catch {
         try { cmd.child.kill(); } catch { /* ignore */ }
       }
+    } else {
+      try { cmd.child.stdin.write("exit\n"); } catch { /* ignore */ }
+      await new Promise(r => setTimeout(r, 150));
       if (!cmd.done) {
-        cmd.done = true;
-        // null, never an invented 0: this branch runs only when the shell
-        // survived "exit\n" AND the tree kill — nobody knows its exit code,
-        // and a fabricated 0 reads as "closed cleanly" in every consumer
-        // (get_process_snapshot, wait, the console) that checks it.
-        cmd.exitCode = cmd.exitCode ?? null;
-        cmd.lastEvent = "shell_closed";
+        // Terminate the whole process tree like terminateProcess: a bare
+        // single-PID kill on Windows would leave children of the session
+        // shell (dev servers, background jobs) running as unstoppable orphans.
+        try {
+          if (process.platform === "win32" && pid) {
+            await killWindowsProcessFamily(pid);
+          } else {
+            cmd.child.kill();
+          }
+        } catch {
+          try { cmd.child.kill(); } catch { /* ignore */ }
+        }
       }
+    }
+    if (!cmd.done) {
+      cmd.done = true;
+      // null, never an invented 0: this branch runs only when the shell never
+      // reported its own exit — nobody knows its exit code, and a fabricated 0
+      // reads as "closed cleanly" in every consumer (get_process_snapshot,
+      // wait, the console) that checks it.
+      cmd.exitCode = cmd.exitCode ?? null;
+      cmd.lastEvent = "shell_closed";
     }
   }
   host().ui.update();
