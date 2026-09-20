@@ -36,6 +36,10 @@ export interface SnapshotOptions {
   logPath: string;
   /** Injection point for tests; the driver passes nothing (real clock). */
   now?: number;
+  /** THIS process's launch instant (the driver captures it at console start):
+   *  「运行」 is process uptime, never the persisted stats window — a freshly
+   *  restarted Bridge used to claim 50 hours. */
+  launchedAt?: number;
 }
 
 const MAX_EVENTS = 40;
@@ -176,7 +180,7 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
           ? "blocked"
           : "local",
     mcpUrl: safeUrl,
-    uptimeMs: Math.max(0, now - view.usage.startedAt),
+    uptimeMs: Math.max(0, now - (options.launchedAt ?? now)),
     calls: view.usage.calls,
     successes: view.usage.successes,
     failures: view.usage.failures,

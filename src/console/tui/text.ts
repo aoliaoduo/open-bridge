@@ -48,11 +48,41 @@ const WIDE_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x30000, 0x3fffd],
 ];
 
+/**
+ * East-Asian AMBIGUOUS characters (middle dot, ellipsis, box drawing, blocks,
+ * geometric shapes, check/cross marks) render TWO columns in CJK-context
+ * terminals: the first live dashboard measured one column past the edge per
+ * painted line and the terminal ate the trailing character ("● 运行" lost its
+ * 中, "./open-bridge" lost its e). Under a zh/ja/ko locale they count as two.
+ * The opposite error (counting wide what renders narrow) only under-fills a
+ * line, which the driver's per-line erase masks — over-counting is safe,
+ * under-counting smears. The flag is settable so both regimes stay testable.
+ */
+const AMBIGUOUS_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x00b7, 0x00b7], // middle dot — the separator used everywhere
+  [0x2026, 0x2026], // ellipsis
+  [0x2500, 0x259f], // box drawing + block elements
+  [0x25a0, 0x25ff], // geometric shapes (● ◆ ○)
+  [0x26a0, 0x26a1], // ⚠
+  [0x2713, 0x2718], // ✓ ✕ and neighbours
+];
+let ambiguousWide = /^(zh|ja|ko)/i.test(`${process.env.LANG ?? ""}${process.env.LC_ALL ?? ""}`);
+
+/** Test seam: pin the ambiguous-width regime explicitly. */
+export function setAmbiguousWideForTests(value: boolean): void {
+  ambiguousWide = value;
+}
+
 function charWidth(code: number): 0 | 1 | 2 {
   if (code === 0) return 0;
   if (code < 32 || (code >= 0x7f && code < 0xa0)) return 0; // control characters
   for (const [lo, hi] of WIDE_RANGES) {
     if (code >= lo && code <= hi) return 2;
+  }
+  if (ambiguousWide) {
+    for (const [lo, hi] of AMBIGUOUS_RANGES) {
+      if (code >= lo && code <= hi) return 2;
+    }
   }
   return 1;
 }
@@ -104,6 +134,19 @@ export function padStartVisual(text: string, width: number): string {
 }
 
 /**
+ * Fill exactly `width` columns by repeating `ch`. A 2-column rule cannot split
+ * the last cell, so the remainder is padded with spaces — "─".repeat(width)
+ * is only correct when every repetition renders one column, which stops being
+ * true the moment a CJK-terminal regime doubles the box-drawing characters.
+ */
+export function fillVisualWidth(ch: string, width: number): string {
+  const w = visualWidth(ch);
+  if (w <= 0 || width <= 0) return "";
+  const full = Math.floor(width / w);
+  return ch.repeat(full) + " ".repeat(width - full * w);
+}
+
+/**
  * The character occupying visual column `column` (0-based), "" when past the
  * end or when a wide character straddles the column. String indexing cannot
  * answer this on CJK-containing lines: one code unit can be two columns wide.
@@ -111,15 +154,10 @@ export function padStartVisual(text: string, width: number): string {
 export function charAtColumn(text: string, column: number): string {
   let col = 0;
   for (const ch of stripAnsi(text)) {
-    const code = ch.codePointAt(0) ?? 0;
-    const w = (code >= 0x1100 && (
-      code <= 0x115f || (code >= 0x2e80 && code <= 0xa4cf) || (code >= 0xac00 && code <= 0xd7a3)
-      || (code >= 0xf900 && code <= 0xfaff) || (code >= 0xfe30 && code <= 0xfe4f)
-      || (code >= 0xff00 && code <= 0xff60) || (code >= 0x1f300 && code <= 0x1f64f)
-      || (code >= 0x20000 && code <= 0x3fffd)
-    )) ? 2 : (code < 32 ? 0 : 1);
-    if (col === column && w > 0) return ch;
-    if (w > 0) col += w;
+    const w = charWidth(ch.codePointAt(0) ?? 0);
+    if (w === 0) continue;
+    if (col === column) return ch;
+    col += w;
     if (col > column) return "";
   }
   return "";

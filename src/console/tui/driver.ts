@@ -70,6 +70,9 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
   if (!out.isTTY) return false;
   if (active) return true;
   active = true;
+  // THIS process's start: 「运行」 must not read the persisted stats window
+  // (a freshly restarted Bridge used to claim 50 hours of uptime).
+  const launchedAt = Date.now();
 
   const write = (payload: string): void => {
     try { out.write(payload); } catch { /* a dead pipe must never crash the bridge */ }
@@ -78,7 +81,7 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
     // The dashboard is an observer of the work, never part of it: any
     // rendering failure is swallowed and the next tick tries again.
     try {
-      const snapshot = buildSnapshot(state, options);
+      const snapshot = buildSnapshot(state, { ...options, launchedAt });
       lastEventCount = snapshot.events.length;
       const lines = renderFrame(snapshot, {
         width: out.columns ?? 80,

@@ -14,7 +14,7 @@
  */
 
 import { paint, healthColor, spinnerFrame, type ColorName } from "./theme.js";
-import { stripAnsi, truncateVisual, padEndVisual, padStartVisual, visualWidth } from "./text.js";
+import { fillVisualWidth, stripAnsi, truncateVisual, padEndVisual, padStartVisual, visualWidth } from "./text.js";
 
 export type TuiEventStatus = "running" | "completed" | "error" | "progress" | "warning";
 
@@ -83,7 +83,8 @@ const CAPSULE: Record<TuiSnapshot["bridgeState"], { icon: string; label: string;
 };
 
 const TUNNEL_TAG: Record<TuiSnapshot["tunnel"], { text: string; color: ColorName }> = {
-  public: { text: "隧道 ●", color: "accent" },
+  // The value must not repeat the field label: 「隧道 隧道 ●」 read as a stutter.
+  public: { text: "公网 ●", color: "accent" },
   local: { text: "仅本机", color: "dim" },
   follower: { text: "跟随实例", color: "review" },
   blocked: { text: "隧道受阻", color: "error" },
@@ -96,11 +97,14 @@ function bar(percent: number, cells: number): string {
 
 /** Wrap rows in a rounded box with an inline title (lipgloss RoundedBorder). */
 function boxLines(title: string, rows: string[], width: number): string[] {
-  const inner = width - 4;
+  // Border and padding costs are MEASURED, not assumed: in a CJK-terminal
+  // regime the box characters themselves render two columns each.
+  const side = visualWidth("│");
+  const inner = width - 2 * side - 2;
   if (inner < 10 || rows.length === 0) return [];
   const head = `─ ${title} `;
-  const top = `╭${head}${"─".repeat(Math.max(1, width - 2 - visualWidth(head)))}╮`;
-  const bottom = `╰${"─".repeat(width - 2)}╯`;
+  const top = `╭${head}${fillVisualWidth("─", Math.max(1, width - 2 * side - visualWidth(head)))}╮`;
+  const bottom = `╰${fillVisualWidth("─", width - 2 * side)}╯`;
   return [top, ...rows.map(row => `│ ${padEndVisual(row, inner)} │`), bottom];
 }
 
@@ -158,13 +162,12 @@ function renderOverviewRows(snap: TuiSnapshot, width: number): string[] {
     counters = candidate;
   }
 
-  // Row 2 — where to connect, and how far the tunnel reaches.
+  // The tunnel tag rides the counters row; the MCP address moved to the
+  // footer, which owns it exclusively (it used to appear in both places).
   const tag = TUNNEL_TAG[snap.tunnel];
-  const urlBudget = inner - visualWidth(tag.text) - 3;
-  const url = truncateVisual(`MCP ${snap.mcpUrl}`, Math.max(10, urlBudget));
-  const urls = `${paint("muted", url)}  ${paint(tag.color, tag.text)}`;
+  segments.push({ text: tag.text, color: tag.color });
 
-  return [counters, urls];
+  return [counters];
 }
 
 function renderProcessRows(snap: TuiSnapshot, width: number, maxRows: number): string[] {
@@ -225,7 +228,7 @@ function renderEvents(snap: TuiSnapshot, width: number, budget: number, spin: nu
   if (budget <= 0) return [];
   const out: string[] = [];
   const head = "─ 活动 ";
-  out.push(paint("dim", `${head}${"─".repeat(Math.max(1, width - visualWidth(head)))}`));
+  out.push(paint("dim", `${head}${fillVisualWidth("─", Math.max(1, width - visualWidth(head)))}`));
   for (const event of snap.events.slice(0, Math.max(0, budget - 1))) {
     out.push(eventRow(event, width, spin, now));
   }
@@ -233,21 +236,13 @@ function renderEvents(snap: TuiSnapshot, width: number, budget: number, spin: nu
 }
 
 function renderFooter(snap: TuiSnapshot, width: number): string[] {
-  const leftRest = ` open-bridge · 会话 ${snap.sessions}/${snap.maxSessions} · 调用 ${formatCount(snap.calls)} · 端口 ${snap.port}`;
-  const right = truncateVisual(`./${snap.rootName}`, Math.max(4, width - 12));
-  const rightW = visualWidth(right);
-  let leftCut = truncateVisual(leftRest, Math.max(10, width - rightW - 1));
-  let gapSpaces = width - 1 - visualWidth(leftCut) - rightW;
-  if (gapSpaces < 0) {
-    // The left side filled its budget exactly and the minimum gap would push
-    // past the edge — cut the left side further instead of overflowing.
-    leftCut = truncateVisual(leftRest, Math.max(4, visualWidth(leftCut) + gapSpaces));
-    gapSpaces = width - 1 - visualWidth(leftCut) - rightW;
-  }
-  if (gapSpaces < 0) gapSpaces = 0;
-  const line1 = `${paint("accent", "◆", { bold: true })}${paint("dim", leftCut)}${" ".repeat(gapSpaces)}${paint("dim", right)}`;
+  // One fact, one place: the top bar owns identity, port and status; the
+  // sidebar owns the counters and the tunnel; the footer owns the MCP address
+  // — the thing an operator reaches for. The first live screen printed the
+  // port three times, sessions and calls twice, and the workspace name twice.
+  const line1 = padEndVisual(paint("muted", truncateVisual(`MCP ${snap.mcpUrl}`, width)), width);
   const line2 = paint("dim", truncateVisual(`Ctrl+C 停止 · ↑↓ 滚动 · End 最新 · 日志 ${snap.logPath} · --no-tui 关闭界面`, width));
-  return [padEndVisual(line1, width), line2];
+  return [line1, line2];
 }
 
 // --- workbench layout (stage 3): fixed sidebar + scrollable event panel -----
@@ -300,15 +295,15 @@ function sidebarField(lines: string[], width: number, label: string, value: stri
   lines.push(`${labelPart} ${paint(color, truncateVisual(value, Math.max(4, width - 10)))}`);
 }
 
-function renderSidebar(snap: TuiSnapshot, width: number, busy: boolean): string[] {
+function renderSidebar(snap: TuiSnapshot, width: number): string[] {
   const lines: string[] = [];
   const section = (title: string): void => {
     lines.push(paint("dim", padEndVisual(`─ ${title} `, width)));
   };
 
   section("概览");
-  const capsule = CAPSULE[snap.bridgeState];
-  sidebarField(lines, width, "状态", `${capsule.icon} ${capsule.label}`, snap.bridgeState === "running" && busy ? "accent" : capsule.color);
+  // No 状态 field: the top-bar capsule already owns that fact — the first live
+  // screen showed it twice.
   const tag = TUNNEL_TAG[snap.tunnel];
   sidebarField(lines, width, "隧道", tag.text, tag.color);
   sidebarField(lines, width, "运行", formatDuration(snap.uptimeMs));
@@ -320,13 +315,15 @@ function renderSidebar(snap: TuiSnapshot, width: number, busy: boolean): string[
     sidebarField(lines, width, "服务", `${snap.serviceRows.filter(s => s.running).length}/${snap.serviceRows.length}`);
   }
 
-  section("进程");
-  if (snap.runningCommands.length === 0) lines.push(paint("dim", "（无运行中进程）"));
-  for (const command of snap.runningCommands.slice(0, 6)) {
-    const pct = command.capacityBytes > 0 ? Math.min(100, (command.capturedBytes / command.capacityBytes) * 100) : 0;
-    const right = `${Math.round(pct)}%`;
-    const left = truncateVisual(`▸ ${command.id.slice(0, 8)} ${command.command}`, Math.max(6, width - visualWidth(right) - 1));
-    lines.push(`${paint("text", left)} ${paint(healthColor(pct), right)}`);
+  if (snap.runningCommands.length > 0) {
+    // No empty placeholder section: the 概览 counter already says 进程 0.
+    section("进程");
+    for (const command of snap.runningCommands.slice(0, 6)) {
+      const pct = command.capacityBytes > 0 ? Math.min(100, (command.capturedBytes / command.capacityBytes) * 100) : 0;
+      const right = `${Math.round(pct)}%`;
+      const left = truncateVisual(`▸ ${command.id.slice(0, 8)} ${command.command}`, Math.max(6, width - visualWidth(right) - 1));
+      lines.push(`${paint("text", left)} ${paint(healthColor(pct), right)}`);
+    }
   }
 
   if (snap.serviceRows.length > 0) {
@@ -345,11 +342,11 @@ function renderWorkbench(
 ): string[] {
   const { width, height, spin, now, busy } = options;
   const sidebarW = Math.max(24, Math.min(40, Math.floor(width * 0.3)));
-  const panelW = width - sidebarW - 1;
+  const panelW = width - sidebarW - visualWidth("│");
   const bodyRows = height - 4;
   const rows = Math.max(1, bodyRows - 1);
 
-  const sidebar = renderSidebar(snap, sidebarW, busy).slice(0, bodyRows);
+  const sidebar = renderSidebar(snap, sidebarW).slice(0, bodyRows);
   while (sidebar.length < bodyRows) sidebar.push("");
 
   const maxFirst = maxFirstVisible(snap.events.length, rows);
@@ -366,14 +363,14 @@ function renderWorkbench(
   ];
   while (panel.length < bodyRows) panel.push("");
 
-  const lines: string[] = [renderTopBar(snap, width, busy, spin), paint("dim", "─".repeat(width))];
+  const lines: string[] = [renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width))];
   for (let i = 0; i < bodyRows; i += 1) {
     lines.push(`${padEndVisual(sidebar[i] ?? "", sidebarW)}${paint("dim", "│")}${padEndVisual(panel[i] ?? "", panelW)}`);
   }
   lines.push(...renderFooter(snap, width));
   return lines.slice(0, height).map(line => {
     const w = visualWidth(line);
-    if (w > width) return truncateVisual(stripAnsi(line), width);
+    if (w > width) return padEndVisual(truncateVisual(stripAnsi(line), width), width);
     return padEndVisual(line, width);
   });
 }
@@ -403,7 +400,7 @@ export function renderFrame(
     return renderWorkbench(snap, { width, height, spin, now, busy, firstVisible: options.firstVisible ?? Number.MAX_SAFE_INTEGER });
   }
 
-  const lines: string[] = [renderTopBar(snap, width, busy, spin), paint("dim", "─".repeat(width))];
+  const lines: string[] = [renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width))];
 
   const overview = boxLines("概览", renderOverviewRows(snap, width), width);
   const processRows = renderProcessRows(snap, width, 4);
@@ -415,10 +412,11 @@ export function renderFrame(
     eventsBudget += processes.length;
     processes.length = 0;
   }
-  if (eventsBudget < 1 && overview.length >= 3) {
-    // Drop the MCP row, keep the counters row.
-    overview.splice(2, 1);
-    eventsBudget += 1;
+  if (eventsBudget < 1 && overview.length > 0) {
+    // Still short: drop the overview box whole — the survival set is the top
+    // bar, one event row and the footer.
+    eventsBudget += overview.length;
+    overview.length = 0;
   }
   eventsBudget = Math.max(0, eventsBudget);
 
@@ -431,10 +429,11 @@ export function renderFrame(
   lines.push(...footer);
   // Final safety net: a row that still measures past `width` (a corner the
   // budget math above could not foresee) is degraded to unpainted truncation
-  // rather than wrapping and smearing the repaint.
+  // and re-padded — a 2-column character at the seam can leave the cut one
+  // column short, and a wrapped line would smear the repaint.
   return lines.slice(0, height).map(line => {
     const w = visualWidth(line);
-    if (w > width) return truncateVisual(stripAnsi(line), width);
+    if (w > width) return padEndVisual(truncateVisual(stripAnsi(line), width), width);
     return padEndVisual(line, width);
   });
 }

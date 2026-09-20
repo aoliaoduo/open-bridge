@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { charAtColumn, stripAnsi, visualWidth, truncateVisual, padEndVisual } from "../src/console/tui/text.js";
+import { charAtColumn, fillVisualWidth, setAmbiguousWideForTests, stripAnsi, visualWidth, truncateVisual, padEndVisual } from "../src/console/tui/text.js";
 import { healthColor, paint } from "../src/console/tui/theme.js";
 import { advanceScroll, formatDuration, formatBytes, renderFrame } from "../src/console/tui/render.js";
 import { buildSnapshot, type TuiStateView } from "../src/console/tui/snapshot.js";
@@ -24,6 +24,40 @@ test("truncateVisual never splits a wide character or exceeds the budget", () =>
   assert.equal(visualWidth(truncateVisual("中文abc更多", 7)), 7);
   assert.equal(truncateVisual("abc", 2), "ab");
   assert.equal(padEndVisual("中", 4), "中  ");
+});
+
+test("ambiguous-width characters follow the CJK locale", () => {
+  try {
+    setAmbiguousWideForTests(false);
+    assert.equal(visualWidth("◆ · ✓"), 5);
+    assert.equal(fillVisualWidth("─", 5), "─────");
+    setAmbiguousWideForTests(true);
+    assert.equal(visualWidth("◆ · ✓"), 8, "in a CJK terminal the ambiguous marks render two columns each");
+    assert.equal(fillVisualWidth("─", 5), "── ", "a 2-column rule cannot split; the last cell becomes a space");
+  } finally {
+    setAmbiguousWideForTests(false);
+  }
+});
+
+test("geometry holds under the CJK ambiguous regime", () => {
+  const snap = buildSnapshot(fixtureView(), {
+    version: "1.0.0-rc.2",
+    rootName: "open-bridge",
+    logPath: "C:/x/bridge.log",
+    now: 60_000,
+  });
+  try {
+    setAmbiguousWideForTests(true);
+    for (const [w, h] of [[80, 24], [110, 30], [40, 10]] as const) {
+      const lines = renderFrame(snap, { width: w, height: h, now: 60_000 });
+      assert.ok(lines.length <= h, `${w}x${h}: frame fits the height`);
+      for (const [i, line] of lines.entries()) {
+        assert.equal(visualWidth(line), w, `${w}x${h}: line ${i} must be exactly ${w} columns under the wide regime`);
+      }
+    }
+  } finally {
+    setAmbiguousWideForTests(false);
+  }
 });
 
 test("health gradient uses the ainovel-cli thresholds", () => {
@@ -172,10 +206,12 @@ test("renderFrame fills the exact geometry and shows the dashboard vocabulary", 
     logPath: "C:/x/bridge.log",
     now: 60_000,
   });
-  const lines = renderFrame(snap, { width: 80, height: 24, now: 60_000 });
+  // 70 columns keeps this frame on the stacked dashboard ladder; the
+  // workbench owns everything >= 76x22 and has its own geometry tests.
+  const lines = renderFrame(snap, { width: 70, height: 24, now: 60_000 });
   assert.ok(lines.length <= 24, `frame is ${lines.length} rows, must fit 24`);
   for (const [i, line] of lines.entries()) {
-    assert.equal(visualWidth(line), 80, `line ${i} must be exactly 80 columns`);
+    assert.equal(visualWidth(line), 70, `line ${i} must be exactly 70 columns`);
   }
   const text = lines.map(stripAnsi).join("\n");
   assert.match(text, /运行中/);
@@ -199,7 +235,7 @@ test("renderFrame pins the footer to the bottom rows however few the events", ()
   for (const [i, line] of lines.entries()) {
     assert.equal(visualWidth(line), 80, `tall line ${i} must be exactly 80 columns`);
   }
-  assert.match(stripAnsi(lines[38] ?? ""), /open-bridge/, "usage footer on the second-to-last row");
+  assert.match(stripAnsi(lines[38] ?? ""), /MCP http/, "the address footer owns the second-to-last row");
   assert.match(stripAnsi(lines[39] ?? ""), /Ctrl\+C 停止/, "hint row on the last row");
 });
 
@@ -243,8 +279,11 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   assert.match(joined, /─ 概览/);
   assert.match(joined, /─ 进程/);
   assert.match(joined, /─ 服务/);
+  assert.doesNotMatch(joined, /状态/, "the top-bar capsule owns the status; the sidebar does not repeat it");
+  assert.match(joined, /仅本机/, "tunnel wording reads 隧道 · 仅本机, not 隧道 隧道 ●");
   assert.match(joined, /活动 \(\d+\)/);
-  assert.match(plain[28] ?? "", /open-bridge/, "usage footer on the second-to-last row");
+  assert.match(plain[28] ?? "", /MCP http/, "the address footer on the second-to-last row");
+  assert.doesNotMatch(plain[28] ?? "", /会话|调用|端口/, "counters live in the sidebar, not repeated in the footer");
   assert.match(plain[29] ?? "", /End 最新/, "scroll hint on the last row");
 });
 
