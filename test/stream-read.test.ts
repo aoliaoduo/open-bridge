@@ -223,3 +223,36 @@ test("end_line + no trailing newline: the unterminated last line is still counte
   assert.equal(r.lines_total, 5, "EOF was reached, so the count must include the unterminated last line");
   assert.equal(r.sha256, createHash("sha256").update(body).digest("hex"));
 });
+
+test("empty file (0 bytes) returns empty content and zero counts with sha256", async () => {
+  const f = tmpFile("empty.txt", "");
+  const r = await streamReadLines(f, { maxBytes: 1 << 20 }, 0);
+  assert.equal(r.content, "");
+  assert.equal(r.lines_total, 0);
+  assert.equal(r.lines_returned, 0);
+  assert.equal(r.start_line, 1);
+  assert.equal(r.sha256, createHash("sha256").update("").digest("hex"));
+  assert.equal(r.reached_eof, true);
+  assert.equal(r.binary, false);
+});
+
+test("startLine past EOF returns empty content but still reports lines_total and hash", async () => {
+  const body = "line 1\nline 2\n";
+  const f = tmpFile("past-eof.txt", body);
+  const r = await streamReadLines(f, { startLine: 10, maxBytes: 1 << 20 }, Buffer.byteLength(body));
+  assert.equal(r.content, "");
+  assert.equal(r.lines_returned, 0);
+  assert.equal(r.lines_total, 2);
+  assert.equal(r.reached_eof, true);
+  assert.equal(r.sha256, createHash("sha256").update(body).digest("hex"));
+});
+
+test("file with consecutive blank lines preserves line counts", async () => {
+  const body = "\n\n\n";
+  const f = tmpFile("blank-lines.txt", body);
+  const r = await streamReadLines(f, { maxBytes: 1 << 20 }, Buffer.byteLength(body));
+  assert.equal(r.content, "\n\n\n");
+  assert.equal(r.lines_total, 3);
+  assert.equal(r.lines_returned, 3);
+  assert.equal(r.reached_eof, true);
+});

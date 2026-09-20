@@ -304,3 +304,19 @@ test("waitTimeoutMs 0 means unlimited: a queued caller waits instead of being re
     assert.equal(granted, true, "the waiter is granted as soon as the holder releases");
     waiterRelease();
   }));
+
+test("high concurrency: many callers on independent and shared keys resolve correctly", async () => {
+  const count = 25;
+  const results: number[] = [];
+  const promises = Array.from({ length: count }, async (_, i) => {
+    const key = `key:${i % 5}`;
+    const mode = i % 2 === 0 ? "read" : "write";
+    const release = await acquireLocks({ keys: [key], mode, label: `task-${i}` }, FAST);
+    results.push(i);
+    await new Promise(r => setTimeout(r, 2));
+    release();
+  });
+  await Promise.all(promises);
+  assert.equal(results.length, count);
+  assert.deepEqual(lockSnapshot(), { held: [], waiting: [] });
+});
