@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `list_directory` / `search_files` 的已公布 inputSchema 与运行时对齐：`depth` 移除 1–3 枚举（小于 1 钳制为 1、更大的值按请求递归），`context` 移除 0–20 上下限（超界钳制）——运行时接受的合法调用不再违反自己公布的契约。
+- 控制台统计页措辞诚实化：调用计数按工作区持久化、跨 Bridge 重启保留，「本次运行」改为「自统计开始」、「运行时长」改为「统计时长」。
+- docs/tools.md 补齐：`open_shell` 新开/复用两种结果形状、`send_to_shell` 结果 `cwd` 的含义（启动目录，不跟踪 shell 内 `cd`）、`write_file` 响应 `mode` 的取值、`get_usage_stats` 的统计窗口语义、`run_script` 预算钳制区间。
+
 ### Fixed
 
 - `find_files` 的 `**/` 现在只按**完整路径段**匹配（或匹配零段）：`**/host.ts` 不再误中 `node-host.ts`；裸 `**` 照旧可跨分隔符。

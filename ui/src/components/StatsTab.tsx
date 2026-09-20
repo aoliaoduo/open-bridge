@@ -83,7 +83,7 @@ export function StatsTab() {
   return (
     <>
       <div className="stats">
-        <Stat label={t("总调用", "Calls")} value={usage?.calls ?? "…"} hint={t("本次运行", "This run")} />
+        <Stat label={t("总调用", "Calls")} value={usage?.calls ?? "…"} hint={t("自统计开始", "Since tracking began")} />
         <Stat
           label={t("成功", "Succeeded")}
           value={usage?.successes ?? "…"}
@@ -97,7 +97,7 @@ export function StatsTab() {
           tone={(usage?.failures ?? 0) > 0 ? "err" : "plain"}
         />
         <Stat
-          label={t("运行时长", "Uptime")}
+          label={t("统计时长", "Tracked for")}
           value={usage ? fmtUptime(usage.uptime_ms) : "…"}
           hint={usage
             ? t(`自 ${new Date(usage.started_at).toLocaleString()}`, `since ${new Date(usage.started_at).toLocaleString()}`)
@@ -108,8 +108,8 @@ export function StatsTab() {
       <Card
         title={t("调用统计", "Call statistics")}
         desc={t(
-          "本实例启动以来的累计；清空只归零这里的数字，不影响任何正在跑的调用。",
-          "Accumulated since the instance started; clearing zeroes the counters and does not touch calls in flight.",
+          "累计计数按工作区持久化，跨 Bridge 重启保留；清空只归零这里的数字，不影响任何正在跑的调用。",
+          "Counters persist per workspace across Bridge restarts; clearing zeroes them and does not touch calls in flight.",
         )}
         actions={
           <div className="btn-group">

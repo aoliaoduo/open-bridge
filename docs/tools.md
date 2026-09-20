@@ -65,11 +65,11 @@
 
 ### 工作区读取
 
-**list_directory** — 列目录。`depth` 1–3、`include_hidden`、`max_entries`、`offset`；结果是 `{items: [{name, type}], truncated, total, next_offset}`。平铺 `depth: 1` 时，非空 `next_offset` 可直接续页，末页为 `null`；`total` 是真实总数。`offset` 只对平铺有意义 —— 和 `depth > 1` 一起给会被明确拒绝，而不是悄悄按某一层分页。递归结果的 `total`、`next_offset` 都是 `null`；若因 `max_entries` 被截断，`truncated` 仍会明确说明，但递归树没有可恢复的页游标。
+**list_directory** — 列目录。`depth`（默认 1；小于 1 按 1 处理，更大的值按请求继续深入递归，schema 不设枚举上限）、`include_hidden`、`max_entries`、`offset`；结果是 `{items: [{name, type}], truncated, total, next_offset}`。平铺 `depth: 1` 时，非空 `next_offset` 可直接续页，末页为 `null`；`total` 是真实总数。`offset` 只对平铺有意义 —— 和 `depth > 1` 一起给会被明确拒绝，而不是悄悄按某一层分页。递归结果的 `total`、`next_offset` 都是 `null`；若因 `max_entries` 被截断，`truncated` 仍会明确说明，但递归树没有可恢复的页游标。
 
 **find_files** — 按 glob 找文件（`*`、`**`、`?`、`{a,b}`、`[abc]`）；纯名字/前缀仍按 basename 匹配，`src/**/*.ts` 这种按完整相对路径匹配。`offset` + `max_results` 翻页，结果固定为 `{items, truncated, next_offset}`；上限只在**已收集到的数量**上生效，所以"正好到达上限"会如实报告 `truncated: true`（内部多探一个，不靠猜）。`max_results: 0` 只用于探测：会返回空 `items` 和 `next_offset: null`，应改用正数才能继续翻页。
 
-**search_files** — 在工作区文件里搜文本：有 ripgrep 就用（快），否则内置扫描；两套引擎**看的文件集合完全相同**：`.git`、`node_modules`、`dist` 之外一律都搜，**`.gitignore` 不会让文件消失**（它管的是提交，不是文件是否存在；同一次搜索的结果不该因为正则语法触发哪套引擎而不同）。`query` 默认按**正则**解析（`regex: false` 才按字面匹配；非法正则直接报错，不会静默给空）；`include` 限定文件（如 `["*.ts"]`）；`context`（0–20）在每处匹配前后带若干行；`offset` + `max_results` 翻页，结果的 `next_offset` 可直接作为下一次 `offset`。`max_results: 0` 返回空页且不给续读游标，避免原地循环；需要翻页时用正数。`path` 可以是目录或单个文件。
+**search_files** — 在工作区文件里搜文本：有 ripgrep 就用（快），否则内置扫描；两套引擎**看的文件集合完全相同**：`.git`、`node_modules`、`dist` 之外一律都搜，**`.gitignore` 不会让文件消失**（它管的是提交，不是文件是否存在；同一次搜索的结果不该因为正则语法触发哪套引擎而不同）。`query` 默认按**正则**解析（`regex: false` 才按字面匹配；非法正则直接报错，不会静默给空）；`include` 限定文件（如 `["*.ts"]`）；`context`（0–20，超界值会被钳制而不是报错）在每处匹配前后带若干行；`offset` + `max_results` 翻页，结果的 `next_offset` 可直接作为下一次 `offset`。`max_results: 0` 返回空页且不给续读游标，避免原地循环；需要翻页时用正数。`path` 可以是目录或单个文件。
 
 - 正则语义是 **JavaScript** 的（内置扫描用的就是 `RegExp`）。ripgrep 的默认引擎不支持先行/后顾（`(?=`、`(?!`、`(?<=`、`(?<!`）与反向引用（`\1`），这类查询会由内置扫描回答 —— 结果一致，只是慢一些，不会因此少给或不报错。看到空结果时先确认不是正则写错或 `include` 太窄。
 
@@ -126,15 +126,15 @@
 
 **get_process_snapshot** — 一次列出所有受监管进程（状态、命令、cwd、启动时间）。排查"现在到底有什么在跑"时先用它。传 `command_id` 时 `structuredContent` 是该进程对象；省略时兼容文本仍是数组，而类型化结果为 `{items: [...]}`。
 
-**open_shell** — 开一个**具名持久 shell**（需要 bash/sh，Windows 上是 Git Bash）。同一个 shell 跨调用存活，`cd`、导出变量、激活的 virtualenv **都保留**；`list: true` 则返回当前开着的 shell 列表（`name` / `command_id` / `cwd` / `alive` / `started_at`）。打开/复用时 `structuredContent` 是一个 shell 对象；列举时兼容文本是数组、类型化结果为 `{items: [...]}`。
+**open_shell** — 开一个**具名持久 shell**（需要 bash/sh，Windows 上是 Git Bash）。同一个 shell 跨调用存活，`cd`、导出变量、激活的 virtualenv **都保留**；`list: true` 则返回当前开着的 shell 列表（`name` / `command_id` / `cwd` / `alive` / `started_at`）。新开时 `structuredContent` 为 `{name, command_id, cwd, status:"open", shell, pid}`；复用已开的活 shell 则给 `{name, command_id, cwd, already_open:true}`；`alive` / `started_at` 只在列举条目上有（列举时兼容文本是数组、类型化结果为 `{items: [...]}`）。
 
-**send_to_shell** — 在 `open_shell` 开的 shell 里跑命令，经哨兵字符串等它结束（上限 `timeout_ms`），返回输出与退出码；超时则 shell 保持开着。`structuredContent` 固定给出 `{ name, command_id, output, stdout, stderr, exit_code, timed_out, status, shell_alive, cwd }`；若本次输出的前段已被保留上限挤掉，另有 `output_dropped: true`，超时时还有继续读取/重试说明 `note`。`status` 是 `completed`、`running` 或 `shell_exited`，而非靠字段缺失判断。
+**send_to_shell** — 在 `open_shell` 开的 shell 里跑命令，经哨兵字符串等它结束（上限 `timeout_ms`），返回输出与退出码；超时则 shell 保持开着。`structuredContent` 固定给出 `{ name, command_id, output, stdout, stderr, exit_code, timed_out, status, shell_alive, cwd }`；若本次输出的前段已被保留上限挤掉，另有 `output_dropped: true`，超时时还有继续读取/重试说明 `note`。`status` 是 `completed`、`running` 或 `shell_exited`，而非靠字段缺失判断。结果里的 `cwd` 是 shell 的**启动目录**，不跟踪 shell 内的 `cd`。
 
 **close_shell** — 关掉某个持久 shell。`structuredContent` 互斥地为成功的 `{ name, closed: true }`，或该名称本来未打开的 `{ name, closed: false, reason: "not_open" }`。
 
 ### 结构化返回补充
 
-**文件写入与审阅** — `write_file` 固定返回 `{ path, bytes, mode, sha256 }`（二进制写入额外给 `encoding: "base64"`）；`edit_block` 固定返回 `{ path, replacements, sha256 }`，可附 `applied_edits` / `diff`；`apply_patch` 固定返回 `{ applied: true, files, changes }`，每项 `changes` 明确给路径、动作、增删行数和 diff。`review_changes` 则明确区分不可用的 `{ available: false, reason }` 与可审阅的 diff 结果。`workspace_brief` 固定含工作区、顶层条目、指令文件、Git 摘要和 Bridge 摘要，存在时才附 manifests / skills。
+**文件写入与审阅** — `write_file` 固定返回 `{ path, bytes, mode, sha256 }`（二进制写入额外给 `encoding: "base64"`；`mode` 是本次实际采用的写法 —— `append` 或 `overwrite`，新建文件同样报 `overwrite`）；`edit_block` 固定返回 `{ path, replacements, sha256 }`，可附 `applied_edits` / `diff`；`apply_patch` 固定返回 `{ applied: true, files, changes }`，每项 `changes` 明确给路径、动作、增删行数和 diff。`review_changes` 则明确区分不可用的 `{ available: false, reason }` 与可审阅的 diff 结果。`workspace_brief` 固定含工作区、顶层条目、指令文件、Git 摘要和 Bridge 摘要，存在时才附 manifests / skills。
 
 **配置、任务与批量调用** — `get_config` 是完整且字段固定的运行时配置（`notify.barkKey` 始终为脱敏提示）；`set_config_value` 返回 `{ key, value }`；`get_usage_stats` 固定含累计计数和 `by_tool`。`set_todos` 的兼容文本仍是数组，但 `structuredContent` 为 `{ items: [...] }`；`get_todos` 固定含会话任务、持久任务、上次进度和保存时间；`report_progress` 确认 `{ received, message, pushed }`，再按需要返回阶段/类别/百分比/任务编号。`batch` 固定给总数、成功/失败数、是否提前停止及每个子调用的成功结果或错误。
 
@@ -171,7 +171,7 @@
 
   - **`at` 是 ISO-8601 UTC，不是操作者的挂钟时间。** 这是刻意的：`since` 过滤要把它反解析成毫秒，机读需要绝对时刻。但 `bridge.log`、控制台日志流和活动视图显示的都是**本机时间**，所以在 UTC+8 的机器上，用户口中的「03:40 那次调用」对应这里的 `19:40Z`。**把时间复述给用户之前先换算**，否则双方会以为在说两件事。`ts`（epoch 毫秒）是同一时刻的另一种表示，做算术时用它更省事。
 
-**get_usage_stats** — 聚合调用统计（总次数、成功/失败、按工具分布）。
+**get_usage_stats** — 聚合调用统计（总次数、成功/失败、按工具分布）。计数按工作区**持久化，跨 Bridge 重启保留**，控制台「清空统计」会归零；`started_at` / `uptime_ms` 描述的是这个统计窗口（起点＝首次计数或上次清空），不是当前进程的寿命。
 
 ### 编排与其他
 
@@ -188,7 +188,7 @@ return { files: [...new Set(hits.items.map(i => i.path))] };
 - 每次运行都是**全新作用域**；`console.log` 收在结果的 `console` 数组里，**不会**代替 `return`。
 - 沙箱**没有**文件系统、网络、进程、定时器或模块访问；要访问就通过 `tools.*`。
 - 组合调用是**真实的 Bridge 调用**：资源锁、审计日志、脱敏、会话状态与错误语义全部生效。
-- 失败时结果带 `phase` / `error_type` / `line` / `code_preview` / `hint`。预算：`timeout_ms` 默认 30000、最大 300000；`max_calls` 默认 60、最大 200。
+- 失败时结果带 `phase` / `error_type` / `line` / `code_preview` / `hint`。预算：`timeout_ms` 默认 30000、钳制在 1000–300000；`max_calls` 默认 60、钳制在 1–200；≤0 或非数字回落到默认值。
 
 
 ---

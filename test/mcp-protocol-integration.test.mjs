@@ -949,3 +949,21 @@ test("activity_log recent reports at as ISO-8601 UTC, like search does", async (
     assert.match(item.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, `search at stays ISO, got ${JSON.stringify(item.at)}`);
   }
 });
+
+/**
+ * A published inputSchema that the runtime's own accepted calls violate is a
+ * lying contract. Both leniencies below are deliberate, pinned behaviours:
+ * `depth: 0` clamps to 1 and an over-large depth still recurses (required-args
+ * ⑥ / the file-tools comment), and `context` clamps to 0–20. callTool()
+ * validates every successful call against the advertised schema, so these
+ * calls fail for exactly as long as schema and runtime disagree.
+ */
+test("published input schemas accept the values the runtime accepts", async () => {
+  const { sessionId } = await openSession();
+  const clamped = await callTool(sessionId, "list_directory", { path: ".", depth: 0 });
+  assert.equal(clamped.payload.result.isError, undefined, clamped.text);
+  const deep = await callTool(sessionId, "list_directory", { path: ".", depth: 9 });
+  assert.equal(deep.payload.result.isError, undefined, deep.text);
+  const wide = await callTool(sessionId, "search_files", { query: "protocol", context: 25 });
+  assert.equal(wide.payload.result.isError, undefined, wide.text);
+});
