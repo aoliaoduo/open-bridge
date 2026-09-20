@@ -16,9 +16,9 @@
 
 import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
-import {mkdtempSync, writeFileSync} from "node:fs";
+import {mkdtempSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -370,3 +370,110 @@ test("close_shell takes the session's background jobs with it", {
     }
   }
 });
+test("cli stop's kill fallback reaps the wedged instance's session jobs", {
+  skip: process.platform !== "win32"
+    ? "the MSYS process-group reap is win32-only; the POSIX fallback sends a plain signal"
+    : false,
+  timeout: 120_000,
+}, async () => {
+  // `open-bridge stop` normally asks the instance to shut down over HTTP, and
+  // the instance reaps its own children (lifecycle sweeps state.commands
+  // through terminateProcess). The kill fallback exists for the instance that
+  // cannot answer — and it used to be a bare `taskkill /T /F` on the instance
+  // pid, which reaches only the Windows-visible tree. The MSYS exec-emulation
+  // children of the instance's bash sessions survive it as unstoppable strays:
+  // the same root cause terminateProcess and close_shell already fixed on the
+  // inside, seen from the outside. This pins the outside path to the same
+  // standard: kill the family, not just the tree.
+  //
+  // `cli-orphan` is a renamed copy of sleep so the plain `sleep` of parallel
+  // integration files cannot disturb the ps filter.
+  const cp = asObject(await callTool("run_command", {
+    command: "cp /usr/bin/sleep cli-orphan && echo copied",
+    timeout_ms: 20_000,
+  }));
+  assert.match(cp.output ?? "", /copied/, "the unique orphan binary is in place");
+
+  const name = "ob-cli-stop";
+  const opened = await callTool("open_shell", { name });
+  assert.equal(opened.isError, false, `open_shell answered: ${opened.text.slice(0, 200)}`);
+
+  /** Live (msys pid, winpid) pairs of our orphan binaries, per a local `ps -W`. */
+  const alivePairs = () => {
+    const snap = spawnSync("bash",
+      ["-c", "ps -W | awk '$8 ~ /cli-orphan/ {print $1, $4}'"],
+      { encoding: "utf8", timeout: 20_000 });
+    assert.equal(snap.error, undefined, `a local bash can read the MSYS table: ${String(snap.error)}`);
+    return new Set(
+      (snap.stdout ?? "").split(/\r?\n/).map(l => l.trim()).filter(l => /^\d+ \d+$/.test(l)),
+    );
+  };
+
+  let rows = [];
+  try {
+    const sent = asObject(await callTool("send_to_shell", {
+      name,
+      command: "./cli-orphan 300 & ./cli-orphan 300 & ./cli-orphan 300 & echo spawned",
+      timeout_ms: 20_000,
+    }));
+    assert.equal(sent.timed_out, false, `backgrounding returns at once: ${JSON.stringify(sent).slice(0, 200)}`);
+    assert.match(sent.output ?? "", /spawned/, "the session ran the line");
+
+    rows = [...alivePairs()];
+    assert.ok(rows.length >= 3, `three background jobs are visible in ps -W: ${rows.join(", ")}`);
+
+    // Wedge the graceful path: the record keeps the REAL, alive pid (so cmdStop
+    // proceeds) but its port points nowhere, so both /api/shutdown attempts
+    // fail and the kill fallback runs.
+    const runtimeFile = readdirSync(home)
+      .map(f => path.join(home, f))
+      .find(f => /^runtime-[0-9a-f]{24}\.json$/.test(path.basename(f)));
+    assert.ok(runtimeFile, "the harness instance published a runtime record");
+    const record = JSON.parse(readFileSync(runtimeFile, "utf8"));
+    assert.equal(record.pid, child.pid, "the record names the harness server");
+    record.port = 1; // nothing serves here: ECONNREFUSED, twice
+    writeFileSync(runtimeFile, JSON.stringify(record), "utf8");
+
+    const cli = await new Promise((resolve, reject) => {
+      const cliChild = spawn(process.execPath,
+        [path.join(ROOT, "bin", "open-bridge.js"), "stop", "--pid", String(child.pid)],
+        { cwd: ROOT, env: { ...process.env, OPEN_BRIDGE_HOME: home }, stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "";
+      let stderr = "";
+      cliChild.stdout.on("data", chunk => { stdout += chunk; });
+      cliChild.stderr.on("data", chunk => { stderr += chunk; });
+      const timer = setTimeout(() => {
+        cliChild.kill("SIGKILL");
+        reject(new Error("`open-bridge stop` did not exit within 60 s"));
+      }, 60_000);
+      cliChild.once("exit", code => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+      cliChild.once("error", reject);
+    });
+    assert.equal(cli.code, 0, `the fallback stop succeeded: ${(cli.stdout + cli.stderr).slice(0, 300)}`);
+
+    const exited = await Promise.race([
+      new Promise(resolve => {
+        if (child.exitCode !== null) resolve(true); else child.once("exit", () => resolve(true));
+      }),
+      delay(10_000).then(() => false),
+    ]);
+    assert.ok(exited, "the fallback actually stopped the instance");
+
+    await delay(2500);
+    const still = alivePairs();
+    const survivors = rows.filter(r => still.has(r));
+    assert.equal(survivors.length, 0,
+      `cli stop's fallback killed the session jobs with the instance; survivors (msys pid, winpid): ${survivors.join(", ")}`);
+  } finally {
+    // Never leave five-minute strays on the machine, red or green. Kill by the
+    // recorded winpid only after re-verifying the (pid, winpid) pair still
+    // exists, so a recycled pid can never be hit.
+    const still = (() => { try { return alivePairs(); } catch { return new Set(); } })();
+    const strays = rows.filter(r => still.has(r));
+    for (const r of strays) {
+      spawnSync("taskkill.exe", ["/pid", r.split(" ")[1], "/f"], { stdio: "ignore" });
+    }
+    await callTool("close_shell", { name }).catch(() => {});
+  }
+});
+

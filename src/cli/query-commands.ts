@@ -89,11 +89,20 @@ export async function cmdStop(parsed: ParsedArgs): Promise<void> {
   console.error(t("停止失败 (", "Stop failed (") + (shutdownError instanceof Error ? shutdownError.message : String(shutdownError)) + t(")，尝试直接终止进程。", "); killing the process directly."));
   try {
     if (process.platform === "win32") {
-      // TerminateProcess via process.kill() leaves the ngrok child alive and
-      // holding the reserved domain — the exact mess lifecycle's own error
-      // text tells people to clean up with taskkill. Kill the whole tree.
-      const { execFileSync } = await import("node:child_process");
-      execFileSync("taskkill.exe", ["/pid", String(runtime.pid), "/T", "/F"], { stdio: "ignore", timeout: 3_000, windowsHide: true });
+      // A bare `taskkill /T /F` reaches only the Windows-visible tree: the
+      // MSYS exec-emulation children of the instance's bash sessions and
+      // monitored commands (watchers, `npm run dev &`) have parent links that
+      // point at dead intermediates and survive as unstoppable strays — the
+      // same root cause terminateProcess and closeShell fixed in-process via
+      // killWindowsProcessFamily. autoShell() is the same first choice an
+      // unconfigured Bridge resolves itself, so the group sweep normally runs
+      // under the very Git Bash whose process table holds those rows.
+      const { killWindowsProcessFamily } = await import("../process/win-family-kill.js");
+      const { autoShell } = await import("../shell/shell-provider.js");
+      await killWindowsProcessFamily(runtime.pid, autoShell());
+      // The family kill swallows per-member refusals (an already-dead pid is a
+      // success, not an error), so verify the outcome instead of trusting it.
+      if (pidAlive(runtime.pid)) fail(t("进程终止失败。", "Could not kill the process."));
     } else {
       process.kill(runtime.pid);
     }

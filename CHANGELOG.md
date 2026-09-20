@@ -22,6 +22,7 @@
 - 文档与实现对齐：`read_files` 的 `sha256` 尾部预算行为、`edit_block` 的 `replace_all` 参数、`process_control{action:"restart"}` 返回新 `command_id` 均已写明。
 - 修复 Windows + Git Bash 下停止/重启/删除被监控命令时误报「无法终止」的问题：MSYS 的 fork/exec 模拟会切断 Windows 父子链接，后台子进程（如 `while` 循环里的 `sleep 30 &`）成为 `taskkill /T` 与进程树枚举都看不见的孤儿，占住 stdio 管道导致 close 永不触发、5 秒预算耗尽。现在对 bash 类 shell 先枚举 Windows 可见成员，再经 `ps -W` 的 PGID 按 MSYS 进程组整组 `kill -9`（严格跳过组 0，防止波及无关系统进程），最后 taskkill 收尾；原生 shell（PowerShell/cmd）改为单次原子 `taskkill /T /F`。附 win32 门控的进程树集成测试。
 - 修复 `close_shell` 泄漏后台任务：Windows + Git Bash 下关闭持久 shell 返回 `closed:true`，但会话里的后台任务（`npm run dev &`、`sleep 300 &` 等）继续存活——bash 优雅退出不带走后台子进程，令整个 kill 块被跳过；即使执行到，`taskkill /T` 也看不见 MSYS 孤儿。现在 win32 的 bash 类会话直接进入与被监控命令终止共享的家族击杀路径（`killWindowsProcessFamily`：枚举 → MSYS 进程组组杀 → taskkill），两处不再各自漂移。附 win32 门控集成测试（改名副本 ob-sleep 防并行文件干扰）。
+- 修复 `open-bridge stop` 兜底路径泄漏后台任务：目标实例无法响应 HTTP 优雅停止时，CLI 直接`taskkill /T /F` 实例 pid——只能杀到 Windows 可见进程树，实例 bash 会话/受管命令的 MSYS 孤儿（`npm run dev &`、watcher）继续存活为无主游魂（与 terminateProcess/close_shell 同根因，第三处同型点）。家族击杀逻辑抽出为无 host 依赖的 `src/process/win-family-kill.ts`，terminateProcess、closeShell 与 CLI 兜底三处共用同一实现；CLI 侧以 autoShell()（与未配置时桥自身解析的首选 shell 一致）执行组清扫，并在事后核验实例确实退出而非信任被吞掉的逐成员错误。附 win32 门控集成测试（runtime 记录指向死端口模拟挂死 + 改名副本 cli-orphan 防并行文件干扰）。
 
 ## [1.0.0-rc.1] — 2026-09-20
 

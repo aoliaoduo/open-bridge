@@ -77,16 +77,10 @@ function enqueueSend(name: string, op: () => Promise<Record<string, unknown>>): 
   return tail;
 }
 
-/** True when the configured shell is a POSIX-style shell (bash/sh) we drive with sentinels. */
-function isBashLike(file: string): boolean {
-  const n = file.toLowerCase().replace(/\\/g, "/");
-  return n.includes("bash") || n.endsWith("/sh") || n.endsWith("/sh.exe") || n.includes("/bin/sh");
-}
-
 /** Spawn a login shell that reads commands from stdin and keep it registered like a managed command. */
 function spawnSessionShell(name: string, cwd: string): { id: string; child: ChildProcessWithoutNullStreams; output: ProcessOutputBuffer } {
   const spec = shellSpec();
-  if (!isBashLike(spec.file)) {
+  if (!shellIsBashLike(spec.file)) {
     throw new Error(
       `Persistent shell sessions currently require a bash/sh shell (configured: ${spec.file}). `
       + "Use run_command for one-off commands, or pick a bash on the console settings page "
@@ -344,7 +338,7 @@ export async function closeShell(args: Args): Promise<Record<string, unknown>> {
   shellSessions.delete(name);
   if (cmd && !cmd.done) {
     const pid = cmd.child.pid;
-    if (process.platform === "win32" && pid && shellIsBashLike()) {
+    if (process.platform === "win32" && pid && shellIsBashLike(shellSpec().file)) {
       // Straight to the family kill — no graceful "exit\n" first. Bash does
       // NOT take background jobs with it when it exits, and once the executor
       // dies, its MSYS process-group row — the only way to find those orphans
@@ -352,7 +346,7 @@ export async function closeShell(args: Args): Promise<Record<string, unknown>> {
       // "cleanly" leaked every `job &` as an unstoppable stray while still
       // answering closed:true. Kill while the family is discoverable.
       try {
-        await killWindowsProcessFamily(pid);
+        await killWindowsProcessFamily(pid, shellSpec().file);
       } catch {
         try { cmd.child.kill(); } catch { /* ignore */ }
       }
@@ -365,7 +359,7 @@ export async function closeShell(args: Args): Promise<Record<string, unknown>> {
         // shell (dev servers, background jobs) running as unstoppable orphans.
         try {
           if (process.platform === "win32" && pid) {
-            await killWindowsProcessFamily(pid);
+            await killWindowsProcessFamily(pid, shellSpec().file);
           } else {
             cmd.child.kill();
           }
