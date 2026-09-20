@@ -34,6 +34,8 @@
 
 ### Fixed
 
+
+- 审计依赖、打包清单与发布资产：`@modelcontextprotocol/sdk`、`@modelcontextprotocol/server`、`@modelcontextprotocol/node` 各自是必要的 v1/v2 协议直接依赖；其余 devDep 全部由 vitest/vite/jsdom 与 typescript-eslint 实际使用，无可删除的冗余。`scripts/`、`vendor/`、`package.json` `files` 与 package-check 三方一致；当前没有发现需要删除或更新的过期资产。
 - 补全行为准则遗留的举报联系方式占位符，使用项目已公开的维护者联系渠道，并添加回归检查。
 - 加固文件复制、补丁、路径、自毁保护和换行处理，避免静默覆盖或错误 diff。
 - 修复 OAuth 令牌撤销、跨进程令牌写入、动态注册限流和公开路由的安全边界。
