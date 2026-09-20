@@ -78,12 +78,14 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
 
   let servicesTotal = 0;
   let servicesRunning = 0;
-  for (const service of view.services.values()) {
+  const serviceRows: TuiSnapshot["serviceRows"] = [];
+  for (const [name, service] of view.services) {
     servicesTotal += 1;
     const id = service.commandId;
-    if (id === undefined) continue;
-    const command = view.commands.get(id);
-    if (command !== undefined && !command.done) servicesRunning += 1;
+    const command = id === undefined ? undefined : view.commands.get(id);
+    const running = command !== undefined && !command.done;
+    if (running) servicesRunning += 1;
+    serviceRows.push({ name: String(name), running });
   }
 
   // Duration matching: the activity log records the invoke ("running") and the
@@ -151,6 +153,7 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     runningCommands,
     servicesTotal,
     servicesRunning,
+    serviceRows,
     events,
     logPath: options.logPath,
   };

@@ -42,6 +42,8 @@ export type TuiSnapshot = {
   }>;
   servicesTotal: number;
   servicesRunning: number;
+  /** Per-service rows for the workbench sidebar (name + live state). */
+  serviceRows: Array<{ name: string; running: boolean }>;
   events: Array<{ at: string; tool: string; status: TuiEventStatus; message: string; durationMs?: number }>;
   logPath: string;
 };
@@ -182,39 +184,50 @@ function renderProcessRows(snap: TuiSnapshot, width: number, maxRows: number): s
   return rows;
 }
 
+/** One event line, exactly `width` columns — shared by the stacked stream and
+ *  the workbench panel so the two cannot drift apart. */
+export function eventRow(
+  event: TuiSnapshot["events"][number],
+  width: number,
+  spin: number,
+  now: number,
+): string {
+  const icon =
+    event.status === "running" ? paint("accent", spinnerFrame(spin), { bold: true })
+    : event.status === "completed" ? paint("success", "✓")
+    : event.status === "error" ? paint("error", "✕", { bold: true })
+    : event.status === "warning" ? paint("review", "⚠")
+    : paint("context", "◆");
+  // A running row shows live elapsed time; a finished row shows the matched
+  // duration only when the invoke/outcome pair was actually observed —
+  // never an invented one.
+  const rightText =
+    event.status === "running"
+      ? `${formatDuration(Math.max(0, now - Date.parse(event.at)))}…`
+      : event.durationMs !== undefined
+        ? formatDuration(event.durationMs)
+        : "";
+  const headPlain = `${formatClock(event.at)} ${event.status === "running" ? spinnerFrame(spin) : event.status === "completed" ? "✓" : event.status === "error" ? "✕" : event.status === "warning" ? "⚠" : "◆"} ${event.tool}`;
+  const rightBudget = rightText === "" ? 0 : visualWidth(rightText) + 1;
+  // On a narrow window the message is the first thing to go (the timestamp,
+  // the state icon and the tool name identify the row; the message decorates it).
+  const msgBudget = width - visualWidth(headPlain) - rightBudget - 2;
+  const msgPart = msgBudget >= 1 ? ` ${paint("muted", truncateVisual(event.message, msgBudget))}` : "";
+  let left = `${paint("dim", formatClock(event.at))} ${icon} ${paint("tool", event.tool)}${msgPart}`;
+  if (visualWidth(left) > width - (rightBudget > 0 ? visualWidth(rightText) : 0)) {
+    // Absurdly narrow: keep the information, lose the paint.
+    left = truncateVisual(stripAnsi(left), Math.max(4, width - (rightBudget > 0 ? visualWidth(rightText) : 0)));
+  }
+  return rightText === "" ? padEndVisual(left, width) : `${padEndVisual(left, width - visualWidth(rightText))}${paint("dim", rightText)}`;
+}
+
 function renderEvents(snap: TuiSnapshot, width: number, budget: number, spin: number, now: number): string[] {
   if (budget <= 0) return [];
   const out: string[] = [];
   const head = "─ 活动 ";
   out.push(paint("dim", `${head}${"─".repeat(Math.max(1, width - visualWidth(head)))}`));
   for (const event of snap.events.slice(0, Math.max(0, budget - 1))) {
-    const icon =
-      event.status === "running" ? paint("accent", spinnerFrame(spin), { bold: true })
-      : event.status === "completed" ? paint("success", "✓")
-      : event.status === "error" ? paint("error", "✕", { bold: true })
-      : event.status === "warning" ? paint("review", "⚠")
-      : paint("context", "◆");
-    // A running row shows live elapsed time; a finished row shows the matched
-    // duration only when the invoke/outcome pair was actually observed —
-    // never an invented one.
-    const rightText =
-      event.status === "running"
-        ? `${formatDuration(Math.max(0, now - Date.parse(event.at)))}…`
-        : event.durationMs !== undefined
-          ? formatDuration(event.durationMs)
-          : "";
-    const headPlain = `${formatClock(event.at)} ${event.status === "running" ? spinnerFrame(spin) : event.status === "completed" ? "✓" : event.status === "error" ? "✕" : event.status === "warning" ? "⚠" : "◆"} ${event.tool}`;
-    const rightBudget = rightText === "" ? 0 : visualWidth(rightText) + 1;
-    // On a narrow window the message is the first thing to go (the timestamp,
-    // the state icon and the tool name identify the row; the message decorates it).
-    const msgBudget = width - visualWidth(headPlain) - rightBudget - 2;
-    const msgPart = msgBudget >= 1 ? ` ${paint("muted", truncateVisual(event.message, msgBudget))}` : "";
-    let left = `${paint("dim", formatClock(event.at))} ${icon} ${paint("tool", event.tool)}${msgPart}`;
-    if (visualWidth(left) > width - (rightBudget > 0 ? visualWidth(rightText) : 0)) {
-      // Absurdly narrow: keep the information, lose the paint.
-      left = truncateVisual(stripAnsi(left), Math.max(4, width - (rightBudget > 0 ? visualWidth(rightText) : 0)));
-    }
-    out.push(rightText === "" ? padEndVisual(left, width) : `${padEndVisual(left, width - visualWidth(rightText))}${paint("dim", rightText)}`);
+    out.push(eventRow(event, width, spin, now));
   }
   return out;
 }
@@ -233,8 +246,136 @@ function renderFooter(snap: TuiSnapshot, width: number): string[] {
   }
   if (gapSpaces < 0) gapSpaces = 0;
   const line1 = `${paint("accent", "◆", { bold: true })}${paint("dim", leftCut)}${" ".repeat(gapSpaces)}${paint("dim", right)}`;
-  const line2 = paint("dim", truncateVisual(`Ctrl+C 停止 · 日志 ${snap.logPath} · --no-tui 关闭界面`, width));
+  const line2 = paint("dim", truncateVisual(`Ctrl+C 停止 · ↑↓ 滚动 · End 最新 · 日志 ${snap.logPath} · --no-tui 关闭界面`, width));
   return [padEndVisual(line1, width), line2];
+}
+
+// --- workbench layout (stage 3): fixed sidebar + scrollable event panel -----
+//
+// The TUI is a VIEWING surface by design: settings and background operations
+// live in the web console, and the workbench adds no command input. Its one
+// interaction is scrolling the activity history, handled by the driver.
+
+/** Event rows visible in the workbench panel for a terminal size. */
+export function workbenchPanelRows(width: number, height: number): number {
+  void width;
+  return Math.max(1, height - 5); // top bar + divider (2) + panel title (1) + footer (2)
+}
+
+/** Largest first-visible index that still shows the newest event (the tail). */
+export function maxFirstVisible(eventCount: number, rows: number): number {
+  return Math.max(0, eventCount - rows);
+}
+
+/**
+ * Which events the panel shows. `firstVisible` beyond the tail clamps to the
+ * tail, so "follow the latest" is simply "a first-visible larger than the
+ * event count" — the same value the driver keeps until the user scrolls.
+ */
+export function visibleEvents<T>(events: readonly T[], firstVisible: number, rows: number): T[] {
+  const max = maxFirstVisible(events.length, rows);
+  const start = Math.min(Math.max(0, Math.floor(firstVisible)), max);
+  return events.slice(start, start + Math.max(1, rows));
+}
+
+export type ScrollKey = "up" | "down" | "pageup" | "pagedown" | "home" | "end";
+
+/** One pure scroll step: older = smaller index, `end` re-locks to the tail. */
+export function advanceScroll(key: ScrollKey, current: number, eventCount: number, rows: number): number {
+  const max = maxFirstVisible(eventCount, rows);
+  const page = Math.max(1, rows - 1);
+  const at = Math.min(Math.max(0, current), max);
+  switch (key) {
+    case "up": return Math.max(0, at - 1);
+    case "down": return Math.min(max, at + 1);
+    case "pageup": return Math.max(0, at - page);
+    case "pagedown": return Math.min(max, at + page);
+    case "home": return 0;
+    case "end": return max;
+  }
+}
+
+function sidebarField(lines: string[], width: number, label: string, value: string, color: ColorName = "text"): void {
+  const labelPart = paint("muted", padEndVisual(label, 8));
+  lines.push(`${labelPart} ${paint(color, truncateVisual(value, Math.max(4, width - 10)))}`);
+}
+
+function renderSidebar(snap: TuiSnapshot, width: number, busy: boolean): string[] {
+  const lines: string[] = [];
+  const section = (title: string): void => {
+    lines.push(paint("dim", padEndVisual(`─ ${title} `, width)));
+  };
+
+  section("概览");
+  const capsule = CAPSULE[snap.bridgeState];
+  sidebarField(lines, width, "状态", `${capsule.icon} ${capsule.label}`, snap.bridgeState === "running" && busy ? "accent" : capsule.color);
+  const tag = TUNNEL_TAG[snap.tunnel];
+  sidebarField(lines, width, "隧道", tag.text, tag.color);
+  sidebarField(lines, width, "运行", formatDuration(snap.uptimeMs));
+  sidebarField(lines, width, "调用", `${formatCount(snap.calls)} · ✓ ${formatCount(snap.successes)} ✕ ${formatCount(snap.failures)}`, snap.failures > 0 ? "review" : "text");
+  const sessionPct = snap.maxSessions > 0 ? (snap.sessions / snap.maxSessions) * 100 : 0;
+  sidebarField(lines, width, "会话", `${snap.sessions}/${snap.maxSessions}${snap.sessionsActive > 0 ? ` · 活跃 ${snap.sessionsActive}` : ""}`, healthColor(sessionPct));
+  sidebarField(lines, width, "进程", `${snap.runningCommands.length}`);
+  if (snap.serviceRows.length > 0) {
+    sidebarField(lines, width, "服务", `${snap.serviceRows.filter(s => s.running).length}/${snap.serviceRows.length}`);
+  }
+
+  section("进程");
+  if (snap.runningCommands.length === 0) lines.push(paint("dim", "（无运行中进程）"));
+  for (const command of snap.runningCommands.slice(0, 6)) {
+    const pct = command.capacityBytes > 0 ? Math.min(100, (command.capturedBytes / command.capacityBytes) * 100) : 0;
+    const right = `${Math.round(pct)}%`;
+    const left = truncateVisual(`▸ ${command.id.slice(0, 8)} ${command.command}`, Math.max(6, width - visualWidth(right) - 1));
+    lines.push(`${paint("text", left)} ${paint(healthColor(pct), right)}`);
+  }
+
+  if (snap.serviceRows.length > 0) {
+    section("服务");
+    for (const service of snap.serviceRows.slice(0, 8)) {
+      const mark = service.running ? paint("success", "●") : paint("dim", "○");
+      lines.push(`${mark} ${paint(service.running ? "text" : "dim", truncateVisual(service.name, Math.max(4, width - 3)))}`);
+    }
+  }
+  return lines;
+}
+
+function renderWorkbench(
+  snap: TuiSnapshot,
+  options: { width: number; height: number; spin: number; now: number; busy: boolean; firstVisible: number },
+): string[] {
+  const { width, height, spin, now, busy } = options;
+  const sidebarW = Math.max(24, Math.min(40, Math.floor(width * 0.3)));
+  const panelW = width - sidebarW - 1;
+  const bodyRows = height - 4;
+  const rows = Math.max(1, bodyRows - 1);
+
+  const sidebar = renderSidebar(snap, sidebarW, busy).slice(0, bodyRows);
+  while (sidebar.length < bodyRows) sidebar.push("");
+
+  const maxFirst = maxFirstVisible(snap.events.length, rows);
+  const first = Math.min(Math.max(0, Math.floor(options.firstVisible)), maxFirst);
+  const older = first; // rows of retained history above the current view
+  // Off the tail (older events exist below the view) the way back deserves a
+  // hint even when no rows sit above the view yet.
+  const offTail = first < maxFirst;
+  const titleLeft = `─ 活动 (${snap.events.length}) `;
+  const hint = offTail ? (older > 0 ? `↑${older} 行 · End 回底 ` : "End 回底 ") : "";
+  const panel: string[] = [
+    `${padEndVisual(paint("dim", titleLeft), Math.max(1, panelW - visualWidth(hint)))}${hint === "" ? "" : paint("accent", hint)}`,
+    ...visibleEvents(snap.events, first, rows).map(event => eventRow(event, panelW, spin, now)),
+  ];
+  while (panel.length < bodyRows) panel.push("");
+
+  const lines: string[] = [renderTopBar(snap, width, busy, spin), paint("dim", "─".repeat(width))];
+  for (let i = 0; i < bodyRows; i += 1) {
+    lines.push(`${padEndVisual(sidebar[i] ?? "", sidebarW)}${paint("dim", "│")}${padEndVisual(panel[i] ?? "", panelW)}`);
+  }
+  lines.push(...renderFooter(snap, width));
+  return lines.slice(0, height).map(line => {
+    const w = visualWidth(line);
+    if (w > width) return truncateVisual(stripAnsi(line), width);
+    return padEndVisual(line, width);
+  });
 }
 
 /**
@@ -248,13 +389,19 @@ function renderFooter(snap: TuiSnapshot, width: number): string[] {
  */
 export function renderFrame(
   snap: TuiSnapshot,
-  options: { width: number; height: number; spinnerFrame?: number; now?: number },
+  options: { width: number; height: number; spinnerFrame?: number; now?: number; firstVisible?: number },
 ): string[] {
   const width = Math.max(20, Math.min(400, Math.floor(options.width)));
   const height = Math.max(6, Math.min(200, Math.floor(options.height)));
   const spin = options.spinnerFrame ?? 0;
   const now = options.now ?? Date.now();
   const busy = snap.sessionsActive > 0 || snap.runningCommands.length > 0;
+
+  // The workbench split needs room for both columns; a narrow or short
+  // terminal keeps the stage-1 stacked layout, which packs small frames best.
+  if (width >= 76 && height >= 22) {
+    return renderWorkbench(snap, { width, height, spin, now, busy, firstVisible: options.firstVisible ?? Number.MAX_SAFE_INTEGER });
+  }
 
   const lines: string[] = [renderTopBar(snap, width, busy, spin), paint("dim", "─".repeat(width))];
 

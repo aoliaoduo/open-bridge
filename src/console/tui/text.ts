@@ -102,3 +102,25 @@ export function padStartVisual(text: string, width: number): string {
   const missing = width - visualWidth(text);
   return missing > 0 ? " ".repeat(missing) + text : text;
 }
+
+/**
+ * The character occupying visual column `column` (0-based), "" when past the
+ * end or when a wide character straddles the column. String indexing cannot
+ * answer this on CJK-containing lines: one code unit can be two columns wide.
+ */
+export function charAtColumn(text: string, column: number): string {
+  let col = 0;
+  for (const ch of stripAnsi(text)) {
+    const code = ch.codePointAt(0) ?? 0;
+    const w = (code >= 0x1100 && (
+      code <= 0x115f || (code >= 0x2e80 && code <= 0xa4cf) || (code >= 0xac00 && code <= 0xd7a3)
+      || (code >= 0xf900 && code <= 0xfaff) || (code >= 0xfe30 && code <= 0xfe4f)
+      || (code >= 0xff00 && code <= 0xff60) || (code >= 0x1f300 && code <= 0x1f64f)
+      || (code >= 0x20000 && code <= 0x3fffd)
+    )) ? 2 : (code < 32 ? 0 : 1);
+    if (col === column && w > 0) return ch;
+    if (w > 0) col += w;
+    if (col > column) return "";
+  }
+  return "";
+}

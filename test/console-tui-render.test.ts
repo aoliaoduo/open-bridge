@@ -8,9 +8,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { stripAnsi, visualWidth, truncateVisual, padEndVisual } from "../src/console/tui/text.js";
+import { charAtColumn, stripAnsi, visualWidth, truncateVisual, padEndVisual } from "../src/console/tui/text.js";
 import { healthColor, paint } from "../src/console/tui/theme.js";
-import { formatDuration, formatBytes, renderFrame } from "../src/console/tui/render.js";
+import { advanceScroll, formatDuration, formatBytes, renderFrame } from "../src/console/tui/render.js";
 import { buildSnapshot, type TuiStateView } from "../src/console/tui/snapshot.js";
 
 test("visual width counts CJK as two columns and ignores ANSI", () => {
@@ -97,6 +97,9 @@ test("buildSnapshot counts live state and redacts the route token", () => {
   assert.equal(snap.runningCommands[0]?.elapsedMs, 59_000);
   assert.equal(snap.servicesTotal, 3);
   assert.equal(snap.servicesRunning, 1); // c2 is done, s3 has no process
+  assert.equal(snap.serviceRows.length, 3);
+  assert.equal(snap.serviceRows.filter(s => s.running).length, 1);
+  assert.deepEqual(snap.serviceRows[0], { name: "s1", running: true });
   assert.equal(snap.tunnel, "local");
   assert.ok(!snap.mcpUrl.includes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), "route token never shown");
   assert.ok(snap.mcpUrl.includes("<redacted>"));
@@ -172,4 +175,78 @@ test("renderFrame degrades gracefully on a small window", () => {
   const text = lines.map(stripAnsi).join("\n");
   assert.match(text, /运行中/);
   assert.match(text, /Ctrl\+C 停止/);
+});
+
+test("workbench layout: exact geometry with a sidebar divider column", () => {
+  const snap = buildSnapshot(fixtureView(), {
+    version: "1.0.0-rc.2",
+    rootName: "open-bridge",
+    logPath: "C:/x/bridge.log",
+    now: 60_000,
+  });
+  const lines = renderFrame(snap, { width: 110, height: 30, now: 60_000 });
+  assert.equal(lines.length, 30, "a 30-row window gets a full-height workbench");
+  for (const [i, line] of lines.entries()) {
+    assert.equal(visualWidth(line), 110, `wb line ${i} must be exactly 110 columns`);
+  }
+  const plain = lines.map(stripAnsi);
+  assert.match(plain[0] ?? "", /运行中/, "top bar present");
+  const sidebarW = Math.max(24, Math.min(40, Math.floor(110 * 0.3)));
+  for (let i = 2; i < 28; i += 1) {
+    // Column, not string index: the sidebar contains CJK (2-column) characters.
+    assert.equal(charAtColumn(plain[i] ?? "", sidebarW), "│", `divider column on body row ${i}`);
+  }
+  const joined = plain.join("\n");
+  assert.match(joined, /─ 概览/);
+  assert.match(joined, /─ 进程/);
+  assert.match(joined, /─ 服务/);
+  assert.match(joined, /活动 \(\d+\)/);
+  assert.match(plain[28] ?? "", /open-bridge/, "usage footer on the second-to-last row");
+  assert.match(plain[29] ?? "", /End 最新/, "scroll hint on the last row");
+});
+
+test("workbench panel follows the tail and reports history when scrolled", () => {
+  const snap = buildSnapshot(fixtureView(), {
+    version: "1.0.0-rc.2",
+    rootName: "open-bridge",
+    logPath: "C:/x/bridge.log",
+    now: 60_000,
+  });
+  const tail = renderFrame(snap, { width: 110, height: 30, now: 60_000 });
+  const tailText = tail.map(stripAnsi).join("\n");
+  assert.match(tailText, /send_to_shell/, "the newest event is visible in tail mode");
+  assert.doesNotMatch(tailText, /End 回底/, "no history indicator while following the tail");
+
+  // 30 events, 25 visible rows: the tail starts five rows in. Scrolling to
+  // firstVisible 2 leaves two rows of history above the view.
+  const many = Array.from({ length: 30 }, (_, i) => ({
+    at: new Date(1000 + i).toISOString(),
+    ts: 1000 + i,
+    tool: `tool_${i}`,
+    status: "completed" as const,
+    message: `m${i}`,
+  }));
+  const manySnap = buildSnapshot(
+    { ...fixtureView(), activity: many },
+    { version: "v", rootName: "r", logPath: "l", now: 60_000 },
+  );
+  const scrolled = renderFrame(manySnap, { width: 110, height: 30, now: 60_000, firstVisible: 2 });
+  const scrollText = scrolled.map(stripAnsi).join("\n");
+  assert.match(scrollText, /↑2 行 · End 回底/, "scrolled view shows rows-above and the way back");
+  assert.match(scrollText, /tool_2/, "the view starts at the requested event");
+  assert.doesNotMatch(scrollText, /tool_0 /, "events above the view are not shown");
+});
+
+test("advanceScroll steps and clamps around the retained history", () => {
+  // 10 events, 4 visible rows -> the tail starts at index 6.
+  assert.equal(advanceScroll("up", 6, 10, 4), 5);
+  assert.equal(advanceScroll("up", 0, 10, 4), 0, "cannot scroll past the oldest");
+  assert.equal(advanceScroll("down", 5, 10, 4), 6);
+  assert.equal(advanceScroll("down", 6, 10, 4), 6, "cannot scroll past the newest");
+  assert.equal(advanceScroll("home", 6, 10, 4), 0);
+  assert.equal(advanceScroll("end", 0, 10, 4), 6);
+  assert.equal(advanceScroll("pageup", 6, 10, 4), 3);
+  // A first-visible beyond the event count (the follow sentinel) behaves as
+  // the tail, so the first scroll step is always one row of history.
+  assert.equal(advanceScroll("up", Number.MAX_SAFE_INTEGER, 10, 4), 5);
 });

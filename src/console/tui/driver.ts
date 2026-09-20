@@ -1,21 +1,25 @@
 /**
- * Stage-1 serve-console TUI driver: alternate screen, 500 ms repaint, no raw
- * mode.
+ * Serve-console TUI driver (stage 3): alternate screen, 500 ms repaint, and
+ * exactly one interaction — scrolling the activity panel.
  *
- * Deliberately raw-mode-free: Ctrl+C keeps its normal SIGINT meaning (the
- * existing graceful shutdown runs, which calls stopConsoleTui and restores the
- * original screen — startup banner included), and no key handling exists to
- * break. Writes are one buffered string per frame; a child that prints to the
- * shared console (rare — managed commands are piped) merely smears one frame,
- * and the next tick repaints it away.
+ * The TUI is a viewing surface by design (settings and background operations
+ * live in the web console), so no command input exists. Scroll keys are read
+ * through raw mode; inside raw mode Ctrl+C no longer raises SIGINT by itself,
+ * so \x03 is translated into a real SIGINT against ourselves and the existing
+ * graceful shutdown path runs unchanged (it calls stopConsoleTui, which
+ * restores the alternate screen AND the raw stdin). Every terminal mode the
+ * driver touches is restored on stop and once more on "exit" as a net for
+ * paths that bypass the graceful stop.
  *
  * Without a real console (service, CI, redirect, --no-tui) startConsoleTui()
  * answers false and the plain output path is untouched.
  */
 
+import * as readline from "node:readline";
+import type { ReadStream } from "node:tty";
 import { state } from "../../bridge/state.js";
 import { buildSnapshot } from "./snapshot.js";
-import { renderFrame } from "./render.js";
+import { renderFrame, workbenchPanelRows, advanceScroll, type ScrollKey } from "./render.js";
 
 export interface ConsoleTuiOptions {
   version: string;
@@ -23,13 +27,42 @@ export interface ConsoleTuiOptions {
   logPath: string;
 }
 
+const KEY_MAP: Record<string, ScrollKey> = {
+  up: "up",
+  down: "down",
+  pageup: "pageup",
+  pagedown: "pagedown",
+  home: "home",
+  end: "end",
+  escape: "end", // Esc snaps back to the newest events, like End
+};
+
 let timer: ReturnType<typeof setInterval> | undefined;
 let resizeHandler: (() => void) | undefined;
+let keyListener: ((ch: string, key: { name?: string; ctrl?: boolean }) => void) | undefined;
 let frameIndex = 0;
 let active = false;
+/** Panel scroll position; larger than any event count = locked to the tail. */
+let scrollFirst = Number.MAX_SAFE_INTEGER;
+/** Event count of the last painted frame, so scroll steps clamp correctly. */
+let lastEventCount = 0;
 
 export function consoleTuiActive(): boolean {
   return active;
+}
+
+function restoreStdin(): void {
+  const stdin = process.stdin as ReadStream;
+  if (keyListener !== undefined) {
+    stdin.off("keypress", keyListener);
+    keyListener = undefined;
+  }
+  try {
+    if (stdin.isTTY === true && stdin.isRaw === true) {
+      stdin.setRawMode(false);
+      stdin.pause();
+    }
+  } catch { /* best effort */ }
 }
 
 export function startConsoleTui(options: ConsoleTuiOptions): boolean {
@@ -46,16 +79,45 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
     // rendering failure is swallowed and the next tick tries again.
     try {
       const snapshot = buildSnapshot(state, options);
+      lastEventCount = snapshot.events.length;
       const lines = renderFrame(snapshot, {
         width: out.columns ?? 80,
         height: out.rows ?? 24,
         spinnerFrame: frameIndex++,
+        firstVisible: scrollFirst,
       });
       write(`\x1b[H${lines.map(line => `${line}\x1b[K`).join("\n")}\x1b[J`);
     } catch { /* see above */ }
   };
 
   write("\x1b[?1049h\x1b[?25l"); // alternate screen + hidden cursor
+
+  const stdin = process.stdin as ReadStream;
+  if (stdin.isTTY === true) {
+    try {
+      readline.emitKeypressEvents(stdin);
+      stdin.setRawMode(true);
+      stdin.resume();
+      keyListener = (ch, key) => {
+        try {
+          if (ch === "\x03" || (key?.ctrl === true && key.name === "c")) {
+            // Raw mode swallows the terminal's SIGINT; raise the real one so
+            // the graceful shutdown path (and its cleanup) runs as before.
+            process.kill(process.pid, "SIGINT");
+            return;
+          }
+          const mapped = KEY_MAP[key?.name ?? ""];
+          if (mapped === undefined) return;
+          const rows = workbenchPanelRows(out.columns ?? 80, out.rows ?? 24);
+          scrollFirst = advanceScroll(mapped, scrollFirst, lastEventCount, rows);
+        } catch { /* a key must never crash the bridge */ }
+      };
+      stdin.on("keypress", keyListener);
+    } catch {
+      /* No raw-mode stdin: the dashboard simply stays read-only, repaint only. */
+    }
+  }
+
   timer = setInterval(paint, 500);
   timer.unref();
   resizeHandler = paint;
@@ -75,14 +137,17 @@ export function stopConsoleTui(): void {
     process.stdout.off("resize", resizeHandler);
     resizeHandler = undefined;
   }
+  restoreStdin();
   try { process.stdout.write("\x1b[?25h\x1b[?1049l"); } catch { /* best effort */ }
 }
 
 // Last-resort restore: exits that bypass the graceful path (a hard deadline)
 // would otherwise leave a hidden cursor behind — the kind of dirt operators
-// remember. Synchronous write on "exit" is allowed and tiny.
+// remember. Synchronous writes on "exit" are allowed and tiny.
 process.on("exit", () => {
   if (active) {
+    active = false;
+    restoreStdin();
     try { process.stdout.write("\x1b[?25h\x1b[?1049l"); } catch { /* best effort */ }
   }
 });
