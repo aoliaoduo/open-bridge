@@ -20,6 +20,7 @@ export type RouteId =
   | "sessions"
   | "todos"
   | "tools"
+  | "skills"
   | "health"
   | "services"
   | "logs"
@@ -91,6 +92,14 @@ export const ROUTES: RouteSpec[] = [
     hint: () => t("这台实例实际对外公布的 MCP 工具清单", "The MCP tools this instance actually advertises"),
     group: "instance",
     icon: ["M4 4h7v7H4z", "M13 4h7v7h-7z", "M4 13h7v7H4z", "M13 13h7v7h-7z"],
+  },
+  {
+    id: "skills",
+    label: () => t("技能", "Skills"),
+    hint: () => t("本实例可用的技能库：名称、说明与来源目录", "The skill library this instance can use: names, descriptions and source dirs"),
+    group: "instance",
+    // A bookmark on a document: a page with a folded corner and two lines.
+    icon: ["M6 3.5h9l4 4v13H6z", "M15 3.5V8h4", "M9.5 13h5", "M9.5 16.5h5"],
   },
   {
     id: "health",

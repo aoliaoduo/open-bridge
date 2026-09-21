@@ -28,6 +28,7 @@ import * as fs from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { listSkills } from "../bridge/skills.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { state } from "../bridge/state.js";
 import { getBridgeStatus, getUsageStats } from "../bridge/meta-tools.js";
@@ -440,6 +441,11 @@ export async function apiRouteHandler(
           core: CORE_TOOLS.has(tool.name),
         }));
         sendJson(res, 200, { ok: true, profile, count: tools.length, tools });
+        return true;
+      }
+      case "/skills": {
+        const discovered = listSkills();
+        sendJson(res, 200, { ok: true, count: discovered.count, skills: discovered.skills, scanned_dirs: discovered.scanned_dirs, shadowed: discovered.shadowed });
         return true;
       }
       case "/health": {

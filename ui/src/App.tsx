@@ -22,6 +22,7 @@ import { ServicesTab } from "./components/ServicesTab";
 import { SessionsPage } from "./components/SessionsPage";
 import { TodosPage } from "./components/TodosPage";
 import { ToolsPage } from "./components/ToolsPage";
+import { SkillsPage } from "./components/SkillsPage";
 import { HealthPage } from "./components/HealthPage";
 
 interface ToastMsg { text: string; isError: boolean }
@@ -234,6 +235,7 @@ export function App() {
               {route === "sessions" && <SessionsPage notify={showToast} />}
               {route === "todos" && <TodosPage />}
               {route === "tools" && <ToolsPage notify={showToast} settings={settings} act={act} />}
+              {route === "skills" && <SkillsPage notify={showToast} />}
               {route === "health" && <HealthPage onOpen={open} />}
               {route === "services" && <ServicesTab notify={showToast} />}
               {route === "logs" && <LogsTab settings={settings} act={act} notify={showToast} />}

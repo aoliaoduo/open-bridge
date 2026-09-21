@@ -150,6 +150,9 @@ export interface TodoBoard {
 export interface ToolView { name: string; description: string; core: boolean }
 export interface ToolCatalog { profile: string; count: number; tools: ToolView[] }
 
+export interface SkillView { name: string; description: string; path: string; dir: string; outside_workspace: boolean }
+export interface SkillCatalog { count: number; skills: SkillView[] }
+
 export interface HealthCheck {
   name: string;
   /** ok = fine, warn = 提醒 (a risk, not a defect), fail = 异常. */
@@ -229,6 +232,7 @@ export const api = {
     postJson<{ closed: string; sessions: SessionView[] }>("/api/sessions/close", { id }),
   todos: () => getJson<TodoBoard>("/api/todos"),
   tools: () => getJson<ToolCatalog>("/api/tools"),
+  skills: () => getJson<SkillCatalog>("/api/skills"),
   health: () => getJson<{ health: HealthReport }>("/api/health").then(r => r.health),
   oauth: () => getJson<{ oauth: OAuthConsoleView }>("/api/oauth").then(r => r.oauth),
   serviceAction: (action: "start" | "stop" | "restart", name: string) =>
