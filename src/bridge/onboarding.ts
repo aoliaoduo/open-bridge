@@ -10,6 +10,14 @@
  * hosted client), and a silent `127.0.0.1` is a dead end for exactly those
  * clients — the old text handed one over with no comment at all, while the
  * console card next to the button was careful to say "仅本机可访问".
+ *
+ * The fixed text is deliberately minimal. The URL goes out bare — the 【】
+ * wrapper is gone, so anything that auto-links or pastes the first line
+ * verbatim gets a clean address — and the working details are left to the
+ * server instructions the client reads at connect time. The one duty that
+ * cannot move there is the todo panel: a web AI that never calls set_todos
+ * leaves the operator's TUI task panel stuck on a previous session, so the
+ * prompt still says it in so many words.
  */
 
 export interface WebAiPromptInputs {
@@ -35,13 +43,11 @@ export function buildWebAiPrompt(inputs: WebAiPromptInputs): string {
       + "要发给外部客户端，请先在控制台「设置」页填写 ngrokDomain 并开启隧道，然后重新复制本提示词。\n\n";
   // Plain strings for the fixed tail: a template literal that spans lines can
   // silently swallow its own continuation, and tsc has nothing to complain about.
-  const instruction = "快速连接这个 MCP（URL），明确使用规则，熟悉可用工具，做好处理接下来一系列工作的准备。";
-  // The operator's TUI task panel is this list and nothing else. A web AI
-  // that never calls set_todos leaves the panel stuck on the previous session.
-  const todoNote = "多步工作一开始就用 set_todos 写下完整清单，推进时整表替换（操作者的 TUI 任务面板只显示这份清单）；瞬时进度用 report_progress，不能代替清单。";
-  // Public tunnels (ngrok's free edge in particular) drop mid-session and come
-  // back. A client that treats the first SSL EOF as a hard failure reports a
-  // working tool as broken, so the prompt says what to do about it.
-  const transportNote = "若遇到传输层报错（SSL EOF、连接被重置或超时），等 5 秒后重试一次；这不是工具失败。";
-  return `${localNote}【${inputs.url}】${authNote}\n\n${instruction}\n${todoNote}\n${transportNote}`;
+  const instruction = "连接这个 MCP（URL），阅读服务器说明，明确规则与工具后待命接受任务。";
+  // The todo-panel duty stays in the paste text even though the other working
+  // details moved to the server instructions: a client that skips those would
+  // otherwise leave the operator's TUI panel stuck on a stale session.
+  const workingNotes = "多步工作先以 set_todos 写清单、整表替换，瞬时进度用 report_progress；"
+    + "传输层报错（SSL EOF、连接被重置或超时）等 5 秒重试一次，那不算工具失败。";
+  return `${localNote}${inputs.url}${authNote}\n\n${instruction}\n${workingNotes}`;
 }
