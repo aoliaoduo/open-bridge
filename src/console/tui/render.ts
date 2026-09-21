@@ -69,7 +69,7 @@ export type TuiSnapshot = {
   servicesRunning: number;
   /** Per-service rows for the workbench sidebar (name + live state). */
   serviceRows: Array<{ name: string; running: boolean }>;
-  events: Array<{ at: string; tool: string; status: TuiEventStatus; message: string; durationMs?: number }>;
+  events: Array<{ at: string; tool: string; status: TuiEventStatus; message: string; durationMs?: number; subtle?: boolean; detail?: string }>;
   logPath: string;
 };
 
@@ -301,6 +301,81 @@ export function eventRow(
   return eventRows(event, width, spin, now)[0] ?? padEndVisual("", width);
 }
 
+/** Event identity for the detail page: `at` is ISO with ms, collisions are theoretical. */
+export function eventKeyOf(event: { at: string; tool: string }): string {
+  return `${event.at}|${event.tool}`;
+}
+
+/**
+ * One event, exactly one row (操作者叫停了软换行): the message truncates with
+ * an ellipsis instead of wrapping. mcp/process rows — transport and process
+ * lifecycle — ride along in a dimmed voice instead of being filtered away.
+ */
+export function eventListRow(
+  event: TuiSnapshot["events"][number],
+  width: number,
+  spin: number,
+  now: number,
+  selected = false,
+): string {
+  const tool = inlineText(event.tool);
+  const message = inlineText(event.message);
+  const icon =
+    event.status === "running" ? paint("accent", spinnerFrame(spin), { bold: true })
+    : event.status === "completed" ? paint("success", "✓")
+    : event.status === "error" ? paint("error", "✕", { bold: true })
+    : event.status === "warning" ? paint("review", "⚠")
+    : paint("context", "◆");
+  const rightText =
+    event.status === "running"
+      ? `${formatDuration(Math.max(0, now - Date.parse(event.at)))}…`
+      : event.durationMs !== undefined
+        ? (event.durationMs < 1000 ? `${Math.round(event.durationMs)}ms` : formatDuration(event.durationMs))
+        : "";
+  const clock = formatClock(event.at);
+  const mark = event.status === "running" ? spinnerFrame(spin)
+    : event.status === "completed" ? "✓"
+    : event.status === "error" ? "✕"
+    : event.status === "warning" ? "⚠"
+    : "◆";
+  const prefixPlain = `${clock} ${mark} ${tool} `;
+  const prefix = `${paint("dim", clock)} ${icon} ${paint(event.subtle === true ? "dim" : "tool", tool)} `;
+  const prefixW = visualWidth(prefixPlain);
+  const DURATION_W = 7; // 与 eventRows 同一约定：右列定宽，正文宽度与时长无关。
+  const rightW = rightText === "" ? 0 : DURATION_W;
+  const rightShown = rightText === "" ? "" : padStartVisual(rightText, DURATION_W);
+  const msgWidth = Math.max(1, width - prefixW - (rightW > 0 ? rightW + 1 : 0));
+  const shown = truncateVisual(message, msgWidth);
+  const left = `${prefix}${shown.length > 0 ? paint(event.subtle === true ? "dim" : "muted", shown) : ""}`;
+  const line = rightShown === ""
+    ? padEndVisual(left, width)
+    : `${padEndVisual(left, Math.max(0, width - rightW))}${paint("dim", rightShown)}`;
+  const safe = visualWidth(line) > width ? padEndVisual(truncateVisual(stripAnsi(line), width), width) : padEndVisual(line, width);
+  // 光标行：整行加粗提亮，布局零位移。
+  return selected ? paint("text", stripAnsi(safe), { bold: true }) : safe;
+}
+
+/** Enter 的目的地：一条事件的全文（record 已在源头截到 500 字符）。 */
+export function eventDetailRows(
+  snap: TuiSnapshot,
+  width: number,
+  key: string | undefined,
+): string[] {
+  const event = snap.events.find(candidate => eventKeyOf(candidate) === key);
+  if (key === undefined || event === undefined) return [padEndVisual(paint("dim", "该事件已滚出活动日志"), width)];
+  const icon =
+    event.status === "running" ? paint("accent", "…", { bold: true })
+    : event.status === "completed" ? paint("success", "✓")
+    : event.status === "error" ? paint("error", "✕", { bold: true })
+    : event.status === "warning" ? paint("review", "⚠")
+    : paint("context", "◆");
+  const duration = event.durationMs !== undefined ? ` · ${formatDuration(event.durationMs)}` : "";
+  const head = `${paint("dim", formatClock(event.at))} ${icon} ${paint("tool", inlineText(event.tool))}${paint("dim", duration)}`;
+  const detail = (event.detail !== undefined && event.detail !== "" ? event.detail : event.message).replace(/\r\n?/g, "\n");
+  const body = detail.split("\n").flatMap(segment => wrapVisualSoft(segment, Math.max(1, width)));
+  return [head, "", ...body.map(segment => paint("muted", segment))].map(line => padEndVisual(line, width));
+}
+
 
 function renderFooter(snap: TuiSnapshot, width: number): string[] {
   // One fact, one place: the top bar owns identity, port and status; the
@@ -462,15 +537,20 @@ function taskPanelRows(snap: TuiSnapshot, width: number, spin: number): string[]
     const mark = todo.status === "completed" ? paint("success", "✓")
       : isCurrent ? paint("accent", spinnerFrame(spin), { bold: true })
       : paint("dim", "·");
-    const titleColor: ColorName = isCurrent ? "text" : "dim";
+    // 完成 → muted（内容略亮于背景）、时钟 dim（元数据退后）：同一行里
+    // 两种灰阶一眼可分；进行中保持 text 加粗、待办保持 dim。
+    const titleColor: ColorName = isCurrent ? "text" : todo.status === "completed" ? "muted" : "dim";
     // 完成时刻固定右列（formatClock 定宽），正文换行边界与时间无关 ——
     // 与活动行时长列同一个防闪烁约定。
     const stamp = todo.status === "completed" && todo.completedAt !== undefined ? formatClock(todo.completedAt) : "";
     const stampW = stamp === "" ? 0 : visualWidth(stamp) + 1;
+    // 长标题撑满换行预算时，padEnd 的间隔会归零、时钟直接贴住正文 ——
+    // 完成行的换行预算再让出 2 列，保证时钟与标题之间至少两条空隙。
+    const stampGap = stampW > 0 ? 2 : 0;
     // A title may contain real line breaks. They must become viewport rows,
     // never embedded terminal newlines that escape the frame's height budget.
     const wrapped = stripAnsi(todo.title).replace(/\r\n?/g, "\n").split("\n")
-      .flatMap(line => wrapVisual(inlineText(line.replace(/\t/g, "    ")), Math.max(1, width - gutter - stampW)));
+      .flatMap(line => wrapVisual(inlineText(line.replace(/\t/g, "    ")), Math.max(1, width - gutter - stampW - stampGap)));
     wrapped.forEach((line, index) => {
       const body = `${index === 0 ? padEndVisual(mark, gutter) : " ".repeat(gutter)}${paint(titleColor, line, { bold: isCurrent })}`;
       if (index === 0 && stamp !== "") {
@@ -539,7 +619,7 @@ function diffPanelRows(snap: TuiSnapshot, width: number): string[] {
   return rows;
 }
 
-export type PanelView = "activity" | "tasks" | "changes" | "diff";
+export type PanelView = "activity" | "tasks" | "changes" | "diff" | "event";
 export const PANEL_VIEWS: readonly PanelView[] = ["activity", "tasks", "changes"];
 export function nextPanelView(view: PanelView): PanelView {
   const index = PANEL_VIEWS.indexOf(view);
@@ -591,27 +671,30 @@ export function panelScrollMetrics(
     totalRows: options.panelView === "tasks" ? taskPanelRows(snap, layout.panelWidth, options.spinnerFrame ?? 0).length
       : options.panelView === "changes" ? changePanelRows(snap, layout.panelWidth).length
       : options.panelView === "diff" ? diffPanelRows(snap, layout.panelWidth).length
-      : snap.events.flatMap(event => eventRows(event, layout.panelWidth, options.spinnerFrame ?? 0, options.now ?? 0)).length,
+      : options.panelView === "event" ? eventDetailRows(snap, layout.panelWidth, undefined).length
+      : snap.events.length, // 单行模式：一行就是一条事件，光标下标与行号同轴
   };
 }
 
 function renderPanel(
   snap: TuiSnapshot, width: number, rows: number, spin: number, now: number,
-  view: PanelView, firstVisible: number,
+  view: PanelView, firstVisible: number, cursor = 0, detailKey?: string,
 ): string[] {
   const tasksView = view === "tasks";
   const changesView = view === "changes";
   const diffView = view === "diff";
+  const eventView = view === "event";
   const content = tasksView ? taskPanelRows(snap, width, spin)
     : changesView ? changePanelRows(snap, width)
     : diffView ? diffPanelRows(snap, width)
-    : snap.events.flatMap(event => eventRows(event, width, spin, now));
+    : eventView ? eventDetailRows(snap, width, detailKey)
+    : snap.events.map((event, index) => eventListRow(event, width, spin, now, index === cursor));
   const requested = Number.isFinite(firstVisible) ? Math.floor(firstVisible) : 0;
   const first = Math.min(Math.max(0, requested), maxFirstVisible(content.length, rows));
   const count = tasksView ? snap.todosTotal : changesView ? (snap.changes?.entries?.length ?? snap.changes?.files ?? 0)
     : diffView ? (snap.diff?.text ? snap.diff.text.split("\n").length : 0)
     : snap.events.length;
-  const label = diffView ? "累计 diff" : `${tasksView ? "任务" : changesView ? "变更" : "活动"} (${count})`;
+  const label = eventView ? "事件详情" : diffView ? "累计 diff" : `${tasksView ? "任务" : changesView ? "变更" : "活动"} (${count})`;
   let title = `─ ${label} `;
   const listView = tasksView || changesView || diffView;
   // Scroll position only: Tab still cycles the views, but the title no longer
@@ -653,12 +736,13 @@ function renderPanel(
     hint = diffView ? "Esc 返回变更" : changesView ? "d 预览 diff" : "";
     if (hint !== "" && scroll !== "") hint = `${hint} · ${scroll}`;
     else if (hint === "") hint = scroll;
+  } else if (eventView) {
+    // 与 diff 预览同一约定：Esc 是唯一出口，靠标题提示被发现。
+    hint = "Esc 返回活动";
   } else {
-    hint = first > 0
-      ? `↑${first} 行 · Home 回顶`
-      : content.length > rows
-        ? `↓${content.length - rows} 行 · PgDn 下翻`
-        : "";
+    const scroll = first > 0 ? `↑${first} 行` : content.length > rows ? `↓${content.length - rows} 行` : "";
+    // 光标选择是新交互，靠标题提示被发现；宽度不够时由下方统一丢弃。
+    hint = scroll === "" ? "↑↓ 选择 · Enter 展开" : `Enter 展开 · ${scroll}`;
   }
   if (visualWidth(title) + visualWidth(hint) > width) hint = "";
   if (visualWidth(title) + visualWidth(hint) > width) title = `${label} `;
@@ -674,6 +758,7 @@ function renderWorkbench(
   options: {
     layout: FrameLayout; spin: number; now: number; busy: boolean;
     firstVisible: number; taskFirstVisible: number; changeFirstVisible: number; diffFirstVisible: number; panelView: PanelView;
+    activityCursor: number; eventDetailKey?: string;
   },
 ): string[] {
   const { layout, spin, now, busy, panelView } = options;
@@ -684,7 +769,7 @@ function renderWorkbench(
     : panelView === "changes" ? options.changeFirstVisible
     : panelView === "diff" ? options.diffFirstVisible
     : options.firstVisible;
-  const panel = renderPanel(snap, panelWidth, panelRows, spin, now, panelView, first);
+  const panel = renderPanel(snap, panelWidth, panelRows, spin, now, panelView, first, options.activityCursor, options.eventDetailKey);
   const lines = [renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width))];
   for (let i = 0; i < bodyRows; i += 1) {
     lines.push(`${padEndVisual(sidebar[i] ?? "", sidebarWidth)}${paint("dim", "│")}${padEndVisual(panel[i] ?? "", panelWidth)}`);
@@ -706,6 +791,7 @@ export function renderFrame(
   options: {
     width: number; height: number; spinnerFrame?: number; now?: number;
     firstVisible?: number; taskFirstVisible?: number; changeFirstVisible?: number; diffFirstVisible?: number; panelView?: PanelView;
+    activityCursor?: number; eventDetailKey?: string;
   },
 ): string[] {
   const panelView = options.panelView ?? "activity";
@@ -718,8 +804,9 @@ export function renderFrame(
   const taskFirstVisible = options.taskFirstVisible ?? 0;
   const changeFirstVisible = options.changeFirstVisible ?? 0;
   const diffFirstVisible = options.diffFirstVisible ?? 0;
+  const activityCursor = options.activityCursor ?? 0;
   if (layout.sidebarWidth > 0) {
-    return renderWorkbench(snap, { layout, spin, now, busy, firstVisible, taskFirstVisible, changeFirstVisible, diffFirstVisible, panelView });
+    return renderWorkbench(snap, { layout, spin, now, busy, firstVisible, taskFirstVisible, changeFirstVisible, diffFirstVisible, panelView, activityCursor: options.activityCursor ?? 0, eventDetailKey: options.eventDetailKey });
   }
   const first = panelView === "tasks" ? taskFirstVisible
     : panelView === "changes" ? changeFirstVisible
@@ -728,7 +815,7 @@ export function renderFrame(
   const lines = [
     renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width)),
     ...layout.overview, ...layout.processes,
-    ...renderPanel(snap, width, panelRows, spin, now, panelView, first),
+    ...renderPanel(snap, width, panelRows, spin, now, panelView, first, activityCursor, options.eventDetailKey),
     ...renderFooter(snap, width),
   ];
   return fitFrame(lines, width, height);

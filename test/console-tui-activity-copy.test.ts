@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildArgsSummary } from "../src/bridge/args-summary.js";
-import { tuiActivityMessage, tuiActivityVisible } from "../src/console/tui/activity-copy.js";
+import { tuiActivityDetail, tuiActivityMessage } from "../src/console/tui/activity-copy.js";
 import { buildSnapshot, type TuiStateView } from "../src/console/tui/snapshot.js";
 import { renderFrame } from "../src/console/tui/render.js";
 import { stripAnsi } from "../src/console/tui/text.js";
@@ -25,27 +25,20 @@ function fixtureView(activity: TuiStateView["activity"]): TuiStateView {
   };
 }
 
-test("transport mcp lines and process lifecycle are not dashboard facts", () => {
-  assert.equal(tuiActivityVisible({
-    tool: "mcp",
-    status: "progress",
-    message: "modern/other · HTTP 200 · 3808ms · sse · session abc · tool def",
-  }), false);
-  assert.equal(tuiActivityVisible({
-    tool: "process",
-    status: "running",
-    message: "Started f7e5f178ae04a9fe: git status -sb (cwd: C:/x)",
-  }), false);
-  assert.equal(tuiActivityVisible({
-    tool: "process",
-    status: "completed",
-    message: "f7e5f178ae04a9fe exited with code 0",
-  }), false);
-  assert.equal(tuiActivityVisible({
-    tool: "write_file",
-    status: "completed",
-    message: "Completed in 4 ms.",
-  }), true);
+test("mcp/process ride along dimmed instead of being filtered away", () => {
+  const view = fixtureView([
+    { at: new Date(NOW).toISOString(), ts: NOW, tool: "mcp", status: "progress", message: "modern/other · HTTP 200 · 3808ms · sse · session abc · tool def" },
+    { at: new Date(NOW + 1).toISOString(), ts: NOW + 1, tool: "process", status: "running", message: "Started f7e5f178ae04a9fe: git status -sb (cwd: C:/x)" },
+  ]);
+  const snap = buildSnapshot(view, { version: "1.0.0", rootName: "r", logPath: "l", now: NOW + 5_000 });
+  assert.equal(snap.events.length, 2, "nothing is filtered: what was logged is shown");
+  assert.equal(snap.events.every(event => event.subtle === true), true, "both ride with the subtle flag");
+});
+
+test("detail uncaps the row copy for the Enter page", () => {
+  const long = "run_command with a very long command argument that runs well past the fifty-six column cap of the dashboard row";
+  assert.equal(tuiActivityMessage({ tool: "run_command", status: "completed", message: long }).length <= 60, true, "rows keep the cap");
+  assert.ok(tuiActivityDetail({ tool: "run_command", status: "completed", message: long }).length > 80, "detail does not");
 });
 
 test("operator copy is the action, not the protocol or the JSON dump", () => {
@@ -98,7 +91,7 @@ test("operator copy is the action, not the protocol or the JSON dump", () => {
   }), "");
 });
 
-test("the activity panel hides mcp/process traces and does not dump argv", () => {
+test("mcp/process traces ride along dimmed; argv never reaches the rows", () => {
   const snap = buildSnapshot(fixtureView([
     { at: "1970-01-01T00:00:04.000Z", ts: 4000, tool: "mcp", status: "progress", message: "modern/other · HTTP 200 · 3808ms · sse · session abc · tool def" },
     {
@@ -112,15 +105,16 @@ test("the activity panel hides mcp/process traces and does not dump argv", () =>
     { at: "1970-01-01T00:00:02.000Z", ts: 2000, tool: "process", status: "running", message: "Started f7e5f178ae04a9fe: git push origin main (cwd: C:/x)" },
     { at: "1970-01-01T00:00:01.000Z", ts: 1000, tool: "write_file", status: "completed", message: "Completed in 4 ms." },
   ]), { version: "v", rootName: "r", logPath: "l", now: NOW });
-  assert.equal(snap.events.some(event => event.tool === "mcp"), false);
-  assert.equal(snap.events.some(event => event.tool === "process"), false);
+  assert.equal(snap.events.filter(event => event.subtle === true).length, 2, "mcp/process are present and marked subtle");
   const text = renderFrame(snap, { width: 110, height: 30, now: NOW }).map(stripAnsi).join("\n");
-  assert.doesNotMatch(text, /HTTP 200|session |sse|timeout_ms|\{command:/);
+  assert.match(text, /HTTP 200/, "the transport line is shown now, dimmed by tone rather than deleted");
+  assert.doesNotMatch(text, /timeout_ms|\{command:/, "rows still never dump argv");
   assert.match(text, /run_command/);
   assert.match(text, /git push origin main/);
   assert.doesNotMatch(text, /git status -sb/);
   assert.match(text, /write_file/);
   assert.doesNotMatch(text, /Completed in 3800/);
+  assert.doesNotMatch(text, /f7e5f178ae04a9fe/, "process ids stay out of the operator copy");
 });
 
 test("semantic hints for high-frequency tools are operator-friendly", () => {

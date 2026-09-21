@@ -11,6 +11,40 @@ import { test } from "node:test";
 import { charAtColumn, fillVisualWidth, setAmbiguousWideForTests, stripAnsi, visualWidth, truncateVisual, padEndVisual } from "../src/console/tui/text.js";
 import { healthColor, paint } from "../src/console/tui/theme.js";
 import { advanceScroll, eventRows, formatDuration, formatBytes, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
+
+test("activity rows are single-line: the message truncates instead of wrapping", () => {
+  const long = "curl -s http://127.0.0.1:8123/api/skills | head -c 400 plus extra padding padding padding to push this well past one panel width for sure";
+  const view = { ...fixtureView(), activity: [
+    { at: "2026-09-22T06:00:00Z", ts: 60_000, tool: "run_command", status: "completed", message: long },
+    { at: "2026-09-22T06:01:00Z", ts: 66_000, tool: "mcp", status: "progress", message: "HTTP 200 · 3808ms · session abc" },
+  ] };
+  const snap = buildSnapshot(view, { version: "1.0.0", rootName: "r", logPath: "l", now: 70_000 });
+  const metrics = panelScrollMetrics(snap, { width: 100, height: 30, panelView: "activity" });
+  assert.equal(metrics.totalRows, 2, "one event, one row — mcp included, nothing filtered");
+  const frame = renderFrame(snap, { width: 100, height: 30, panelView: "activity", now: 70_000 });
+  const plain = frame.map(stripAnsi);
+  const row = plain.find(l => l.includes("curl -s")) ?? "";
+  assert.ok(row.includes("..."), "truncation is marked with an ellipsis");
+  assert.ok(plain.some(l => l.includes("HTTP 200")), "mcp lines ride along now");
+});
+
+test("the cursor row is highlighted and the detail page shows the full copy", () => {
+  const view = { ...fixtureView(), activity: [
+    { at: "2026-09-22T06:00:00Z", ts: 60_000, tool: "run_command", status: "completed", message: "first" },
+    { at: "2026-09-22T06:01:00Z", ts: 66_000, tool: "run_command", status: "completed", message: "second" },
+  ] };
+  const snap = buildSnapshot(view, { version: "1.0.0", rootName: "r", logPath: "l", now: 70_000 });
+  const frame = renderFrame(snap, { width: 100, height: 30, panelView: "activity", now: 70_000, activityCursor: 1 });
+  const rawSecond = frame.find(l => stripAnsi(l).includes("second")) ?? "";
+  assert.ok(rawSecond.includes("\x1b[1m"), "the cursor row paints bold");
+  const detail = renderFrame(snap, { width: 100, height: 30, panelView: "event", now: 70_000, eventDetailKey: "2026-09-22T06:01:00Z|run_command" });
+  const plain = detail.map(stripAnsi);
+  assert.ok(plain.some(l => l.includes("事件详情")), "detail heading");
+  assert.ok(plain.some(l => l.includes("Esc 返回活动")), "the one exit is advertised");
+  assert.ok(plain.some(l => l.includes("second")), "the body shows the event copy");
+  const gone = renderFrame(snap, { width: 100, height: 30, panelView: "event", now: 70_000, eventDetailKey: "missing|key" });
+  assert.ok(gone.map(stripAnsi).some(l => l.includes("已滚出")), "rotated-out events degrade gracefully");
+});
 import { buildSnapshot, type TuiStateView } from "../src/console/tui/snapshot.js";
 
 test("visual width counts CJK as two columns and ignores ANSI", () => {
@@ -204,7 +238,7 @@ test("invoke rows retire against outcome rows that carry no args summary", () =>
   assert.equal(snap.events[1]?.durationMs, 1000);
 });
 
-test("process lifecycle rows stay off the dashboard", () => {
+test("process lifecycle rows ride along, dimmed, with their real state", () => {
   const base = {
     ...fixtureView(),
     activity: [
@@ -218,7 +252,11 @@ test("process lifecycle rows stay off the dashboard", () => {
     ["aaaa0000bbbb2222", { id: "aaaa0000bbbb2222", command: "finished one", done: true, startedAt: 1000, endedAt: 3500, output: { state: () => ({ totalBytes: 1, capacityBytes: 1 }) } }],
   ]);
   const snap = buildSnapshot(base, { version: "v", rootName: "r", logPath: "l", now: 60_000 });
-  assert.equal(snap.events.some(event => event.tool === "process"), false);
+  assert.equal(snap.events.length, 3, "nothing is dropped: the lifecycle stays visible");
+  assert.equal(snap.events.every(event => event.subtle === true), true, "process rows ride dimmed");
+  const states = snap.events.map(event => event.status).sort().join(",");
+  assert.match(states, /completed/, "the finished process keeps its finished state");
+  assert.match(states, /running/, "the live process keeps its live state");
 });
 
 test("renderFrame fills the exact geometry and shows the dashboard vocabulary", () => {
@@ -467,39 +505,38 @@ test("workbench panel follows the tail and reports history when scrolled", () =>
   assert.doesNotMatch(followText, /tool_0 /, "the oldest events are history when the panel overflows");
   const scrolled = renderFrame(manySnap, { width: 110, height: 30, now: 60_000, firstVisible: 2 });
   const scrollText = scrolled.map(stripAnsi).join("\n");
-  assert.match(scrollText, /↑2 行 · Home 回顶/, "scrolled view shows rows-above and the way back");
+  assert.match(scrollText, /Enter 展开 · ↑2 行/, "scrolled view shows rows-above and the selection affordance");
   assert.match(scrollText, /tool_27 /, "the view starts at the requested event");
   assert.doesNotMatch(scrollText, /tool_29 /, "events above the view are not shown");
 });
 
-test("activity messages wrap on spaces instead of dropping their tail", () => {
+test("activity messages truncate on the row; the Enter detail keeps the tail", () => {
   const snap = buildSnapshot(fixtureView(), {
     version: "1.0.0-rc.2",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
   });
-  const token = "WRAPTOKENTAILNOTELLIPSIS";
+  const token = "TRUNCTOKENTAILINDETAIL";
   snap.events = [{
     at: new Date(60_000).toISOString(),
     tool: "write_file",
     status: "error",
     message: `cannot write ${"subdir/".repeat(12)}${token}`,
+    detail: `cannot write ${"subdir/".repeat(12)}${token}`,
   }];
   const metrics = panelScrollMetrics(snap, { width: 110, height: 30, panelView: "activity", now: 60_000 });
-  assert.ok(metrics.totalRows > 1, "a long live line becomes several viewport rows");
+  assert.equal(metrics.totalRows, 1, "one event, one row — no wrapping");
   const top = renderFrame(snap, { width: 110, height: 30, now: 60_000, panelView: "activity", firstVisible: 0 }).map(stripAnsi).join("\n");
-  assert.match(top, /cannot write/, "the reason stays on the first rows");
-  const bottom = renderFrame(snap, {
-    width: 110, height: 30, now: 60_000, panelView: "activity",
-    firstVisible: Math.max(0, metrics.totalRows - metrics.rows),
-  }).map(stripAnsi).join("\n");
-  assert.match(bottom, new RegExp(token), "scrolling the wrapped rows reaches the message tail");
+  assert.match(top, /cannot write/, "the reason stays on the row");
+  assert.match(top, /\.\.\./, "the cut is marked with an ellipsis");
+  assert.doesNotMatch(top, new RegExp(token), "the tail beyond the row is cut from the list");
+  assert.ok((snap.events[0]?.detail ?? "").includes(token), "the Enter page keeps the tail");
   for (const [width, height] of [[110, 30], [60, 12]] as const) {
     const lines = renderFrame(snap, { width, height, now: 60_000, panelView: "activity" });
     assert.equal(lines.length, height);
     for (const [i, line] of lines.entries()) {
-      assert.equal(visualWidth(line), width, `${width}x${height} wrapped activity line ${i}`);
+      assert.equal(visualWidth(line), width, `${width}x${height} single-line activity ${i}`);
     }
   }
 });
@@ -576,6 +613,23 @@ test("the changes panel advertises d and the preview advertises Esc", () => {
   });
   const diff = renderFrame(diffSnap, { width: 100, height: 30, panelView: "diff" }).join("\n");
   assert.ok(stripAnsi(diff).includes("Esc 返回变更"), "the preview title hints the only exit");
+});
+
+test("the completion clock keeps a gap and its own tone apart from the title", async () => {
+  const todos = [
+    { id: "1", title: "这一行标题很长很长很长这一行标题很长很长很长这一行标题很长很长很长这一行标题很长很长", status: "completed", completedAt: "2026-09-22T06:00:00Z" },
+  ];
+  const snap = buildSnapshot({ ...fixtureView(), todos }, { version: "1.0.0", rootName: "r", logPath: "l", now: 60_000, todosUpdatedAt: "2026-09-22T09:58:00Z" });
+  const frame = renderFrame(snap, { width: 100, height: 30, panelView: "tasks", now: 60_000 });
+  const line = frame.map(l => stripAnsi(l)).find(l => l.includes("这一行标题很长")) ?? "";
+  const titleEnd = line.indexOf("这一行标题很长") + visualWidth("这一行标题很长");
+  const clockAt = line.indexOf("06:00:00");
+  assert.ok(clockAt > 0, `clock missing in ${line}`);
+  assert.ok(clockAt - titleEnd >= 2, `clock jammed against title (gap ${clockAt - titleEnd})`);
+  // 标题 muted (#b8b09c)、时钟 dim (#8a8175)：真彩 SGR 直接断言两种灰阶。
+  const raw = frame.find(l => stripAnsi(l).includes("这一行标题很长")) ?? "";
+  assert.ok(raw.includes("38;2;184;176;156"), "title should paint muted #b8b09c");
+  assert.ok(raw.includes("38;2;138;129;117"), "clock should paint dim #8a8175");
 });
 
 test("completed todos render a fixed-width completion clock", () => {

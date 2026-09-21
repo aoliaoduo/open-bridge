@@ -8,7 +8,7 @@
  */
 
 import { MAX_CAPTURED_OUTPUT } from "../../bridge/state.js";
-import { tuiActivityMessage, tuiActivityVisible } from "./activity-copy.js";
+import { tuiActivityDetail, tuiActivityMessage } from "./activity-copy.js";
 import type { TuiEventStatus, TuiSnapshot } from "./render.js";
 
 export interface TuiStateView {
@@ -148,7 +148,10 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
   const openByTool = new Map<string, { idx: number; startedAt: number; args_summary?: string }[]>();
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const entry = entries[i]!;
-    if (!tuiActivityVisible(entry)) continue;
+    // 「全部显示」：mcp/process 不再被过滤，渲染层以 subtle 弱化着色 ——
+    // 操作者要的是「没有哪次调用没记录」的确定感。
+    const rowSubtle = entry.tool === "mcp" || entry.tool === "process";
+    const rowDetail = tuiActivityDetail(entry);
     const ts = entry.ts ?? Date.parse(entry.at);
     const message = tuiActivityMessage(entry);
 
@@ -157,19 +160,26 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
       const command = id === undefined ? undefined : view.commands.get(id);
       if (command === undefined) {
         // Pruned from the table: the fact stays, the animation does not.
-        collected.push({ at: entry.at, tool: entry.tool, status: "progress", message });
+        collected.push({
+        at: entry.at, tool: entry.tool, status: "progress", message,
+        ...(rowSubtle ? { subtle: true } : {}), ...(rowDetail !== "" ? { detail: rowDetail } : {}),
+      });
       } else if (command.done) {
         collected.push({
           at: entry.at,
           tool: entry.tool,
           status: "completed",
           message,
+          ...(rowSubtle ? { subtle: true } : {}), ...(rowDetail !== "" ? { detail: rowDetail } : {}),
           ...(command.endedAt !== undefined && Number.isFinite(command.endedAt) && command.endedAt >= command.startedAt
             ? { durationMs: command.endedAt - command.startedAt }
             : {}),
         });
       } else {
-        collected.push({ at: entry.at, tool: entry.tool, status: "running", message });
+        collected.push({
+          at: entry.at, tool: entry.tool, status: "running", message,
+          ...(rowSubtle ? { subtle: true } : {}), ...(rowDetail !== "" ? { detail: rowDetail } : {}),
+        });
       }
       continue;
     }
@@ -183,11 +193,15 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     }
     const pending = openByTool.get(entry.tool)?.shift();
     if (pending !== undefined) collected[pending.idx] = null;
+    const merged = { ...entry, args_summary: entry.args_summary ?? pending?.args_summary };
+    const mergedDetail = tuiActivityDetail(merged);
     collected.push({
       at: entry.at,
       tool: entry.tool,
       status: toEventStatus(entry.status),
-      message: tuiActivityMessage({ ...entry, args_summary: entry.args_summary ?? pending?.args_summary }),
+      message: tuiActivityMessage(merged),
+      ...(rowSubtle ? { subtle: true } : {}),
+      ...(mergedDetail !== "" ? { detail: mergedDetail } : {}),
       ...(pending !== undefined && Number.isFinite(ts) && ts >= pending.startedAt
         ? { durationMs: ts - pending.startedAt }
         : {}),

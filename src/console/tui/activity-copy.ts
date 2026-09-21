@@ -36,28 +36,30 @@ const TOOL_LABELS: Record<string, string> = {
   list_directory: "列出目录",
 };
 
-/** Transport / process lifecycle rows stay in the log, not on the dashboard. */
-export function tuiActivityVisible(entry: ActivityLike): boolean {
-  if (entry.tool === "mcp" || entry.tool === "process") return false;
-  return true;
+
+
+function full(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }
 
-export function tuiActivityMessage(entry: ActivityLike): string {
-  const raw = entry.message.replace(/\s+/g, " ").trim();
+/** The uncapped operator line — the copy the row shows, without the 56-column
+ *  ceiling. Rows keep the cap; the Enter detail page renders this. */
+export function tuiActivityDetail(entry: ActivityLike): string {
+  const raw = full(entry.message);
 
   if (entry.tool === "process") {
     const started = PROCESS_STARTED.exec(raw);
-    if (started) return clip(firstCommand(stripCwd(started[1] ?? "")));
-    return clip(stripCwd(raw));
+    if (started) return full(firstCommand(stripCwd(started[1] ?? "")));
+    return full(stripCwd(raw));
   }
 
   if (BRIDGE_STARTED.test(raw)) return "Started";
 
   const fromArgs = hintFromSummary(entry.args_summary, entry.tool);
-  if (fromArgs) return clip(fromArgs);
+  if (fromArgs) return full(fromArgs);
 
   const requestCommand = REQUEST_COMMAND.exec(raw);
-  if (requestCommand) return clip(firstCommand(requestCommand[1] ?? ""));
+  if (requestCommand) return full(firstCommand(requestCommand[1] ?? ""));
 
   if (TOOL_LABELS[entry.tool]) {
     if (BOILER_REQUEST.test(raw) || BOILER_DONE.test(raw) || raw === "") {
@@ -68,10 +70,14 @@ export function tuiActivityMessage(entry: ActivityLike): string {
   if (BOILER_REQUEST.test(raw) || BOILER_DONE.test(raw)) return "";
 
   const failed = BOILER_FAIL.exec(raw);
-  if (failed) return clip(failed[1] ?? "");
+  if (failed) return full(failed[1] ?? "");
 
   if (raw.startsWith("{") && raw.includes(":")) return "";
-  return clip(raw);
+  return full(raw);
+}
+
+export function tuiActivityMessage(entry: ActivityLike): string {
+  return clip(tuiActivityDetail(entry));
 }
 
 function stripCwd(value: string): string {

@@ -233,6 +233,21 @@ test("real driver routes scroll keys to the visible panel and only Tab switches 
   });
 });
 
+test("the activity cursor selects, Enter expands the full copy, Esc is the only exit", () => {
+  withTerminal(({ press }) => {
+    const detail = press("return");
+    assert.match(detail, /事件详情/);
+    assert.match(detail, /Esc 返回活动/);
+    assert.match(detail, /EVENT_01/, "the cursor starts on the newest event");
+    assert.match(press("tab"), /事件详情/, "Tab is inert inside the detail view");
+    const back = press("escape");
+    assert.match(back, /EVENT_01/, "Esc returns to the activity page on the same row");
+    press("down");
+    assert.match(press("return"), /EVENT_02/, "the selection moved before expanding");
+    assert.match(press("escape"), /EVENT_02/, "the cursor survives the round trip");
+  });
+});
+
 test("real driver clamps task scroll after resize and list shrink without resurrecting old offsets", () => {
   withTerminal(({ press, resize }) => {
     press("tab");
