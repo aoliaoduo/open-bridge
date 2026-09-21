@@ -248,6 +248,23 @@ test("the activity cursor selects, Enter expands the full copy, Esc is the only 
   });
 });
 
+test("a long detail pages through: End reaches the tail the first page cannot show", () => {
+  withTerminal(({ press }) => {
+    const sentence = "这是一段超长的中文执行详情用于验证详情页必须能滚动看完全部内容";
+    const long = Array.from({ length: 40 }, (_, i) => `${sentence}标记${i}END`).join("");
+    state.activity.unshift({ at: new Date(NOW + 50_000).toISOString(), ts: NOW + 50_000, tool: "run_command", status: "completed", message: long });
+    // 光标行取自「上一帧」快照：改完状态先催一帧重绘（home 无副作用地回到
+    // 头部并重画），让操作者——和 Enter——看见的是含新事件的列表。
+    press("home");
+    const detail = press("return");
+    assert.match(detail, /事件详情/);
+    assert.doesNotMatch(detail, /标记3[5-9]END/, "the first page cannot show the tail");
+    const lastPage = press("end");
+    assert.match(lastPage, /标记3[5-9]END/, "paging reaches the tail of the detail");
+    assert.match(press("escape"), /EVENT_01/, "Esc returns to the activity page");
+  });
+});
+
 test("real driver clamps task scroll after resize and list shrink without resurrecting old offsets", () => {
   withTerminal(({ press, resize }) => {
     press("tab");

@@ -28,6 +28,17 @@ test("activity rows are single-line: the message truncates instead of wrapping",
   assert.ok(plain.some(l => l.includes("HTTP 200")), "mcp lines ride along now");
 });
 
+test("the detail page wraps any long line and never overflows the panel", () => {
+  const longCjk = "这是一段特别长的中文详情没有任何空格用来模拟操作者要查看的完整内容".repeat(8);
+  const view = { ...fixtureView(), activity: [
+    { at: "2026-09-22T06:00:00.000Z", ts: 60_000, tool: "run_command", status: "completed", message: longCjk },
+  ] };
+  const snap = buildSnapshot(view, { version: "1.0.0", rootName: "r", logPath: "l", now: 70_000 });
+  const frame = renderFrame(snap, { width: 100, height: 30, panelView: "event", now: 70_000, eventDetailKey: "2026-09-22T06:00:00.000Z|run_command" });
+  for (const line of frame) assert.ok(visualWidth(line) <= 100, `row overflows: ${visualWidth(line)}`);
+  assert.ok(frame.map(stripAnsi).join("").includes("完整内容"), "the wrapped rows carry the tail of the content");
+});
+
 test("the cursor row is highlighted and the detail page shows the full copy", () => {
   const view = { ...fixtureView(), activity: [
     { at: "2026-09-22T06:00:00Z", ts: 60_000, tool: "run_command", status: "completed", message: "first" },

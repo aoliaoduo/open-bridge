@@ -107,6 +107,14 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
   activityCursor = 0;
   eventDetailKey = undefined;
   expandScrollFirst = 0;
+  // 上一次会话的帧快照与量度不能带进新会话：回车取的是「当前帧的光标行」，
+  // 旧快照会让 Enter 打开一条早已不存在的事件（键撞上同时刻新事件时更隐蔽）。
+  lastSnapshot = undefined;
+  activityMetrics = { rows: 1, totalRows: 0 };
+  taskMetrics = { rows: 1, totalRows: 0 };
+  changeMetrics = { rows: 1, totalRows: 0 };
+  diffMetrics = { rows: 1, totalRows: 0 };
+  expandMetrics = { rows: 1, totalRows: 0 };
   // THIS process's start: 「运行」 must not read the persisted stats window
   // (a freshly restarted Bridge used to claim 50 hours of uptime).
   const launchedAt = Date.now();
@@ -170,7 +178,7 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
       taskMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "tasks" });
       changeMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "changes" });
       diffMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "diff" });
-      expandMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "event" });
+      expandMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "event", eventDetailKey });
       // Clamp stored positions too: a list shrink must not leave a hidden stale
       // offset that reappears when tasks grow again. Keep the activity sentinel.
       scrollFirst = Math.min(scrollFirst, maxFirstVisible(activityMetrics.totalRows, activityMetrics.rows));
@@ -186,6 +194,7 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
         taskFirstVisible: taskScrollFirst,
         changeFirstVisible: changeScrollFirst,
         diffFirstVisible: diffScrollFirst,
+        expandFirstVisible: expandScrollFirst,
         activityCursor,
         eventDetailKey,
         panelView,
@@ -241,7 +250,9 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
             if (key?.name === "escape") { panelView = "activity"; paint(); return; }
           }
           if (panelView === "activity" && (key?.name === "return" || key?.name === "enter")) {
-            // 光标行展开全文：详情页自带滚动，Esc 返回。
+            // 光标行展开全文：详情页自带滚动，Esc 返回。首帧靠定时器，开屏
+            // 立刻回车时还没有任何快照 —— 先同步画一帧再取事件，别静默失效。
+            if (lastSnapshot === undefined) paint();
             const selected = lastSnapshot?.events[activityCursor];
             if (selected !== undefined) {
               eventDetailKey = eventKeyOf(selected);
@@ -259,6 +270,10 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
             changeScrollFirst = advanceScroll(mapped, changeScrollFirst, changeMetrics.totalRows, changeMetrics.rows);
           } else if (panelView === "diff") {
             diffScrollFirst = advanceScroll(mapped, diffScrollFirst, diffMetrics.totalRows, diffMetrics.rows);
+          } else if (panelView === "event") {
+            // 详情页自带滚动：内容超过面板时翻页看全，Esc 返回；此视图里
+            // 绝不动活动光标 —— 隐藏视图的位置不能被顺手改掉。
+            expandScrollFirst = advanceScroll(mapped, expandScrollFirst, expandMetrics.totalRows, expandMetrics.rows);
           } else {
             // 单行活动列表：滚动键移动光标，视口跟随光标。翻页键让光标锚定
             // 新窗口顶部（与旧的整页滚动窗口一致），单步键做最小跟随。

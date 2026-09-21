@@ -663,7 +663,7 @@ function frameLayout(snap: TuiSnapshot, width: number, height: number, view: Pan
 /** The real viewport's row counts, including wrapped task titles and spacers. */
 export function panelScrollMetrics(
   snap: TuiSnapshot,
-  options: { width: number; height: number; panelView: PanelView; now?: number; spinnerFrame?: number },
+  options: { width: number; height: number; panelView: PanelView; now?: number; spinnerFrame?: number; eventDetailKey?: string },
 ): { rows: number; totalRows: number } {
   const layout = frameLayout(snap, options.width, options.height, options.panelView);
   return {
@@ -671,7 +671,7 @@ export function panelScrollMetrics(
     totalRows: options.panelView === "tasks" ? taskPanelRows(snap, layout.panelWidth, options.spinnerFrame ?? 0).length
       : options.panelView === "changes" ? changePanelRows(snap, layout.panelWidth).length
       : options.panelView === "diff" ? diffPanelRows(snap, layout.panelWidth).length
-      : options.panelView === "event" ? eventDetailRows(snap, layout.panelWidth, undefined).length
+      : options.panelView === "event" ? eventDetailRows(snap, layout.panelWidth, options.eventDetailKey).length
       : snap.events.length, // 单行模式：一行就是一条事件，光标下标与行号同轴
   };
 }
@@ -758,6 +758,7 @@ function renderWorkbench(
   options: {
     layout: FrameLayout; spin: number; now: number; busy: boolean;
     firstVisible: number; taskFirstVisible: number; changeFirstVisible: number; diffFirstVisible: number; panelView: PanelView;
+    expandFirstVisible: number;
     activityCursor: number; eventDetailKey?: string;
   },
 ): string[] {
@@ -768,6 +769,7 @@ function renderWorkbench(
   const first = panelView === "tasks" ? options.taskFirstVisible
     : panelView === "changes" ? options.changeFirstVisible
     : panelView === "diff" ? options.diffFirstVisible
+    : panelView === "event" ? options.expandFirstVisible
     : options.firstVisible;
   const panel = renderPanel(snap, panelWidth, panelRows, spin, now, panelView, first, options.activityCursor, options.eventDetailKey);
   const lines = [renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width))];
@@ -791,6 +793,7 @@ export function renderFrame(
   options: {
     width: number; height: number; spinnerFrame?: number; now?: number;
     firstVisible?: number; taskFirstVisible?: number; changeFirstVisible?: number; diffFirstVisible?: number; panelView?: PanelView;
+    expandFirstVisible?: number;
     activityCursor?: number; eventDetailKey?: string;
   },
 ): string[] {
@@ -806,11 +809,12 @@ export function renderFrame(
   const diffFirstVisible = options.diffFirstVisible ?? 0;
   const activityCursor = options.activityCursor ?? 0;
   if (layout.sidebarWidth > 0) {
-    return renderWorkbench(snap, { layout, spin, now, busy, firstVisible, taskFirstVisible, changeFirstVisible, diffFirstVisible, panelView, activityCursor: options.activityCursor ?? 0, eventDetailKey: options.eventDetailKey });
+    return renderWorkbench(snap, { layout, spin, now, busy, firstVisible, taskFirstVisible, changeFirstVisible, diffFirstVisible, panelView, expandFirstVisible: options.expandFirstVisible ?? 0, activityCursor: options.activityCursor ?? 0, eventDetailKey: options.eventDetailKey });
   }
   const first = panelView === "tasks" ? taskFirstVisible
     : panelView === "changes" ? changeFirstVisible
     : panelView === "diff" ? diffFirstVisible
+    : panelView === "event" ? (options.expandFirstVisible ?? 0)
     : firstVisible;
   const lines = [
     renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width)),
