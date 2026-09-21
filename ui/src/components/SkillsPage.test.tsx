@@ -49,7 +49,8 @@ describe("SkillsPage", () => {
 
   test("a failed load surfaces the error instead of an empty table", async () => {
     skillsMock.mockRejectedValueOnce(new Error("boom"));
-    render(<SkillsPage />);
+    const { container } = render(<SkillsPage />);
     await screen.findByText("boom");
+    expect(container.querySelector(".skeleton")).toBeNull();
   });
 });

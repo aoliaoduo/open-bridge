@@ -119,7 +119,11 @@ export function HealthPage(
           </div>
         }
       >
-        {report === null ? <Skeleton lines={4} /> : (
+        {report === null ? (
+          note
+            ? <div className="section-note" role="alert">{note}</div>
+            : <Skeleton lines={4} />
+        ) : (
           <>
             <div className="meter">
               <div className="meter-track">
@@ -167,7 +171,7 @@ export function HealthPage(
         ) : null}
       </div>
 
-      {note && <div className="card section-note">{note}</div>}
+      {note && report !== null && <div className="card section-note" role="alert">{note}</div>}
     </>
   );
 }

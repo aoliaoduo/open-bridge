@@ -10,6 +10,7 @@ import { paint } from "../src/console/tui/theme.js";
 import { stripAnsi, visualWidth } from "../src/console/tui/text.js";
 import {
   classifyGitError,
+  collectFileDiffPreview,
   collectWorkspaceChanges,
   countTextLines,
   parseNumstat,
@@ -213,6 +214,29 @@ test("the changes panel lists each path with its own +/- and keeps the sidebar s
   assert.doesNotMatch(text, /EVENT_|暂无任务/, "the file list does not leak the other views");
 });
 
+test("the changes panel is a one-file-per-row cursor list", () => {
+  const longPath = `nested/${"very-long-segment/".repeat(12)}tail.ts`;
+  const snap = buildSnapshot(fixtureView(), {
+    version: "v", rootName: "r", logPath: "l", now: 60_000,
+    workspaceChanges: {
+      files: 2, insertions: 3, deletions: 1,
+      entries: [
+        { path: longPath, insertions: 2, deletions: 1 },
+        { path: "selected.ts", insertions: 1, deletions: 0 },
+      ],
+    },
+  });
+  const metrics = panelScrollMetrics(snap, { width: 110, height: 30, panelView: "changes" });
+  assert.equal(metrics.totalRows, 2, "long paths truncate instead of consuming extra selection rows");
+  const frame = renderFrame(snap, { width: 110, height: 30, panelView: "changes", changeCursor: 1 });
+  const selected = frame.find(line => stripAnsi(line).includes("selected.ts")) ?? "";
+  assert.ok(selected.includes("\x1b[1m"), "the current file is visibly highlighted");
+  const text = frame.map(stripAnsi).join("\n");
+  assert.match(text, /↑↓ 选择/);
+  assert.match(text, /Enter 文件 diff/);
+  assert.match(text, /d 累计/);
+});
+
 test("a narrow changes view owns the body the way the task view does", () => {
   const snap = buildSnapshot(fixtureView(), {
     version: "v",
@@ -264,10 +288,14 @@ test("collectWorkspaceChanges against an isolated git repository", async (t) => 
   git(dir, ["init"]);
   try { git(dir, ["checkout", "-b", "main"]); } catch { /* already on main */ }
   writeFileSync(path.join(dir, "tracked.txt"), "one\n");
-  git(dir, ["add", "tracked.txt"]);
+  writeFileSync(path.join(dir, "literal[1].txt"), "magic old\n");
+  writeFileSync(path.join(dir, "literal1.txt"), "plain old\n");
+  git(dir, ["add", "--all"]);
   git(dir, ["commit", "-m", "seed"]);
 
   writeFileSync(path.join(dir, "tracked.txt"), "one\ntwo\n");
+  writeFileSync(path.join(dir, "literal[1].txt"), "magic old\nmagic changed\n");
+  writeFileSync(path.join(dir, "literal1.txt"), "plain old\nplain changed\n");
   mkdirSync(path.join(dir, "nested"));
   writeFileSync(path.join(dir, "nested", "a.txt"), "aaa\n");
   writeFileSync(path.join(dir, "nested", "b.txt"), "b\n");
@@ -279,12 +307,12 @@ test("collectWorkspaceChanges against an isolated git repository", async (t) => 
   const summary = await collectWorkspaceChanges(dir);
   assert.ok(summary, "a real repository is never reported as 非 git");
   assert.equal(summary.unavailable, undefined);
-  // tracked.txt (modified) + nested/a + nested/b + empty + tail + "my file.txt" + pic.bin
-  assert.equal(summary.files, 7, "untracked directory must expand; space path and empty file each count");
-  // numstat on tracked.txt: +1 / 0; untracked: a=1, b=1, empty=0, tail=1, my file=2, binary=0
-  assert.equal(summary.insertions, 1 + 1 + 1 + 0 + 1 + 2 + 0);
+  // Three tracked modifications + nested/a + nested/b + empty + tail + "my file.txt" + pic.bin
+  assert.equal(summary.files, 9, "untracked directory must expand; space path and empty file each count");
+  // Each tracked file is +1; untracked: a=1, b=1, empty=0, tail=1, my file=2, binary=0.
+  assert.equal(summary.insertions, 1 + 1 + 1 + 1 + 1 + 0 + 1 + 2 + 0);
   assert.equal(summary.deletions, 0);
-  assert.equal(summary.entries?.length, 7);
+  assert.equal(summary.entries?.length, 9);
   assert.equal(byPath(summary, "tracked.txt")?.insertions, 1);
   assert.equal(byPath(summary, "tracked.txt")?.untracked, undefined);
   assert.equal(byPath(summary, "nested/a.txt")?.untracked, true);
@@ -292,6 +320,43 @@ test("collectWorkspaceChanges against an isolated git repository", async (t) => 
   assert.equal(byPath(summary, "empty.txt")?.insertions, 0);
   assert.equal(byPath(summary, "my file.txt")?.insertions, 2);
   assert.equal(byPath(summary, "pic.bin")?.binary, true);
+
+  const trackedPreview = await collectFileDiffPreview(dir, { path: "tracked.txt", insertions: 1, deletions: 0 });
+  assert.equal(trackedPreview.ok, true);
+  if (trackedPreview.ok) {
+    assert.match(trackedPreview.text, /^\+two$/m, "the selected tracked file gets its own HEAD-to-worktree diff");
+    assert.doesNotMatch(trackedPreview.text, /nested\/a\.txt/, "other changed files never leak into the detail");
+  }
+  const literalPreview = await collectFileDiffPreview(dir, { path: "literal[1].txt", insertions: 1, deletions: 0 });
+  assert.equal(literalPreview.ok, true);
+  if (literalPreview.ok) {
+    assert.match(literalPreview.text, /^\+magic changed$/m);
+    assert.doesNotMatch(literalPreview.text, /plain changed/, "pathspec metacharacters remain literal");
+  }
+  const untrackedPreview = await collectFileDiffPreview(dir, { path: "my file.txt", insertions: 2, deletions: 0, untracked: true });
+  assert.equal(untrackedPreview.ok, true);
+  if (untrackedPreview.ok) {
+    assert.match(untrackedPreview.text, /my file\.txt/);
+    assert.match(untrackedPreview.text, /^\+x$/m);
+    assert.match(untrackedPreview.text, /^\+y$/m);
+  }
+  const emptyPreview = await collectFileDiffPreview(dir, { path: "empty.txt", insertions: 0, deletions: 0, untracked: true });
+  assert.equal(emptyPreview.ok, true);
+  if (emptyPreview.ok) assert.match(emptyPreview.text, /new file mode/, "an empty untracked file still has a useful creation preview");
+  const binaryPreview = await collectFileDiffPreview(dir, { path: "pic.bin", insertions: 0, deletions: 0, untracked: true, binary: true });
+  assert.equal(binaryPreview.ok, true);
+  if (binaryPreview.ok) assert.match(binaryPreview.text, /Binary files/);
+  const boundedPreview = await collectFileDiffPreview(dir, { path: "my file.txt", insertions: 2, deletions: 0, untracked: true }, 40);
+  assert.equal(boundedPreview.ok, true);
+  if (boundedPreview.ok) assert.equal(boundedPreview.truncated, true, "large file diffs honor the preview budget");
+
+  const unbornDir = mkdtempSync(path.join(tmpdir(), "ob-tui-git-unborn-"));
+  git(unbornDir, ["init"]);
+  writeFileSync(path.join(unbornDir, "staged.txt"), "first revision\n");
+  git(unbornDir, ["add", "staged.txt"]);
+  const unbornPreview = await collectFileDiffPreview(unbornDir, { path: "staged.txt", insertions: 1, deletions: 0 });
+  assert.equal(unbornPreview.ok, true);
+  if (unbornPreview.ok) assert.match(unbornPreview.text, /^\+first revision$/m, "a staged file is useful before the first commit");
 
   const cleanDir = mkdtempSync(path.join(tmpdir(), "ob-tui-git-clean-"));
   git(cleanDir, ["init"]);

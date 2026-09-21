@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import childProcess, { type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 import { state } from "../src/bridge/state.js";
 import { consoleTuiActive, startConsoleTui, stopConsoleTui } from "../src/console/tui/driver.js";
@@ -23,6 +26,7 @@ function fixtureView(count = 100): TuiStateView {
     commands: new Map(),
     services: new Map(),
     activity: Array.from({ length: 40 }, (_, index) => ({
+      id: `fixture-event-${index + 1}`,
       at: new Date(NOW - index * 1000).toISOString(),
       ts: NOW - index * 1000,
       tool: "probe",
@@ -140,13 +144,17 @@ class TerminalOutput extends EventEmitter {
 }
 
 /** Exercise the real startConsoleTui/key listener without spawning a Bridge,
- * touching a real terminal, running Git, or emitting an actual SIGINT. */
-function withTerminal(run: (terminal: {
-  output: TerminalOutput;
-  press: (name: string, ctrl?: boolean) => string;
-  resize: (width: number, height: number) => string;
-  killCalls: () => unknown[][];
-}) => void): void {
+ * touching a real terminal, or emitting SIGINT. Git is mocked unless a real
+ * repository is explicitly supplied for an integration path. */
+async function withTerminal(
+  run: (terminal: {
+    output: TerminalOutput;
+    press: (name: string, ctrl?: boolean) => string;
+    resize: (width: number, height: number) => string;
+    killCalls: () => unknown[][];
+  }) => void | Promise<void>,
+  options: { rootPath?: string; mockGit?: boolean } = {},
+): Promise<void> {
   const stdoutDescriptor = Object.getOwnPropertyDescriptor(process, "stdout");
   const stdinDescriptor = Object.getOwnPropertyDescriptor(process, "stdin");
   assert.ok(stdoutDescriptor && stdinDescriptor);
@@ -161,7 +169,7 @@ function withTerminal(run: (terminal: {
   const view = fixtureView();
   state.todos = view.todos;
   state.activity = view.activity.map(entry => ({ ...entry, ts: entry.ts ?? NOW }));
-  const gitMock = mock.method(childProcess, "execFile", (...args: unknown[]) => {
+  const gitMock = options.mockGit === false ? undefined : mock.method(childProcess, "execFile", (...args: unknown[]) => {
     const callback = args.at(-1);
     if (typeof callback === "function") callback(new Error("fixture: no Git probe"), "", "");
     return {} as ChildProcess;
@@ -171,9 +179,9 @@ function withTerminal(run: (terminal: {
   Object.defineProperty(process, "stdout", { configurable: true, value: output });
   Object.defineProperty(process, "stdin", { configurable: true, value: input });
   try {
-    assert.equal(startConsoleTui({ version: "test", rootName: "fixture", rootPath: process.cwd(), logPath: "synthetic.log" }), true);
+    assert.equal(startConsoleTui({ version: "test", rootName: "fixture", rootPath: options.rootPath ?? process.cwd(), logPath: "synthetic.log" }), true);
     assert.equal(input.isRaw, true);
-    run({
+    await run({
       output,
       press(name, ctrl = false) {
         input.emit("keypress", name === "tab" ? "\t" : ctrl && name === "c" ? "\x03" : "", { name, ctrl });
@@ -196,7 +204,7 @@ function withTerminal(run: (terminal: {
     Object.defineProperty(process, "stdout", stdoutDescriptor);
     Object.defineProperty(process, "stdin", stdinDescriptor);
     input.destroy();
-    gitMock.mock.restore();
+    gitMock?.mock.restore();
     killMock.mock.restore();
     syncBuiltinESMExports();
     assert.equal(rawAfterStop, false, "stop restores raw stdin");
@@ -208,8 +216,41 @@ function eventLabels(text: string): string[] {
   return text.match(/EVENT_\d+/g) ?? [];
 }
 
-test("real driver routes scroll keys to the visible panel and only Tab switches views", () => {
-  withTerminal(({ press, killCalls }) => {
+function gitAvailable(): boolean {
+  try {
+    childProcess.execFileSync("git", ["--version"], { stdio: "ignore", windowsHide: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function git(cwd: string, args: string[]): void {
+  childProcess.execFileSync("git", [
+    "-c", "user.email=tui@test",
+    "-c", "user.name=tui",
+    "-c", "commit.gpgsign=false",
+    "-c", "init.defaultBranch=main",
+    "-c", "core.autocrlf=false",
+    ...args,
+  ], { cwd, stdio: "ignore", windowsHide: true });
+}
+
+async function waitForFrame(
+  output: TerminalOutput,
+  predicate: (frame: string) => boolean,
+  timeoutMs = 5000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate(output.frame)) return output.frame;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  assert.fail(`timed out waiting for TUI frame; last frame:\n${output.frame.slice(-2000)}`);
+}
+
+test("real driver routes scroll keys to the visible panel and only Tab switches views", async () => {
+  await withTerminal(({ press, killCalls }) => {
     const activity = eventLabels(press("pagedown"));
     assert.ok(activity.length > 0 && !activity.includes("EVENT_01"));
     assert.match(press("tab"), /TASK_001/);
@@ -233,8 +274,44 @@ test("real driver routes scroll keys to the visible panel and only Tab switches 
   });
 });
 
-test("the activity cursor selects, Enter expands the full copy, Esc is the only exit", () => {
-  withTerminal(({ press }) => {
+test("the real driver selects change files with arrows, opens Enter detail, and returns with Esc", async (t) => {
+  if (!gitAvailable()) {
+    t.skip("git is not on PATH");
+    return;
+  }
+  const dir = mkdtempSync(path.join(tmpdir(), "ob-tui-navigation-git-"));
+  git(dir, ["init"]);
+  writeFileSync(path.join(dir, "a.txt"), "a old\n");
+  writeFileSync(path.join(dir, "b.txt"), "b old\n");
+  git(dir, ["add", "--all"]);
+  git(dir, ["commit", "-m", "seed"]);
+  writeFileSync(path.join(dir, "a.txt"), "a old\na changed\n");
+  writeFileSync(path.join(dir, "b.txt"), "b old\nb changed\n");
+
+  await withTerminal(async ({ output, press }) => {
+    press("tab");
+    press("tab");
+    await waitForFrame(output, value => value.includes("a.txt") && value.includes("b.txt"));
+
+    press("down");
+    press("return");
+    const second = await waitForFrame(output, value => value.includes("文件 diff · b.txt") && value.includes("+b changed"));
+    assert.match(second, /Esc 返回变更/);
+
+    const back = press("escape");
+    assert.match(back, /变更 \(2\)/);
+    assert.match(back, /Enter 文件 diff/);
+    assert.doesNotMatch(back, /文件 diff · b\.txt/);
+
+    press("up");
+    press("return");
+    await waitForFrame(output, value => value.includes("文件 diff · a.txt") && value.includes("+a changed"));
+    assert.match(press("escape"), /a\.txt/);
+  }, { rootPath: dir, mockGit: false });
+});
+
+test("the activity cursor selects, Enter expands the full copy, Esc is the only exit", async () => {
+  await withTerminal(({ press }) => {
     const detail = press("return");
     assert.match(detail, /事件详情/);
     assert.match(detail, /Esc 返回活动/);
@@ -248,8 +325,27 @@ test("the activity cursor selects, Enter expands the full copy, Esc is the only 
   });
 });
 
-test("a long detail pages through: End reaches the tail the first page cannot show", () => {
-  withTerminal(({ press }) => {
+test("a newly prepended event does not move a historical activity selection", async () => {
+  await withTerminal(({ press, resize }) => {
+    press("down");
+    press("down");
+    state.activity.unshift({
+      id: "fixture-event-new",
+      at: new Date(NOW + 1_000).toISOString(),
+      ts: NOW + 1_000,
+      tool: "probe",
+      status: "completed",
+      message: "EVENT_00",
+    });
+    resize(110, 24);
+    const detail = press("return");
+    assert.match(detail, /EVENT_03/, "Enter opens the event the cursor selected before the live insert");
+    assert.doesNotMatch(detail, /EVENT_02/, "the cursor did not drift to the same array index");
+  });
+});
+
+test("a long detail pages through: End reaches the tail the first page cannot show", async () => {
+  await withTerminal(({ press }) => {
     const sentence = "这是一段超长的中文执行详情用于验证详情页必须能滚动看完全部内容";
     const long = Array.from({ length: 40 }, (_, i) => `${sentence}标记${i}END`).join("");
     state.activity.unshift({ at: new Date(NOW + 50_000).toISOString(), ts: NOW + 50_000, tool: "run_command", status: "completed", message: long });
@@ -265,8 +361,8 @@ test("a long detail pages through: End reaches the tail the first page cannot sh
   });
 });
 
-test("real driver clamps task scroll after resize and list shrink without resurrecting old offsets", () => {
-  withTerminal(({ press, resize }) => {
+test("real driver clamps task scroll after resize and list shrink without resurrecting old offsets", async () => {
+  await withTerminal(({ press, resize }) => {
     press("tab");
     assert.match(press("end"), /TASK_100/);
     resize(60, 12);
@@ -319,8 +415,8 @@ test("every wrapped title character survives, not only the first and last line",
   }
 });
 
-test("real narrow activity scrolling uses the rows left after overview cards", () => {
-  withTerminal(({ press, resize }) => {
+test("real narrow activity scrolling uses the rows left after overview cards", async () => {
+  await withTerminal(({ press, resize }) => {
     const initial = eventLabels(resize(60, 12));
     assert.ok(initial.length > 1 && initial.includes("EVENT_01"));
     const advanced = eventLabels(press("pagedown"));
@@ -333,8 +429,8 @@ test("real narrow activity scrolling uses the rows left after overview cards", (
 });
 
 
-test("real driver clears before drawing and never erases the last painted cell", () => {
-  withTerminal(({ output, press }) => {
+test("real driver clears before drawing and never erases the last painted cell", async () => {
+  await withTerminal(({ output, press }) => {
     press("tab");
     const esc = String.fromCharCode(27);
     assert.ok(output.payload.startsWith(`${esc}[H${esc}[2K`), "erase the row BEFORE its ink, not at the pending-wrap cursor");

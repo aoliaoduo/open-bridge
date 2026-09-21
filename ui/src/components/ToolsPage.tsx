@@ -40,7 +40,7 @@ export function ToolsPage({ notify, settings, act }: {
   useEffect(() => {
     let alive = true;
     void api.tools()
-      .then(value => { if (alive) setCatalog(value); })
+      .then(value => { if (alive) { setCatalog(value); setNote(""); } })
       .catch(error => { if (alive) setNote(error instanceof Error ? error.message : String(error)); });
     return () => { alive = false; };
   }, [profileSetting]);
@@ -111,7 +111,9 @@ export function ToolsPage({ notify, settings, act }: {
       }
     >
       {catalog === null ? (
-        <Skeleton lines={5} />
+        note
+          ? <div className="section-note" role="alert">{note}</div>
+          : <Skeleton lines={5} />
       ) : (
         <>
           <div className="toolbar">
@@ -180,7 +182,7 @@ export function ToolsPage({ notify, settings, act }: {
           )}
         </>
       )}
-      {note && <div className="section-note">{note}</div>}
+      {note && catalog !== null && <div className="section-note" role="alert">{note}</div>}
     </Card>
     </>
   );

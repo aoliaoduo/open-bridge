@@ -1,6 +1,7 @@
 import { host } from "../host/host.js";
 import type { Server as HttpServer } from "node:http";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -61,6 +62,10 @@ export type CommandState = {
 };
 
 export type Activity = {
+  /** Unique identity for this physical log row. */
+  id?: string;
+  /** Shared by the running and terminal rows of one tool invocation. */
+  invocation_id?: string;
   at: string;
   /** Epoch ms for relative-time rendering (the locale `at` string is display-only). */
   ts?: number;
@@ -293,15 +298,22 @@ async function appendAuditEntry(entry: Omit<Activity, "at"> & { at: string }): P
   await fs.appendFile(logPath, `${JSON.stringify(entry)}\n`);
 }
 
+/** Opaque correlation/row identity; UUIDs stay unique across fast parallel calls. */
+export function createActivityId(): string {
+  return randomUUID();
+}
+
 /** Record one tool/activity event into the in-memory log, output channel, view, and audit file. */
 export function record(
   tool: string,
   status: Activity["status"],
   message: string,
   argsSummary?: string,
-  details?: { changes?: Activity["changes"] },
+  details?: { changes?: Activity["changes"]; invocationId?: string },
 ): void {
   const entry = {
+    id: createActivityId(),
+    ...(details?.invocationId ? { invocation_id: details.invocationId } : {}),
     at: new Date().toISOString(),
     tool,
     status,

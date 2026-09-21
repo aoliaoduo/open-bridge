@@ -27,7 +27,7 @@ export function SkillsPage({ notify }: {
   useEffect(() => {
     let alive = true;
     void api.skills()
-      .then(value => { if (alive) setCatalog(value); })
+      .then(value => { if (alive) { setCatalog(value); setNote(""); } })
       .catch(error => { if (alive) setNote(error instanceof Error ? error.message : String(error)); });
     return () => { alive = false; };
   }, []);
@@ -59,7 +59,9 @@ export function SkillsPage({ notify }: {
       }
     >
       {catalog === null ? (
-        <Skeleton lines={4} />
+        note
+          ? <div className="section-note" role="alert">{note}</div>
+          : <Skeleton lines={4} />
       ) : (
         <>
           {catalog.skills.length > 0 && (
@@ -134,7 +136,7 @@ export function SkillsPage({ notify }: {
           )}
         </>
       )}
-      {note && <div className="section-note">{note}</div>}
+      {note && catalog !== null && <div className="section-note" role="alert">{note}</div>}
     </Card>
   );
 }

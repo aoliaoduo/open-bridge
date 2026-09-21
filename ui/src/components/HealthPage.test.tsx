@@ -35,6 +35,14 @@ function renderPage() {
 }
 
 describe("HealthPage", () => {
+  test("a failed initial check stops looking like an endless health run", async () => {
+    healthMock.mockRejectedValueOnce(new Error("health unavailable"));
+    const { container } = render(<HealthPage />);
+
+    expect((await screen.findByRole("alert")).textContent).toContain("health unavailable");
+    expect(container.querySelector(".skeleton")).toBeNull();
+  });
+
   test("labels the 构建 row like every other row", async () => {
     // The build check arrived after the label map did, so this page showed the
     // raw English check name in a table where everything else is Chinese.

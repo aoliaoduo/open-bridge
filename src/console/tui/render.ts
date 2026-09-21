@@ -48,7 +48,7 @@ export type TuiSnapshot = {
     unavailable?: boolean;
     entries?: Array<{ path: string; insertions: number; deletions: number; untracked?: boolean; binary?: boolean }>;
   };
-  /** 累计 diff 预览（review_changes 只读面，不推进审阅基线）。 */
+  /** 累计 review diff，或变更页当前文件的工作树 diff。 */
   diff?: {
     loading: boolean;
     ok: boolean;
@@ -57,6 +57,8 @@ export type TuiSnapshot = {
     since: string;
     checkpoint: string;
     reason: string;
+    kind?: "cumulative" | "file";
+    path?: string;
   };
   runningCommands: Array<{
     id: string;
@@ -69,7 +71,7 @@ export type TuiSnapshot = {
   servicesRunning: number;
   /** Per-service rows for the workbench sidebar (name + live state). */
   serviceRows: Array<{ name: string; running: boolean }>;
-  events: Array<{ at: string; tool: string; status: TuiEventStatus; message: string; durationMs?: number; subtle?: boolean; detail?: string }>;
+  events: Array<{ id?: string; at: string; tool: string; status: TuiEventStatus; message: string; durationMs?: number; subtle?: boolean; detail?: string }>;
   logPath: string;
 };
 
@@ -297,9 +299,9 @@ export function eventRow(
   return eventRows(event, width, spin, now)[0] ?? padEndVisual("", width);
 }
 
-/** Event identity for the detail page: `at` is ISO with ms, collisions are theoretical. */
-export function eventKeyOf(event: { at: string; tool: string }): string {
-  return `${event.at}|${event.tool}`;
+/** Stable event identity; old in-memory rows fall back to their legacy key. */
+export function eventKeyOf(event: { id?: string; at: string; tool: string }): string {
+  return event.id ? `id:${event.id}` : `${event.at}|${event.tool}`;
 }
 
 /**
@@ -566,8 +568,8 @@ function taskPanelRows(snap: TuiSnapshot, width: number, spin: number): string[]
 }
 
 
-/** Per-file +/- list for the Tab 「变更」 page. Paths wrap; counts keep their columns. */
-function changePanelRows(snap: TuiSnapshot, width: number): string[] {
+/** Per-file +/- list for the Tab 「变更」 page: one selectable file per row. */
+function changePanelRows(snap: TuiSnapshot, width: number, cursor = 0): string[] {
   if (snap.changes === undefined) return [paint("dim", "非 git")];
   if (snap.changes.unavailable) return [paint("dim", "读取失败")];
   const entries = snap.changes.entries ?? [];
@@ -582,33 +584,34 @@ function changePanelRows(snap: TuiSnapshot, width: number): string[] {
   const rows: string[] = [];
   for (const [index, entry] of entries.entries()) {
     const path = inlineText(entry.path).replace(/\t/g, "    ");
-    const wrapped = wrapVisual(path, pathWidth);
+    const selected = index === cursor;
+    const bold = selected ? { bold: true } : undefined;
+    const shown = truncateVisual(path, pathWidth);
     const counts = entry.binary
-      ? padEndVisual(paint("dim", "二进制"), gutter)
-      : `${paint("success", padStartVisual(addTexts[index] ?? "", addW))} ${delTexts[index] ? paint("error", padStartVisual(delTexts[index] ?? "", delW)) : " ".repeat(delW)} `;
-    wrapped.forEach((line, lineIndex) => {
-      if (lineIndex === 0) {
-        const tag = entry.untracked && visualWidth(line) + visualWidth(" 未跟踪") <= pathWidth ? paint("dim", " 未跟踪") : "";
-        rows.push(`${counts}${paint("text", line)}${tag}`);
-      } else {
-        rows.push(`${" ".repeat(gutter)}${paint("text", line)}`);
-      }
-    });
+      ? padEndVisual(paint("dim", "二进制", bold), gutter)
+      : `${paint("success", padStartVisual(addTexts[index] ?? "", addW), bold)} ${delTexts[index] ? paint("error", padStartVisual(delTexts[index] ?? "", delW), bold) : " ".repeat(delW)} `;
+    const tag = entry.untracked && visualWidth(shown) + visualWidth(" 未跟踪") <= pathWidth ? paint("dim", " 未跟踪", bold) : "";
+    rows.push(`${counts}${paint("text", shown, bold)}${tag}`);
   }
   return rows;
 }
 
-/** 累计 diff 预览（review_changes 只读）：+绿 -红 @@暗，行内截断不折行。 */
+/** Diff preview: cumulative review or one selected working-tree file. */
 function diffPanelRows(snap: TuiSnapshot, width: number): string[] {
   const diff = snap.diff;
-  if (diff === undefined || diff.loading) return [paint("dim", "正在读取累计 diff…")];
+  const fileDiff = diff?.kind === "file";
+  if (diff === undefined || diff.loading) return [paint("dim", `正在读取${fileDiff ? "文件" : "累计"} diff…`)];
   if (!diff.ok) return [paint("dim", truncateVisual(diff.reason || "读取失败", width))];
   if (diff.text === "") {
+    if (fileDiff) return [paint("dim", "该文件当前没有可显示的工作树 diff")];
     return [paint("dim", diff.checkpoint === "established"
       ? "已建立审阅基线；出现新改动后再按 d 刷新"
       : "自上次审阅以来没有改动")];
   }
-  const rows = [paint("dim", truncateVisual(`累计 diff · 自 ${diff.since}${diff.truncated ? " · 已截断" : ""}`, width))];
+  const summary = fileDiff
+    ? `文件 diff · ${inlineText(diff.path ?? "")}${diff.truncated ? " · 已截断" : ""}`
+    : `累计 diff · 自 ${diff.since}${diff.truncated ? " · 已截断" : ""}`;
+  const rows = [paint("dim", truncateVisual(summary, width))];
   for (const raw of diff.text.split("\n")) {
     const line = inlineText(raw.replace(/\t/g, "    "));
     if (line.startsWith("+")) rows.push(paint("success", truncateVisual(line, width)));
@@ -678,14 +681,14 @@ export function panelScrollMetrics(
 
 function renderPanel(
   snap: TuiSnapshot, width: number, rows: number, spin: number, now: number,
-  view: PanelView, firstVisible: number, cursor = 0, detailKey?: string,
+  view: PanelView, firstVisible: number, cursor = 0, detailKey?: string, changeCursor = 0,
 ): string[] {
   const tasksView = view === "tasks";
   const changesView = view === "changes";
   const diffView = view === "diff";
   const eventView = view === "event";
   const content = tasksView ? taskPanelRows(snap, width, spin)
-    : changesView ? changePanelRows(snap, width)
+    : changesView ? changePanelRows(snap, width, changeCursor)
     : diffView ? diffPanelRows(snap, width)
     : eventView ? eventDetailRows(snap, width, detailKey)
     : snap.events.map((event, index) => eventListRow(event, width, spin, now, index === cursor));
@@ -694,7 +697,7 @@ function renderPanel(
   const count = tasksView ? snap.todosTotal : changesView ? (snap.changes?.entries?.length ?? snap.changes?.files ?? 0)
     : diffView ? (snap.diff?.text ? snap.diff.text.split("\n").length : 0)
     : snap.events.length;
-  const label = eventView ? "事件详情" : diffView ? "累计 diff" : `${tasksView ? "任务" : changesView ? "变更" : "活动"} (${count})`;
+  const label = eventView ? "事件详情" : diffView ? (snap.diff?.kind === "file" ? "文件 diff" : "累计 diff") : `${tasksView ? "任务" : changesView ? "变更" : "活动"} (${count})`;
   let title = `─ ${label} `;
   const listView = tasksView || changesView || diffView;
   // Scroll position only: Tab still cycles the views, but the title no longer
@@ -731,9 +734,10 @@ function renderPanel(
     }
   } else if (listView) {
     const scroll = content.length > rows ? `${first + 1}-${Math.min(first + rows, content.length)}/${content.length} 行` : "";
-    // 让功能可被发现：变更页提示 d，预览页提示唯一的出口 Esc；放不下时由
-    // 下方既有的宽度检查统一丢弃，窄面板维持原状。
-    hint = diffView ? "Esc 返回变更" : changesView ? "d 预览 diff" : "";
+    // 变更页与活动页共享光标/Enter 心智；d 继续保留累计审阅预览。
+    hint = diffView ? "Esc 返回变更" : changesView
+      ? ((snap.changes?.entries?.length ?? 0) > 0 ? "↑↓ 选择 · Enter 文件 diff · d 累计" : "d 累计 diff")
+      : "";
     if (hint !== "" && scroll !== "") hint = `${hint} · ${scroll}`;
     else if (hint === "") hint = scroll;
   } else if (eventView) {
@@ -759,7 +763,7 @@ function renderWorkbench(
     layout: FrameLayout; spin: number; now: number; busy: boolean;
     firstVisible: number; taskFirstVisible: number; changeFirstVisible: number; diffFirstVisible: number; panelView: PanelView;
     expandFirstVisible: number;
-    activityCursor: number; eventDetailKey?: string;
+    activityCursor: number; changeCursor: number; eventDetailKey?: string;
   },
 ): string[] {
   const { layout, spin, now, busy, panelView } = options;
@@ -771,7 +775,7 @@ function renderWorkbench(
     : panelView === "diff" ? options.diffFirstVisible
     : panelView === "event" ? options.expandFirstVisible
     : options.firstVisible;
-  const panel = renderPanel(snap, panelWidth, panelRows, spin, now, panelView, first, options.activityCursor, options.eventDetailKey);
+  const panel = renderPanel(snap, panelWidth, panelRows, spin, now, panelView, first, options.activityCursor, options.eventDetailKey, options.changeCursor);
   const lines = [renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width))];
   for (let i = 0; i < bodyRows; i += 1) {
     lines.push(`${padEndVisual(sidebar[i] ?? "", sidebarWidth)}${paint("dim", "│")}${padEndVisual(panel[i] ?? "", panelWidth)}`);
@@ -794,7 +798,7 @@ export function renderFrame(
     width: number; height: number; spinnerFrame?: number; now?: number;
     firstVisible?: number; taskFirstVisible?: number; changeFirstVisible?: number; diffFirstVisible?: number; panelView?: PanelView;
     expandFirstVisible?: number;
-    activityCursor?: number; eventDetailKey?: string;
+    activityCursor?: number; changeCursor?: number; eventDetailKey?: string;
   },
 ): string[] {
   const panelView = options.panelView ?? "activity";
@@ -808,8 +812,9 @@ export function renderFrame(
   const changeFirstVisible = options.changeFirstVisible ?? 0;
   const diffFirstVisible = options.diffFirstVisible ?? 0;
   const activityCursor = options.activityCursor ?? 0;
+  const changeCursor = options.changeCursor ?? 0;
   if (layout.sidebarWidth > 0) {
-    return renderWorkbench(snap, { layout, spin, now, busy, firstVisible, taskFirstVisible, changeFirstVisible, diffFirstVisible, panelView, expandFirstVisible: options.expandFirstVisible ?? 0, activityCursor: options.activityCursor ?? 0, eventDetailKey: options.eventDetailKey });
+    return renderWorkbench(snap, { layout, spin, now, busy, firstVisible, taskFirstVisible, changeFirstVisible, diffFirstVisible, panelView, expandFirstVisible: options.expandFirstVisible ?? 0, activityCursor, changeCursor, eventDetailKey: options.eventDetailKey });
   }
   const first = panelView === "tasks" ? taskFirstVisible
     : panelView === "changes" ? changeFirstVisible
@@ -819,7 +824,7 @@ export function renderFrame(
   const lines = [
     renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width)),
     ...layout.overview, ...layout.processes,
-    ...renderPanel(snap, width, panelRows, spin, now, panelView, first, activityCursor, options.eventDetailKey),
+    ...renderPanel(snap, width, panelRows, spin, now, panelView, first, activityCursor, options.eventDetailKey, changeCursor),
     ...renderFooter(snap, width),
   ];
   return fitFrame(lines, width, height);

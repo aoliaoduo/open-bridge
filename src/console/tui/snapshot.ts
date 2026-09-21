@@ -29,7 +29,16 @@ export interface TuiStateView {
     output: { state(): { totalBytes: number; capacityBytes: number } };
   }>;
   services: Map<unknown, { commandId?: string }>;
-  activity: Array<{ at: string; ts?: number; tool: string; status: string; message: string; args_summary?: string }>;
+  activity: Array<{
+    id?: string;
+    invocation_id?: string;
+    at: string;
+    ts?: number;
+    tool: string;
+    status: string;
+    message: string;
+    args_summary?: string;
+  }>;
   usage: { startedAt: number; calls: number; successes: number; failures: number };
   /** Since-launch counters (state.runtimeUsage): the numbers the TUI shows. */
   runtimeUsage: { calls: number; successes: number; failures: number };
@@ -63,7 +72,7 @@ export interface SnapshotOptions {
     unavailable?: boolean;
     entries?: Array<{ path: string; insertions: number; deletions: number; untracked?: boolean; binary?: boolean }>;
   };
-  /** 累计 diff 预览（review_changes 只读面，不推进审阅基线）。 */
+  /** 累计 review diff，或变更页当前文件的工作树 diff。 */
   diff?: {
     loading: boolean;
     ok: boolean;
@@ -72,6 +81,8 @@ export interface SnapshotOptions {
     since: string;
     checkpoint: string;
     reason: string;
+    kind?: "cumulative" | "file";
+    path?: string;
   };
 }
 
@@ -112,7 +123,7 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     });
   }
   // Longest-running first: the row the operator most needs to notice.
-  runningCommands.sort((a, b) => a.elapsedMs - b.elapsedMs);
+  runningCommands.sort((a, b) => b.elapsedMs - a.elapsedMs);
 
   let servicesTotal = 0;
   let servicesRunning = 0;
@@ -132,20 +143,21 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
   //   mcp endpoint (outcome): record(name, "completed"|"error", message) — no args summary
   //   processes (lifecycle):  record("process", "running", "Started <id>: ...") — no outcome row at all
   //
-  // So exact-key pairing can never succeed (the first live screenshot showed
-  // every invoke row spinning and counting forever), and process rows have no
-  // outcome to wait for. Two rules instead:
+  // New rows carry one invocation_id across their start and outcome, so parallel
+  // calls of the same tool close exactly the row they started. Older rows have
+  // no correlation field, so they retain the best-effort FIFO fallback. Process
+  // rows have no outcome to wait for. Two rules instead:
   //
-  //   1. An outcome row closes the OLDEST still-open invoke of the same tool
-  //      (FIFO). Concurrent same-tool calls can attribute durations crosswise;
-  //      for a viewing surface that beats an invoke that never retires.
+  //   1. Match invocation_id exactly; only legacy rows use same-tool FIFO.
   //   2. A "process · Started <id>" row is a lifecycle fact, not a call: its
   //      truth comes from the command table. A live process legitimately
   //      counts; a finished one shows its real lifetime (endedAt − startedAt);
   //      a pruned one degrades to a neutral marker with no invented time.
   const entries = view.activity.slice(0, MAX_EVENTS);
   const collected: Array<TuiSnapshot["events"][number] | null> = [];
-  const openByTool = new Map<string, { idx: number; startedAt: number; args_summary?: string }[]>();
+  type Pending = { idx: number; startedAt: number; args_summary?: string; invocationId?: string };
+  const openByTool = new Map<string, Pending[]>();
+  const openByInvocation = new Map<string, Pending>();
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const entry = entries[i]!;
     // 「全部显示」：mcp/process 不再被过滤，渲染层以 subtle 弱化着色 ——
@@ -161,11 +173,12 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
       if (command === undefined) {
         // Pruned from the table: the fact stays, the animation does not.
         collected.push({
-        at: entry.at, tool: entry.tool, status: "progress", message,
+        ...(entry.id ? { id: entry.id } : {}), at: entry.at, tool: entry.tool, status: "progress", message,
         ...(rowSubtle ? { subtle: true } : {}), ...(rowDetail !== "" ? { detail: rowDetail } : {}),
       });
       } else if (command.done) {
         collected.push({
+          ...(entry.id ? { id: entry.id } : {}),
           at: entry.at,
           tool: entry.tool,
           status: "completed",
@@ -177,7 +190,7 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
         });
       } else {
         collected.push({
-          at: entry.at, tool: entry.tool, status: "running", message,
+          ...(entry.id ? { id: entry.id } : {}), at: entry.at, tool: entry.tool, status: "running", message,
           ...(rowSubtle ? { subtle: true } : {}), ...(rowDetail !== "" ? { detail: rowDetail } : {}),
         });
       }
@@ -186,16 +199,38 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
 
     if (entry.status === "running") {
       const queue = openByTool.get(entry.tool) ?? [];
-      if (Number.isFinite(ts)) queue.push({ idx: collected.length, startedAt: ts, args_summary: entry.args_summary });
+      if (Number.isFinite(ts)) {
+        const pending: Pending = {
+          idx: collected.length, startedAt: ts, args_summary: entry.args_summary,
+          ...(entry.invocation_id ? { invocationId: entry.invocation_id } : {}),
+        };
+        queue.push(pending);
+        if (entry.invocation_id) openByInvocation.set(entry.invocation_id, pending);
+      }
       openByTool.set(entry.tool, queue);
-      collected.push({ at: entry.at, tool: entry.tool, status: "running", message });
+      const eventId = entry.invocation_id ?? entry.id;
+      collected.push({ ...(eventId ? { id: eventId } : {}), at: entry.at, tool: entry.tool, status: "running", message });
       continue;
     }
-    const pending = openByTool.get(entry.tool)?.shift();
+    const queue = openByTool.get(entry.tool);
+    let pending = entry.invocation_id ? openByInvocation.get(entry.invocation_id) : undefined;
+    if (pending !== undefined) {
+      const index = queue?.indexOf(pending) ?? -1;
+      if (index >= 0) queue?.splice(index, 1);
+      openByInvocation.delete(entry.invocation_id!);
+    } else if (!entry.invocation_id) {
+      // An uncorrelated lifecycle/audit row must not steal a modern correlated
+      // invocation merely because it shares the tool name. FIFO applies only
+      // among legacy starts that also lack an invocation id.
+      const legacyIndex = queue?.findIndex(candidate => !candidate.invocationId) ?? -1;
+      if (legacyIndex >= 0) pending = queue?.splice(legacyIndex, 1)[0];
+    }
     if (pending !== undefined) collected[pending.idx] = null;
     const merged = { ...entry, args_summary: entry.args_summary ?? pending?.args_summary };
     const mergedDetail = tuiActivityDetail(merged);
+    const eventId = entry.invocation_id ?? pending?.invocationId ?? entry.id;
     collected.push({
+      ...(eventId ? { id: eventId } : {}),
       at: entry.at,
       tool: entry.tool,
       status: toEventStatus(entry.status),

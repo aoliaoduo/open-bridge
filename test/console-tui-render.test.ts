@@ -10,7 +10,7 @@ import { test } from "node:test";
 
 import { charAtColumn, fillVisualWidth, setAmbiguousWideForTests, stripAnsi, visualWidth, truncateVisual, padEndVisual } from "../src/console/tui/text.js";
 import { healthColor, paint } from "../src/console/tui/theme.js";
-import { advanceScroll, eventRows, formatDuration, formatBytes, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
+import { advanceScroll, eventKeyOf, eventRows, formatDuration, formatBytes, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
 
 test("activity rows are single-line: the message truncates instead of wrapping", () => {
   const long = "curl -s http://127.0.0.1:8123/api/skills | head -c 400 plus extra padding padding padding to push this well past one panel width for sure";
@@ -60,6 +60,21 @@ test("the cursor row is highlighted and the detail page shows the full copy", ()
   const gone = renderFrame(snap, { width: 100, height: 30, panelView: "event", now: 70_000, eventDetailKey: "missing|key" });
   assert.ok(gone.map(stripAnsi).some(l => l.includes("已滚出")), "rotated-out events degrade gracefully");
 });
+test("event detail identity distinguishes same-millisecond calls of the same tool", () => {
+  const view = { ...fixtureView(), activity: [
+    { id: "event-first", at: "2026-09-22T06:00:00.000Z", ts: 60_000, tool: "run_command", status: "completed", message: "first parallel call" },
+    { id: "event-second", at: "2026-09-22T06:00:00.000Z", ts: 60_000, tool: "run_command", status: "completed", message: "second parallel call" },
+  ] };
+  const snap = buildSnapshot(view, { version: "1.0.0", rootName: "r", logPath: "l", now: 70_000 });
+  const second = snap.events.find(event => event.id === "event-second");
+  assert.ok(second);
+  const detail = renderFrame(snap, {
+    width: 100, height: 30, panelView: "event", now: 70_000, eventDetailKey: eventKeyOf(second),
+  }).map(stripAnsi).join("\n");
+  assert.match(detail, /second parallel call/);
+  assert.doesNotMatch(detail, /first parallel call/);
+});
+
 import { buildSnapshot, type TuiStateView } from "../src/console/tui/snapshot.js";
 
 test("visual width counts CJK as two columns and ignores ANSI", () => {
@@ -213,6 +228,18 @@ test("buildSnapshot counts live state and shows the full MCP URL", () => {
   assert.equal(snap.calls, 7);
   assert.equal(snap.successes, 6);
   assert.equal(snap.failures, 1);
+});
+
+test("running commands are ordered longest-running first", () => {
+  const view = fixtureView();
+  const output = { state: () => ({ totalBytes: 0, capacityBytes: 1024 }) };
+  view.commands = new Map([
+    ["new", { id: "newer", command: "quick", done: false, startedAt: 50_000, output }],
+    ["old", { id: "older", command: "stuck", done: false, startedAt: 1_000, output }],
+    ["middle", { id: "middle", command: "medium", done: false, startedAt: 30_000, output }],
+  ]);
+  const snap = buildSnapshot(view, { version: "v", rootName: "r", logPath: "l", now: 60_000 });
+  assert.deepEqual(snap.runningCommands.map(command => command.id), ["older", "middle", "newer"]);
 });
 
 test("buildSnapshot reports a duration only for observed invoke/outcome pairs", () => {
@@ -608,6 +635,24 @@ test("the diff panel renders the cumulative review diff", () => {
   assert.ok(joined.includes("已截断") === false, "untruncated diff stays quiet about truncation");
 });
 
+test("the diff panel names and renders one selected file", () => {
+  const snap = buildSnapshot(fixtureView(), {
+    version: "1.0.0", rootName: "open-bridge", logPath: "C:/x/bridge.log", now: 60_000,
+    diff: {
+      kind: "file", path: "src/selected.ts", loading: false, ok: true,
+      text: "diff --git a/src/selected.ts b/src/selected.ts\n@@ -1 +1 @@\n-old\n+new",
+      truncated: false, since: "", checkpoint: "", reason: "",
+    },
+  });
+  const frame = renderFrame(snap, { width: 100, height: 30, panelView: "diff" });
+  const text = frame.map(stripAnsi).join("\n");
+  assert.match(text, /文件 diff/);
+  assert.match(text, /src\/selected\.ts/);
+  assert.match(text, /-old/);
+  assert.match(text, /\+new/);
+  assert.match(text, /Esc 返回变更/);
+});
+
 test("the diff panel shows loading and failure states", () => {
   const loading = buildSnapshot(fixtureView(), {
     version: "1.0.0", rootName: "r", logPath: "l",
@@ -635,13 +680,15 @@ test("the duration column keeps a fixed width so rows stop flickering", () => {
   assert.ok(columns[0] >= 0 && columns[0] === columns[1] && columns[1] === columns[2]);
 });
 
-test("the changes panel advertises d and the preview advertises Esc", () => {
+test("the changes panel advertises cursor/Enter plus cumulative d, and preview advertises Esc", () => {
   const changesSnap = buildSnapshot(fixtureView(), {
     version: "1.0.0", rootName: "r", logPath: "l",
-    workspaceChanges: { files: 0, insertions: 0, deletions: 0, entries: [] },
+    workspaceChanges: { files: 1, insertions: 1, deletions: 0, entries: [{ path: "src/a.ts", insertions: 1, deletions: 0 }] },
   });
   const changes = renderFrame(changesSnap, { width: 100, height: 30, panelView: "changes" }).join("\n");
-  assert.ok(stripAnsi(changes).includes("d 预览 diff"), "the changes title hints the preview key");
+  assert.ok(stripAnsi(changes).includes("↑↓ 选择"), "the changes title hints cursor movement");
+  assert.ok(stripAnsi(changes).includes("Enter 文件 diff"), "the changes title hints the selected-file preview");
+  assert.ok(stripAnsi(changes).includes("d 累计"), "the cumulative preview remains discoverable");
 
   const diffSnap = buildSnapshot(fixtureView(), {
     version: "1.0.0", rootName: "r", logPath: "l",

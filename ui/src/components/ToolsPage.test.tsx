@@ -64,4 +64,17 @@ describe("ToolsPage", () => {
     rerender(<ToolsPage settings={{ config: { toolProfile: "full", port: 9 } } as unknown as SettingsState} act={act} />);
     await waitFor(() => expect(toolsMock).toHaveBeenCalledTimes(1));
   });
+
+  test("a failed initial load stops the loading skeleton and shows the error", async () => {
+    toolsMock.mockRejectedValueOnce(new Error("catalog unavailable")).mockResolvedValueOnce(CORE);
+    const act = vi.fn();
+    const { container, rerender } = render(<ToolsPage settings={settings("full")} act={act} />);
+
+    expect((await screen.findByRole("alert")).textContent).toContain("catalog unavailable");
+    expect(container.querySelector(".skeleton")).toBeNull();
+
+    rerender(<ToolsPage settings={settings("core")} act={act} />);
+    expect(await screen.findByText("read_files")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });

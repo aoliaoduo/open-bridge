@@ -5,6 +5,7 @@ import { state } from "../src/bridge/state.js";
 import { invoke } from "../src/bridge/dispatcher.js";
 import { batchTool } from "../src/bridge/batch.js";
 import { runScript } from "../src/bridge/script-tools.js";
+import { buildArgsSummary } from "../src/bridge/args-summary.js";
 import { buildSnapshot } from "../src/console/tui/snapshot.js";
 
 const memoryHost: Host = {
@@ -38,6 +39,9 @@ function statuses(tool: string): string[] {
 
 function assertRetired(tool: string, outcome: "completed" | "error"): void {
   assert.deepEqual(statuses(tool), ["running", outcome], "each started nested call has exactly one real outcome");
+  const pair = state.activity.filter(entry => entry.tool === tool);
+  assert.ok(pair[0]?.invocation_id, "the invocation has a correlation id");
+  assert.equal(pair[0]?.invocation_id, pair[1]?.invocation_id, "start and outcome share that id");
   const snap = buildSnapshot(state, { version: "test", rootName: "fixture", logPath: "unused", now: Date.now() + 15 * 60_000 });
   const events = snap.events.filter(entry => entry.tool === tool);
   assert.equal(events.length, 1, "the result replaces its invoke row in the TUI");
@@ -95,4 +99,34 @@ test("normal top-level dispatch leaves completion and accounting to the MCP endp
   assert.deepEqual(statuses("get_todos"), ["running"], "do not add a duplicate top-level terminal event");
   assert.equal(state.runtimeUsage.calls, 1);
   assert.equal(state.usage.calls, 1);
+});
+
+test("out-of-order parallel calls of one tool keep their own arguments and durations", () => {
+  const t0 = Date.parse("2026-09-22T00:00:00.000Z");
+  const activity: typeof state.activity = [
+    { id: "row-a-done", invocation_id: "call-a", at: new Date(t0 + 4_000).toISOString(), ts: t0 + 4_000, tool: "read_files", status: "completed", message: "Completed in 4000 ms." },
+    { id: "row-b-done", invocation_id: "call-b", at: new Date(t0 + 3_000).toISOString(), ts: t0 + 3_000, tool: "read_files", status: "completed", message: "Completed in 2000 ms." },
+    { id: "row-b-start", invocation_id: "call-b", at: new Date(t0 + 1_000).toISOString(), ts: t0 + 1_000, tool: "read_files", status: "running", message: "Request received.", args_summary: buildArgsSummary({ paths: ["beta.md"] }) },
+    { id: "row-a-start", invocation_id: "call-a", at: new Date(t0).toISOString(), ts: t0, tool: "read_files", status: "running", message: "Request received.", args_summary: buildArgsSummary({ paths: ["alpha.md"] }) },
+  ];
+  const snap = buildSnapshot({ ...state, activity }, { version: "test", rootName: "fixture", logPath: "unused", now: t0 + 5_000 });
+  const alpha = snap.events.find(event => event.id === "call-a");
+  const beta = snap.events.find(event => event.id === "call-b");
+  assert.equal(alpha?.message, "alpha.md");
+  assert.equal(alpha?.durationMs, 4_000);
+  assert.equal(beta?.message, "beta.md");
+  assert.equal(beta?.durationMs, 2_000);
+});
+
+test("an uncorrelated same-tool audit row cannot steal a correlated invocation", () => {
+  const t0 = Date.parse("2026-09-22T01:00:00.000Z");
+  const activity: typeof state.activity = [
+    { id: "call-done", invocation_id: "call-a", at: new Date(t0 + 2_000).toISOString(), ts: t0 + 2_000, tool: "notify", status: "completed", message: "Completed in 2000 ms." },
+    { id: "manual-row", at: new Date(t0 + 1_000).toISOString(), ts: t0 + 1_000, tool: "notify", status: "completed", message: "sent finish" },
+    { id: "call-start", invocation_id: "call-a", at: new Date(t0).toISOString(), ts: t0, tool: "notify", status: "running", message: "Request received.", args_summary: buildArgsSummary({ event: "finish", title: "done" }) },
+  ];
+  const snap = buildSnapshot({ ...state, activity }, { version: "test", rootName: "fixture", logPath: "unused", now: t0 + 3_000 });
+  assert.equal(snap.events.filter(event => event.id === "call-a").length, 1);
+  assert.ok(snap.events.some(event => event.id === "manual-row"));
+  assert.equal(snap.events.find(event => event.id === "call-a")?.durationMs, 2_000);
 });

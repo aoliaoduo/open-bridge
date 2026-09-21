@@ -13,6 +13,7 @@ import { promisify } from "node:util";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { reviewChanges } from "../../bridge/review.js";
+import { boundedText, unifiedDiff } from "../../mcp/line-diff.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -28,6 +29,7 @@ export type ChangeSummary = ChangeCounts & { unavailable?: boolean; entries?: Ch
 
 const STATUS_TIMEOUT_MS = 5000;
 const NUMSTAT_TIMEOUT_MS = 5000;
+const FILE_DIFF_TIMEOUT_MS = 10_000;
 const UNTRACKED_FILE_CAP = 512 * 1024;
 const UNTRACKED_READ_BUDGET = 2 * 1024 * 1024;
 
@@ -206,10 +208,15 @@ function errorBlob(error: GitLikeError): string {
   return `${error.message ?? ""}\n${error.stderr ?? ""}\n${error.stdout ?? ""}`;
 }
 
+function isMissingHead(error: GitLikeError): boolean {
+  return /bad revision|unknown revision|ambiguous argument 'HEAD'/i.test(errorBlob(error));
+}
+
 async function gitOutput(
   root: string,
   args: string[],
   timeout: number,
+  missingHeadIsEmpty = true,
 ): Promise<{ ok: true; stdout: string } | { ok: false; error: GitLikeError }> {
   try {
     const { stdout } = await execFile("git", ["-C", root, "-c", "core.quotepath=off", ...args], {
@@ -221,7 +228,7 @@ async function gitOutput(
     return { ok: true, stdout: typeof stdout === "string" ? stdout : "" };
   } catch (error) {
     const err = error as GitLikeError;
-    if (/bad revision|unknown revision|ambiguous argument 'HEAD'/i.test(errorBlob(err))) {
+    if (missingHeadIsEmpty && isMissingHead(err)) {
       return { ok: true, stdout: "" };
     }
     return { ok: false, error: err };
@@ -272,4 +279,71 @@ export async function collectReviewDiffPreview(maxPatchBytes = 24_000): Promise<
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : String(error) };
   }
+}
+
+export type FileDiffPreview =
+  | { ok: true; path: string; text: string; truncated: boolean }
+  | { ok: false; path: string; reason: string };
+
+function fallbackUntrackedPatch(root: string, filePath: string): Promise<string> {
+  return fs.readFile(path.join(root, filePath)).then(buf => {
+    const shownPath = filePath.replaceAll("\\", "/");
+    const header = [`diff --git a/${shownPath} b/${shownPath}`, "new file mode 100644"];
+    if (buf.includes(0)) return [...header, `Binary files /dev/null and b/${shownPath} differ`].join("\n");
+    const body = unifiedDiff("", buf.toString("utf8"));
+    return [...header, "--- /dev/null", `+++ b/${shownPath}`, ...(body === undefined ? [] : [body])].join("\n");
+  });
+}
+
+/** Current working-tree diff for one row in the TUI changes list. */
+export async function collectFileDiffPreview(
+  root: string,
+  file: ChangeFile,
+  maxPatchBytes = 24_000,
+): Promise<FileDiffPreview> {
+  const requested = Number(maxPatchBytes);
+  const limit = Math.max(0, Math.min(
+    Number.isFinite(requested) && requested >= 0 ? Math.floor(requested) : 24_000,
+    512 * 1024,
+  ));
+  const args = file.untracked
+    ? ["diff", "--no-index", "--no-color", "--no-ext-diff", "--", "/dev/null", file.path]
+    : ["--literal-pathspecs", "diff", "--no-color", "--no-ext-diff", "HEAD", "--", file.path];
+  const result = await gitOutput(root, args, FILE_DIFF_TIMEOUT_MS, false);
+  const missingHead = !result.ok && !file.untracked && isMissingHead(result.error);
+
+  let patch = "";
+  let incomplete = false;
+  if (result.ok) {
+    patch = result.stdout;
+  } else {
+    const partial = typeof result.error.stdout === "string" ? result.error.stdout : "";
+    const expectedDifference = file.untracked && (result.error.code === 1 || result.error.code === "1");
+    const maxBuffer = /maxbuffer|stdout maxbuffer length exceeded/i.test(result.error.message ?? "");
+    if (partial !== "" && (expectedDifference || maxBuffer)) {
+      patch = partial;
+      incomplete = maxBuffer;
+    } else if (file.untracked || missingHead) {
+      try {
+        patch = await fallbackUntrackedPatch(root, file.path);
+      } catch (error) {
+        return { ok: false, path: file.path, reason: error instanceof Error ? error.message : String(error) };
+      }
+    } else {
+      const reason = (result.error.stderr ?? result.error.message ?? "读取文件 diff 失败").trim();
+      return { ok: false, path: file.path, reason: reason || "读取文件 diff 失败" };
+    }
+  }
+
+  // Git considers /dev/null and an empty untracked file identical. The file is
+  // still a real changes-list row, so retain a useful creation header.
+  if (file.untracked && patch === "") {
+    try {
+      patch = await fallbackUntrackedPatch(root, file.path);
+    } catch (error) {
+      return { ok: false, path: file.path, reason: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  const bounded = boundedText(patch, limit);
+  return { ok: true, path: file.path, text: bounded.text, truncated: bounded.truncated || incomplete };
 }

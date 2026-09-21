@@ -1,4 +1,4 @@
-import { record, state, redactSensitiveText, type SessionState } from "./state.js";
+import { createActivityId, record, state, redactSensitiveText, type SessionState } from "./state.js";
 import { host } from "../host/host.js";
 import { persistUsageStats } from "./usage-store.js";
 import { deriveLockPlan, type LockPlanContext } from "./lock-plan.js";
@@ -45,6 +45,7 @@ import type { JsonArgs } from "./json-args.js";
 
 type Args = JsonArgs;
 type Handler = (args: Args, session?: SessionState) => unknown | Promise<unknown>;
+type InvokeOptions = { countUsage?: boolean; invocationId?: string };
 
 /**
  * Tool name -> handler. Mirrors TOOL_DEFINITIONS (validated by the contract test).
@@ -118,17 +119,19 @@ export async function invoke(
   name: string,
   args: Args,
   session?: SessionState,
-  options?: { countUsage?: boolean },
+  options?: InvokeOptions,
 ): Promise<unknown> {
-  if (options?.countUsage !== false) return dispatchInvocation(name, args, session, options);
+  const invocationId = options?.invocationId ?? createActivityId();
+  const correlated = { ...options, invocationId };
+  if (options?.countUsage !== false) return dispatchInvocation(name, args, session, correlated);
   const startedAt = Date.now();
   try {
-    const result = await dispatchInvocation(name, args, session, options);
-    record(name, "completed", `Completed in ${Date.now() - startedAt} ms.`);
+    const result = await dispatchInvocation(name, args, session, correlated);
+    record(name, "completed", `Completed in ${Date.now() - startedAt} ms.`, undefined, { invocationId });
     return result;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    record(name, "error", `Failed in ${Date.now() - startedAt} ms: ${reason}`);
+    record(name, "error", `Failed in ${Date.now() - startedAt} ms: ${reason}`, undefined, { invocationId });
     throw error;
   }
 }
@@ -138,7 +141,7 @@ async function dispatchInvocation(
   name: string,
   args: Args,
   session?: SessionState,
-  options?: { countUsage?: boolean },
+  options?: InvokeOptions,
 ): Promise<unknown> {
   // One normalization point: a legacy name is rewritten into the call the
   // catalog advertises today, and everything below — handler lookup, lock plan,
@@ -193,6 +196,7 @@ async function dispatchInvocation(
     "running",
     call.alias ? `${requestSummary} · legacy name ${call.alias.used} -> ${call.alias.call}` : requestSummary,
     argsSummary,
+    { invocationId: options?.invocationId },
   );
 
   // Record<string, Handler> indexing does not admit undefined; cast so the

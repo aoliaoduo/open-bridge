@@ -18,7 +18,7 @@
 import * as readline from "node:readline";
 import type { ReadStream } from "node:tty";
 import { state } from "../../bridge/state.js";
-import { collectReviewDiffPreview, collectWorkspaceChanges, type ChangeSummary, type ReviewDiffPreview } from "./changes.js";
+import { collectFileDiffPreview, collectReviewDiffPreview, collectWorkspaceChanges, type ChangeFile, type ChangeSummary, type FileDiffPreview, type ReviewDiffPreview } from "./changes.js";
 import { todoFreshness } from "../../bridge/todo-store.js";
 import { buildSnapshot } from "./snapshot.js";
 import { renderFrame, panelScrollMetrics, maxFirstVisible, advanceScroll, nextPanelView, eventKeyOf, type PanelView, type ScrollKey } from "./render.js";
@@ -46,6 +46,8 @@ let resizeHandler: (() => void) | undefined;
 let keyListener: ((ch: string, key: { name?: string; ctrl?: boolean }) => void) | undefined;
 let frameIndex = 0;
 let active = false;
+/** Invalidates async Git work that outlives a stopped/restarted TUI session. */
+let sessionGeneration = 0;
 /** Panel scroll position; negative = locked to the head (the newest event). */
 let scrollFirst = -1;
 /** Which view owns the wide panel: activity, tasks, or the per-file 变更 list. */
@@ -54,14 +56,21 @@ let panelView: PanelView = "activity";
 let taskScrollFirst = 0;
 /** Change-list scroll is independent of the other two views. */
 let changeScrollFirst = 0;
+/** 变更光标：一个下标对应一个文件；Enter 打开该文件的工作树 diff。 */
+let changeCursor = 0;
 let activityMetrics = { rows: 1, totalRows: 0 };
 let taskMetrics = { rows: 1, totalRows: 0 };
 let changeMetrics = { rows: 1, totalRows: 0 };
 /** Workspace changes since the last commit; undefined = 非 git. */
 let workspaceChanges: ChangeSummary | undefined;
 let changesTimer: ReturnType<typeof setInterval> | undefined;
-/** 累计 diff 预览（按 d 请求；只读，不推进审阅基线）。 */
-let diffState: ReviewDiffPreview | undefined;
+type DiffTarget = { kind: "cumulative" } | { kind: "file"; file: ChangeFile };
+type LoadedDiff =
+  | { kind: "cumulative"; result: ReviewDiffPreview }
+  | { kind: "file"; result: FileDiffPreview };
+/** d 打开累计 review diff；Enter 打开当前文件的工作树 diff。 */
+let diffTarget: DiffTarget = { kind: "cumulative" };
+let diffState: LoadedDiff | undefined;
 let diffLoading = false;
 let diffScrollFirst = 0;
 let diffMetrics = { rows: 1, totalRows: 0 };
@@ -96,11 +105,15 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
   const out = process.stdout;
   if (!out.isTTY) return false;
   if (active) return true;
+  const session = ++sessionGeneration;
   active = true;
   panelView = "activity";
   scrollFirst = -1;
   taskScrollFirst = 0;
   changeScrollFirst = 0;
+  changeCursor = 0;
+  workspaceChanges = undefined;
+  diffTarget = { kind: "cumulative" };
   diffState = undefined;
   diffLoading = false;
   diffScrollFirst = 0;
@@ -127,41 +140,59 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
   const refreshChanges = (): void => {
     const gen = ++changesGen;
     void collectWorkspaceChanges(options.rootPath).then(summary => {
-      if (gen !== changesGen) return;
+      if (session !== sessionGeneration || gen !== changesGen) return;
       workspaceChanges = summary;
     }).catch(() => {
-      if (gen !== changesGen) return;
+      if (session !== sessionGeneration || gen !== changesGen) return;
       // A thrown probe is a failed read of *something* — never impersonate 非 git.
       workspaceChanges = { files: 0, insertions: 0, deletions: 0, unavailable: true };
     });
   };
 
   let diffGen = 0;
-  const diffSnapshotInput = () => diffLoading
-    ? { loading: true, ok: false, text: "", truncated: false, since: "", checkpoint: "", reason: "" }
-    : diffState === undefined ? undefined
-    : diffState.ok
-      ? { loading: false, ok: true, text: diffState.text, truncated: diffState.truncated, since: diffState.since, checkpoint: diffState.checkpoint, reason: "" }
-      : { loading: false, ok: false, text: "", truncated: false, since: "", checkpoint: "", reason: diffState.reason };
+  const diffSnapshotInput = () => {
+    const target = diffTarget.kind === "file"
+      ? { kind: "file" as const, path: diffTarget.file.path }
+      : { kind: "cumulative" as const };
+    if (diffLoading) return { ...target, loading: true, ok: false, text: "", truncated: false, since: "", checkpoint: "", reason: "" };
+    if (diffState === undefined) return undefined;
+    if (diffState.kind === "cumulative") {
+      const result = diffState.result;
+      if (!result.ok) return { ...target, loading: false, ok: false, text: "", truncated: false, since: "", checkpoint: "", reason: result.reason };
+      return { ...target, loading: false, ok: true, text: result.text, truncated: result.truncated, since: result.since, checkpoint: result.checkpoint, reason: "" };
+    }
+    const result = diffState.result;
+    if (!result.ok) return { ...target, loading: false, ok: false, text: "", truncated: false, since: "", checkpoint: "", reason: result.reason };
+    return { ...target, loading: false, ok: true, text: result.text, truncated: result.truncated, since: "", checkpoint: "", reason: "" };
+  };
   // The diff is IO (git), fetched on demand with a generation token so a slow
   // read cannot overwrite a newer request — same contract as refreshChanges.
-  const loadDiff = (): void => {
+  const loadDiff = (target: DiffTarget): void => {
     const gen = ++diffGen;
+    diffTarget = target;
+    diffState = undefined;
     diffLoading = true;
+    diffScrollFirst = 0;
+    panelView = "diff";
     paint();
-    void collectReviewDiffPreview().then(result => {
-      if (gen !== diffGen) return;
+    const finish = (loaded: LoadedDiff): void => {
+      if (session !== sessionGeneration || gen !== diffGen) return;
       diffLoading = false;
-      diffState = result;
-      panelView = "diff";
+      diffState = loaded;
       paint();
-    }).catch(() => {
-      if (gen !== diffGen) return;
-      diffLoading = false;
-      diffState = { ok: false, reason: "读取失败" };
-      panelView = "diff";
-      paint();
-    });
+    };
+    const fail = (): void => finish(target.kind === "file"
+      ? { kind: "file", result: { ok: false, path: target.file.path, reason: "读取失败" } }
+      : { kind: "cumulative", result: { ok: false, reason: "读取失败" } });
+    if (target.kind === "file") {
+      void collectFileDiffPreview(options.rootPath, target.file)
+        .then(result => finish({ kind: "file", result }))
+        .catch(fail);
+    } else {
+      void collectReviewDiffPreview()
+        .then(result => finish({ kind: "cumulative", result }))
+        .catch(fail);
+    }
   };
 
   const write = (payload: string): void => {
@@ -171,7 +202,21 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
     // The dashboard is an observer of the work, never part of it: any
     // rendering failure is swallowed and the next tick tries again.
     try {
+      // Once the operator moves off the live head, anchor the cursor by event
+      // identity. New rows are prepended; retaining only the array index would
+      // silently move Enter to a different call on every repaint.
+      const selectedEventKey = activityCursor > 0
+        ? lastSnapshot?.events[activityCursor] && eventKeyOf(lastSnapshot.events[activityCursor]!)
+        : undefined;
       const snapshot = buildSnapshot(state, { ...options, launchedAt, workspaceChanges, diff: diffSnapshotInput(), todosUpdatedAt: todoFreshness() });
+      if (selectedEventKey !== undefined) {
+        const nextCursor = snapshot.events.findIndex(event => eventKeyOf(event) === selectedEventKey);
+        if (nextCursor >= 0) {
+          const shift = nextCursor - activityCursor;
+          activityCursor = nextCursor;
+          if (scrollFirst >= 0) scrollFirst += shift;
+        }
+      }
       lastSnapshot = snapshot;
       const dimensions = { width: out.columns ?? 80, height: out.rows ?? 24 };
       activityMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "activity" });
@@ -187,6 +232,9 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
       diffScrollFirst = Math.min(diffScrollFirst, maxFirstVisible(diffMetrics.totalRows, diffMetrics.rows));
       expandScrollFirst = Math.min(expandScrollFirst, maxFirstVisible(expandMetrics.totalRows, expandMetrics.rows));
       activityCursor = Math.max(0, Math.min(activityCursor, Math.max(0, activityMetrics.totalRows - 1)));
+      changeCursor = Math.max(0, Math.min(changeCursor, Math.max(0, (snapshot.changes?.entries?.length ?? 0) - 1)));
+      if (changeCursor < changeScrollFirst) changeScrollFirst = changeCursor;
+      else if (changeCursor >= changeScrollFirst + changeMetrics.rows) changeScrollFirst = changeCursor - changeMetrics.rows + 1;
       const lines = renderFrame(snapshot, {
         ...dimensions,
         spinnerFrame: frameIndex++,
@@ -196,6 +244,7 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
         diffFirstVisible: diffScrollFirst,
         expandFirstVisible: expandScrollFirst,
         activityCursor,
+        changeCursor,
         eventDetailKey,
         panelView,
       });
@@ -237,11 +286,11 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
           }
           if (panelView === "changes" && ch === "d") {
             // 累计 diff 预览：review_changes 的只读面。
-            loadDiff();
+            loadDiff({ kind: "cumulative" });
             return;
           }
           if (panelView === "diff") {
-            if (ch === "d") { loadDiff(); return; }
+            if (ch === "d") { loadDiff(diffTarget); return; }
             // Esc 是预览的唯一出口（回到变更页）；滚动键仍归 KEY_MAP。
             if (key?.name === "escape") { panelView = "changes"; paint(); return; }
           }
@@ -262,12 +311,32 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
             }
             return;
           }
+          if (panelView === "changes" && (key?.name === "return" || key?.name === "enter")) {
+            if (lastSnapshot === undefined) paint();
+            const selected = lastSnapshot?.changes?.entries?.[changeCursor];
+            if (selected !== undefined) loadDiff({ kind: "file", file: selected });
+            return;
+          }
           const mapped = KEY_MAP[key?.name ?? ""];
           if (mapped === undefined) return;
           if (panelView === "tasks") {
             taskScrollFirst = advanceScroll(mapped, taskScrollFirst, taskMetrics.totalRows, taskMetrics.rows);
           } else if (panelView === "changes") {
-            changeScrollFirst = advanceScroll(mapped, changeScrollFirst, changeMetrics.totalRows, changeMetrics.rows);
+            const total = lastSnapshot?.changes?.entries?.length ?? 0;
+            if (total > 0) {
+              const page = Math.max(1, changeMetrics.rows - 1);
+              const delta = mapped === "up" ? -1 : mapped === "down" ? 1
+                : mapped === "pageup" ? -page : mapped === "pagedown" ? page
+                : mapped === "home" ? -Infinity : Infinity;
+              changeCursor = Math.max(0, Math.min(total - 1, changeCursor + delta));
+              if (mapped === "pageup" || mapped === "pagedown" || mapped === "home" || mapped === "end") {
+                changeScrollFirst = changeCursor;
+              } else if (changeCursor < changeScrollFirst) {
+                changeScrollFirst = changeCursor;
+              } else if (changeCursor >= changeScrollFirst + changeMetrics.rows) {
+                changeScrollFirst = changeCursor - changeMetrics.rows + 1;
+              }
+            }
           } else if (panelView === "diff") {
             diffScrollFirst = advanceScroll(mapped, diffScrollFirst, diffMetrics.totalRows, diffMetrics.rows);
           } else if (panelView === "event") {
@@ -315,6 +384,7 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
 
 export function stopConsoleTui(): void {
   if (!active) return;
+  sessionGeneration += 1;
   active = false;
   if (timer !== undefined) {
     clearInterval(timer);

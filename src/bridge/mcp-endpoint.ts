@@ -18,7 +18,7 @@ import { createMcpHandler, Server as SpecServer } from "@modelcontextprotocol/se
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { TOOL_DEFINITIONS } from "../mcp/tool-definitions.js";
 import { listToolDefinitions } from "./tool-catalog.js";
-import { asStructuredContent, record, state, text, type SessionState } from "./state.js";
+import { asStructuredContent, createActivityId, record, state, text, type SessionState } from "./state.js";
 import { root } from "./paths.js";
 import { discoverWorkspaceSkills, skillsIndexSuffix } from "./skills.js";
 import { invoke } from "./dispatcher.js";
@@ -253,9 +253,10 @@ async function runToolCall(
   session: SessionState | undefined,
 ): Promise<ToolCallOutcome> {
   const startedAt = Date.now();
+  const invocationId = createActivityId();
   try {
     if (session) session.lastUsed = Date.now();
-    const result = await invoke(name, args, session);
+    const result = await invoke(name, args, session, { invocationId });
     state.usage.successes += 1;
     state.runtimeUsage.successes += 1;
     persistUsageStats();
@@ -277,7 +278,10 @@ async function runToolCall(
       const summary = activityChanges.map(c => `${c.path} +${c.additions}/−${c.deletions}`).join(", ");
       message = `Completed in ${Date.now() - startedAt} ms · ${summary}`;
     }
-    record(name, "completed", message, undefined, activityChanges ? { changes: activityChanges } : undefined);
+    record(name, "completed", message, undefined, {
+      ...(activityChanges ? { changes: activityChanges } : {}),
+      invocationId,
+    });
     // Tools declaring an outputSchema also return structuredContent so clients
     // can consume typed data directly; the text block stays for compatibility.
     // The lookup follows the canonical name, so a caller that used a legacy
@@ -315,7 +319,7 @@ async function runToolCall(
     // record() redacts and caps at 500 chars, so the raw text is safe to pass:
     // this is the same treatment every other audit line gets.
     const reason = e instanceof Error ? e.message : String(e);
-    record(name, "error", `Failed in ${Date.now() - startedAt} ms: ${reason}`);
+    record(name, "error", `Failed in ${Date.now() - startedAt} ms: ${reason}`, undefined, { invocationId });
     return { ok: false, result: toolErrorPayload(name, reason) };
   }
 }
