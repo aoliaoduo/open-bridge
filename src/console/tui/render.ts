@@ -241,11 +241,14 @@ function renderEvents(snap: TuiSnapshot, width: number, budget: number, spin: nu
 
 function renderFooter(snap: TuiSnapshot, width: number): string[] {
   // One fact, one place: the top bar owns identity, port and status; the
-  // sidebar owns the counters and the tunnel; the footer owns the MCP address
-  // — the thing an operator reaches for. The first live screen printed the
-  // port three times, sessions and calls twice, and the workspace name twice.
-  const line1 = padEndVisual(paint("muted", truncateVisual(`MCP ${snap.mcpUrl}`, width)), width);
-  const line2 = paint("dim", truncateVisual(`Ctrl+C 停止 · ↑↓ 滚动 · Home 最新 · 日志 ${snap.logPath} · --no-tui 关闭界面`, width));
+  // sidebar owns the counters and the tunnel; the footer owns the addresses —
+  // the web console entry (the api-router loopback gate only answers the
+  // local Host, so this is always the local address) and the MCP URL.
+  const line1 = padEndVisual(paint("muted", truncateVisual(`控制台 http://127.0.0.1:${snap.port}/console/ · MCP ${snap.mcpUrl}`, width)), width);
+  // No "Ctrl+C 停止": closing the terminal window stops the serve process
+  // anyway — the row is real estate for what cannot be guessed (the scroll
+  // model, the log path, the opt-out flag).
+  const line2 = paint("dim", truncateVisual(`↑↓ 滚动 · Home 最新 · 日志 ${snap.logPath} · --no-tui 关闭界面`, width));
   return [line1, line2];
 }
 

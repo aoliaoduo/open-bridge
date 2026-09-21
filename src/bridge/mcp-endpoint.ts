@@ -257,6 +257,7 @@ async function runToolCall(
     if (session) session.lastUsed = Date.now();
     const result = await invoke(name, args, session);
     state.usage.successes += 1;
+    state.runtimeUsage.successes += 1;
     persistUsageStats();
     // apply_patch results carry per-file changes: surface them in the
     // activity message and as structured data for the panel's diff badge.
@@ -301,6 +302,7 @@ async function runToolCall(
     return { ok: true, result: payload };
   } catch (e) {
     state.usage.failures += 1;
+    state.runtimeUsage.failures += 1;
     persistUsageStats();
     // The reason, not just the duration. This line is the ONLY trace a failed
     // call leaves behind — the console's activity pane, `activity_log` search

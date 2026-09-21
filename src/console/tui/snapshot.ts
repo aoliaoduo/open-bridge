@@ -28,6 +28,8 @@ export interface TuiStateView {
   services: Map<unknown, { commandId?: string }>;
   activity: Array<{ at: string; ts?: number; tool: string; status: string; message: string; args_summary?: string }>;
   usage: { startedAt: number; calls: number; successes: number; failures: number };
+  /** Since-launch counters (state.runtimeUsage): the numbers the TUI shows. */
+  runtimeUsage: { calls: number; successes: number; failures: number };
 }
 
 export interface SnapshotOptions {
@@ -168,9 +170,9 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     .reverse();
 
   const mcpUrl = view.tunnelUrl || `http://127.0.0.1:${view.port}/mcp/${view.routeToken}`;
-  // The route token grants the workspace; the dashboard shows the address, not
-  // the key inside it.
-  const safeUrl = view.routeToken ? mcpUrl.split(view.routeToken).join("<redacted>") : mcpUrl;
+  // Operator's call: the full address, token included. The startup banner and
+  // `open-bridge url` both print it in full — a redacted copy was the odd one
+  // out, and unusable for the paste-it-into-a-client job the footer exists for.
 
   return {
     version: options.version,
@@ -184,11 +186,11 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
         : view.tunnelRole === "blocked"
           ? "blocked"
           : "local",
-    mcpUrl: safeUrl,
+    mcpUrl,
     uptimeMs: Math.max(0, now - (options.launchedAt ?? now)),
-    calls: view.usage.calls,
-    successes: view.usage.successes,
-    failures: view.usage.failures,
+    calls: view.runtimeUsage.calls,
+    successes: view.runtimeUsage.successes,
+    failures: view.runtimeUsage.failures,
     sessions,
     sessionsActive,
     maxSessions: MAX_SESSIONS,

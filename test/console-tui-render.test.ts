@@ -115,10 +115,13 @@ function fixtureView(): TuiStateView {
       { at: "1970-01-01T00:00:01.000Z", ts: 1000, tool: "run_command", status: "running", message: "…", args_summary: "echo hi" },
     ],
     usage: { startedAt: 0, calls: 1234, successes: 1232, failures: 2 },
+    // Since-launch counters — what the TUI displays. Deliberately different
+    // numbers from the persisted window above so a wrong source cannot pass.
+    runtimeUsage: { calls: 7, successes: 6, failures: 1 },
   };
 }
 
-test("buildSnapshot counts live state and redacts the route token", () => {
+test("buildSnapshot counts live state and shows the full MCP URL", () => {
   const snap = buildSnapshot(fixtureView(), {
     version: "1.0.0-rc.2",
     rootName: "open-bridge",
@@ -135,8 +138,15 @@ test("buildSnapshot counts live state and redacts the route token", () => {
   assert.equal(snap.serviceRows.filter(s => s.running).length, 1);
   assert.deepEqual(snap.serviceRows[0], { name: "s1", running: true });
   assert.equal(snap.tunnel, "local");
-  assert.ok(!snap.mcpUrl.includes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), "route token never shown");
-  assert.ok(snap.mcpUrl.includes("<redacted>"));
+  // Operator's call: the full address, token included — the startup banner
+  // and `open-bridge url` print it in full; a redacted copy is unusable for
+  // the paste-it-into-the-client job the footer exists for.
+  assert.ok(snap.mcpUrl.includes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), "the full MCP URL, token included");
+  assert.ok(!snap.mcpUrl.includes("<redacted>"));
+  // Counters are since-launch, not the persisted usage window.
+  assert.equal(snap.calls, 7);
+  assert.equal(snap.successes, 6);
+  assert.equal(snap.failures, 1);
 });
 
 test("buildSnapshot reports a duration only for observed invoke/outcome pairs", () => {
@@ -219,7 +229,9 @@ test("renderFrame fills the exact geometry and shows the dashboard vocabulary", 
   assert.match(text, /50%/); // process card fill ratio
   assert.match(text, /✓/);
   assert.match(text, /57s…/); // live elapsed on the still-open invoke (now 60s - ts 3s)
-  assert.match(text, /Ctrl\+C 停止/);
+  assert.doesNotMatch(text, /Ctrl\+C/, "closing the terminal window stops the serve; the hint is noise");
+  assert.match(text, /控制台 http:\/\/127\.0\.0\.1:8123\/console\//, "the web console entry rides the footer");
+  assert.match(text, /调用 7（✓ 6 ✕ 1）/, "counters are since-launch, not the persisted window");
   assert.match(text, /概览/);
 });
 
@@ -235,8 +247,9 @@ test("renderFrame pins the footer to the bottom rows however few the events", ()
   for (const [i, line] of lines.entries()) {
     assert.equal(visualWidth(line), 80, `tall line ${i} must be exactly 80 columns`);
   }
+  assert.match(stripAnsi(lines[38] ?? ""), /控制台 http:\/\/127\.0\.0\.1:8123\/console\//, "the console entry rides the address footer");
   assert.match(stripAnsi(lines[38] ?? ""), /MCP http/, "the address footer owns the second-to-last row");
-  assert.match(stripAnsi(lines[39] ?? ""), /Ctrl\+C 停止/, "hint row on the last row");
+  assert.match(stripAnsi(lines[39] ?? ""), /↑↓ 滚动/, "hint row on the last row");
 });
 
 test("renderFrame degrades gracefully on a small window", () => {
@@ -253,7 +266,7 @@ test("renderFrame degrades gracefully on a small window", () => {
   }
   const text = lines.map(stripAnsi).join("\n");
   assert.match(text, /运行中/);
-  assert.match(text, /Ctrl\+C 停止/);
+  assert.match(text, /控制台 http:\/\/127\.0\.0\.1:8123\/console\//, "the console entry survives even the smallest window");
 });
 
 test("workbench layout: exact geometry with a sidebar divider column", () => {

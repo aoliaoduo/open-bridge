@@ -210,6 +210,13 @@ export const state = {
   lifecycleTail: Promise.resolve() as Promise<void>,
   activity: [] as Activity[],
   usage: { startedAt: Date.now(), calls: 0, successes: 0, failures: 0, byTool: {} } as UsageStats,
+  /**
+   * The same three counts, this process only. The persisted usage window
+   * above survives restarts for the console's diagnostics; the TUI counts
+   * from launch so a fresh start does not inherit months-old numbers.
+   * Never persisted, never loaded — construction IS the reset.
+   */
+  runtimeUsage: { calls: 0, successes: 0, failures: 0 },
   services: new Map<string, ServiceDefinition>(),
 };
 

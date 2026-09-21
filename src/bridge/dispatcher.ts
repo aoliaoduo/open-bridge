@@ -185,6 +185,7 @@ export async function invoke(
   // countUsage:false because they are counted once via the outer MCP request.
   if (options?.countUsage !== false) {
     state.usage.calls += 1;
+    state.runtimeUsage.calls += 1;
     // Counted under the canonical name: usage is about the capability being
     // used, and a legacy spelling must not split a tool's statistics in two.
     if (handler) state.usage.byTool[tool] = (state.usage.byTool[tool] ?? 0) + 1;
