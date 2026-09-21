@@ -46,10 +46,17 @@ export interface SnapshotOptions {
   launchedAt?: number;
   /**
    * Workspace changes since the last commit (files/insertions/deletions).
-   * The driver refreshes this asynchronously every few seconds; undefined
-   * (or an all-zero summary) means clean tree or not a git repository.
+   * The driver refreshes this asynchronously every few seconds.
+   * undefined = not a git repository (非 git); all-zero = clean (干净);
+   * unavailable = a failed read of a real repo (读取失败).
    */
-  workspaceChanges?: { files: number; insertions: number; deletions: number };
+  workspaceChanges?: {
+    files: number;
+    insertions: number;
+    deletions: number;
+    unavailable?: boolean;
+    entries?: Array<{ path: string; insertions: number; deletions: number; untracked?: boolean; binary?: boolean }>;
+  };
 }
 
 const MAX_EVENTS = 40;
@@ -201,7 +208,7 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     failures: view.runtimeUsage.failures,
     sessions,
     sessionsActive,
-    todos: view.todos.slice(0, 16).map(todo => ({ title: todo.title, status: todo.status })),
+    todos: view.todos.map(todo => ({ title: todo.title, status: todo.status })),
     todosTotal: view.todos.length,
     ...(options.workspaceChanges !== undefined ? { changes: options.workspaceChanges } : {}),
     runningCommands,

@@ -1,6 +1,6 @@
 /**
  * Serve-console TUI driver (stage 3): alternate screen, 500 ms repaint, and
- * exactly one interaction — scrolling the activity panel.
+ * view-local scrolling with Tab as the only view-switching key.
  *
  * The TUI is a viewing surface by design (settings and background operations
  * live in the web console), so no command input exists. Scroll keys are read
@@ -16,13 +16,11 @@
  */
 
 import * as readline from "node:readline";
-import { execFile } from "node:child_process";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 import type { ReadStream } from "node:tty";
 import { state } from "../../bridge/state.js";
+import { collectWorkspaceChanges, type ChangeSummary } from "./changes.js";
 import { buildSnapshot } from "./snapshot.js";
-import { renderFrame, workbenchPanelRows, advanceScroll, type ScrollKey } from "./render.js";
+import { renderFrame, panelScrollMetrics, maxFirstVisible, advanceScroll, nextPanelView, type PanelView, type ScrollKey } from "./render.js";
 
 export interface ConsoleTuiOptions {
   version: string;
@@ -49,12 +47,17 @@ let frameIndex = 0;
 let active = false;
 /** Panel scroll position; negative = locked to the head (the newest event). */
 let scrollFirst = -1;
-/** Which view owns the wide panel: the activity stream or the full task list. */
-let panelView: "activity" | "tasks" = "activity";
-/** Event count of the last painted frame, so scroll steps clamp correctly. */
-let lastEventCount = 0;
-/** Workspace changes since the last commit; undefined = clean or no repo. */
-let workspaceChanges: { files: number; insertions: number; deletions: number } | undefined;
+/** Which view owns the wide panel: activity, tasks, or the per-file 变更 list. */
+let panelView: PanelView = "activity";
+/** Task scroll is independent of the activity view and counts wrapped rows. */
+let taskScrollFirst = 0;
+/** Change-list scroll is independent of the other two views. */
+let changeScrollFirst = 0;
+let activityMetrics = { rows: 1, totalRows: 0 };
+let taskMetrics = { rows: 1, totalRows: 0 };
+let changeMetrics = { rows: 1, totalRows: 0 };
+/** Workspace changes since the last commit; undefined = 非 git. */
+let workspaceChanges: ChangeSummary | undefined;
 let changesTimer: ReturnType<typeof setInterval> | undefined;
 
 export function consoleTuiActive(): boolean {
@@ -81,6 +84,9 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
   if (active) return true;
   active = true;
   panelView = "activity";
+  scrollFirst = -1;
+  taskScrollFirst = 0;
+  changeScrollFirst = 0;
   // THIS process's start: 「运行」 must not read the persisted stats window
   // (a freshly restarted Bridge used to claim 50 hours of uptime).
   const launchedAt = Date.now();
@@ -88,53 +94,17 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
   // Workspace changes since the last commit — the dirty-tree summary,
   // dashboard style. It is IO (git + file reads), so it refreshes on its own
   // slow cadence; the 500ms render tick only reads the cached value.
+  // Generation token: a slow probe must not overwrite a newer one.
+  let changesGen = 0;
   const refreshChanges = (): void => {
-    execFile("git", ["-C", options.rootPath, "-c", "core.quotepath=off", "status", "--porcelain"], { timeout: 5000 }, (err, statusOut) => {
-      if (err || typeof statusOut !== "string") {
-        workspaceChanges = undefined; // no git, not a repository, or a timeout
-        return;
-      }
-      const entries = statusOut.split(/\r?\n/).filter(line => line.length > 0);
-      const untracked = entries
-        .filter(line => line.startsWith("??"))
-        .map(line => line.slice(3).trim().replace(/^"(.*)"$/, "$1"));
-      void (async () => {
-        let insertions = 0;
-        let deletions = 0;
-        await new Promise<void>(resolve => {
-          execFile("git", ["-C", options.rootPath, "diff", "--numstat", "HEAD"], { timeout: 5000 }, (numstatErr, numstat) => {
-            // No HEAD yet (zero commits): the status output above already
-            // carries everything as untracked.
-            if (!numstatErr && typeof numstat === "string") {
-              for (const line of numstat.split(/\r?\n/)) {
-                const [added, removed] = line.split("\t");
-                const add = Number(added);
-                const del = Number(removed);
-                if (Number.isFinite(add) && Number.isFinite(del)) {
-                  insertions += add;
-                  deletions += del;
-                }
-              }
-            }
-            resolve();
-          });
-        });
-        // Untracked files count as whole-file additions (bounded work).
-        for (const rel of untracked.slice(0, 64)) {
-          try {
-            const buf = await fs.readFile(path.join(options.rootPath, rel));
-            if (buf.byteLength <= 512 * 1024) insertions += Math.max(1, buf.toString("utf8").split("\n").length);
-          } catch { /* deleted between status and read */ }
-        }
-        // Clean tree carries an all-zero summary (the sidebar row is a
-        // permanent resident reading 干净); undefined is reserved for
-        // "no git / not a repository", which renders as 非 git.
-        workspaceChanges = entries.length > 0
-          ? { files: entries.length, insertions, deletions }
-          : { files: 0, insertions: 0, deletions: 0 };
-      })().catch(() => {
-        workspaceChanges = undefined;
-      });
+    const gen = ++changesGen;
+    void collectWorkspaceChanges(options.rootPath).then(summary => {
+      if (gen !== changesGen) return;
+      workspaceChanges = summary;
+    }).catch(() => {
+      if (gen !== changesGen) return;
+      // A thrown probe is a failed read of *something* — never impersonate 非 git.
+      workspaceChanges = { files: 0, insertions: 0, deletions: 0, unavailable: true };
     });
   };
 
@@ -146,15 +116,30 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
     // rendering failure is swallowed and the next tick tries again.
     try {
       const snapshot = buildSnapshot(state, { ...options, launchedAt, workspaceChanges });
-      lastEventCount = snapshot.events.length;
+      const dimensions = { width: out.columns ?? 80, height: out.rows ?? 24 };
+      activityMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "activity" });
+      taskMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "tasks" });
+      changeMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "changes" });
+      // Clamp stored positions too: a list shrink must not leave a hidden stale
+      // offset that reappears when tasks grow again. Keep the activity sentinel.
+      scrollFirst = Math.min(scrollFirst, maxFirstVisible(activityMetrics.totalRows, activityMetrics.rows));
+      taskScrollFirst = Math.min(taskScrollFirst, maxFirstVisible(taskMetrics.totalRows, taskMetrics.rows));
+      changeScrollFirst = Math.min(changeScrollFirst, maxFirstVisible(changeMetrics.totalRows, changeMetrics.rows));
       const lines = renderFrame(snapshot, {
-        width: out.columns ?? 80,
-        height: out.rows ?? 24,
+        ...dimensions,
         spinnerFrame: frameIndex++,
         firstVisible: scrollFirst,
+        taskFirstVisible: taskScrollFirst,
+        changeFirstVisible: changeScrollFirst,
         panelView,
       });
-      write(`\x1b[H${lines.map(line => `${line}\x1b[K`).join("\n")}\x1b[J`);
+      // A full-width write leaves the cursor on the last cell (wrap pending).
+      // Erasing there eats that cell — or the last half of a wide character.
+      // Address and clear each row BEFORE drawing, with no LF/autowrap path
+      // and no trailing erase that could remove newly painted content.
+      write(lines.map((line, index) =>
+        `${index === 0 ? "\x1b[H" : `\x1b[${index + 1};1H`}\x1b[2K${line}`,
+      ).join(""));
     } catch { /* see above */ }
   };
 
@@ -178,13 +163,20 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
             // The one navigation key: toggle the wide panel between the
             // activity stream and the full-width task view. One key, both
             // directions — Esc as a second way back was surplus.
-            panelView = panelView === "tasks" ? "activity" : "tasks";
+            panelView = nextPanelView(panelView);
+            paint();
             return;
           }
           const mapped = KEY_MAP[key?.name ?? ""];
           if (mapped === undefined) return;
-          const rows = workbenchPanelRows(out.columns ?? 80, out.rows ?? 24);
-          scrollFirst = advanceScroll(mapped, scrollFirst, lastEventCount, rows);
+          if (panelView === "tasks") {
+            taskScrollFirst = advanceScroll(mapped, taskScrollFirst, taskMetrics.totalRows, taskMetrics.rows);
+          } else if (panelView === "changes") {
+            changeScrollFirst = advanceScroll(mapped, changeScrollFirst, changeMetrics.totalRows, changeMetrics.rows);
+          } else {
+            scrollFirst = advanceScroll(mapped, scrollFirst, activityMetrics.totalRows, activityMetrics.rows);
+          }
+          paint();
         } catch { /* a key must never crash the bridge */ }
       };
       stdin.on("keypress", keyListener);

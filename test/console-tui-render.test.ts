@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { charAtColumn, fillVisualWidth, setAmbiguousWideForTests, stripAnsi, visualWidth, truncateVisual, padEndVisual } from "../src/console/tui/text.js";
 import { paint } from "../src/console/tui/theme.js";
 import { healthColor, paint } from "../src/console/tui/theme.js";
-import { advanceScroll, formatDuration, formatBytes, renderFrame } from "../src/console/tui/render.js";
+import { advanceScroll, formatDuration, formatBytes, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
 import { buildSnapshot, type TuiStateView } from "../src/console/tui/snapshot.js";
 
 test("visual width counts CJK as two columns and ignores ANSI", () => {
@@ -354,7 +354,7 @@ test("task view: Tab swaps the wide panel and shows full titles", () => {
   }
   const text = lines.map(stripAnsi).join("\n");
   assert.match(text, /─ 任务 \(4\)/, "the wide panel belongs to the tasks");
-  assert.match(text, /Tab 返回活动/, "the way back is named");
+  assert.match(text, /Tab 变更/, "the next view is named");
   assert.match(text, /✓ 验证 TUI 布局/);
   assert.match(text, /接入任务列表/);
   assert.match(text, /· 清理收尾/);
@@ -401,6 +401,38 @@ test("workbench panel follows the tail and reports history when scrolled", () =>
   assert.match(scrollText, /↑2 行 · Home 回顶/, "scrolled view shows rows-above and the way back");
   assert.match(scrollText, /tool_27 /, "the view starts at the requested event");
   assert.doesNotMatch(scrollText, /tool_29 /, "events above the view are not shown");
+});
+
+test("activity messages wrap instead of dropping their tail", () => {
+  const snap = buildSnapshot(fixtureView(), {
+    version: "1.0.0-rc.2",
+    rootName: "open-bridge",
+    logPath: "C:/x/bridge.log",
+    now: 60_000,
+  });
+  const token = "WRAP_TOKEN_TAIL_NOT_ELLIPSIS";
+  snap.events = [{
+    at: new Date(60_000).toISOString(),
+    tool: "bridge",
+    status: "completed",
+    message: `Started: https://example.invalid/mcp/${"abcd".repeat(40)}${token}`,
+  }];
+  const metrics = panelScrollMetrics(snap, { width: 110, height: 30, panelView: "activity", now: 60_000 });
+  assert.ok(metrics.totalRows > 1, "a long live line becomes several viewport rows");
+  const top = renderFrame(snap, { width: 110, height: 30, now: 60_000, panelView: "activity", firstVisible: 0 }).map(stripAnsi).join("\n");
+  assert.doesNotMatch(top, /example\.invalid\/mcp\/\.\.\./, "the URL is not amputated with ...");
+  const bottom = renderFrame(snap, {
+    width: 110, height: 30, now: 60_000, panelView: "activity",
+    firstVisible: Math.max(0, metrics.totalRows - metrics.rows),
+  }).map(stripAnsi).join("\n");
+  assert.match(bottom, new RegExp(token), "scrolling the wrapped rows reaches the message tail");
+  for (const [width, height] of [[110, 30], [60, 12]] as const) {
+    const lines = renderFrame(snap, { width, height, now: 60_000, panelView: "activity" });
+    assert.equal(lines.length, height);
+    for (const [i, line] of lines.entries()) {
+      assert.equal(visualWidth(line), width, `${width}x${height} wrapped activity line ${i}`);
+    }
+  }
 });
 
 test("advanceScroll steps and clamps around the retained history", () => {

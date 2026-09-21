@@ -967,3 +967,55 @@ test("published input schemas accept the values the runtime accepts", async () =
   const wide = await callTool(sessionId, "search_files", { query: "protocol", context: 25 });
   assert.equal(wide.payload.result.isError, undefined, wide.text);
 });
+
+
+async function nestedActivityWindow(sessionId, parent) {
+  const logged = await callTool(sessionId, "activity_log", { action: "recent", max_results: 40 });
+  const rows = logged.payload?.result?.structuredContent?.items;
+  assert.ok(Array.isArray(rows));
+  const start = rows.findIndex(row => row.tool === parent && row.status === "running");
+  assert.ok(start >= 0, "the latest parent invocation is inside the bounded activity window");
+  return rows.slice(0, start);
+}
+
+function assertChildOutcome(rows, name, terminal) {
+  const childRows = rows.filter(row => row.tool === name);
+  assert.deepEqual(childRows.map(row => row.status).reverse(), ["running", terminal]);
+  assert.match(childRows[0]?.message ?? "", terminal === "completed" ? /^Completed in \d+ ms\./ : /^Failed in \d+ ms: .*path/i);
+}
+
+test("live sequential and parallel batches close child activity without double-counting usage", async () => {
+  const { sessionId } = await openSession();
+  for (const mode of ["sequential", "parallel"]) {
+    const previous = await usage();
+    const called = await callTool(sessionId, "batch", { mode, calls: [
+      { tool: "get_todos" }, { tool: "get_file_info", arguments: {} },
+    ] });
+    assert.equal(called.payload?.result?.structuredContent?.succeeded, 1);
+    assert.equal(called.payload?.result?.structuredContent?.failed, 1);
+    const next = await usage();
+    assert.equal(next.calls - previous.calls, 1);
+    assert.equal(next.successes - previous.successes, 1);
+    assert.equal(next.failures - previous.failures, 0);
+    const rows = await nestedActivityWindow(sessionId, "batch");
+    assertChildOutcome(rows, "get_todos", "completed");
+    assertChildOutcome(rows, "get_file_info", "error");
+  }
+});
+
+test("live run_script children retire on success and failure while the result envelope is preserved", async () => {
+  const { sessionId } = await openSession();
+  for (const failed of [false, true]) {
+    const name = failed ? "get_file_info" : "get_todos";
+    const previous = await usage();
+    const called = await callTool(sessionId, "run_script", { source: `return await tools.${name}({});` });
+    assert.equal(called.payload?.result?.isError, undefined, "a script recovery envelope is still a successful MCP exchange");
+    assert.equal(called.payload?.result?.structuredContent?.ok, !failed);
+    assert.equal(called.payload?.result?.structuredContent?.calls, 1);
+    const next = await usage();
+    assert.equal(next.calls - previous.calls, 1);
+    assert.equal(next.successes - previous.successes, 1);
+    assert.equal(next.failures - previous.failures, 0);
+    assertChildOutcome(await nestedActivityWindow(sessionId, "run_script"), name, failed ? "error" : "completed");
+  }
+});

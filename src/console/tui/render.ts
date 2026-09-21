@@ -1,11 +1,11 @@
 /**
- * Pure renderers for the serve-console TUI (stage 1: status area + event stream).
+ * Pure renderers for the serve-console TUI.
  *
  * Every function maps a TuiSnapshot to strings of exactly `width` visual
  * columns — no stdout, no timers, no bridge imports — so the whole layout is
  * unit-testable and the driver stays a thin pump. The design language (top bar
  * with a status capsule, overview/process cards with a health gradient, a
- * timestamped event stream with ✓/✕/spinner icons, a one-line usage footer) is
+ * timestamped event stream with ✓/✕/spinner icons, a pinned address footer) is
  * ported from ainovel-cli's TUI (internal/entry/tui/*.go): same colour roles,
  * same gradient thresholds, same three-state icons.
  *
@@ -14,7 +14,7 @@
  */
 
 import { paint, healthColor, spinnerFrame, type ColorName } from "./theme.js";
-import { fillVisualWidth, stripAnsi, truncateVisual, padEndVisual, padStartVisual, visualWidth, wrapVisual } from "./text.js";
+import { fillVisualWidth, stripAnsi, inlineText, truncateVisual, padEndVisual, padStartVisual, visualWidth, wrapVisual } from "./text.js";
 
 export type TuiEventStatus = "running" | "completed" | "error" | "progress" | "warning";
 
@@ -32,12 +32,18 @@ export type TuiSnapshot = {
   failures: number;
   sessions: number;
   sessionsActive: number;
-  /** Current task list for the wide task view (capped; title and status only). */
+  /** Complete current task list; the viewport, not the snapshot, limits rows. */
   todos: Array<{ title: string; status: string }>;
-  /** Honest task count, beyond the render cap. */
+  /** Total task count shared by both layouts. */
   todosTotal: number;
-  /** Workspace changes since the last commit; absent when clean. */
-  changes?: { files: number; insertions: number; deletions: number };
+  /** Workspace changes since the last commit; absent = 非 git; unavailable = 读取失败. */
+  changes?: {
+    files: number;
+    insertions: number;
+    deletions: number;
+    unavailable?: boolean;
+    entries?: Array<{ path: string; insertions: number; deletions: number; untracked?: boolean; binary?: boolean }>;
+  };
   runningCommands: Array<{
     id: string;
     command: string;
@@ -114,7 +120,7 @@ function boxLines(title: string, rows: string[], width: number): string[] {
 }
 
 function renderTopBar(snap: TuiSnapshot, width: number, busy: boolean, spin: number): string {
-  const leftText = `◆ open-bridge v${snap.version} · 端口 ${snap.port}`;
+  const leftText = `◆ open-bridge v${inlineText(snap.version)} · 端口 ${snap.port}`;
   const capsule = CAPSULE[snap.bridgeState];
   // The busy state replaces the static dot with the live spinner — the same
   // trick ainovel-cli's top bar uses so the capsule itself carries motion.
@@ -124,7 +130,7 @@ function renderTopBar(snap: TuiSnapshot, width: number, busy: boolean, spin: num
   // ainovel-cli's top-bar cell math: the centre keeps at least a third of the
   // width, the sides split the rest evenly.
   const innerW = Math.max(12, width);
-  const titleText = truncateVisual(snap.rootName, Math.max(8, Math.floor(innerW / 3)));
+  const titleText = truncateVisual(inlineText(snap.rootName), Math.max(8, Math.floor(innerW / 3)));
   let centerW = Math.max(16, visualWidth(titleText) + 6);
   if (centerW > innerW - 24) centerW = Math.max(8, innerW - 24);
   let sideTotal = innerW - centerW;
@@ -188,21 +194,22 @@ function renderProcessRows(snap: TuiSnapshot, width: number, maxRows: number): s
     const pct = command.capacityBytes > 0 ? Math.min(100, (command.capturedBytes / command.capacityBytes) * 100) : 0;
     const rightPlain = `${formatDuration(command.elapsedMs)} · ${formatBytes(command.capturedBytes)}/${formatBytes(command.capacityBytes)} ${bar(pct, 10)} ${Math.round(pct)}%`;
     const leftBudget = Math.max(12, inner - visualWidth(rightPlain) - 1);
-    const left = truncateVisual(`▸ ${command.id.slice(0, 8)} ${command.command}`, leftBudget);
+    const left = truncateVisual(`▸ ${inlineText(command.id).slice(0, 8)} ${inlineText(command.command)}`, leftBudget);
     const pad = Math.max(1, inner - visualWidth(left) - visualWidth(rightPlain));
     rows.push(`${paint("text", left)}${" ".repeat(pad)}${paint(healthColor(pct), rightPlain)}`);
   }
   return rows;
 }
 
-/** One event line, exactly `width` columns — shared by the stacked stream and
- *  the workbench panel so the two cannot drift apart. */
-export function eventRow(
+/** One event, wrapped to `width` columns. Continuation lines keep the message; nothing is `...`-amputated. */
+export function eventRows(
   event: TuiSnapshot["events"][number],
   width: number,
   spin: number,
   now: number,
-): string {
+): string[] {
+  const tool = inlineText(event.tool);
+  const message = inlineText(event.message);
   const icon =
     event.status === "running" ? paint("accent", spinnerFrame(spin), { bold: true })
     : event.status === "completed" ? paint("success", "✓")
@@ -218,34 +225,41 @@ export function eventRow(
       : event.durationMs !== undefined
         ? formatDuration(event.durationMs)
         : "";
-  const headPlain = `${formatClock(event.at)} ${event.status === "running" ? spinnerFrame(spin) : event.status === "completed" ? "✓" : event.status === "error" ? "✕" : event.status === "warning" ? "⚠" : "◆"} ${event.tool}`;
-  const rightBudget = rightText === "" ? 0 : visualWidth(rightText) + 1;
-  // On a narrow window the message is the first thing to go (the timestamp,
-  // the state icon and the tool name identify the row; the message decorates it).
-  const msgBudget = width - visualWidth(headPlain) - rightBudget - 2;
-  const msgPart = msgBudget >= 1 ? ` ${paint("muted", truncateVisual(event.message, msgBudget))}` : "";
-  let left = `${paint("dim", formatClock(event.at))} ${icon} ${paint("tool", event.tool)}${msgPart}`;
-  if (visualWidth(left) > width - (rightBudget > 0 ? visualWidth(rightText) : 0)) {
-    // Absurdly narrow: keep the information, lose the paint.
-    left = truncateVisual(stripAnsi(left), Math.max(4, width - (rightBudget > 0 ? visualWidth(rightText) : 0)));
-  }
-  return rightText === "" ? padEndVisual(left, width) : `${padEndVisual(left, width - visualWidth(rightText))}${paint("dim", rightText)}`;
+  const clock = formatClock(event.at);
+  const mark = event.status === "running" ? spinnerFrame(spin)
+    : event.status === "completed" ? "✓"
+    : event.status === "error" ? "✕"
+    : event.status === "warning" ? "⚠"
+    : "◆";
+  const prefixPlain = `${clock} ${mark} ${tool} `;
+  const prefix = `${paint("dim", clock)} ${icon} ${paint("tool", tool)} `;
+  const prefixW = visualWidth(prefixPlain);
+  const rightW = rightText === "" ? 0 : visualWidth(rightText);
+  const msgWidth = Math.max(1, width - prefixW - (rightW > 0 ? rightW + 1 : 0));
+  const chunks = wrapVisual(message, msgWidth);
+  if (chunks.length === 0) chunks.push("");
+  return chunks.map((chunk, index) => {
+    if (index === 0) {
+      const left = `${prefix}${chunk.length > 0 ? paint("muted", chunk) : ""}`;
+      const line = rightText === ""
+        ? padEndVisual(left, width)
+        : `${padEndVisual(left, Math.max(0, width - rightW))}${paint("dim", rightText)}`;
+      if (visualWidth(line) > width) return padEndVisual(truncateVisual(stripAnsi(line), width), width);
+      return padEndVisual(line, width);
+    }
+    return padEndVisual(`${" ".repeat(prefixW)}${paint("muted", chunk)}`, width);
+  });
 }
 
-function renderEvents(snap: TuiSnapshot, width: number, budget: number, spin: number, now: number): string[] {
-  if (budget <= 0) return [];
-  const out: string[] = [];
-  const head = "─ 活动 ";
-  out.push(paint("dim", `${head}${fillVisualWidth("─", Math.max(1, width - visualWidth(head)))}`));
-  // Events are newest-first: the budget takes the NEWEST from the front —
-  // slicing from the back would freeze the stream on the session's oldest
-  // rows the moment the budget shrank.
-  const take = Math.max(0, budget - 1);
-  for (const event of snap.events.slice(0, take)) {
-    out.push(eventRow(event, width, spin, now));
-  }
-  return out;
+export function eventRow(
+  event: TuiSnapshot["events"][number],
+  width: number,
+  spin: number,
+  now: number,
+): string {
+  return eventRows(event, width, spin, now)[0] ?? padEndVisual("", width);
 }
+
 
 function renderFooter(snap: TuiSnapshot, width: number): string[] {
   // One fact, one place: the top bar owns identity, port and status; the
@@ -257,15 +271,15 @@ function renderFooter(snap: TuiSnapshot, width: number): string[] {
   // screens — the one string an operator copies. The instruction row is gone
   // entirely; closing the window stops the serve, and the scroll keys surface
   // in the panel title the moment they matter (while scrolled).
-  const line2 = padEndVisual(paint("muted", truncateVisual(`MCP ${snap.mcpUrl}`, width)), width);
+  const line2 = padEndVisual(paint("muted", truncateVisual(`MCP ${inlineText(snap.mcpUrl)}`, width)), width);
   return [line1, line2];
 }
 
 // --- workbench layout (stage 3): fixed sidebar + scrollable event panel -----
 //
 // The TUI is a VIEWING surface by design: settings and background operations
-// live in the web console, and the workbench adds no command input. Its one
-// interaction is scrolling the activity history, handled by the driver.
+// live in the web console, and the workbench adds no command input. Its
+// interactions are Tab view switching and scrolling the selected viewport.
 
 /** Event rows visible in the workbench panel for a terminal size. */
 export function workbenchPanelRows(width: number, height: number): number {
@@ -333,9 +347,12 @@ function renderSidebar(snap: TuiSnapshot, width: number): string[] {
   }
   // A permanent resident: the row answers "is there uncommitted work?" and a
   // missing row cannot say whether that means clean or not-watching. Clean
-  // reads as 干净; a workspace without git is named honestly, not faked.
+  // reads as 干净; a workspace without git is named honestly, not faked;
+  // a timeout or a failed read of a real repo is 读取失败, never 非 git.
   if (snap.changes === undefined) {
     sidebarField(lines, width, "变更", "非 git", "dim");
+  } else if (snap.changes.unavailable) {
+    sidebarField(lines, width, "变更", "读取失败", "dim");
   } else if (snap.changes.files === 0 && snap.changes.insertions === 0 && snap.changes.deletions === 0) {
     sidebarField(lines, width, "变更", "干净", "dim");
   } else {
@@ -365,7 +382,7 @@ function renderSidebar(snap: TuiSnapshot, width: number): string[] {
     for (const command of snap.runningCommands.slice(0, 6)) {
       const pct = command.capacityBytes > 0 ? Math.min(100, (command.capturedBytes / command.capacityBytes) * 100) : 0;
       const right = `${Math.round(pct)}%`;
-      const left = truncateVisual(`▸ ${command.id.slice(0, 8)} ${command.command}`, Math.max(6, width - visualWidth(right) - 1));
+      const left = truncateVisual(`▸ ${inlineText(command.id).slice(0, 8)} ${inlineText(command.command)}`, Math.max(6, width - visualWidth(right) - 1));
       lines.push(`${paint("text", left)} ${paint(healthColor(pct), right)}`);
     }
   }
@@ -374,147 +391,217 @@ function renderSidebar(snap: TuiSnapshot, width: number): string[] {
     section("服务");
     for (const service of snap.serviceRows.slice(0, 8)) {
       const mark = service.running ? paint("success", "●") : paint("dim", "○");
-      lines.push(`${mark} ${paint(service.running ? "text" : "dim", truncateVisual(service.name, Math.max(4, width - 3)))}`);
+      lines.push(`${mark} ${paint(service.running ? "text" : "dim", truncateVisual(inlineText(service.name), Math.max(4, width - 3)))}`);
     }
   }
   return lines;
 }
 
-/** The wide task view: full titles wrapped to the panel width — the narrow
- *  sidebar could only ever show them amputated. */
+/** Task titles wrap with a measured icon gutter, including in CJK terminals. */
 function taskPanelRows(snap: TuiSnapshot, width: number, spin: number): string[] {
+  if (snap.todos.length === 0) return [paint("dim", "暂无任务")];
   const rows: string[] = [];
+  const gutter = Math.max(visualWidth("✓"), visualWidth("·"), visualWidth(spinnerFrame(spin))) + 1;
   for (const todo of snap.todos) {
     const mark = todo.status === "completed" ? paint("success", "✓")
       : todo.status === "in_progress" ? paint("accent", spinnerFrame(spin))
       : paint("dim", "·");
     const titleColor: ColorName = todo.status === "in_progress" ? "text" : "dim";
-    const wrapped = wrapVisual(todo.title, Math.max(4, width - 2));
+    // A title may contain real line breaks. They must become viewport rows,
+    // never embedded terminal newlines that escape the frame's height budget.
+    const wrapped = stripAnsi(todo.title).replace(/\r\n?/g, "\n").split("\n")
+      .flatMap(line => wrapVisual(inlineText(line.replace(/\t/g, "    ")), Math.max(1, width - gutter)));
     wrapped.forEach((line, index) => {
-      rows.push(index === 0 ? `${mark} ${paint(titleColor, line)}` : `  ${paint(titleColor, line)}`);
+      rows.push(`${index === 0 ? padEndVisual(mark, gutter) : " ".repeat(gutter)}${paint(titleColor, line)}`);
     });
-    rows.push(""); // air between tasks
+    rows.push("");
   }
-  if (rows.length > 0 && rows[rows.length - 1] === "") rows.pop();
-  if (snap.todosTotal > snap.todos.length) {
-    rows.push(paint("dim", `… 仅显示前 ${snap.todos.length} 条`));
+  rows.pop(); // no trailing spacer: End must land on the final task's text
+  return rows;
+}
+
+
+/** Per-file +/- list for the Tab 「变更」 page. Paths wrap; counts keep their columns. */
+function changePanelRows(snap: TuiSnapshot, width: number): string[] {
+  if (snap.changes === undefined) return [paint("dim", "非 git")];
+  if (snap.changes.unavailable) return [paint("dim", "读取失败")];
+  const entries = snap.changes.entries ?? [];
+  if (entries.length === 0) return [paint("dim", "暂无变更")];
+
+  const addTexts = entries.map(entry => entry.binary ? "" : `+${formatCount(entry.insertions)}`);
+  const delTexts = entries.map(entry => entry.binary || (entry.untracked && entry.deletions === 0) ? "" : `-${formatCount(entry.deletions)}`);
+  const addW = Math.max(2, ...addTexts.map(text => visualWidth(text)));
+  const delW = Math.max(2, ...delTexts.map(text => visualWidth(text)));
+  const gutter = addW + 1 + delW + 1;
+  const pathWidth = Math.max(1, width - gutter);
+  const rows: string[] = [];
+  for (const [index, entry] of entries.entries()) {
+    const path = inlineText(entry.path).replace(/\t/g, "    ");
+    const wrapped = wrapVisual(path, pathWidth);
+    const counts = entry.binary
+      ? padEndVisual(paint("dim", "二进制"), gutter)
+      : `${paint("success", padStartVisual(addTexts[index] ?? "", addW))} ${delTexts[index] ? paint("error", padStartVisual(delTexts[index] ?? "", delW)) : " ".repeat(delW)} `;
+    wrapped.forEach((line, lineIndex) => {
+      if (lineIndex === 0) {
+        const tag = entry.untracked && visualWidth(line) + visualWidth(" 未跟踪") <= pathWidth ? paint("dim", " 未跟踪") : "";
+        rows.push(`${counts}${paint("text", line)}${tag}`);
+      } else {
+        rows.push(`${" ".repeat(gutter)}${paint("text", line)}`);
+      }
+    });
   }
   return rows;
 }
 
+export type PanelView = "activity" | "tasks" | "changes";
+export const PANEL_VIEWS: readonly PanelView[] = ["activity", "tasks", "changes"];
+export function nextPanelView(view: PanelView): PanelView {
+  const index = PANEL_VIEWS.indexOf(view);
+  return PANEL_VIEWS[(index + 1) % PANEL_VIEWS.length] ?? "activity";
+}
+
+type FrameLayout = {
+  width: number;
+  height: number;
+  sidebarWidth: number;
+  panelWidth: number;
+  panelRows: number;
+  overview: string[];
+  processes: string[];
+};
+
+/** One geometry source for both rendering and the driver's scroll steps. */
+function frameLayout(snap: TuiSnapshot, width: number, height: number, view: PanelView): FrameLayout {
+  width = Math.max(20, Math.min(400, Number.isFinite(width) ? Math.floor(width) : 80));
+  height = Math.max(6, Math.min(200, Number.isFinite(height) ? Math.floor(height) : 24));
+  const wide = width >= 76 && height >= 22;
+  const sidebarWidth = wide ? Math.max(24, Math.min(40, Math.floor(width * 0.3))) : 0;
+  const panelWidth = wide ? width - sidebarWidth - visualWidth("│") : width;
+  // A narrow task view uses the whole body. The activity view keeps its
+  // compact overview/process cards, dropping them before the last event row.
+  const overview = !wide && view === "activity" ? boxLines("概览", renderOverviewRows(snap, width), width) : [];
+  const processRows = !wide && view === "activity" ? renderProcessRows(snap, width, 4) : [];
+  const processes = processRows.length > 0 ? boxLines("进程", processRows, width) : [];
+  let panelRows = workbenchPanelRows(width, height) - overview.length - processes.length;
+  if (panelRows < 1 && processes.length > 0) {
+    panelRows += processes.length;
+    processes.length = 0;
+  }
+  if (panelRows < 1 && overview.length > 0) {
+    panelRows += overview.length;
+    overview.length = 0;
+  }
+  return { width, height, sidebarWidth, panelWidth, panelRows: Math.max(1, panelRows), overview, processes };
+}
+
+/** The real viewport's row counts, including wrapped task titles and spacers. */
+export function panelScrollMetrics(
+  snap: TuiSnapshot,
+  options: { width: number; height: number; panelView: PanelView; now?: number; spinnerFrame?: number },
+): { rows: number; totalRows: number } {
+  const layout = frameLayout(snap, options.width, options.height, options.panelView);
+  return {
+    rows: layout.panelRows,
+    totalRows: options.panelView === "tasks" ? taskPanelRows(snap, layout.panelWidth, options.spinnerFrame ?? 0).length
+      : options.panelView === "changes" ? changePanelRows(snap, layout.panelWidth).length
+      : snap.events.flatMap(event => eventRows(event, layout.panelWidth, options.spinnerFrame ?? 0, options.now ?? 0)).length,
+  };
+}
+
+function renderPanel(
+  snap: TuiSnapshot, width: number, rows: number, spin: number, now: number,
+  view: PanelView, firstVisible: number,
+): string[] {
+  const tasksView = view === "tasks";
+  const changesView = view === "changes";
+  const content = tasksView ? taskPanelRows(snap, width, spin)
+    : changesView ? changePanelRows(snap, width)
+    : snap.events.flatMap(event => eventRows(event, width, spin, now));
+  const requested = Number.isFinite(firstVisible) ? Math.floor(firstVisible) : 0;
+  const first = Math.min(Math.max(0, requested), maxFirstVisible(content.length, rows));
+  const count = tasksView ? snap.todosTotal : changesView ? (snap.changes?.entries?.length ?? snap.changes?.files ?? 0) : snap.events.length;
+  const label = `${tasksView ? "任务" : changesView ? "变更" : "活动"} (${count})`;
+  let title = `─ ${label} `;
+  const navigation = changesView ? "Tab 返回活动" : tasksView ? "Tab 变更" : "Tab 任务";
+  const listView = tasksView || changesView;
+  const position = listView
+    ? content.length > rows ? `${first + 1}-${Math.min(first + rows, content.length)}/${content.length} 行` : ""
+    : first > 0 ? `↑${first} 行 · Home 回顶` : "";
+  let hint = [navigation, position].filter(Boolean).join(" · ");
+  // Keep the return key and the selected view identifiable even at 20 columns;
+  // optional range/history detail yields before either of them does.
+  if (visualWidth(title) + visualWidth(hint) > width) hint = navigation;
+  if (visualWidth(title) + visualWidth(hint) > width) {
+    title = `${label} `;
+    hint = listView ? (changesView ? "Tab 活动" : "Tab 变更") : navigation;
+  }
+  const titleWidth = Math.max(1, width - visualWidth(hint));
+  const heading = `${padEndVisual(paint("dim", truncateVisual(title, titleWidth)), titleWidth)}${paint("accent", hint)}`;
+  const panel = [heading, ...visibleEvents(content, first, rows)];
+  while (panel.length < rows + 1) panel.push("");
+  return panel;
+}
+
 function renderWorkbench(
   snap: TuiSnapshot,
-  options: { width: number; height: number; spin: number; now: number; busy: boolean; firstVisible: number; panelView?: "activity" | "tasks" },
+  options: {
+    layout: FrameLayout; spin: number; now: number; busy: boolean;
+    firstVisible: number; taskFirstVisible: number; changeFirstVisible: number; panelView: PanelView;
+  },
 ): string[] {
-  const { width, height, spin, now, busy } = options;
-  const sidebarW = Math.max(24, Math.min(40, Math.floor(width * 0.3)));
-  const panelW = width - sidebarW - visualWidth("│");
-  const bodyRows = height - 4;
-  const rows = Math.max(1, bodyRows - 1);
-
-  const sidebar = renderSidebar(snap, sidebarW).slice(0, bodyRows);
+  const { layout, spin, now, busy, panelView } = options;
+  const { width, height, sidebarWidth, panelWidth, panelRows } = layout;
+  const bodyRows = panelRows + 1;
+  const sidebar = renderSidebar(snap, sidebarWidth).slice(0, bodyRows);
   while (sidebar.length < bodyRows) sidebar.push("");
-
-  const maxFirst = maxFirstVisible(snap.events.length, rows);
-  const first = Math.min(Math.max(0, Math.floor(options.firstVisible)), maxFirst);
-  const tasksView = options.panelView === "tasks";
-  const titleLeft = tasksView ? `─ 任务 (${snap.todosTotal}) ` : `─ 活动 (${snap.events.length}) `;
-  // The hint always names the way across views; the scroll hint only exists
-  // where scrolling is real (the activity panel).
-  const hintParts: string[] = [];
-  if (tasksView) hintParts.push("Tab 返回活动");
-  else {
-    if (snap.todosTotal > 0) hintParts.push("Tab 任务");
-    if (first > 0) hintParts.push(`↑${first} 行 · Home 回顶`);
-  }
-  const hint = hintParts.length > 0 ? `${hintParts.join(" · ")} ` : "";
-  const body = tasksView
-    ? taskPanelRows(snap, panelW, spin)
-    : visibleEvents(snap.events, first, rows).map(event => eventRow(event, panelW, spin, now));
-  const panel: string[] = [
-    `${padEndVisual(paint("dim", titleLeft), Math.max(1, panelW - visualWidth(hint)))}${hint === "" ? "" : paint("accent", hint)}`,
-    ...body,
-  ];
-  if (panel.length > bodyRows) {
-    const hidden = panel.length - bodyRows + 1;
-    panel.length = Math.max(1, bodyRows - 1);
-    panel.push(paint("dim", `… 还有 ${hidden} 行`));
-  }
-  while (panel.length < bodyRows) panel.push("");
-
-  const lines: string[] = [renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width))];
+  const first = panelView === "tasks" ? options.taskFirstVisible
+    : panelView === "changes" ? options.changeFirstVisible
+    : options.firstVisible;
+  const panel = renderPanel(snap, panelWidth, panelRows, spin, now, panelView, first);
+  const lines = [renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width))];
   for (let i = 0; i < bodyRows; i += 1) {
-    lines.push(`${padEndVisual(sidebar[i] ?? "", sidebarW)}${paint("dim", "│")}${padEndVisual(panel[i] ?? "", panelW)}`);
+    lines.push(`${padEndVisual(sidebar[i] ?? "", sidebarWidth)}${paint("dim", "│")}${padEndVisual(panel[i] ?? "", panelWidth)}`);
   }
   lines.push(...renderFooter(snap, width));
+  return fitFrame(lines, width, height);
+}
+
+/** Exact rows/columns also erase residue after a terminal resize. */
+function fitFrame(lines: string[], width: number, height: number): string[] {
   return lines.slice(0, height).map(line => {
-    const w = visualWidth(line);
-    if (w > width) return padEndVisual(truncateVisual(stripAnsi(line), width), width);
+    if (visualWidth(line) > width) return padEndVisual(truncateVisual(stripAnsi(line), width), width);
     return padEndVisual(line, width);
   });
 }
 
-/**
- * Lay out one full frame. The row budget is exact: whatever the terminal
- * height, the result never exceeds `height` lines (a wrapped line would smear
- * the repaint), and every line is padded to `width` so residue from a wider
- * previous frame is overwritten.
- *
- * Small-window ladder: the process card drops first, then the overview loses
- * its MCP row; the top bar, at least one event row and the footer survive.
- */
+/** Both layouts render the selected view and use independent scroll offsets. */
 export function renderFrame(
   snap: TuiSnapshot,
-  options: { width: number; height: number; spinnerFrame?: number; now?: number; firstVisible?: number; panelView?: "activity" | "tasks" },
+  options: {
+    width: number; height: number; spinnerFrame?: number; now?: number;
+    firstVisible?: number; taskFirstVisible?: number; changeFirstVisible?: number; panelView?: PanelView;
+  },
 ): string[] {
-  const width = Math.max(20, Math.min(400, Math.floor(options.width)));
-  const height = Math.max(6, Math.min(200, Math.floor(options.height)));
+  const panelView = options.panelView ?? "activity";
+  const layout = frameLayout(snap, options.width, options.height, panelView);
+  const { width, height, panelRows } = layout;
   const spin = options.spinnerFrame ?? 0;
   const now = options.now ?? Date.now();
   const busy = snap.sessionsActive > 0 || snap.runningCommands.length > 0;
-
-  // The workbench split needs room for both columns; a narrow or short
-  // terminal keeps the stage-1 stacked layout, which packs small frames best.
-  if (width >= 76 && height >= 22) {
-    // The follow default is the head sentinel: below zero clamps to index 0,
-    // the newest event — never the array tail, which is the oldest window.
-    return renderWorkbench(snap, { width, height, spin, now, busy, firstVisible: options.firstVisible ?? -1, panelView: options.panelView });
+  const firstVisible = options.firstVisible ?? -1;
+  const taskFirstVisible = options.taskFirstVisible ?? 0;
+  const changeFirstVisible = options.changeFirstVisible ?? 0;
+  if (layout.sidebarWidth > 0) {
+    return renderWorkbench(snap, { layout, spin, now, busy, firstVisible, taskFirstVisible, changeFirstVisible, panelView });
   }
-
-  const lines: string[] = [renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width))];
-
-  const overview = boxLines("概览", renderOverviewRows(snap, width), width);
-  const processRows = renderProcessRows(snap, width, 4);
-  const processes = processRows.length > 0 ? boxLines("进程", processRows, width) : [];
-  const footer = renderFooter(snap, width);
-
-  let eventsBudget = height - lines.length - overview.length - processes.length - footer.length;
-  if (eventsBudget < 1 && processes.length > 0) {
-    eventsBudget += processes.length;
-    processes.length = 0;
-  }
-  if (eventsBudget < 1 && overview.length > 0) {
-    // Still short: drop the overview box whole — the survival set is the top
-    // bar, one event row and the footer.
-    eventsBudget += overview.length;
-    overview.length = 0;
-  }
-  eventsBudget = Math.max(0, eventsBudget);
-
-  lines.push(...overview, ...processes, ...renderEvents(snap, width, eventsBudget, spin, now));
-  // Pin the footer to the bottom rows: with few events the frame would
-  // otherwise top-pack, leaving the lower terminal dark and the footer
-  // floating mid-screen. ainovel-cli's layout keeps its status bar on the
-  // last line whatever the content height; so does this one.
-  while (lines.length < height - footer.length) lines.push("");
-  lines.push(...footer);
-  // Final safety net: a row that still measures past `width` (a corner the
-  // budget math above could not foresee) is degraded to unpainted truncation
-  // and re-padded — a 2-column character at the seam can leave the cut one
-  // column short, and a wrapped line would smear the repaint.
-  return lines.slice(0, height).map(line => {
-    const w = visualWidth(line);
-    if (w > width) return padEndVisual(truncateVisual(stripAnsi(line), width), width);
-    return padEndVisual(line, width);
-  });
+  const first = panelView === "tasks" ? taskFirstVisible
+    : panelView === "changes" ? changeFirstVisible
+    : firstVisible;
+  const lines = [
+    renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width)),
+    ...layout.overview, ...layout.processes,
+    ...renderPanel(snap, width, panelRows, spin, now, panelView, first),
+    ...renderFooter(snap, width),
+  ];
+  return fitFrame(lines, width, height);
 }

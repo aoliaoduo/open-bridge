@@ -1,0 +1,247 @@
+/**
+ * Workspace-change summary for the serve-console TUI sidebar and the
+ * Tab 「变更」 file list.
+ *
+ * The 500 ms render tick only reads a cached value; git and file IO live here
+ * so they can be tested without a TTY. A missing git / non-repository is a
+ * different fact from a timeout or a partial read — the sidebar names them
+ * separately (非 git vs 读取失败).
+ */
+
+import { execFile as execFileCallback } from "node:child_process";
+import { promisify } from "node:util";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+
+const execFile = promisify(execFileCallback);
+
+export type ChangeFile = {
+  path: string;
+  insertions: number;
+  deletions: number;
+  untracked?: boolean;
+  binary?: boolean;
+};
+export type ChangeCounts = { files: number; insertions: number; deletions: number };
+export type ChangeSummary = ChangeCounts & { unavailable?: boolean; entries?: ChangeFile[] };
+
+const STATUS_TIMEOUT_MS = 5000;
+const NUMSTAT_TIMEOUT_MS = 5000;
+const UNTRACKED_FILE_CAP = 512 * 1024;
+const UNTRACKED_READ_BUDGET = 2 * 1024 * 1024;
+
+type GitLikeError = { code?: string | number | null; killed?: boolean; message?: string; stdout?: string; stderr?: string };
+
+export function classifyGitError(error: GitLikeError): "no-git" | "unavailable" {
+  if (error.killed === true || error.code === "ETIMEDOUT") return "unavailable";
+  if (error.code === "ENOENT") return "no-git";
+  if (error.code === 128 || error.code === "128") return "no-git";
+  const blob = `${error.message ?? ""}\n${error.stderr ?? ""}\n${error.stdout ?? ""}`;
+  if (/not a git repository/i.test(blob)) return "no-git";
+  return "unavailable";
+}
+
+/** Git-style text line count: empty is 0; a missing trailing newline still counts as a line. */
+export function countTextLines(buf: Buffer): number | null {
+  if (buf.includes(0)) return null;
+  if (buf.byteLength === 0) return 0;
+  let lines = 0;
+  for (const byte of buf) if (byte === 10) lines += 1;
+  if (buf[buf.byteLength - 1] !== 10) lines += 1;
+  return lines;
+}
+
+export function parsePorcelainZ(output: string): Array<{ xy: string; path: string }> {
+  const parts = output.split("\0").filter(part => part.length > 0);
+  const entries: Array<{ xy: string; path: string }> = [];
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i] ?? "";
+    if (part.length < 3) continue;
+    const xy = part.slice(0, 2);
+    const filePath = part.slice(3);
+    if (xy.startsWith("R") || xy.startsWith("C")) {
+      const renamed = parts[i + 1] ?? filePath;
+      i += 1;
+      entries.push({ xy, path: renamed });
+    } else {
+      entries.push({ xy, path: filePath });
+    }
+  }
+  return entries;
+}
+
+export function parseNumstatFiles(output: string): Array<{ path: string; insertions: number; deletions: number; binary: boolean }> {
+  const files: Array<{ path: string; insertions: number; deletions: number; binary: boolean }> = [];
+  const push = (added: string, removed: string, filePath: string): void => {
+    if (filePath.length === 0) return;
+    const binary = added === "-" || removed === "-";
+    const insertions = binary ? 0 : Number(added);
+    const deletions = binary ? 0 : Number(removed);
+    if (!binary && (!Number.isFinite(insertions) || !Number.isFinite(deletions))) return;
+    files.push({ path: filePath, insertions, deletions, binary });
+  };
+
+  if (output.includes("\0")) {
+    const parts = output.split("\0").filter(part => part.length > 0);
+    for (let i = 0; i < parts.length; i += 1) {
+      const part = parts[i] ?? "";
+      const tabs = part.split("\t");
+      if (tabs.length >= 3) {
+        let filePath = tabs.slice(2).join("\t");
+        const next = parts[i + 1];
+        if (next !== undefined && !next.includes("\t")) {
+          filePath = next;
+          i += 1;
+        }
+        push(tabs[0] ?? "0", tabs[1] ?? "0", filePath);
+      } else if (tabs.length === 2) {
+        const src = parts[i + 1] ?? "";
+        const dest = parts[i + 2] ?? "";
+        if (src.length > 0 && !src.includes("\t")) {
+          if (dest.length > 0 && !dest.includes("\t")) {
+            i += 2;
+            push(tabs[0] ?? "0", tabs[1] ?? "0", dest);
+          } else {
+            i += 1;
+            push(tabs[0] ?? "0", tabs[1] ?? "0", src);
+          }
+        }
+      }
+    }
+    return files;
+  }
+
+  for (const line of output.split(/\r?\n/)) {
+    if (line.length === 0) continue;
+    const tabs = line.split("\t");
+    const added = tabs[0] ?? "0";
+    const removed = tabs[1] ?? "0";
+    let filePath = tabs.slice(2).join("\t");
+    const arrow = filePath.lastIndexOf(" => ");
+    if (arrow >= 0) filePath = filePath.slice(arrow + 4);
+    push(added, removed, filePath);
+  }
+  return files;
+}
+
+export function parseNumstat(output: string): { insertions: number; deletions: number } {
+  return parseNumstatFiles(output).reduce(
+    (acc, file) => ({ insertions: acc.insertions + file.insertions, deletions: acc.deletions + file.deletions }),
+    { insertions: 0, deletions: 0 },
+  );
+}
+
+function parsePorcelainLines(output: string): Array<{ xy: string; path: string }> {
+  return output.split(/\r?\n/).filter(line => line.length > 0).map(line => ({
+    xy: line.slice(0, 2),
+    path: line.slice(3).replace(/^"(.*)"$/, "$1"),
+  }));
+}
+
+export async function summarizeGitStatus(args: {
+  statusError?: GitLikeError | null;
+  statusOut?: string | null;
+  numstatError?: GitLikeError | null;
+  numstatOut?: string | null;
+  readFile: (rel: string) => Promise<Buffer>;
+}): Promise<ChangeSummary | undefined> {
+  if (args.statusError) {
+    return classifyGitError(args.statusError) === "no-git"
+      ? undefined
+      : { files: 0, insertions: 0, deletions: 0, unavailable: true };
+  }
+  if (typeof args.statusOut !== "string") {
+    return { files: 0, insertions: 0, deletions: 0, unavailable: true };
+  }
+
+  const porcelain = args.statusOut.includes("\0")
+    ? parsePorcelainZ(args.statusOut)
+    : parsePorcelainLines(args.statusOut);
+
+  if (args.numstatError && classifyGitError(args.numstatError) === "unavailable") {
+    return { files: 0, insertions: 0, deletions: 0, unavailable: true };
+  }
+
+  const numstatFiles = typeof args.numstatOut === "string" ? parseNumstatFiles(args.numstatOut) : [];
+  const numstatByPath = new Map(numstatFiles.map(file => [file.path, file]));
+
+  const entries: ChangeFile[] = [];
+  let insertions = 0;
+  let deletions = 0;
+  let budget = UNTRACKED_READ_BUDGET;
+
+  for (const entry of porcelain) {
+    if (entry.xy === "??") {
+      let add = 0;
+      let binary = false;
+      try {
+        const buf = await args.readFile(entry.path);
+        if (buf.includes(0)) binary = true;
+        else if (buf.byteLength <= UNTRACKED_FILE_CAP && budget > 0) {
+          budget -= buf.byteLength;
+          add = countTextLines(buf) ?? 0;
+        }
+      } catch {
+        // Deleted between status and read — still listed.
+      }
+      entries.push({ path: entry.path, insertions: add, deletions: 0, untracked: true, ...(binary ? { binary: true } : {}) });
+      insertions += add;
+      continue;
+    }
+    const counted = numstatByPath.get(entry.path);
+    const add = counted?.insertions ?? 0;
+    const del = counted?.deletions ?? 0;
+    entries.push({ path: entry.path, insertions: add, deletions: del, ...(counted?.binary ? { binary: true } : {}) });
+    insertions += add;
+    deletions += del;
+  }
+
+  return entries.length > 0
+    ? { files: entries.length, insertions, deletions, entries }
+    : { files: 0, insertions: 0, deletions: 0, entries: [] };
+}
+
+function errorBlob(error: GitLikeError): string {
+  return `${error.message ?? ""}\n${error.stderr ?? ""}\n${error.stdout ?? ""}`;
+}
+
+async function gitOutput(
+  root: string,
+  args: string[],
+  timeout: number,
+): Promise<{ ok: true; stdout: string } | { ok: false; error: GitLikeError }> {
+  try {
+    const { stdout } = await execFile("git", ["-C", root, "-c", "core.quotepath=off", ...args], {
+      timeout,
+      encoding: "utf8",
+      windowsHide: true,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    return { ok: true, stdout: typeof stdout === "string" ? stdout : "" };
+  } catch (error) {
+    const err = error as GitLikeError;
+    if (/bad revision|unknown revision|ambiguous argument 'HEAD'/i.test(errorBlob(err))) {
+      return { ok: true, stdout: "" };
+    }
+    return { ok: false, error: err };
+  }
+}
+
+/** Probe a workspace: undefined means 非 git; unavailable is a failed read of a repo. */
+export async function collectWorkspaceChanges(root: string): Promise<ChangeSummary | undefined> {
+  const status = await gitOutput(root, ["status", "--porcelain=v1", "-z", "-uall"], STATUS_TIMEOUT_MS);
+  if (!status.ok) {
+    return classifyGitError(status.error) === "no-git"
+      ? undefined
+      : { files: 0, insertions: 0, deletions: 0, unavailable: true };
+  }
+  const numstat = await gitOutput(root, ["diff", "--numstat", "-z", "HEAD"], NUMSTAT_TIMEOUT_MS);
+  if (!numstat.ok && classifyGitError(numstat.error) === "unavailable") {
+    return { files: 0, insertions: 0, deletions: 0, unavailable: true };
+  }
+  return summarizeGitStatus({
+    statusOut: status.stdout,
+    numstatOut: numstat.ok ? numstat.stdout : "",
+    readFile: rel => fs.readFile(path.join(root, rel)),
+  });
+}

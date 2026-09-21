@@ -13,15 +13,23 @@
  * keeps its colour but still fills the row exactly.
  */
 
-// Built through the constructor because the escape byte itself comes from
-// fromCharCode: a literal \x1b inside a regex is exactly what eslint's
-// no-control-regex exists to catch, and a rule waiver would outlive this file.
-const ESC = String.fromCharCode(27);
-const ANSI_PATTERN = new RegExp(`${ESC}\\[[0-9;?]*[A-Za-z]`, "g");
+import { stripVTControlCharacters } from "node:util";
 
-/** Remove SGR/cursor escape sequences so only printable cells remain. */
+/** Strip terminal sequences, including CSI and OSC hyperlinks, before measuring. */
 export function stripAnsi(text: string): string {
-  return text.replace(ANSI_PATTERN, "");
+  return stripVTControlCharacters(text);
+}
+
+/** Untrusted display data is text, never terminal input. Preserve word boundaries
+ *  while removing controls that could move the cursor or escape a frame row. */
+export function inlineText(text: string): string {
+  const plain = stripAnsi(text).replace(/\r\n?|[\n\t\u2028\u2029]/g, " ");
+  let result = "";
+  for (const ch of plain) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code >= 32 && !(code >= 127 && code < 160)) result += ch;
+  }
+  return result;
 }
 
 /**
@@ -49,14 +57,10 @@ const WIDE_RANGES: ReadonlyArray<readonly [number, number]> = [
 ];
 
 /**
- * East-Asian AMBIGUOUS characters (middle dot, ellipsis, box drawing, blocks,
- * geometric shapes, check/cross marks) render TWO columns in CJK-context
- * terminals: the first live dashboard measured one column past the edge per
- * painted line and the terminal ate the trailing character ("● 运行" lost its
- * 中, "./open-bridge" lost its e). Under a zh/ja/ko locale they count as two.
- * The opposite error (counting wide what renders narrow) only under-fills a
- * line, which the driver's per-line erase masks — over-counting is safe,
- * under-counting smears. The flag is settable so both regimes stay testable.
+ * Some CJK-configured terminals give ambiguous punctuation and symbols two
+ * columns. Preserve the existing locale-based policy and test both regimes.
+ * Column measurement does not make erase-after-write safe: a full row leaves
+ * the terminal cursor on its last cell until a cursor movement cancels wrap.
  */
 const AMBIGUOUS_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x00b7, 0x00b7], // middle dot — the separator used everywhere

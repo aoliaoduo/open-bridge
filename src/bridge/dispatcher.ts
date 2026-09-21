@@ -112,8 +112,29 @@ const HANDLERS: Record<string, Handler> = {
   run_script: runScript,
 };
 
-/** Invoke one tool, updating usage stats and the activity log. Throws on unknown/failed tools. */
+/** Invoke one tool. Top-level outcomes belong to the MCP endpoint; nested
+ *  batch/script calls bypass that endpoint, so close their activity here. */
 export async function invoke(
+  name: string,
+  args: Args,
+  session?: SessionState,
+  options?: { countUsage?: boolean },
+): Promise<unknown> {
+  if (options?.countUsage !== false) return dispatchInvocation(name, args, session, options);
+  const startedAt = Date.now();
+  try {
+    const result = await dispatchInvocation(name, args, session, options);
+    record(name, "completed", `Completed in ${Date.now() - startedAt} ms.`);
+    return result;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    record(name, "error", `Failed in ${Date.now() - startedAt} ms: ${reason}`);
+    throw error;
+  }
+}
+
+/** The shared normalization, accounting and resource-lock path. */
+async function dispatchInvocation(
   name: string,
   args: Args,
   session?: SessionState,
