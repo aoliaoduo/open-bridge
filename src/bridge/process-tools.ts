@@ -2,7 +2,7 @@ import { host } from "../host/host.js";
 import { randomBytes } from "node:crypto";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { testReadyPattern, validateReadyPattern } from "../mcp/regex-worker.js";
-import { persistTodos } from "./todo-store.js";
+import { applyCompletionTimes, persistTodos } from "./todo-store.js";
 import {
   MAX_INLINE_OUTPUT,
   READY_PATTERN_WINDOW_BYTES,
@@ -562,12 +562,15 @@ export function listSessions(): unknown {
 /** Todos live on the MCP session that set them. */
 export function setTodos(args: Args, session?: SessionState): unknown[] {
   const next = validateTodos(args.todos);
+  // 完成时间戳只在这一处盖：state.todos（TUI）、session.todos（控制台）
+  // 与持久文档收到的是同一份 enriched，三路显示不会各说各话。
+  const enriched = applyCompletionTimes(state.todos, next);
   if (session) {
-    session.todos = next;
+    session.todos = enriched;
     state.latestSession = session;
   }
-  persistTodos(next);
-  state.todos = [...next]; // the TUI sidebar reads this live copy
+  persistTodos(enriched);
+  state.todos = [...enriched]; // the TUI sidebar reads this live copy
   host().ui.update();
   return next;
 }

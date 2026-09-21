@@ -9,7 +9,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { setHost, type Host, type StateStore } from "../src/host/host.js";
-import { persistTodos, persistProgress } from "../src/bridge/todo-store.js";
+import { applyCompletionTimes, persistTodos, persistProgress } from "../src/bridge/todo-store.js";
 import { state, type SessionState } from "../src/bridge/state.js";
 
 function memoryStateStore(): StateStore & { dump(): Map<string, unknown> } {
@@ -120,4 +120,23 @@ test("an unbound workspace persists under the literal unbound key", async () => 
   persistTodos([]);
   await drain();
   assert.ok(store.dump().has("openBridge.todos.unbound"));
+});
+
+test("applyCompletionTimes stamps new completions, keeps stamps, clears on reopen", () => {
+  const first = applyCompletionTimes([], [
+    { id: "a", title: "x", status: "completed" },
+    { id: "b", title: "y", status: "in_progress" },
+  ], "2026-09-22T01:00:00.000Z");
+  assert.equal(first[0]!.completedAt, "2026-09-22T01:00:00.000Z");
+  assert.equal("completedAt" in first[1]!, false);
+
+  const second = applyCompletionTimes(first, [
+    { id: "a", title: "x", status: "completed" },
+    { id: "b", title: "y", status: "completed" },
+  ], "2026-09-22T02:00:00.000Z");
+  assert.equal(second[0]!.completedAt, "2026-09-22T01:00:00.000Z");
+  assert.equal(second[1]!.completedAt, "2026-09-22T02:00:00.000Z");
+
+  const reopened = applyCompletionTimes(second, [{ id: "a", title: "x", status: "pending" }], "2026-09-22T03:00:00.000Z");
+  assert.equal("completedAt" in reopened[0]!, false);
 });

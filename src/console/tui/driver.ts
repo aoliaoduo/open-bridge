@@ -19,6 +19,7 @@ import * as readline from "node:readline";
 import type { ReadStream } from "node:tty";
 import { state } from "../../bridge/state.js";
 import { collectReviewDiffPreview, collectWorkspaceChanges, type ChangeSummary, type ReviewDiffPreview } from "./changes.js";
+import { todoFreshness } from "../../bridge/todo-store.js";
 import { buildSnapshot } from "./snapshot.js";
 import { renderFrame, panelScrollMetrics, maxFirstVisible, advanceScroll, nextPanelView, type PanelView, type ScrollKey } from "./render.js";
 
@@ -151,7 +152,7 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
     // The dashboard is an observer of the work, never part of it: any
     // rendering failure is swallowed and the next tick tries again.
     try {
-      const snapshot = buildSnapshot(state, { ...options, launchedAt, workspaceChanges, diff: diffSnapshotInput() });
+      const snapshot = buildSnapshot(state, { ...options, launchedAt, workspaceChanges, diff: diffSnapshotInput(), todosUpdatedAt: todoFreshness() });
       const dimensions = { width: out.columns ?? 80, height: out.rows ?? 24 };
       activityMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "activity" });
       taskMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "tasks" });

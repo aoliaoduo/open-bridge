@@ -44,6 +44,12 @@ export interface TodoStoreSnapshot {
 }
 
 let persistTail: Promise<void> = Promise.resolve();
+/** 任务文档最近一次写入/加载的时刻（TUI 标题栏新鲜度）；undefined = 本次运行还没碰过。 */
+let lastWriteAt: string | undefined;
+/** The TUI title bar reads this instead of re-reading the store every 500 ms tick. */
+export function todoFreshness(): string | undefined {
+  return lastWriteAt;
+}
 
 function todoStoreKey(): string {
   return `${TODOS_STATE_PREFIX}${state.activeWorkspaceRoot || "unbound"}`;
@@ -73,9 +79,44 @@ function enqueueTodoWrite(build: (current: TodoStoreSnapshot) => TodoStoreSnapsh
   persistTail = persistTail
     .then(async () => {
       const current = loadRawStore(key);
-      await host().state.update(key, build(current));
+      const built = build(current);
+      await host().state.update(key, built);
+      lastWriteAt = built.updatedAt;
     })
     .catch(() => undefined);
+}
+
+/**
+ * 盖完成时间戳：上一份清单里没完成、这一份完成的条目标上 completedAt；
+ * 已完成的保持原时间戳（幂等——三路消费方各自调用也不会漂移），回到
+ * 未完成则摘除。session.todos（控制台）、state.todos（TUI）与持久文档
+ * 共用这一个纯函数，显示层永远与存储层说同一套时间。
+ */
+export function applyCompletionTimes(
+  previous: unknown[],
+  next: Array<{ id: string; title: string; status: string }>,
+  nowIso: string = new Date().toISOString(),
+): Array<{ id: string; title: string; status: string; completedAt?: string }> {
+  const priorStatus = new Map<string, string>();
+  const priorStamp = new Map<string, string>();
+  for (const item of previous) {
+    if (item === null || typeof item !== "object") continue;
+    const record = item as { id?: unknown; status?: unknown; completedAt?: unknown };
+    if (typeof record.id !== "string") continue;
+    if (typeof record.status === "string") priorStatus.set(record.id, record.status);
+    if (record.status === "completed" && typeof record.completedAt === "string") {
+      priorStamp.set(record.id, record.completedAt);
+    }
+  }
+  return next.map(item => {
+    if (item.status === "completed") {
+      const existing = (item as { completedAt?: unknown }).completedAt;
+      const kept = priorStatus.get(item.id) === "completed" ? priorStamp.get(item.id) : undefined;
+      return { ...item, completedAt: typeof existing === "string" ? existing : kept ?? nowIso };
+    }
+    const { completedAt: _dropped, ...rest } = item as { completedAt?: unknown };
+    return rest as typeof item;
+  });
 }
 
 export function persistTodos(todos: unknown[]): void {
@@ -137,5 +178,9 @@ function loadRawStore(key?: string): TodoStoreSnapshot {
 }
 
 export function loadTodoStore(): TodoStoreSnapshot {
-  return loadRawStore();
+  const snapshot = loadRawStore();
+  // 启动加载把文档里的历史 updatedAt 接进新鲜度：重启后标题栏仍然知道
+  // 这份清单是多久之前写下的，而不是装作刚刚发生。
+  lastWriteAt = snapshot.updatedAt ?? lastWriteAt;
+  return snapshot;
 }

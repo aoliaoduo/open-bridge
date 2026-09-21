@@ -577,3 +577,37 @@ test("the changes panel advertises d and the preview advertises Esc", () => {
   const diff = renderFrame(diffSnap, { width: 100, height: 30, panelView: "diff" }).join("\n");
   assert.ok(stripAnsi(diff).includes("Esc 返回变更"), "the preview title hints the only exit");
 });
+
+test("completed todos render a fixed-width completion clock", () => {
+  const todos = [
+    { id: "1", title: "审查代码变更", status: "completed", completedAt: "2026-09-22T06:00:00Z" },
+    { id: "2", title: "写补丁", status: "completed", completedAt: "2026-09-22T09:30:00Z" },
+  ];
+  const snap = buildSnapshot({ ...fixtureView(), todos }, { version: "1.0.0", rootName: "r", logPath: "l", now: 60_000 });
+  const plain = stripAnsi(renderFrame(snap, { width: 100, height: 30, panelView: "tasks" }).join("\n"));
+  assert.ok(/\d{2}:\d{2}:\d{2}/.test(plain), "the completion clock renders");
+  // Stamps differ but the titles start at the same column: fixed-width right
+  // column, the same anti-flicker contract as the activity rows.
+  // Per-line columns: absolute offsets in the joined frame mean nothing across
+  // different lines — the contract is "same column within the task list".
+  const lines = plain.split("\n");
+  // Compare VISUAL columns (the sidebar mixes CJK and latin, so string indexes
+  // differ line to line even when the layout is pixel-identical).
+  const columns = ["审查代码变更", "写补丁"].map(title => {
+    const line = lines.find(candidate => candidate.includes(title)) ?? "";
+    return visualWidth(line.slice(0, line.indexOf(title)));
+  });
+  assert.ok(columns[0] > 0 && columns[0] === columns[1]);
+});
+
+test("the task title shows freshness and warns when stale work sits in progress", () => {
+  const todos = [
+    { id: "1", title: "a", status: "completed" },
+    { id: "2", title: "b", status: "in_progress" },
+  ];
+  const now = Date.parse("2026-09-22T10:00:00Z");
+  const fresh = buildSnapshot({ ...fixtureView(), todos }, { version: "1.0.0", rootName: "r", logPath: "l", now, todosUpdatedAt: "2026-09-22T09:58:00Z" });
+  assert.ok(stripAnsi(renderFrame(fresh, { width: 100, height: 30, panelView: "tasks", now }).join("\n")).includes("更新 "));
+  const stale = buildSnapshot({ ...fixtureView(), todos }, { version: "1.0.0", rootName: "r", logPath: "l", now, todosUpdatedAt: "2026-09-22T09:30:00Z" });
+  assert.ok(stripAnsi(renderFrame(stale, { width: 100, height: 30, panelView: "tasks", now }).join("\n")).includes("分钟未更新"));
+});

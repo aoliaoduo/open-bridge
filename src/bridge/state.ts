@@ -223,7 +223,7 @@ export const state = {
    * boot loads it back). The TUI sidebar reads this in-memory copy — the
    * render path never touches storage.
    */
-  todos: [] as Array<{ id: string; title: string; status: string }>,
+  todos: [] as Array<{ id: string; title: string; status: string; completedAt?: string }>,
   services: new Map<string, ServiceDefinition>(),
 };
 

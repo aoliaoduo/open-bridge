@@ -292,7 +292,7 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   state.usage = loadUsageStats();
   // The task list outlives restarts in the persisted store; set_todos keeps
   // this in-memory copy fresh afterwards, and the TUI reads only the copy.
-  state.todos = loadTodoStore().todos.filter((todo): todo is { id: string; title: string; status: string } =>
+  state.todos = loadTodoStore().todos.filter((todo): todo is { id: string; title: string; status: string; completedAt?: string } =>
     todo !== null && typeof todo === "object"
     && typeof (todo as { id?: unknown }).id === "string"
     && typeof (todo as { title?: unknown }).title === "string"

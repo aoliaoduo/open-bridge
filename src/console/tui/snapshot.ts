@@ -34,10 +34,12 @@ export interface TuiStateView {
   /** Since-launch counters (state.runtimeUsage): the numbers the TUI shows. */
   runtimeUsage: { calls: number; successes: number; failures: number };
   /** Current task list (set_todos writes; boot loads it from the store). */
-  todos: Array<{ id: string; title: string; status: string }>;
+  todos: Array<{ id: string; title: string; status: string; completedAt?: string }>;
 }
 
 export interface SnapshotOptions {
+  /** 任务文档最近一次写入/加载的时刻（todoFreshness）；标题栏新鲜度与卡住预警用。 */
+  todosUpdatedAt?: string;
   version: string;
   rootName: string;
   rootPath?: string;
@@ -230,10 +232,11 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     failures: view.runtimeUsage.failures,
     sessions,
     sessionsActive,
-    todos: view.todos.map(todo => ({ title: todo.title, status: todo.status })),
+    todos: view.todos.map(todo => ({ title: todo.title, status: todo.status, ...(todo.completedAt !== undefined ? { completedAt: todo.completedAt } : {}) })),
     todosTotal: view.todos.length,
     ...(options.workspaceChanges !== undefined ? { changes: options.workspaceChanges } : {}),
     ...(options.diff !== undefined ? { diff: options.diff } : {}),
+    ...(options.todosUpdatedAt !== undefined ? { todosUpdatedAt: options.todosUpdatedAt } : {}),
     runningCommands,
     servicesTotal,
     servicesRunning,

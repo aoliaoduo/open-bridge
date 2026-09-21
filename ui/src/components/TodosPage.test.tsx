@@ -129,3 +129,16 @@ describe("TodosPage", () => {
     expect(await screen.findByText("正在重建 dist")).toBeTruthy();
   });
 });
+
+test("a completed item shows when it was finished", async () => {
+    todosMock.mockResolvedValue(board({
+      todos: [
+        { id: "1", title: "定位日志时间戳", status: "completed", completedAt: new Date(Date.now() - 120_000).toISOString() },
+        { id: "2", title: "实现修复", status: "in_progress" },
+      ],
+      counts: { total: 2, pending: 0, in_progress: 1, completed: 1 },
+    }));
+    render(<TodosPage />);
+    expect(await screen.findByText("定位日志时间戳")).toBeTruthy();
+    expect(screen.getAllByText("2 分钟前").length).toBeGreaterThan(0);
+  });

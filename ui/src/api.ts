@@ -114,6 +114,8 @@ export interface TodoItem {
   id: string;
   title: string;
   status: "pending" | "in_progress" | "completed" | string;
+  /** 桥在条目转为完成时盖的时间戳；任务页据此显示「多久前完成」。 */
+  completedAt?: string;
 }
 
 /** The last `report_progress` line, when the agent sent one. */

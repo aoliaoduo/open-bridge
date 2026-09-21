@@ -606,6 +606,8 @@ interface TodoView {
   id: string;
   title: string;
   status: string;
+  /** 桥在条目转为完成时盖的时间戳；任务页据此显示「多久前完成」。 */
+  completed_at?: string;
 }
 
 /** Accept only what set_todos would have written; skip anything else. */
@@ -616,7 +618,12 @@ function asTodo(value: unknown): TodoView | undefined {
   const title = typeof raw.title === "string" ? raw.title : "";
   const status = typeof raw.status === "string" ? raw.status : "";
   if (!id || !title) return undefined;
-  return { id, title, status: ["pending", "in_progress", "completed"].includes(status) ? status : "pending" };
+  return {
+    id,
+    title,
+    status: ["pending", "in_progress", "completed"].includes(status) ? status : "pending",
+    ...(typeof raw.completed_at === "string" ? { completed_at: raw.completed_at } : {}),
+  };
 }
 
 /**

@@ -35,7 +35,9 @@ export type TuiSnapshot = {
   sessions: number;
   sessionsActive: number;
   /** Complete current task list; the viewport, not the snapshot, limits rows. */
-  todos: Array<{ title: string; status: string }>;
+  todos: Array<{ title: string; status: string; completedAt?: string }>;
+  /** 任务文档最近一次写入/加载的时刻；标题栏新鲜度与卡住预警用。 */
+  todosUpdatedAt?: string;
   /** Total task count shared by both layouts. */
   todosTotal: number;
   /** Workspace changes since the last commit; absent = 非 git; unavailable = 读取失败. */
@@ -461,12 +463,21 @@ function taskPanelRows(snap: TuiSnapshot, width: number, spin: number): string[]
       : isCurrent ? paint("accent", spinnerFrame(spin), { bold: true })
       : paint("dim", "·");
     const titleColor: ColorName = isCurrent ? "text" : "dim";
+    // 完成时刻固定右列（formatClock 定宽），正文换行边界与时间无关 ——
+    // 与活动行时长列同一个防闪烁约定。
+    const stamp = todo.status === "completed" && todo.completedAt !== undefined ? formatClock(todo.completedAt) : "";
+    const stampW = stamp === "" ? 0 : visualWidth(stamp) + 1;
     // A title may contain real line breaks. They must become viewport rows,
     // never embedded terminal newlines that escape the frame's height budget.
     const wrapped = stripAnsi(todo.title).replace(/\r\n?/g, "\n").split("\n")
-      .flatMap(line => wrapVisual(inlineText(line.replace(/\t/g, "    ")), Math.max(1, width - gutter)));
+      .flatMap(line => wrapVisual(inlineText(line.replace(/\t/g, "    ")), Math.max(1, width - gutter - stampW)));
     wrapped.forEach((line, index) => {
-      rows.push(`${index === 0 ? padEndVisual(mark, gutter) : " ".repeat(gutter)}${paint(titleColor, line, { bold: isCurrent })}`);
+      const body = `${index === 0 ? padEndVisual(mark, gutter) : " ".repeat(gutter)}${paint(titleColor, line, { bold: isCurrent })}`;
+      if (index === 0 && stamp !== "") {
+        rows.push(`${padEndVisual(body, Math.max(0, width - stampW))}${paint("dim", stamp)}`);
+      } else {
+        rows.push(padEndVisual(body, width));
+      }
     });
     rows.push("");
   }
@@ -606,6 +617,7 @@ function renderPanel(
   // Scroll position only: Tab still cycles the views, but the title no longer
   // advertises the next page (「Tab 任务」 read as the current view).
   let hint = "";
+  let hintTone: "accent" | "review" = "accent";
   if (tasksView && snap.todosTotal > 0) {
     const completed = snap.todos.filter(t => t.status === "completed").length;
     const pct = Math.round((completed / snap.todosTotal) * 100);
@@ -617,6 +629,21 @@ function renderPanel(
       hint = `${bar(pct, 8)} ${pct}% · ${completed}/${snap.todosTotal} 完成`;
       if (visualWidth(title) + visualWidth(hint) > width) {
         hint = `${pct}% · ${completed}/${snap.todosTotal}`;
+      }
+    }
+    // 新鲜度与卡住预警：有进行中任务却长时间没有写入，是最像「静默卡住」
+    // 的形状 —— 预警色盖过常规提示。
+    const updatedMs = snap.todosUpdatedAt !== undefined ? Date.parse(snap.todosUpdatedAt) : Number.NaN;
+    if (Number.isFinite(updatedMs)) {
+      const ageMin = Math.max(0, Math.round((now - updatedMs) / 60_000));
+      if (snap.todos.some(todo => todo.status === "in_progress") && ageMin >= 10) {
+        hintTone = "review";
+        hint = `⚠ ${ageMin} 分钟未更新`;
+        if (visualWidth(title) + visualWidth(hint) > width) hint = `⚠${ageMin}m`;
+      } else if (ageMin < 24 * 60) {
+        const stamp = `更新 ${formatClock(snap.todosUpdatedAt!)}`;
+        hint = hint === "" ? stamp : `${hint} · ${stamp}`;
+        if (visualWidth(title) + visualWidth(hint) > width) hint = stamp;
       }
     }
   } else if (listView) {
@@ -636,7 +663,7 @@ function renderPanel(
   if (visualWidth(title) + visualWidth(hint) > width) hint = "";
   if (visualWidth(title) + visualWidth(hint) > width) title = `${label} `;
   const titleWidth = Math.max(1, width - visualWidth(hint));
-  const heading = `${padEndVisual(paint("dim", truncateVisual(title, titleWidth)), titleWidth)}${hint === "" ? "" : paint("accent", hint)}`;
+  const heading = `${padEndVisual(paint("dim", truncateVisual(title, titleWidth)), titleWidth)}${hint === "" ? "" : paint(hintTone, hint)}`;
   const panel = [heading, ...visibleEvents(content, first, rows)];
   while (panel.length < rows + 1) panel.push("");
   return panel;
