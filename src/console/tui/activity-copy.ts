@@ -77,15 +77,107 @@ function quotedField(summary: string, key: string): string | undefined {
   return undefined;
 }
 
+function unquotedField(summary: string, key: string): string | undefined {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = new RegExp(`(?:^|[{\\,])\\s*${escaped}:\\s*([a-zA-Z0-9_.:/-]+)`, "i").exec(summary);
+  return m?.[1];
+}
+
+function arrayCount(summary: string, key: string): number | undefined {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = new RegExp(`(?:^|[{\\,])\\s*${escaped}:\\s*\\[(\\d+)\\s+items\\]`, "i").exec(summary);
+  if (m?.[1]) return parseInt(m[1], 10);
+  const mBracket = new RegExp(`(?:^|[{\\,])\\s*${escaped}:\\s*\\[(.*?)\\]`, "i").exec(summary);
+  if (mBracket?.[1] !== undefined) {
+    const inner = mBracket[1].trim();
+    if (!inner) return 0;
+    return inner.split(",").length;
+  }
+  return undefined;
+}
+
 function hintFromSummary(summary: string | undefined, tool: string): string {
   if (!summary) return "";
   const command = quotedField(summary, "command") ?? quotedField(summary, "cmd");
   const query = quotedField(summary, "query");
   const path = quotedField(summary, "path") ?? quotedField(summary, "paths");
+  const op = quotedField(summary, "op");
+  const action = quotedField(summary, "action");
+  const name = quotedField(summary, "name");
+  const url = quotedField(summary, "url");
+  const port = unquotedField(summary, "port");
+  const ms = unquotedField(summary, "ms");
+  const cmdId = quotedField(summary, "command_id") ?? unquotedField(summary, "command_id");
+  const key = quotedField(summary, "key");
+  const value = quotedField(summary, "value") ?? unquotedField(summary, "value");
+  const message = quotedField(summary, "message");
+  const pattern = quotedField(summary, "pattern");
+  const patchFile = quotedField(summary, "patch_file");
+  const source = quotedField(summary, "source");
+  const destination = quotedField(summary, "destination");
+  const todosCount = arrayCount(summary, "todos");
+  const callsCount = arrayCount(summary, "calls");
+  const mode = quotedField(summary, "mode");
+  const section = quotedField(summary, "section");
+
   if (tool === "search_files" && query) return query;
+  if (tool === "find_files" && pattern) return path ? `${pattern} (${path})` : pattern;
+  if (tool === "file_op") {
+    if ((op === "move" || op === "copy") && source && destination) {
+      return `${op} ${source} → ${destination}`;
+    }
+    if (op && path) return `${op} ${path}`;
+    if (op) return op;
+  }
+  if (tool === "service") {
+    const target = name ?? (quotedField(summary, "group") ? `group:${quotedField(summary, "group")}` : undefined);
+    if (action && target) return `${action} ${target}`;
+    if (action) return action;
+    if (target) return target;
+  }
+  if (tool === "process_control") {
+    if (action && cmdId) return `${action} ${cmdId.slice(0, 8)}`;
+    if (action) return action;
+  }
+  if (tool === "connectivity") {
+    if (url) return url;
+    if (port) return `port ${port}`;
+  }
+  if (tool === "send_to_shell") {
+    if (name && command) return `[${name}] ${firstCommand(command)}`;
+    if (command) return firstCommand(command);
+  }
+  if (tool === "open_shell" || tool === "close_shell") {
+    if (name) return name;
+  }
+  if (tool === "wait") {
+    if (ms) return `${ms}ms`;
+    if (cmdId) return `pid ${cmdId.slice(0, 8)}`;
+  }
+  if (tool === "set_todos") {
+    if (todosCount !== undefined) return `${todosCount} 项任务`;
+  }
+  if (tool === "report_progress") {
+    if (message) return message;
+  }
+  if (tool === "batch") {
+    if (callsCount !== undefined) return `${callsCount} calls${mode ? ` (${mode})` : ""}`;
+  }
+  if (tool === "set_config_value") {
+    if (key && value !== undefined) return `${key} = ${value}`;
+    if (key) return key;
+  }
+  if (tool === "activity_log" && action) return action;
+  if (tool === "bridge_status" && section) return section;
+  if (tool === "apply_patch") {
+    if (patchFile) return patchFile;
+    return "inline patch";
+  }
+
   if (command) return firstCommand(command);
   if (query) return query;
   if (path) return path;
+  if (name) return name;
   return "";
 }
 

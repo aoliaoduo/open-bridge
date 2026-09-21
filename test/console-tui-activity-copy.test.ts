@@ -122,3 +122,103 @@ test("the activity panel hides mcp/process traces and does not dump argv", () =>
   assert.match(text, /write_file/);
   assert.doesNotMatch(text, /Completed in 3800/);
 });
+
+test("semantic hints for high-frequency tools are operator-friendly", () => {
+  assert.equal(tuiActivityMessage({
+    tool: "file_op",
+    status: "completed",
+    message: "Completed in 5 ms.",
+    args_summary: buildArgsSummary({ op: "delete", path: "dist/bundle.js" }),
+  }), "delete dist/bundle.js");
+
+  assert.equal(tuiActivityMessage({
+    tool: "file_op",
+    status: "completed",
+    message: "Completed in 5 ms.",
+    args_summary: buildArgsSummary({ op: "move", source: "src/old.ts", destination: "src/new.ts" }),
+  }), "move src/old.ts → src/new.ts");
+
+  assert.equal(tuiActivityMessage({
+    tool: "service",
+    status: "completed",
+    message: "Completed in 20 ms.",
+    args_summary: buildArgsSummary({ action: "restart", name: "web-server" }),
+  }), "restart web-server");
+
+  assert.equal(tuiActivityMessage({
+    tool: "service",
+    status: "completed",
+    message: "Completed in 20 ms.",
+    args_summary: buildArgsSummary({ action: "start_all", group: "backend" }),
+  }), "start_all group:backend");
+
+  assert.equal(tuiActivityMessage({
+    tool: "process_control",
+    status: "completed",
+    message: "Completed in 10 ms.",
+    args_summary: buildArgsSummary({ action: "terminate", command_id: "cmd-12345678" }),
+  }), "terminate cmd-1234");
+
+  assert.equal(tuiActivityMessage({
+    tool: "connectivity",
+    status: "completed",
+    message: "Completed in 15 ms.",
+    args_summary: buildArgsSummary({ url: "https://example.com" }),
+  }), "https://example.com");
+
+  assert.equal(tuiActivityMessage({
+    tool: "connectivity",
+    status: "completed",
+    message: "Completed in 15 ms.",
+    args_summary: buildArgsSummary({ port: 8080 }),
+  }), "port 8080");
+
+  assert.equal(tuiActivityMessage({
+    tool: "send_to_shell",
+    status: "completed",
+    message: "Completed in 50 ms.",
+    args_summary: buildArgsSummary({ name: "repl", command: "npm test" }),
+  }), "[repl] npm test");
+
+  assert.equal(tuiActivityMessage({
+    tool: "wait",
+    status: "completed",
+    message: "Completed in 2000 ms.",
+    args_summary: buildArgsSummary({ ms: 2000 }),
+  }), "2000ms");
+
+  assert.equal(tuiActivityMessage({
+    tool: "set_todos",
+    status: "completed",
+    message: "Completed in 4 ms.",
+    args_summary: buildArgsSummary({ todos: [{ id: "1" }, { id: "2" }] }),
+  }), "2 项任务");
+
+  assert.equal(tuiActivityMessage({
+    tool: "report_progress",
+    status: "completed",
+    message: "Completed in 2 ms.",
+    args_summary: buildArgsSummary({ message: "running unit tests" }),
+  }), "running unit tests");
+
+  assert.equal(tuiActivityMessage({
+    tool: "batch",
+    status: "completed",
+    message: "Completed in 30 ms.",
+    args_summary: buildArgsSummary({ calls: [{ tool: "a" }, { tool: "b" }], mode: "sequential" }),
+  }), "2 calls (sequential)");
+
+  assert.equal(tuiActivityMessage({
+    tool: "set_config_value",
+    status: "completed",
+    message: "Completed in 5 ms.",
+    args_summary: buildArgsSummary({ key: "auth.enabled", value: true }),
+  }), "auth.enabled = true");
+
+  assert.equal(tuiActivityMessage({
+    tool: "find_files",
+    status: "completed",
+    message: "Completed in 8 ms.",
+    args_summary: buildArgsSummary({ pattern: "*.ts", path: "src" }),
+  }), "*.ts (src)");
+});
