@@ -432,7 +432,11 @@ test("sidebar displays specific tunnel provider (ngrok / tailscale)", () => {
     now: 60_000,
   });
   const ngrokLines = renderFrame(ngrokSnap, { width: 110, height: 30, now: 60_000 });
-  assert.match(ngrokLines.map(stripAnsi).join("\n"), /隧道\s+ngrok 公网 ●/);
+  // 提供方名字本身就是全部信息：不挂「公网」后缀，也不带状态点。
+  // 工作台把侧栏与面板拼在同一行：只取分隔线「│」以左的侧栏段。
+  const ngrokTunnel = (ngrokLines.map(stripAnsi).find(l => l.includes("隧道")) ?? "").split("│")[0] ?? "";
+  assert.match(ngrokTunnel, /隧道\s+ngrok\s*$/);
+  assert.doesNotMatch(ngrokTunnel, /公网|●/);
 
   const tsView = {
     ...fixtureView(),
@@ -445,7 +449,24 @@ test("sidebar displays specific tunnel provider (ngrok / tailscale)", () => {
     now: 60_000,
   });
   const tsLines = renderFrame(tsSnap, { width: 110, height: 30, now: 60_000 });
-  assert.match(tsLines.map(stripAnsi).join("\n"), /隧道\s+tailscale 公网 ●/);
+  const tsTunnel = (tsLines.map(stripAnsi).find(l => l.includes("隧道")) ?? "").split("│")[0] ?? "";
+  assert.match(tsTunnel, /隧道\s+tailscale\s*$/);
+  assert.doesNotMatch(tsTunnel, /公网|●/);
+});
+
+test("heading freshness time shares the completion-clock column", () => {
+  const todos = [
+    { id: "1", title: "写补丁", status: "completed", completedAt: "2026-09-22T06:00:00Z" },
+    { id: "2", title: "还差一步", status: "in_progress" },
+  ];
+  const snap = buildSnapshot({ ...fixtureView(), todos }, { version: "1.0.0", rootName: "r", logPath: "l", now: 60_000, todosUpdatedAt: "2026-09-22T09:58:00Z" });
+  const frame = renderFrame(snap, { width: 100, height: 30, panelView: "tasks", now: 60_000 }).map(stripAnsi);
+  const heading = frame.find(l => l.includes("更新 09:58:00")) ?? "";
+  const task = frame.find(l => l.includes("写补丁")) ?? "";
+  assert.ok(heading.includes("09:58:00") && task.includes("06:00:00"), `${heading} | ${task}`);
+  const a = heading.indexOf("09:58:00");
+  const b = task.indexOf("06:00:00");
+  assert.equal(b, a, `task clock column ${b} must match heading time column ${a}`);
 });
 
 test("task view: Tab swaps the wide panel and shows full titles", () => {

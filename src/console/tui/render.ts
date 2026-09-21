@@ -107,17 +107,13 @@ const CAPSULE: Record<TuiSnapshot["bridgeState"], { icon: string; label: string;
   stopped: { icon: "○", label: "未启动", color: "dim" },
 };
 
-export function tunnelTag(snap: TuiSnapshot, width?: number): { text: string; color: ColorName } {
+export function tunnelTag(snap: TuiSnapshot): { text: string; color: ColorName } {
   if (snap.tunnel === "public") {
+    // 提供方名字本身就是「公网」：ngrok/tailscale 不必再挂后缀；状态点与
+    // 顶栏的运行中圆点重复，一并去掉 —— 侧栏少一层噪声。
     const provider = snap.tunnelProvider;
-    if (provider === "tailscale") {
-      const full = "tailscale 公网 ●";
-      return { text: width !== undefined && Math.max(4, width - 10) < visualWidth(full) ? "tailscale ●" : full, color: "accent" };
-    }
-    if (provider === "ngrok") {
-      return { text: "ngrok 公网 ●", color: "accent" };
-    }
-    return { text: "公网 ●", color: "accent" };
+    if (provider === "tailscale" || provider === "ngrok") return { text: provider, color: "accent" };
+    return { text: "公网", color: "accent" };
   }
   if (snap.tunnel === "follower") {
     const provider = snap.tunnelProvider;
@@ -451,7 +447,7 @@ function renderSidebar(snap: TuiSnapshot, width: number, maxRows?: number): stri
 
   section("概览");
   // No 状态 or 工作区 fields: the top-bar capsule and title already own those facts.
-  const tag = tunnelTag(snap, width);
+  const tag = tunnelTag(snap);
   sidebarField(lines, width, "隧道", tag.text, tag.color);
   sidebarField(lines, width, "运行", formatDuration(snap.uptimeMs));
   sidebarField(lines, width, "调用", `${formatCount(snap.calls)} · ✓ ${formatCount(snap.successes)} ✕ ${formatCount(snap.failures)}`, snap.failures > 0 ? "review" : "text");
@@ -545,18 +541,20 @@ function taskPanelRows(snap: TuiSnapshot, width: number, spin: number): string[]
     // 完成时刻固定右列（formatClock 定宽），正文换行边界与时间无关 ——
     // 与活动行时长列同一个防闪烁约定。
     const stamp = todo.status === "completed" && todo.completedAt !== undefined ? formatClock(todo.completedAt) : "";
-    const stampW = stamp === "" ? 0 : visualWidth(stamp) + 1;
+    // 时钟右缘抵面板右缘，与标题栏「更新 HH:MM:SS」的时间同列 —— 标题栏的
+    // 时间没有尾随空隙，行内的也不该有（此前 +1 让行内时钟缩进了一列）。
+    const stampCols = stamp === "" ? 0 : visualWidth(stamp);
     // 长标题撑满换行预算时，padEnd 的间隔会归零、时钟直接贴住正文 ——
     // 完成行的换行预算再让出 2 列，保证时钟与标题之间至少两条空隙。
-    const stampGap = stampW > 0 ? 2 : 0;
+    const stampGap = stampCols > 0 ? 2 : 0;
     // A title may contain real line breaks. They must become viewport rows,
     // never embedded terminal newlines that escape the frame's height budget.
     const wrapped = stripAnsi(todo.title).replace(/\r\n?/g, "\n").split("\n")
-      .flatMap(line => wrapVisual(inlineText(line.replace(/\t/g, "    ")), Math.max(1, width - gutter - stampW - stampGap)));
+      .flatMap(line => wrapVisual(inlineText(line.replace(/\t/g, "    ")), Math.max(1, width - gutter - stampCols - stampGap)));
     wrapped.forEach((line, index) => {
       const body = `${index === 0 ? padEndVisual(mark, gutter) : " ".repeat(gutter)}${paint(titleColor, line, { bold: isCurrent })}`;
       if (index === 0 && stamp !== "") {
-        rows.push(`${padEndVisual(body, Math.max(0, width - stampW))}${paint("dim", stamp)}`);
+        rows.push(`${padEndVisual(body, Math.max(0, width - stampCols))}${paint("dim", stamp)}`);
       } else {
         rows.push(padEndVisual(body, width));
       }
