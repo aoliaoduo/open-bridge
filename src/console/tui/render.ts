@@ -121,19 +121,22 @@ function boxLines(title: string, rows: string[], width: number): string[] {
 }
 
 function renderTopBar(snap: TuiSnapshot, width: number, busy: boolean, spin: number): string {
-  const leftText = `◆ open-bridge v${inlineText(snap.version)} · 端口 ${snap.port}`;
+  const version = inlineText(snap.version.replace(/^v/, ""));
+  const leftText = `◆ v${version}`;
   const capsule = CAPSULE[snap.bridgeState];
   // The busy state replaces the static dot with the live spinner — the same
   // trick ainovel-cli's top bar uses so the capsule itself carries motion.
   const icon = snap.bridgeState === "running" && busy ? spinnerFrame(spin) : capsule.icon;
   const rightText = `${icon} ${capsule.label}`;
 
-  // ainovel-cli's top-bar cell math: the centre keeps at least a third of the
-  // width, the sides split the rest evenly.
+  // Top-bar layout: left is version, right is live state capsule,
+  // center is the active workspace directory.
   const innerW = Math.max(12, width);
-  const titleText = truncateVisual(inlineText(snap.rootName), Math.max(8, Math.floor(innerW / 3)));
-  let centerW = Math.max(16, visualWidth(titleText) + 6);
-  if (centerW > innerW - 24) centerW = Math.max(8, innerW - 24);
+  const workspace = snap.workspaceRoot || snap.rootName;
+  const maxTitleW = Math.max(8, innerW - 20);
+  const titleText = truncateVisual(inlineText(workspace), maxTitleW);
+  let centerW = Math.max(16, visualWidth(titleText) + 4);
+  if (centerW > innerW - 20) centerW = Math.max(8, innerW - 20);
   let sideTotal = innerW - centerW;
   if (sideTotal < 0) {
     sideTotal = 0;
@@ -336,11 +339,7 @@ function renderSidebar(snap: TuiSnapshot, width: number): string[] {
   };
 
   section("概览");
-  if (snap.workspaceRoot) {
-    sidebarField(lines, width, "工作区", snap.workspaceRoot);
-  }
-  // No 状态 field: the top-bar capsule already owns that fact — the first live
-  // screen showed it twice.
+  // No 状态 or 工作区 fields: the top-bar capsule and title already own those facts.
   const tag = TUNNEL_TAG[snap.tunnel];
   sidebarField(lines, width, "隧道", tag.text, tag.color);
   sidebarField(lines, width, "运行", formatDuration(snap.uptimeMs));

@@ -334,7 +334,7 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   assert.match(plain[29] ?? "", /MCP http/, "the MCP address gets the full last row — sharing truncated it on small screens");
 });
 
-test("sidebar displays active workspace directory when present", () => {
+test("top bar displays active workspace directory, version, and omits port/name", () => {
   const view = { ...fixtureView(), activeWorkspaceRoot: "C:/Projects/my-app" };
   const snap = buildSnapshot(view, {
     version: "1.0.0-rc.2",
@@ -342,8 +342,13 @@ test("sidebar displays active workspace directory when present", () => {
     logPath: "C:/x/bridge.log",
     now: 60_000,
   });
-  const text = renderFrame(snap, { width: 110, height: 30, now: 60_000 }).map(stripAnsi).join("\n");
-  assert.match(text, /工作区\s+C:\/Projects\/my-app/);
+  const lines = renderFrame(snap, { width: 110, height: 30, now: 60_000 });
+  const topBar = stripAnsi(lines[0] ?? "");
+  assert.match(topBar, /◆ v1\.0\.0-rc\.2/);
+  assert.match(topBar, /C:\/Projects\/my-app/);
+  assert.match(topBar, /运行中/);
+  assert.doesNotMatch(topBar, /端口/);
+  assert.doesNotMatch(topBar, /open-bridge/);
 });
 
 test("task view: Tab swaps the wide panel and shows full titles", () => {
