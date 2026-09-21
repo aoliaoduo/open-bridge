@@ -202,7 +202,7 @@ test("the changes panel lists each path with its own +/- and keeps the sidebar s
   }
   const text = lines.map(stripAnsi).join("\n");
   assert.match(text, /─ 变更 \(3\)/, "the wide panel belongs to the file list");
-  assert.match(text, /Tab 返回活动/, "Tab remains the only way back");
+  assert.doesNotMatch(text, /Tab 任务|Tab 变更|Tab 返回活动|Tab 活动/, "the title row does not advertise the Tab cycle");
   assert.match(text, /src\/a\.ts/);
   assert.match(text, /my file\.txt/);
   assert.match(text, /nested\/b\.txt/);

@@ -522,21 +522,16 @@ function renderPanel(
   const count = tasksView ? snap.todosTotal : changesView ? (snap.changes?.entries?.length ?? snap.changes?.files ?? 0) : snap.events.length;
   const label = `${tasksView ? "任务" : changesView ? "变更" : "活动"} (${count})`;
   let title = `─ ${label} `;
-  const navigation = changesView ? "Tab 返回活动" : tasksView ? "Tab 变更" : "Tab 任务";
   const listView = tasksView || changesView;
-  const position = listView
+  // Scroll position only: Tab still cycles the views, but the title no longer
+  // advertises the next page (「Tab 任务」 read as the current view).
+  let hint = listView
     ? content.length > rows ? `${first + 1}-${Math.min(first + rows, content.length)}/${content.length} 行` : ""
     : first > 0 ? `↑${first} 行 · Home 回顶` : "";
-  let hint = [navigation, position].filter(Boolean).join(" · ");
-  // Keep the return key and the selected view identifiable even at 20 columns;
-  // optional range/history detail yields before either of them does.
-  if (visualWidth(title) + visualWidth(hint) > width) hint = navigation;
-  if (visualWidth(title) + visualWidth(hint) > width) {
-    title = `${label} `;
-    hint = listView ? (changesView ? "Tab 活动" : "Tab 变更") : navigation;
-  }
+  if (visualWidth(title) + visualWidth(hint) > width) hint = "";
+  if (visualWidth(title) + visualWidth(hint) > width) title = `${label} `;
   const titleWidth = Math.max(1, width - visualWidth(hint));
-  const heading = `${padEndVisual(paint("dim", truncateVisual(title, titleWidth)), titleWidth)}${paint("accent", hint)}`;
+  const heading = `${padEndVisual(paint("dim", truncateVisual(title, titleWidth)), titleWidth)}${hint === "" ? "" : paint("accent", hint)}`;
   const panel = [heading, ...visibleEvents(content, first, rows)];
   while (panel.length < rows + 1) panel.push("");
   return panel;

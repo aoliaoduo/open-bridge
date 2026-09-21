@@ -311,7 +311,7 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   assert.match(joined, /活动 \(\d+\)/);
   assert.doesNotMatch(joined, /─ 任务/, "titles no longer cram into the narrow sidebar");
   assert.match(joined, /任务\s+4（1 进行中）/, "a one-line summary replaces the truncated section");
-  assert.match(joined, /Tab 任务/, "the activity panel title points at the task view");
+  assert.doesNotMatch(joined, /Tab 任务|Tab 变更|Tab 返回活动|Tab 活动/, "the title row does not advertise the Tab cycle");
   assert.match(joined, /\+53 -18 · 2 文件/, "workspace changes since the last commit");
   // Additions green, deletions red — the diff convention every tool shares.
   const rawChangeRow = lines.find(line => stripAnsi(line).includes("+53")) ?? "";
@@ -349,7 +349,7 @@ test("task view: Tab swaps the wide panel and shows full titles", () => {
   }
   const text = lines.map(stripAnsi).join("\n");
   assert.match(text, /─ 任务 \(4\)/, "the wide panel belongs to the tasks");
-  assert.match(text, /Tab 变更/, "the next view is named");
+  assert.doesNotMatch(text, /Tab 任务|Tab 变更|Tab 返回活动|Tab 活动/, "the title row does not advertise the Tab cycle");
   assert.match(text, /✓ 验证 TUI 布局/);
   assert.match(text, /接入任务列表/);
   assert.match(text, /· 清理收尾/);

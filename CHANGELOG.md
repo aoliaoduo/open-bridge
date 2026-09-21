@@ -9,6 +9,7 @@
 ### Changed
 
 - 仓库根目录精简：Windows 启动脚本移到 `scripts/`，架构说明移到 `docs/ARCHITECTURE.md`。`*.cmd` 固定为 CRLF，避免 Linux CI 把启动器误判成 LF。
+- TUI 各页标题不再写「Tab 任务 / Tab 变更 / Tab 返回活动」。Tab 仍是切页键，标题只保留当前视图名；滚出顶部时仍显示行数提示。
 
 ## [1.0.0] — 2026-09-21
 

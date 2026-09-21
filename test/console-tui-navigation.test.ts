@@ -95,7 +95,7 @@ test("task selection survives narrow and short layouts, including both workbench
     assert.match(first.join("\n"), /TASK_001/, `${width}x${height} shows the selected task view`);
     assert.match(last.join("\n"), /TASK_100/, `${width}x${height} can reach the final task`);
     assert.doesNotMatch(first.join("\n"), /EVENT_/);
-    assert.match(first.join("\n"), /Tab/, "the return key remains discoverable");
+    assert.doesNotMatch(first.join("\n"), /Tab 任务|Tab 变更|Tab 返回活动|Tab 活动/, "the title row does not advertise the Tab cycle");
   }
 });
 
@@ -119,7 +119,7 @@ test("empty tasks are explicit and remain safe after an old long-list scroll off
     const lines = frame(snapshot(0), width, height, Number.MAX_SAFE_INTEGER);
     assertGeometry(lines, width, height);
     assert.match(lines.join("\n"), /暂无任务/);
-    assert.match(lines.join("\n"), /Tab/);
+    assert.doesNotMatch(lines.join("\n"), /Tab 任务|Tab 变更|Tab 返回活动|Tab 活动/);
     assert.doesNotMatch(lines.join("\n"), /EVENT_/);
   }
 });
