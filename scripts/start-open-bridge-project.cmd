@@ -10,7 +10,7 @@ rem  Closing this window stops the server. Ctrl+C is the clean stop.
 rem  ASCII-only: cmd.exe reads batch files in the console codepage.
 rem =====================================================================
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0.."
 set "ROOT=%CD%"
 set "PORT=8123"
 title Open Bridge - this project :%PORT%
@@ -28,7 +28,7 @@ where node >nul 2>nul
 if errorlevel 1 goto nonode
 
 if not exist "package.json" (
-  echo  [X] package.json was not found beside this launcher.
+  echo  [X] package.json was not found in the repository root.
   goto failed
 )
 

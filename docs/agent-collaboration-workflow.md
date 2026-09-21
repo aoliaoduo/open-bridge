@@ -2,7 +2,7 @@
 
 仅在用户采用此流程时使用；读取文档本身不授权新增任务、提交或推送。
 技术约定只维护在 [AGENTS.md](../AGENTS.md)，工具参数见 [tools.md](tools.md)，
-模块地图见 [ARCHITECTURE.md](../ARCHITECTURE.md)。中文沟通，代码和字段名保持原文。
+模块地图见 [ARCHITECTURE.md](ARCHITECTURE.md)。中文沟通，代码和字段名保持原文。
 
 ## 1. 先核对事实
 

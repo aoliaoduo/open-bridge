@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 仓库根目录精简：Windows 启动脚本移到 `scripts/`，架构说明移到 `docs/ARCHITECTURE.md`。`*.cmd` 固定为 CRLF，避免 Linux CI 把启动器误判成 LF。
+
 ## [1.0.0] — 2026-09-21
 
 ### Added

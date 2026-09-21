@@ -39,7 +39,7 @@
     "docs/configuration.md",
     "docs/tools.md",
     "CHANGELOG.md",
-    "ARCHITECTURE.md",
+    "docs/ARCHITECTURE.md",
     "LICENSE"
   ],
   "scripts": {

@@ -61,8 +61,8 @@ free port, so the URL changes each start. `--port 18080` keeps it stable.
 **Closing the terminal stops the bridge.** That window owns the instance —
 which is also why the console has no start/stop buttons.
 
-On Windows, `start-open-bridge.cmd` asks which folder to serve. For this
-repository itself, double-click `start-open-bridge-project.cmd`: it always uses
+On Windows, `scripts/start-open-bridge.cmd` asks which folder to serve. For this
+repository itself, double-click `scripts/start-open-bridge-project.cmd`: it always uses
 this project as the workspace, rebuilds it, and serves the console on fixed
 port **8123** (without opening a browser).
 
@@ -102,7 +102,7 @@ vulnerability.
 | [docs/tools.md](docs/tools.md) | All 39 tools and their exact behaviour |
 | [SECURITY.md](SECURITY.md) | Threat model and reporting |
 | [AGENTS.md](https://github.com/aoliaoduo/open-bridge/blob/main/AGENTS.md) | Conventions for changing this repo — read before a PR |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Current module ownership, execution and state boundaries |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Current module ownership, execution and state boundaries |
 | [Agent workflow](https://github.com/aoliaoduo/open-bridge/blob/main/docs/agent-collaboration-workflow.md) | Repository collaboration, verification and handoff |
 | [CHANGELOG.md](CHANGELOG.md) | What changed and why |
 
@@ -119,7 +119,7 @@ npm run verify                     # typecheck + lint + build + every test
 will report the old behaviour.
 
 Run `npm run release:check` for the complete verification plus npm package
-preflight. The module map lives in [ARCHITECTURE.md](ARCHITECTURE.md): core
+preflight. The module map lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): core
 modules depend on the `Host` interface, not its concrete implementation;
 using Node built-ins is intentional. Runtime dependencies are three official
 MCP packages (the v1 SDK, v2 server and Node adapter), not a web framework;

@@ -49,7 +49,7 @@ Web 控制台:   http://127.0.0.1:18080/console/
 
 **关掉终端就停。** 那个窗口掌握着实例 —— 这也是控制台没有启动/停止按钮的原因。
 
-Windows 下有 `start-open-bridge.cmd`：双击后输入要用的目录。若要固定启动**本项目**，请双击 `start-open-bridge-project.cmd`：它始终用本项目作工作区、每次构建后提供控制台（不自动打开浏览器），并固定使用 **8123** 端口。
+Windows 下有 `scripts/start-open-bridge.cmd`：双击后输入要用的目录。若要固定启动**本项目**，请双击 `scripts/start-open-bridge-project.cmd`：它始终用本项目作工作区、每次构建后提供控制台（不自动打开浏览器），并固定使用 **8123** 端口。
 
 其余的 —— 每条命令、每项设置、控制台各页、隧道、通知、数据目录 —— 都在 **[docs/configuration.md](docs/configuration.md)**。
 
@@ -75,7 +75,7 @@ open-bridge prompt      # 打印一段现成的接入提示词
 | [docs/tools.md](docs/tools.md) | 39 个工具各自的准确行为 |
 | [SECURITY.md](SECURITY.md) | 威胁模型与漏洞报告 |
 | [AGENTS.md](https://github.com/aoliaoduo/open-bridge/blob/main/AGENTS.md) | 改这个仓库的约定 —— 提 PR 前先读 |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 当前模块职责、执行路径与状态边界 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 当前模块职责、执行路径与状态边界 |
 | [Agent 协作流程](https://github.com/aoliaoduo/open-bridge/blob/main/docs/agent-collaboration-workflow.md) | 仓库协作、验证与交接 |
 | [CHANGELOG.md](CHANGELOG.md) | 改了什么，以及为什么 |
 
@@ -89,7 +89,7 @@ npm run verify                     # typecheck + lint + build + 全部测试
 
 提交前 `npm run verify` 必须全绿。集成测试是**真的**启动 `bin/open-bridge.js` 走 HTTP 的，所以**先构建再跑**，否则它报的是旧行为。
 
-完整发布验证使用 `npm run release:check`，在全部检查之外核对 npm 实际打包清单。模块地图以 [ARCHITECTURE.md](ARCHITECTURE.md) 为准：核心依赖 `Host` 接口而不是具体宿主实现，但直接使用 Node 内置模块是正常的。运行时依赖为三个官方 MCP 包（v1 SDK、v2 server 与 Node adapter），不是 Web 框架；MCP、API 和控制台都直接挂在 `node:http` 上。
+完整发布验证使用 `npm run release:check`，在全部检查之外核对 npm 实际打包清单。模块地图以 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 为准：核心依赖 `Host` 接口而不是具体宿主实现，但直接使用 Node 内置模块是正常的。运行时依赖为三个官方 MCP 包（v1 SDK、v2 server 与 Node adapter），不是 Web 框架；MCP、API 和控制台都直接挂在 `node:http` 上。
 
 ## License
 

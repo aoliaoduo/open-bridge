@@ -3,7 +3,7 @@
 适用于修改本仓库，不扩大当前用户的任务或授权。只读任务不编辑、构建或提交；保留用户已有改动。`CLAUDE.md` 只链接到本文，不另写一套规则。
 
 - 工具行为与参数：[docs/tools.md](docs/tools.md)。
-- 模块职责与依赖边界：[ARCHITECTURE.md](ARCHITECTURE.md)。
+- 模块职责与依赖边界：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 - 贡献与发布检查：[CONTRIBUTING.md](CONTRIBUTING.md)。
 - 用户采用的 Agent 协作节奏：[docs/agent-collaboration-workflow.md](docs/agent-collaboration-workflow.md)。
 

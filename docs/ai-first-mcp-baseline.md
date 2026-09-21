@@ -68,4 +68,4 @@ add coverage that fails before the fix.
 
 For execution, release checks, review, commits and restart verification,
 follow the [collaboration workflow](agent-collaboration-workflow.md). Architecture
-and module ownership are maintained in [ARCHITECTURE.md](../ARCHITECTURE.md).
+and module ownership are maintained in [ARCHITECTURE.md](ARCHITECTURE.md).

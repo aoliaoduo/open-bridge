@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-const launcher = readFileSync(path.join(process.cwd(), "start-open-bridge-project.cmd"), "utf8");
+const launcher = readFileSync(path.join(process.cwd(), "scripts/start-open-bridge-project.cmd"), "utf8");
 
 test("the dedicated project launcher fixes both workspace and port", () => {
-  assert.match(launcher, /cd \/d "%~dp0"/);
+  assert.match(launcher, /cd \/d "%~dp0\.\."/);
   assert.match(launcher, /set "ROOT=%CD%"/);
   assert.match(launcher, /set "PORT=8123"/);
   assert.match(launcher, /serve --root "%ROOT%" --port %PORT%(?:\r?\n|\r)/);

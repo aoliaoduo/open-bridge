@@ -1,6 +1,6 @@
 # Open Bridge 架构说明
 
-本文描述当前源码的职责边界。运行配置见 [配置与运维](docs/configuration.md)，工具契约见 [工具参考](docs/tools.md)；历史设计过程保留在 Git 历史，不作为未完成任务清单。
+本文描述当前源码的职责边界。运行配置见 [配置与运维](configuration.md)，工具契约见 [工具参考](tools.md)；历史设计过程保留在 Git 历史，不作为未完成任务清单。
 
 ## 1. 产品边界
 
@@ -58,7 +58,7 @@ AI 客户端负责推理、选择工具与编排工作；Bridge 负责真实执�
 - `/api` 与 `/console` 是本机管理面，不向跨来源网页开放 CORS；变更 API 还要求控制台令牌头。
 - Bearer 门禁和 OAuth 默认关闭。公开模式下应把完整 MCP URL 当作访问凭据保护；开启认证是操作者的选择，不在清理或升级中自动改变。
 - `unrestrictedFileAccess` 默认开启：工作区固定相对路径的含义，但不是文件系统沙箱。关闭该设置时才按允许目录限制访问；删除/移动工作区根、数据目录或盘根的自毁护栏另行存在。
-- 密钥掩码、路径保护、运行时守卫和兼容输入不能因为“看起来多余”而删除。完整威胁模型见 [SECURITY.md](SECURITY.md)。
+- 密钥掩码、路径保护、运行时守卫和兼容输入不能因为“看起来多余”而删除。完整威胁模型见 [SECURITY.md](../SECURITY.md)。
 
 隧道由 `src/bridge/` 管理：ngrok 使用受监管子进程，Tailscale Funnel 使用本机守护进程；实例可以通过共享注册表跟随同机隧道持有者。两种提供商的生命周期并不相同，不能用一次返回的成功布尔值替代实际健康状态。
 
@@ -83,6 +83,6 @@ npm run release:check   # verify 全流程 + npm 实际打包清单检查
 
 集成测试启动 `bin/open-bridge.js` 并读取 `dist/`，所以必须先构建。源码、测试和 UI 测试的放置约定见仓库的 `AGENTS.md`；一批修改完成后还需审阅差异、检查工作树并只提交相关文件。
 
-Windows 项目启动器 `start-open-bridge-project.cmd` 从项目目录构建并启动，固定端口 `8123`，不自动打开浏览器。重启后先确认 `state: "running"` 与 `build_stale: false`，再做与改动对应的真实 MCP 验证；源码测试通过不能代替这一步。
+Windows 项目启动器 `scripts/start-open-bridge-project.cmd` 从项目目录构建并启动，固定端口 `8123`，不自动打开浏览器。重启后先确认 `state: "running"` 与 `build_stale: false`，再做与改动对应的真实 MCP 验证；源码测试通过不能代替这一步。
 
 维护时优先保持一个配置/契约真源、最小直接的改动、可恢复且诚实的异步结果。不要恢复行为教练层，也不要把已完成的迁移报告当成新的待办任务。

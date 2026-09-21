@@ -7,7 +7,7 @@ rem     boundary the AI sees - not the folder this launcher sits in.
 rem     Quotes are harmless, Enter reuses the last directory, and a
 rem     directory can also be passed as the first argument (handy in a
 rem     desktop shortcut or a scheduled task):
-rem         start-open-bridge.cmd "D:\work\my-project"
+rem         scripts\start-open-bridge.cmd "D:\work\my-project"
 rem  2) it keeps a visible console: the server's own log and its three URLs.
 rem
 rem  * CLOSING THIS WINDOW STOPS THE SERVER AND WHAT IT STARTED. The ngrok
@@ -20,11 +20,10 @@ rem  ASCII-only on purpose: cmd.exe reads a batch file in the console's
 rem  current codepage, so anything else here would come out as mojibake.
 rem =====================================================================
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0.."
 title Open Bridge
-set "LAUNCHER_DIR=%~dp0"
-if "%LAUNCHER_DIR:~-1%"=="\" set "LAUNCHER_DIR=%LAUNCHER_DIR:~0,-1%"
-set "LAST_DIR_FILE=%~dp0start-open-bridge.last-dir"
+set "REPO_DIR=%CD%"
+set "LAST_DIR_FILE=%REPO_DIR%\start-open-bridge.last-dir"
 
 echo.
 echo  Open Bridge - one-click launcher
@@ -44,7 +43,7 @@ if defined WORKSPACE goto :have_dir
 
 echo  Workspace directory the AI may work in - for example:
 echo    "D:\work\my-project"     (quotes only needed for paths with spaces)
-if defined PREVIOUS (echo  Press Enter to reuse: %PREVIOUS%) else (echo  Press Enter to use this launcher's own folder.)
+if defined PREVIOUS (echo  Press Enter to reuse: %PREVIOUS%) else (echo  Press Enter to use this repository's folder.)
 echo.
 set /p "WORKSPACE= > "
 
@@ -54,7 +53,7 @@ rem rewrites that line with unbalanced quotes and the rest of the file dies on
 rem the parse error, which is exactly what a bare Enter used to do. So the
 rem fallbacks run first and the quote strip always sees something defined.
 if not defined WORKSPACE set "WORKSPACE=%PREVIOUS%"
-if not defined WORKSPACE set "WORKSPACE=%LAUNCHER_DIR%"
+if not defined WORKSPACE set "WORKSPACE=%REPO_DIR%"
 if not defined WORKSPACE goto :quit
 set "WORKSPACE=%WORKSPACE:"=%"
 if "%WORKSPACE:~-1%"=="\" set "WORKSPACE=%WORKSPACE:~0,-1%"

@@ -14,5 +14,6 @@ start-open-bridge.last-dir
 
 # agent 工作区工具的本地状态（不属于项目本体）
 .claude/
+tui-task-work/
 .openclaw/
 .cluster/

@@ -17,7 +17,7 @@ failures, skips or checks you could not run instead of implying they passed.
 
 [AGENTS.md](AGENTS.md) is the canonical source for implementation boundaries,
 test locations and regression evidence. Do not copy those rules here.
-[ARCHITECTURE.md](ARCHITECTURE.md) owns the module map; the optional
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) owns the module map; the optional
 [Agent workflow](docs/agent-collaboration-workflow.md) owns task selection,
 commit authorization and restart verification.
 
@@ -54,7 +54,7 @@ Follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Contributions are under
 `npm run release:check`。在 PR 中列出实际检查和结果；失败、跳过或未执行项都要说明。
 
 实现边界、测试位置与回归证据只维护在 [AGENTS.md](AGENTS.md)，不要在这里复制。
-模块地图见 [ARCHITECTURE.md](ARCHITECTURE.md)；采用 Agent 协作时，选择、提交授权和
+模块地图见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)；采用 Agent 协作时，选择、提交授权和
 重启验证见 [协作流程](docs/agent-collaboration-workflow.md)。
 
 - 改动围绕当前问题，保留无关工作；不提交产物、缓存、连接凭据或密钥。
