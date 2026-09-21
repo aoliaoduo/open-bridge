@@ -214,6 +214,17 @@ describe("StatusTab KPIs and state labels", () => {
 
     expect(await screen.findByText("公网可达 · 无鉴权")).toBeTruthy();
   });
+
+  test("shows workspace directory in live state", async () => {
+    statusMock.mockResolvedValue(bridgeStatus({
+      workspace_root: "C:\\work\\my-project",
+    }));
+
+    renderTab();
+
+    expect(await screen.findByText("工作区目录")).toBeTruthy();
+    expect(screen.getByText("C:\\work\\my-project")).toBeTruthy();
+  });
 });
 
 describe("StatusTab lock detail", () => {

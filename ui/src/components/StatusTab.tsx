@@ -256,6 +256,11 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
                 { label: t("状态", "State"), value: STATE_LABEL[status?.state ?? ""]?.() ?? status?.state ?? "…" },
                 { label: "Shell", value: status?.shell ?? "…", mono: true },
                 {
+                  label: t("工作区目录", "Workspace directory"),
+                  value: status?.workspace_root || status?.allowed_directories?.[0] || "…",
+                  mono: true,
+                },
+                {
                   label: t("鉴权", "Auth"),
                   value: status?.auth_enabled
                     ? t("已启用（Bearer）", "On (Bearer)")

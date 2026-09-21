@@ -22,6 +22,7 @@ export type TuiEventStatus = "running" | "completed" | "error" | "progress" | "w
 export type TuiSnapshot = {
   version: string;
   rootName: string;
+  workspaceRoot?: string;
   bridgeState: "running" | "stopping" | "stopped";
   port: number;
   tunnel: "public" | "local" | "follower" | "blocked";
@@ -162,8 +163,11 @@ function renderOverviewRows(snap: TuiSnapshot, width: number): string[] {
     { text: `进程 ${snap.runningCommands.length}`, color: "text" },
   ];
   if (snap.todosTotal > 0) {
+    const completed = snap.todos.filter(todo => todo.status === "completed").length;
     const inProgress = snap.todos.filter(todo => todo.status === "in_progress").length;
-    segments.push({ text: `任务 ${snap.todosTotal}（${inProgress} 进行中）`, color: inProgress > 0 ? "accent" : "text" });
+    const pct = Math.round((completed / snap.todosTotal) * 100);
+    const color: ColorName = completed === snap.todosTotal ? "success" : inProgress > 0 ? "accent" : "text";
+    segments.push({ text: `任务 ${completed}/${snap.todosTotal}（${pct}%）`, color });
   }
   if (snap.servicesTotal > 0) {
     segments.push({ text: `服务 ${snap.servicesRunning}/${snap.servicesTotal}`, color: snap.servicesRunning < snap.servicesTotal ? "review" : "success" });
@@ -332,6 +336,9 @@ function renderSidebar(snap: TuiSnapshot, width: number): string[] {
   };
 
   section("概览");
+  if (snap.workspaceRoot) {
+    sidebarField(lines, width, "工作区", snap.workspaceRoot);
+  }
   // No 状态 field: the top-bar capsule already owns that fact — the first live
   // screen showed it twice.
   const tag = TUNNEL_TAG[snap.tunnel];
@@ -370,10 +377,12 @@ function renderSidebar(snap: TuiSnapshot, width: number): string[] {
   }
 
   if (snap.todosTotal > 0) {
-    // One summary line, never truncated titles: the full list lives in the
-    // wide task view (Tab) — a 33-column sidebar can only amputate them.
+    // Progress summary: completed / total with percentage
+    const completed = snap.todos.filter(todo => todo.status === "completed").length;
     const inProgress = snap.todos.filter(todo => todo.status === "in_progress").length;
-    sidebarField(lines, width, "任务", `${snap.todosTotal}（${inProgress} 进行中）`, inProgress > 0 ? "accent" : "text");
+    const pct = Math.round((completed / snap.todosTotal) * 100);
+    const color: ColorName = completed === snap.todosTotal ? "success" : inProgress > 0 ? "accent" : "text";
+    sidebarField(lines, width, "任务", `${completed}/${snap.todosTotal}（${pct}%）`, color);
   }
 
   if (snap.runningCommands.length > 0) {
@@ -529,14 +538,13 @@ function renderPanel(
   let hint = "";
   if (tasksView && snap.todosTotal > 0) {
     const completed = snap.todos.filter(t => t.status === "completed").length;
-    const inProgress = snap.todos.filter(t => t.status === "in_progress").length;
     const pct = Math.round((completed / snap.todosTotal) * 100);
     const scrollInfo = content.length > rows ? `${first + 1}-${Math.min(first + rows, content.length)}/${content.length} 行` : "";
     if (content.length > rows) {
       hint = `${completed}/${snap.todosTotal} · ${scrollInfo}`;
       if (visualWidth(title) + visualWidth(hint) > width) hint = scrollInfo;
     } else {
-      hint = `${bar(pct, 8)} ${pct}% · ${completed}/${snap.todosTotal} 完成${inProgress > 0 ? ` · ${inProgress} 进行中` : ""}`;
+      hint = `${bar(pct, 8)} ${pct}% · ${completed}/${snap.todosTotal} 完成`;
       if (visualWidth(title) + visualWidth(hint) > width) {
         hint = `${pct}% · ${completed}/${snap.todosTotal}`;
       }
@@ -544,7 +552,11 @@ function renderPanel(
   } else if (listView) {
     hint = content.length > rows ? `${first + 1}-${Math.min(first + rows, content.length)}/${content.length} 行` : "";
   } else {
-    hint = first > 0 ? `↑${first} 行 · Home 回顶` : "";
+    hint = first > 0
+      ? `↑${first} 行 · Home 回顶`
+      : content.length > rows
+        ? `↓${content.length - rows} 行 · PgDn 下翻`
+        : "";
   }
   if (visualWidth(title) + visualWidth(hint) > width) hint = "";
   if (visualWidth(title) + visualWidth(hint) > width) title = `${label} `;

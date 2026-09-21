@@ -17,6 +17,7 @@ export interface TuiStateView {
   tunnelUrl: string;
   tunnelRole: string;
   stopping: boolean;
+  activeWorkspaceRoot?: string;
   sessions: Map<unknown, { activeRequests: number; calls: number; lastUsed: number }>;
   commands: Map<unknown, {
     id: string;
@@ -38,6 +39,7 @@ export interface TuiStateView {
 export interface SnapshotOptions {
   version: string;
   rootName: string;
+  rootPath?: string;
   logPath: string;
   /** Injection point for tests; the driver passes nothing (real clock). */
   now?: number;
@@ -60,7 +62,7 @@ export interface SnapshotOptions {
   };
 }
 
-const MAX_EVENTS = 40;
+const MAX_EVENTS = 200;
 
 function toEventStatus(status: string): TuiEventStatus {
   return status === "running" || status === "completed" || status === "error" || status === "progress" || status === "warning"
@@ -195,6 +197,7 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
   return {
     version: options.version,
     rootName: options.rootName,
+    workspaceRoot: view.activeWorkspaceRoot || options.rootPath || "",
     bridgeState: view.stopping ? "stopping" : "running",
     port: view.port,
     tunnel: view.tunnelUrl

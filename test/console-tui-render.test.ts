@@ -309,7 +309,7 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   assert.match(joined, /仅本机/, "tunnel wording reads 隧道 · 仅本机, not 隧道 隧道 ●");
   assert.match(joined, /活动 \(\d+\)/);
   assert.doesNotMatch(joined, /─ 任务/, "titles no longer cram into the narrow sidebar");
-  assert.match(joined, /任务\s+4（1 进行中）/, "a one-line summary replaces the truncated section");
+  assert.match(joined, /任务\s+1\/4（25%）/, "a one-line progress summary replaces the truncated section");
   assert.doesNotMatch(joined, /Tab 任务|Tab 变更|Tab 返回活动|Tab 活动/, "the title row does not advertise the Tab cycle");
   assert.match(joined, /\+53 -18 · 2 文件/, "workspace changes since the last commit");
   // Additions green, deletions red — the diff convention every tool shares.
@@ -334,6 +334,18 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   assert.match(plain[29] ?? "", /MCP http/, "the MCP address gets the full last row — sharing truncated it on small screens");
 });
 
+test("sidebar displays active workspace directory when present", () => {
+  const view = { ...fixtureView(), activeWorkspaceRoot: "C:/Projects/my-app" };
+  const snap = buildSnapshot(view, {
+    version: "1.0.0-rc.2",
+    rootName: "open-bridge",
+    logPath: "C:/x/bridge.log",
+    now: 60_000,
+  });
+  const text = renderFrame(snap, { width: 110, height: 30, now: 60_000 }).map(stripAnsi).join("\n");
+  assert.match(text, /工作区\s+C:\/Projects\/my-app/);
+});
+
 test("task view: Tab swaps the wide panel and shows full titles", () => {
   const snap = buildSnapshot(fixtureView(), {
     version: "1.0.0-rc.2",
@@ -349,7 +361,8 @@ test("task view: Tab swaps the wide panel and shows full titles", () => {
   const text = lines.map(stripAnsi).join("\n");
   assert.match(text, /─ 任务 \(4\)/, "the wide panel belongs to the tasks");
   assert.doesNotMatch(text, /Tab 任务|Tab 变更|Tab 返回活动|Tab 活动/, "the title row does not advertise the Tab cycle");
-  assert.match(text, /25% · 1\/4 完成 · 1 进行中/, "heading displays completion percentage and status breakdown");
+  assert.match(text, /25% · 1\/4 完成/, "heading displays completion percentage and count");
+  assert.doesNotMatch(text, /进行中/, "heading omits the redundant in-progress segment");
   assert.ok(lines.some(line => line.includes("\x1b[1m") && line.includes("接入任务列表")), "in-progress task is painted bold");
   assert.match(text, /✓ 验证 TUI 布局/);
   assert.match(text, /接入任务列表/);

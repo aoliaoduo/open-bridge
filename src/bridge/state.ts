@@ -313,7 +313,7 @@ export function record(
   // the audit file; recent used to answer a server-locale wall-clock string
   // for the very same event. Display formatting belongs to the console UI.
   state.activity.unshift({ ...entry, ts: Date.now() });
-  state.activity.splice(40);
+  state.activity.splice(200);
   // Activity recording must never fail a tool call: the log sink and the UI
   // are observers of the work, not part of it.
   try { host().log(`[${tool}] ${status}: ${entry.message}`); } catch { /* sink unavailable */ }

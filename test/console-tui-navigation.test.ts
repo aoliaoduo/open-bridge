@@ -70,7 +70,7 @@ test("task snapshot preserves the complete tool-supported list, not only its fir
 
 test("sidebar counts in-progress tasks beyond the former snapshot cap", () => {
   const text = renderFrame(snapshot(), { width: 110, height: 24, now: NOW }).map(stripAnsi).join("\n");
-  assert.match(text, /100（1 进行中）/);
+  assert.match(text, /0\/100（0%）/);
 });
 
 test("task viewport reaches the final task and clamps excessive offsets", () => {

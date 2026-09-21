@@ -46,6 +46,7 @@ export interface BridgeStatus {
   /** The URL to hand a client: the tunnel when published, otherwise loopback. */
   mcp_url?: string;
   shell: string;
+  workspace_root?: string;
   allowed_directories: string[];
   active_sessions: number;
   active_commands: number;
