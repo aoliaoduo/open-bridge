@@ -61,6 +61,16 @@ export interface SnapshotOptions {
     unavailable?: boolean;
     entries?: Array<{ path: string; insertions: number; deletions: number; untracked?: boolean; binary?: boolean }>;
   };
+  /** 累计 diff 预览（review_changes 只读面，不推进审阅基线）。 */
+  diff?: {
+    loading: boolean;
+    ok: boolean;
+    text: string;
+    truncated: boolean;
+    since: string;
+    checkpoint: string;
+    reason: string;
+  };
 }
 
 const MAX_EVENTS = 200;
@@ -223,6 +233,7 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     todos: view.todos.map(todo => ({ title: todo.title, status: todo.status })),
     todosTotal: view.todos.length,
     ...(options.workspaceChanges !== undefined ? { changes: options.workspaceChanges } : {}),
+    ...(options.diff !== undefined ? { diff: options.diff } : {}),
     runningCommands,
     servicesTotal,
     servicesRunning,

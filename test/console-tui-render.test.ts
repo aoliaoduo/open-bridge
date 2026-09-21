@@ -518,3 +518,37 @@ test("advanceScroll steps and clamps around the retained history", () => {
   // the first scroll step into history is always one row.
   assert.equal(advanceScroll("down", -1, 10, 4), 1);
 });
+
+test("the diff panel renders the cumulative review diff", () => {
+  const snap = buildSnapshot(fixtureView(), {
+    version: "1.0.0",
+    rootName: "open-bridge",
+    logPath: "C:/x/bridge.log",
+    now: 60_000,
+    diff: { loading: false, ok: true, text: "@@ -1 +1 @@\n-seed\n+seed\nplus one", truncated: false, since: "last_shown", checkpoint: "retained", reason: "" },
+  });
+  const lines = renderFrame(snap, { width: 100, height: 30, panelView: "diff" });
+  const joined = lines.join("\n");
+  assert.ok(joined.includes("累计 diff"), "the panel title names the view");
+  assert.ok(joined.includes("+seed"), "added lines render");
+  assert.ok(joined.includes("-seed"), "removed lines render");
+  assert.ok(joined.includes("已截断") === false, "untruncated diff stays quiet about truncation");
+});
+
+test("the diff panel shows loading and failure states", () => {
+  const loading = buildSnapshot(fixtureView(), {
+    version: "1.0.0", rootName: "r", logPath: "l",
+    diff: { loading: true, ok: false, text: "", truncated: false, since: "", checkpoint: "", reason: "" },
+  });
+  assert.ok(renderFrame(loading, { width: 100, height: 30, panelView: "diff" }).join("\n").includes("正在读取累计 diff"));
+  const failed = buildSnapshot(fixtureView(), {
+    version: "1.0.0", rootName: "r", logPath: "l",
+    diff: { loading: false, ok: false, text: "", truncated: false, since: "", checkpoint: "", reason: "review_changes requires a Git workspace" },
+  });
+  assert.ok(renderFrame(failed, { width: 100, height: 30, panelView: "diff" }).join("\n").includes("Git workspace"));
+  const established = buildSnapshot(fixtureView(), {
+    version: "1.0.0", rootName: "r", logPath: "l",
+    diff: { loading: false, ok: true, text: "", truncated: false, since: "workspace_open", checkpoint: "established", reason: "" },
+  });
+  assert.ok(renderFrame(established, { width: 100, height: 30, panelView: "diff" }).join("\n").includes("已建立审阅基线"));
+});

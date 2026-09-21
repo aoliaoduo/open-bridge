@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setHost, type Host } from "../src/host/host.js";
 import { reviewChanges } from "../src/bridge/review.js";
+import { collectReviewDiffPreview } from "../src/console/tui/changes.js";
 import type { JsonArgs } from "../src/bridge/json-args.js";
 
 const run = promisify(execFile);
@@ -144,4 +145,34 @@ test("since workspace_open keeps reporting against the open checkpoint", async (
   assert.equal(r.available, true);
   assert.equal(r.since, "workspace_open");
   assert.ok((r.summary?.files ?? 0) >= 1);
+});
+
+test("the TUI diff preview reads without advancing the baseline", async () => {
+  await initRepo();
+  await review();
+  writeFileSync(join(repo, "seed.txt"), "seed\nplus one\n");
+  const first = await collectReviewDiffPreview();
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+  assert.match(first.text, /\+plus one/);
+  assert.equal(first.since, "last_shown");
+  assert.equal(first.checkpoint, "retained");
+  // Re-reading is idempotent: the baseline stays where it was.
+  const again = await collectReviewDiffPreview();
+  assert.equal(again.ok, true);
+  if (!again.ok) return;
+  assert.equal(again.text, first.text);
+});
+
+test("the TUI diff preview names a non-git workspace", async () => {
+  const plain = mkdtempSync(join(tmpdir(), "ob-plain-"));
+  installHostFor(plain);
+  try {
+    const r = await collectReviewDiffPreview();
+    assert.equal(r.ok, false);
+    if (r.ok) return;
+    assert.match(r.reason, /Git workspace/);
+  } finally {
+    rmSync(plain, { recursive: true, force: true });
+  }
 });

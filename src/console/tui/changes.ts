@@ -12,6 +12,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { reviewChanges } from "../../bridge/review.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -244,4 +245,31 @@ export async function collectWorkspaceChanges(root: string): Promise<ChangeSumma
     numstatOut: numstat.ok ? numstat.stdout : "",
     readFile: rel => fs.readFile(path.join(root, rel)),
   });
+}
+
+export type ReviewDiffPreview =
+  | { ok: true; text: string; truncated: boolean; since: string; checkpoint: string }
+  | { ok: false; reason: string };
+
+/**
+ * 累计 diff 预览（TUI 变更页按 d）：review_changes 的只读面。
+ * mark_reviewed:false 让审阅基线原地不动 —— 看多少次都不改变 AI 下次
+ * 「自上次审阅以来」的口径。首次调用会建立检查点（一次性写入两个 ref）。
+ */
+export async function collectReviewDiffPreview(maxPatchBytes = 24_000): Promise<ReviewDiffPreview> {
+  try {
+    const result = await reviewChanges({ max_patch_bytes: maxPatchBytes, mark_reviewed: false }) as {
+      available?: boolean; reason?: string; patch?: string; patch_truncated?: boolean; since?: string; checkpoint_action?: string;
+    };
+    if (!result.available) return { ok: false, reason: String(result.reason ?? "变更摘要不可用") };
+    return {
+      ok: true,
+      text: String(result.patch ?? ""),
+      truncated: result.patch_truncated === true,
+      since: String(result.since ?? ""),
+      checkpoint: String(result.checkpoint_action ?? ""),
+    };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
 }

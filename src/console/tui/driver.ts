@@ -18,7 +18,7 @@
 import * as readline from "node:readline";
 import type { ReadStream } from "node:tty";
 import { state } from "../../bridge/state.js";
-import { collectWorkspaceChanges, type ChangeSummary } from "./changes.js";
+import { collectReviewDiffPreview, collectWorkspaceChanges, type ChangeSummary, type ReviewDiffPreview } from "./changes.js";
 import { buildSnapshot } from "./snapshot.js";
 import { renderFrame, panelScrollMetrics, maxFirstVisible, advanceScroll, nextPanelView, type PanelView, type ScrollKey } from "./render.js";
 
@@ -59,6 +59,11 @@ let changeMetrics = { rows: 1, totalRows: 0 };
 /** Workspace changes since the last commit; undefined = 非 git. */
 let workspaceChanges: ChangeSummary | undefined;
 let changesTimer: ReturnType<typeof setInterval> | undefined;
+/** 累计 diff 预览（按 d 请求；只读，不推进审阅基线）。 */
+let diffState: ReviewDiffPreview | undefined;
+let diffLoading = false;
+let diffScrollFirst = 0;
+let diffMetrics = { rows: 1, totalRows: 0 };
 
 export function consoleTuiActive(): boolean {
   return active;
@@ -87,6 +92,9 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
   scrollFirst = -1;
   taskScrollFirst = 0;
   changeScrollFirst = 0;
+  diffState = undefined;
+  diffLoading = false;
+  diffScrollFirst = 0;
   // THIS process's start: 「运行」 must not read the persisted stats window
   // (a freshly restarted Bridge used to claim 50 hours of uptime).
   const launchedAt = Date.now();
@@ -108,6 +116,34 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
     });
   };
 
+  let diffGen = 0;
+  const diffSnapshotInput = () => diffLoading
+    ? { loading: true, ok: false, text: "", truncated: false, since: "", checkpoint: "", reason: "" }
+    : diffState === undefined ? undefined
+    : diffState.ok
+      ? { loading: false, ok: true, text: diffState.text, truncated: diffState.truncated, since: diffState.since, checkpoint: diffState.checkpoint, reason: "" }
+      : { loading: false, ok: false, text: "", truncated: false, since: "", checkpoint: "", reason: diffState.reason };
+  // The diff is IO (git), fetched on demand with a generation token so a slow
+  // read cannot overwrite a newer request — same contract as refreshChanges.
+  const loadDiff = (): void => {
+    const gen = ++diffGen;
+    diffLoading = true;
+    paint();
+    void collectReviewDiffPreview().then(result => {
+      if (gen !== diffGen) return;
+      diffLoading = false;
+      diffState = result;
+      panelView = "diff";
+      paint();
+    }).catch(() => {
+      if (gen !== diffGen) return;
+      diffLoading = false;
+      diffState = { ok: false, reason: "读取失败" };
+      panelView = "diff";
+      paint();
+    });
+  };
+
   const write = (payload: string): void => {
     try { out.write(payload); } catch { /* a dead pipe must never crash the bridge */ }
   };
@@ -115,22 +151,25 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
     // The dashboard is an observer of the work, never part of it: any
     // rendering failure is swallowed and the next tick tries again.
     try {
-      const snapshot = buildSnapshot(state, { ...options, launchedAt, workspaceChanges });
+      const snapshot = buildSnapshot(state, { ...options, launchedAt, workspaceChanges, diff: diffSnapshotInput() });
       const dimensions = { width: out.columns ?? 80, height: out.rows ?? 24 };
       activityMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "activity" });
       taskMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "tasks" });
       changeMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "changes" });
+      diffMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "diff" });
       // Clamp stored positions too: a list shrink must not leave a hidden stale
       // offset that reappears when tasks grow again. Keep the activity sentinel.
       scrollFirst = Math.min(scrollFirst, maxFirstVisible(activityMetrics.totalRows, activityMetrics.rows));
       taskScrollFirst = Math.min(taskScrollFirst, maxFirstVisible(taskMetrics.totalRows, taskMetrics.rows));
       changeScrollFirst = Math.min(changeScrollFirst, maxFirstVisible(changeMetrics.totalRows, changeMetrics.rows));
+      diffScrollFirst = Math.min(diffScrollFirst, maxFirstVisible(diffMetrics.totalRows, diffMetrics.rows));
       const lines = renderFrame(snapshot, {
         ...dimensions,
         spinnerFrame: frameIndex++,
         firstVisible: scrollFirst,
         taskFirstVisible: taskScrollFirst,
         changeFirstVisible: changeScrollFirst,
+        diffFirstVisible: diffScrollFirst,
         panelView,
       });
       // A full-width write leaves the cursor on the last cell (wrap pending).
@@ -163,9 +202,18 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
             // The one navigation key: toggle the wide panel between the
             // activity stream and the full-width task view. One key, both
             // directions — Esc as a second way back was surplus.
-            panelView = nextPanelView(panelView);
+            panelView = panelView === "diff" ? "changes" : nextPanelView(panelView);
             paint();
             return;
+          }
+          if (panelView === "changes" && ch === "d") {
+            // 累计 diff 预览：review_changes 的只读面。
+            loadDiff();
+            return;
+          }
+          if (panelView === "diff") {
+            if (ch === "d") { loadDiff(); return; }
+            if (ch === "q" || key?.name === "escape") { panelView = "changes"; paint(); return; }
           }
           const mapped = KEY_MAP[key?.name ?? ""];
           if (mapped === undefined) return;
@@ -173,6 +221,8 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
             taskScrollFirst = advanceScroll(mapped, taskScrollFirst, taskMetrics.totalRows, taskMetrics.rows);
           } else if (panelView === "changes") {
             changeScrollFirst = advanceScroll(mapped, changeScrollFirst, changeMetrics.totalRows, changeMetrics.rows);
+          } else if (panelView === "diff") {
+            diffScrollFirst = advanceScroll(mapped, diffScrollFirst, diffMetrics.totalRows, diffMetrics.rows);
           } else {
             scrollFirst = advanceScroll(mapped, scrollFirst, activityMetrics.totalRows, activityMetrics.rows);
           }

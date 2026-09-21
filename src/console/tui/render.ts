@@ -46,6 +46,16 @@ export type TuiSnapshot = {
     unavailable?: boolean;
     entries?: Array<{ path: string; insertions: number; deletions: number; untracked?: boolean; binary?: boolean }>;
   };
+  /** 累计 diff 预览（review_changes 只读面，不推进审阅基线）。 */
+  diff?: {
+    loading: boolean;
+    ok: boolean;
+    text: string;
+    truncated: boolean;
+    since: string;
+    checkpoint: string;
+    reason: string;
+  };
   runningCommands: Array<{
     id: string;
     command: string;
@@ -492,7 +502,28 @@ function changePanelRows(snap: TuiSnapshot, width: number): string[] {
   return rows;
 }
 
-export type PanelView = "activity" | "tasks" | "changes";
+/** 累计 diff 预览（review_changes 只读）：+绿 -红 @@暗，行内截断不折行。 */
+function diffPanelRows(snap: TuiSnapshot, width: number): string[] {
+  const diff = snap.diff;
+  if (diff === undefined || diff.loading) return [paint("dim", "正在读取累计 diff…")];
+  if (!diff.ok) return [paint("dim", truncateVisual(diff.reason || "读取失败", width))];
+  if (diff.text === "") {
+    return [paint("dim", diff.checkpoint === "established"
+      ? "已建立审阅基线；出现新改动后再按 d 刷新"
+      : "自上次审阅以来没有改动")];
+  }
+  const rows = [paint("dim", truncateVisual(`累计 diff · 自 ${diff.since}${diff.truncated ? " · 已截断" : ""}`, width))];
+  for (const raw of diff.text.split("\n")) {
+    const line = inlineText(raw.replace(/\t/g, "    "));
+    if (line.startsWith("+")) rows.push(paint("success", truncateVisual(line, width)));
+    else if (line.startsWith("-")) rows.push(paint("error", truncateVisual(line, width)));
+    else if (line.startsWith("@@") || line.startsWith("diff ") || line.startsWith("index ")) rows.push(paint("dim", truncateVisual(line, width)));
+    else rows.push(paint("text", truncateVisual(line, width)));
+  }
+  return rows;
+}
+
+export type PanelView = "activity" | "tasks" | "changes" | "diff";
 export const PANEL_VIEWS: readonly PanelView[] = ["activity", "tasks", "changes"];
 export function nextPanelView(view: PanelView): PanelView {
   const index = PANEL_VIEWS.indexOf(view);
@@ -543,6 +574,7 @@ export function panelScrollMetrics(
     rows: layout.panelRows,
     totalRows: options.panelView === "tasks" ? taskPanelRows(snap, layout.panelWidth, options.spinnerFrame ?? 0).length
       : options.panelView === "changes" ? changePanelRows(snap, layout.panelWidth).length
+      : options.panelView === "diff" ? diffPanelRows(snap, layout.panelWidth).length
       : snap.events.flatMap(event => eventRows(event, layout.panelWidth, options.spinnerFrame ?? 0, options.now ?? 0)).length,
   };
 }
@@ -553,15 +585,19 @@ function renderPanel(
 ): string[] {
   const tasksView = view === "tasks";
   const changesView = view === "changes";
+  const diffView = view === "diff";
   const content = tasksView ? taskPanelRows(snap, width, spin)
     : changesView ? changePanelRows(snap, width)
+    : diffView ? diffPanelRows(snap, width)
     : snap.events.flatMap(event => eventRows(event, width, spin, now));
   const requested = Number.isFinite(firstVisible) ? Math.floor(firstVisible) : 0;
   const first = Math.min(Math.max(0, requested), maxFirstVisible(content.length, rows));
-  const count = tasksView ? snap.todosTotal : changesView ? (snap.changes?.entries?.length ?? snap.changes?.files ?? 0) : snap.events.length;
-  const label = `${tasksView ? "任务" : changesView ? "变更" : "活动"} (${count})`;
+  const count = tasksView ? snap.todosTotal : changesView ? (snap.changes?.entries?.length ?? snap.changes?.files ?? 0)
+    : diffView ? (snap.diff?.text ? snap.diff.text.split("\n").length : 0)
+    : snap.events.length;
+  const label = diffView ? "累计 diff" : `${tasksView ? "任务" : changesView ? "变更" : "活动"} (${count})`;
   let title = `─ ${label} `;
-  const listView = tasksView || changesView;
+  const listView = tasksView || changesView || diffView;
   // Scroll position only: Tab still cycles the views, but the title no longer
   // advertises the next page (「Tab 任务」 read as the current view).
   let hint = "";
@@ -600,7 +636,7 @@ function renderWorkbench(
   snap: TuiSnapshot,
   options: {
     layout: FrameLayout; spin: number; now: number; busy: boolean;
-    firstVisible: number; taskFirstVisible: number; changeFirstVisible: number; panelView: PanelView;
+    firstVisible: number; taskFirstVisible: number; changeFirstVisible: number; diffFirstVisible: number; panelView: PanelView;
   },
 ): string[] {
   const { layout, spin, now, busy, panelView } = options;
@@ -609,6 +645,7 @@ function renderWorkbench(
   const sidebar = renderSidebar(snap, sidebarWidth, bodyRows);
   const first = panelView === "tasks" ? options.taskFirstVisible
     : panelView === "changes" ? options.changeFirstVisible
+    : panelView === "diff" ? options.diffFirstVisible
     : options.firstVisible;
   const panel = renderPanel(snap, panelWidth, panelRows, spin, now, panelView, first);
   const lines = [renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width))];
@@ -631,7 +668,7 @@ export function renderFrame(
   snap: TuiSnapshot,
   options: {
     width: number; height: number; spinnerFrame?: number; now?: number;
-    firstVisible?: number; taskFirstVisible?: number; changeFirstVisible?: number; panelView?: PanelView;
+    firstVisible?: number; taskFirstVisible?: number; changeFirstVisible?: number; diffFirstVisible?: number; panelView?: PanelView;
   },
 ): string[] {
   const panelView = options.panelView ?? "activity";
@@ -643,11 +680,13 @@ export function renderFrame(
   const firstVisible = options.firstVisible ?? -1;
   const taskFirstVisible = options.taskFirstVisible ?? 0;
   const changeFirstVisible = options.changeFirstVisible ?? 0;
+  const diffFirstVisible = options.diffFirstVisible ?? 0;
   if (layout.sidebarWidth > 0) {
-    return renderWorkbench(snap, { layout, spin, now, busy, firstVisible, taskFirstVisible, changeFirstVisible, panelView });
+    return renderWorkbench(snap, { layout, spin, now, busy, firstVisible, taskFirstVisible, changeFirstVisible, diffFirstVisible, panelView });
   }
   const first = panelView === "tasks" ? taskFirstVisible
     : panelView === "changes" ? changeFirstVisible
+    : panelView === "diff" ? diffFirstVisible
     : firstVisible;
   const lines = [
     renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width)),
