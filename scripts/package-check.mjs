@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
 export const requiredPackagePaths = [
-  "ARCHITECTURE.md",
+  "docs/ARCHITECTURE.md",
   "CHANGELOG.md",
   "LICENSE",
   "README.md",
