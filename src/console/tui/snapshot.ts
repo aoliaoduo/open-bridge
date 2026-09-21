@@ -7,7 +7,7 @@
  * without spawning child processes or installing a host.
  */
 
-import { MAX_CAPTURED_OUTPUT, MAX_SESSIONS } from "../../bridge/state.js";
+import { MAX_CAPTURED_OUTPUT } from "../../bridge/state.js";
 import type { TuiEventStatus, TuiSnapshot } from "./render.js";
 
 export interface TuiStateView {
@@ -30,6 +30,8 @@ export interface TuiStateView {
   usage: { startedAt: number; calls: number; successes: number; failures: number };
   /** Since-launch counters (state.runtimeUsage): the numbers the TUI shows. */
   runtimeUsage: { calls: number; successes: number; failures: number };
+  /** Current task list (set_todos writes; boot loads it from the store). */
+  todos: Array<{ id: string; title: string; status: string }>;
 }
 
 export interface SnapshotOptions {
@@ -42,6 +44,12 @@ export interface SnapshotOptions {
    *  「运行」 is process uptime, never the persisted stats window — a freshly
    *  restarted Bridge used to claim 50 hours. */
   launchedAt?: number;
+  /**
+   * Workspace changes since the last commit (files/insertions/deletions).
+   * The driver refreshes this asynchronously every few seconds; undefined
+   * (or an all-zero summary) means clean tree or not a git repository.
+   */
+  workspaceChanges?: { files: number; insertions: number; deletions: number };
 }
 
 const MAX_EVENTS = 40;
@@ -193,7 +201,11 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     failures: view.runtimeUsage.failures,
     sessions,
     sessionsActive,
-    maxSessions: MAX_SESSIONS,
+    todos: view.todos.slice(0, 8).map(todo => ({ title: todo.title, status: todo.status })),
+    ...(options.workspaceChanges !== undefined
+      && (options.workspaceChanges.files > 0 || options.workspaceChanges.insertions > 0 || options.workspaceChanges.deletions > 0)
+      ? { changes: options.workspaceChanges }
+      : {}),
     runningCommands,
     servicesTotal,
     servicesRunning,

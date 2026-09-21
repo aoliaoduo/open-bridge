@@ -45,6 +45,7 @@ import { state } from "./bridge/state.js";
 import { currentWorkspaceRoot } from "./bridge/paths.js";
 import { loadServices } from "./bridge/services.js";
 import { loadUsageStats } from "./bridge/usage-store.js";
+import { loadTodoStore } from "./bridge/todo-store.js";
 import { start, stop } from "./bridge/lifecycle.js";
 import { setExtraRouteHandler, setLocalServerReadyHook } from "./bridge/route-hooks.js";
 import { markHostProcess } from "./bridge/stop-guard.js";
@@ -289,6 +290,13 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   state.activeWorkspaceRoot = currentWorkspaceRoot();
   loadServices();
   state.usage = loadUsageStats();
+  // The task list outlives restarts in the persisted store; set_todos keeps
+  // this in-memory copy fresh afterwards, and the TUI reads only the copy.
+  state.todos = loadTodoStore().todos.filter((todo): todo is { id: string; title: string; status: string } =>
+    todo !== null && typeof todo === "object"
+    && typeof (todo as { id?: unknown }).id === "string"
+    && typeof (todo as { title?: unknown }).title === "string"
+    && typeof (todo as { status?: unknown }).status === "string");
   setExtraRouteHandler(apiRouteHandler);
 
   let shuttingDown = false;
@@ -403,6 +411,7 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
     startConsoleTui({
       version: VERSION,
       rootName: path.basename(projectRoot),
+      rootPath: projectRoot,
       logPath: nodeHost.bridgeLog.path(),
     });
   }

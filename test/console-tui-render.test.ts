@@ -118,6 +118,11 @@ function fixtureView(): TuiStateView {
     // Since-launch counters — what the TUI displays. Deliberately different
     // numbers from the persisted window above so a wrong source cannot pass.
     runtimeUsage: { calls: 7, successes: 6, failures: 1 },
+    todos: [
+      { id: "t1", title: "验证 TUI 布局", status: "completed" },
+      { id: "t2", title: "接入任务列表", status: "in_progress" },
+      { id: "t3", title: "清理收尾", status: "pending" },
+    ],
   };
 }
 
@@ -137,6 +142,9 @@ test("buildSnapshot counts live state and shows the full MCP URL", () => {
   assert.equal(snap.serviceRows.length, 3);
   assert.equal(snap.serviceRows.filter(s => s.running).length, 1);
   assert.deepEqual(snap.serviceRows[0], { name: "s1", running: true });
+  assert.equal(snap.todos.length, 3, "the task list rides along for the sidebar");
+  assert.equal(snap.todos[1]?.title, "接入任务列表");
+  assert.equal(snap.changes, undefined, "no workspace changes passed — the row stays hidden");
   assert.equal(snap.tunnel, "local");
   // Operator's call: the full address, token included — the startup banner
   // and `open-bridge url` print it in full; a redacted copy is unusable for
@@ -225,7 +233,8 @@ test("renderFrame fills the exact geometry and shows the dashboard vocabulary", 
   }
   const text = lines.map(stripAnsi).join("\n");
   assert.match(text, /运行中/);
-  assert.match(text, /会话 2\/64/);
+  assert.match(text, /会话 2 · 活跃 1/);
+  assert.doesNotMatch(text, /\/64/, "the session cap is developer knowledge, not operator-facing");
   assert.match(text, /50%/); // process card fill ratio
   assert.match(text, /✓/);
   assert.match(text, /57s…/); // live elapsed on the still-open invoke (now 60s - ts 3s)
@@ -247,9 +256,8 @@ test("renderFrame pins the footer to the bottom rows however few the events", ()
   for (const [i, line] of lines.entries()) {
     assert.equal(visualWidth(line), 80, `tall line ${i} must be exactly 80 columns`);
   }
-  assert.match(stripAnsi(lines[38] ?? ""), /控制台 http:\/\/127\.0\.0\.1:8123\/console\//, "the console entry rides the address footer");
-  assert.match(stripAnsi(lines[38] ?? ""), /MCP http/, "the address footer owns the second-to-last row");
-  assert.match(stripAnsi(lines[39] ?? ""), /↑↓ 滚动/, "hint row on the last row");
+  assert.match(stripAnsi(lines[38] ?? ""), /控制台 http:\/\/127\.0\.0\.1:8123\/console\//, "the console entry owns its own row");
+  assert.match(stripAnsi(lines[39] ?? ""), /MCP http/, "the MCP address gets a full row; sharing one row truncated it into ...");
 });
 
 test("renderFrame degrades gracefully on a small window", () => {
@@ -275,6 +283,7 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
+    workspaceChanges: { files: 2, insertions: 53, deletions: 18 },
   });
   const lines = renderFrame(snap, { width: 110, height: 30, now: 60_000 });
   assert.equal(lines.length, 30, "a 30-row window gets a full-height workbench");
@@ -295,9 +304,16 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   assert.doesNotMatch(joined, /状态/, "the top-bar capsule owns the status; the sidebar does not repeat it");
   assert.match(joined, /仅本机/, "tunnel wording reads 隧道 · 仅本机, not 隧道 隧道 ●");
   assert.match(joined, /活动 \(\d+\)/);
-  assert.match(plain[28] ?? "", /MCP http/, "the address footer on the second-to-last row");
+  assert.match(joined, /─ 任务/, "the task list gets its own sidebar section");
+  assert.match(joined, /✓ 验证 TUI 布局/);
+  assert.match(joined, /接入任务列表/);
+  assert.match(joined, /· 清理收尾/);
+  assert.match(joined, /\+53 -18 · 2 文件/, "workspace changes since the last commit");
+  assert.match(joined, /会话\s+2 · 活跃 1/);
+  assert.doesNotMatch(joined, /\/64/, "the session cap is developer knowledge");
+  assert.match(plain[28] ?? "", /控制台 http/, "the console entry on the second-to-last row");
   assert.doesNotMatch(plain[28] ?? "", /会话|调用|端口/, "counters live in the sidebar, not repeated in the footer");
-  assert.match(plain[29] ?? "", /Home 最新/, "scroll hint on the last row");
+  assert.match(plain[29] ?? "", /MCP http/, "the MCP address gets the full last row — sharing truncated it on small screens");
 });
 
 test("workbench panel follows the tail and reports history when scrolled", () => {

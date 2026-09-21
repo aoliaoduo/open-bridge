@@ -16,6 +16,9 @@
  */
 
 import * as readline from "node:readline";
+import { execFile } from "node:child_process";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type { ReadStream } from "node:tty";
 import { state } from "../../bridge/state.js";
 import { buildSnapshot } from "./snapshot.js";
@@ -24,6 +27,8 @@ import { renderFrame, workbenchPanelRows, advanceScroll, type ScrollKey } from "
 export interface ConsoleTuiOptions {
   version: string;
   rootName: string;
+  /** Absolute workspace root — the git-change refresh runs against it. */
+  rootPath: string;
   logPath: string;
 }
 
@@ -46,6 +51,9 @@ let active = false;
 let scrollFirst = -1;
 /** Event count of the last painted frame, so scroll steps clamp correctly. */
 let lastEventCount = 0;
+/** Workspace changes since the last commit; undefined = clean or no repo. */
+let workspaceChanges: { files: number; insertions: number; deletions: number } | undefined;
+let changesTimer: ReturnType<typeof setInterval> | undefined;
 
 export function consoleTuiActive(): boolean {
   return active;
@@ -74,6 +82,54 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
   // (a freshly restarted Bridge used to claim 50 hours of uptime).
   const launchedAt = Date.now();
 
+  // Workspace changes since the last commit — the dirty-tree summary,
+  // dashboard style. It is IO (git + file reads), so it refreshes on its own
+  // slow cadence; the 500ms render tick only reads the cached value.
+  const refreshChanges = (): void => {
+    execFile("git", ["-C", options.rootPath, "-c", "core.quotepath=off", "status", "--porcelain"], { timeout: 5000 }, (err, statusOut) => {
+      if (err || typeof statusOut !== "string") {
+        workspaceChanges = undefined; // no git, not a repository, or a timeout
+        return;
+      }
+      const entries = statusOut.split(/\r?\n/).filter(line => line.length > 0);
+      const untracked = entries
+        .filter(line => line.startsWith("??"))
+        .map(line => line.slice(3).trim().replace(/^"(.*)"$/, "$1"));
+      void (async () => {
+        let insertions = 0;
+        let deletions = 0;
+        await new Promise<void>(resolve => {
+          execFile("git", ["-C", options.rootPath, "diff", "--numstat", "HEAD"], { timeout: 5000 }, (numstatErr, numstat) => {
+            // No HEAD yet (zero commits): the status output above already
+            // carries everything as untracked.
+            if (!numstatErr && typeof numstat === "string") {
+              for (const line of numstat.split(/\r?\n/)) {
+                const [added, removed] = line.split("\t");
+                const add = Number(added);
+                const del = Number(removed);
+                if (Number.isFinite(add) && Number.isFinite(del)) {
+                  insertions += add;
+                  deletions += del;
+                }
+              }
+            }
+            resolve();
+          });
+        });
+        // Untracked files count as whole-file additions (bounded work).
+        for (const rel of untracked.slice(0, 64)) {
+          try {
+            const buf = await fs.readFile(path.join(options.rootPath, rel));
+            if (buf.byteLength <= 512 * 1024) insertions += Math.max(1, buf.toString("utf8").split("\n").length);
+          } catch { /* deleted between status and read */ }
+        }
+        workspaceChanges = entries.length > 0 ? { files: entries.length, insertions, deletions } : undefined;
+      })().catch(() => {
+        workspaceChanges = undefined;
+      });
+    });
+  };
+
   const write = (payload: string): void => {
     try { out.write(payload); } catch { /* a dead pipe must never crash the bridge */ }
   };
@@ -81,7 +137,7 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
     // The dashboard is an observer of the work, never part of it: any
     // rendering failure is swallowed and the next tick tries again.
     try {
-      const snapshot = buildSnapshot(state, { ...options, launchedAt });
+      const snapshot = buildSnapshot(state, { ...options, launchedAt, workspaceChanges });
       lastEventCount = snapshot.events.length;
       const lines = renderFrame(snapshot, {
         width: out.columns ?? 80,
@@ -123,6 +179,9 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
 
   timer = setInterval(paint, 500);
   timer.unref();
+  refreshChanges();
+  changesTimer = setInterval(refreshChanges, 5000);
+  changesTimer.unref();
   resizeHandler = paint;
   out.on("resize", paint);
   paint();
@@ -135,6 +194,10 @@ export function stopConsoleTui(): void {
   if (timer !== undefined) {
     clearInterval(timer);
     timer = undefined;
+  }
+  if (changesTimer !== undefined) {
+    clearInterval(changesTimer);
+    changesTimer = undefined;
   }
   if (resizeHandler !== undefined) {
     process.stdout.off("resize", resizeHandler);

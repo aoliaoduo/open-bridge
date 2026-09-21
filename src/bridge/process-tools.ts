@@ -567,6 +567,7 @@ export function setTodos(args: Args, session?: SessionState): unknown[] {
     state.latestSession = session;
   }
   persistTodos(next);
+  state.todos = [...next]; // the TUI sidebar reads this live copy
   host().ui.update();
   return next;
 }

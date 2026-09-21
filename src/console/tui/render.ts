@@ -32,7 +32,10 @@ export type TuiSnapshot = {
   failures: number;
   sessions: number;
   sessionsActive: number;
-  maxSessions: number;
+  /** Current task list for the sidebar (capped; title and status only). */
+  todos: Array<{ title: string; status: string }>;
+  /** Workspace changes since the last commit; absent when clean. */
+  changes?: { files: number; insertions: number; deletions: number };
   runningCommands: Array<{
     id: string;
     command: string;
@@ -144,11 +147,10 @@ function renderOverviewRows(snap: TuiSnapshot, width: number): string[] {
 
   // Row 1 — counters. Segments are dropped from the end when the window is too
   // narrow for all of them (uptime and calls outrank the rest).
-  const sessionPct = snap.maxSessions > 0 ? (snap.sessions / snap.maxSessions) * 100 : 0;
   const segments: Array<{ text: string; color: ColorName }> = [
     { text: `运行 ${formatDuration(snap.uptimeMs)}`, color: "text" },
     { text: `调用 ${formatCount(snap.calls)}（✓ ${formatCount(snap.successes)} ✕ ${formatCount(snap.failures)}）`, color: snap.failures > 0 ? "review" : "text" },
-    { text: `会话 ${snap.sessions}/${snap.maxSessions}${snap.sessionsActive > 0 ? ` · 活跃 ${snap.sessionsActive}` : ""}`, color: healthColor(sessionPct) },
+    { text: `会话 ${snap.sessions}${snap.sessionsActive > 0 ? ` · 活跃 ${snap.sessionsActive}` : ""}`, color: "text" },
     { text: `进程 ${snap.runningCommands.length}`, color: "text" },
   ];
   if (snap.servicesTotal > 0) {
@@ -244,11 +246,12 @@ function renderFooter(snap: TuiSnapshot, width: number): string[] {
   // sidebar owns the counters and the tunnel; the footer owns the addresses —
   // the web console entry (the api-router loopback gate only answers the
   // local Host, so this is always the local address) and the MCP URL.
-  const line1 = padEndVisual(paint("muted", truncateVisual(`控制台 http://127.0.0.1:${snap.port}/console/ · MCP ${snap.mcpUrl}`, width)), width);
-  // No "Ctrl+C 停止": closing the terminal window stops the serve process
-  // anyway — the row is real estate for what cannot be guessed (the scroll
-  // model, the log path, the opt-out flag).
-  const line2 = paint("dim", truncateVisual(`↑↓ 滚动 · Home 最新 · 日志 ${snap.logPath} · --no-tui 关闭界面`, width));
+  const line1 = padEndVisual(paint("muted", truncateVisual(`控制台 http://127.0.0.1:${snap.port}/console/`, width)), width);
+  // One address per row: sharing truncated the MCP URL into "..." on small
+  // screens — the one string an operator copies. The instruction row is gone
+  // entirely; closing the window stops the serve, and the scroll keys surface
+  // in the panel title the moment they matter (while scrolled).
+  const line2 = padEndVisual(paint("muted", truncateVisual(`MCP ${snap.mcpUrl}`, width)), width);
   return [line1, line2];
 }
 
@@ -302,7 +305,7 @@ function sidebarField(lines: string[], width: number, label: string, value: stri
   lines.push(`${labelPart} ${paint(color, truncateVisual(value, Math.max(4, width - 10)))}`);
 }
 
-function renderSidebar(snap: TuiSnapshot, width: number): string[] {
+function renderSidebar(snap: TuiSnapshot, width: number, spin: number): string[] {
   const lines: string[] = [];
   const section = (title: string): void => {
     lines.push(paint("dim", padEndVisual(`─ ${title} `, width)));
@@ -315,11 +318,27 @@ function renderSidebar(snap: TuiSnapshot, width: number): string[] {
   sidebarField(lines, width, "隧道", tag.text, tag.color);
   sidebarField(lines, width, "运行", formatDuration(snap.uptimeMs));
   sidebarField(lines, width, "调用", `${formatCount(snap.calls)} · ✓ ${formatCount(snap.successes)} ✕ ${formatCount(snap.failures)}`, snap.failures > 0 ? "review" : "text");
-  const sessionPct = snap.maxSessions > 0 ? (snap.sessions / snap.maxSessions) * 100 : 0;
-  sidebarField(lines, width, "会话", `${snap.sessions}/${snap.maxSessions}${snap.sessionsActive > 0 ? ` · 活跃 ${snap.sessionsActive}` : ""}`, healthColor(sessionPct));
+  // No /64 cap: the session ceiling is developer knowledge; the operator
+  // only needs to know how many clients are connected right now.
+  sidebarField(lines, width, "会话", `${snap.sessions}${snap.sessionsActive > 0 ? ` · 活跃 ${snap.sessionsActive}` : ""}`);
   sidebarField(lines, width, "进程", `${snap.runningCommands.length}`);
   if (snap.serviceRows.length > 0) {
     sidebarField(lines, width, "服务", `${snap.serviceRows.filter(s => s.running).length}/${snap.serviceRows.length}`);
+  }
+  if (snap.changes !== undefined) {
+    sidebarField(lines, width, "变更", `+${formatCount(snap.changes.insertions)} -${formatCount(snap.changes.deletions)} · ${snap.changes.files} 文件`);
+  }
+
+  if (snap.todos.length > 0) {
+    // What the connected agent is working through, in its own words.
+    section("任务");
+    for (const todo of snap.todos) {
+      const mark = todo.status === "completed" ? paint("success", "✓")
+        : todo.status === "in_progress" ? paint("accent", spinnerFrame(spin))
+        : paint("dim", "·");
+      const titleColor: ColorName = todo.status === "in_progress" ? "text" : "dim";
+      lines.push(`${mark} ${paint(titleColor, truncateVisual(todo.title, Math.max(4, width - 3)))}`);
+    }
   }
 
   if (snap.runningCommands.length > 0) {
@@ -353,7 +372,7 @@ function renderWorkbench(
   const bodyRows = height - 4;
   const rows = Math.max(1, bodyRows - 1);
 
-  const sidebar = renderSidebar(snap, sidebarW).slice(0, bodyRows);
+  const sidebar = renderSidebar(snap, sidebarW, spin).slice(0, bodyRows);
   while (sidebar.length < bodyRows) sidebar.push("");
 
   const maxFirst = maxFirstVisible(snap.events.length, rows);

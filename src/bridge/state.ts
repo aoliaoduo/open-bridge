@@ -217,6 +217,12 @@ export const state = {
    * Never persisted, never loaded — construction IS the reset.
    */
   runtimeUsage: { calls: 0, successes: 0, failures: 0 },
+  /**
+   * The current task list (set_todos writes it alongside the persisted store;
+   * boot loads it back). The TUI sidebar reads this in-memory copy — the
+   * render path never touches storage.
+   */
+  todos: [] as Array<{ id: string; title: string; status: string }>,
   services: new Map<string, ServiceDefinition>(),
 };
 
