@@ -290,7 +290,7 @@ function renderFooter(snap: TuiSnapshot, width: number): string[] {
   // sidebar owns the counters and the tunnel; the footer owns the addresses —
   // the web console entry (the api-router loopback gate only answers the
   // local Host, so this is always the local address) and the MCP URL.
-  const line1 = padEndVisual(paint("muted", truncateVisual(`控制台 http://127.0.0.1:${snap.port}/console/`, width)), width);
+  const line1 = padEndVisual(paint("muted", truncateVisual(`控制台 http://127.0.0.1:${snap.port}/console`, width)), width);
   // One address per row: sharing truncated the MCP URL into "..." on small
   // screens — the one string an operator copies. The instruction row is gone
   // entirely; closing the window stops the serve, and the scroll keys surface
@@ -420,7 +420,7 @@ function renderSidebar(snap: TuiSnapshot, width: number, maxRows?: number): stri
     }
   }
 
-  const addrLines = wrapVisual(`控制台 http://127.0.0.1:${snap.port}/console/`, width)
+  const addrLines = wrapVisual(`控制台 http://127.0.0.1:${snap.port}/console`, width)
     .map(line => paint("muted", line));
 
   if (maxRows !== undefined) {

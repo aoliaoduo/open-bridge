@@ -243,7 +243,7 @@ test("renderFrame fills the exact geometry and shows the dashboard vocabulary", 
   assert.match(text, /✓/);
   assert.match(text, /57s…/); // live elapsed on the still-open invoke (now 60s - ts 3s)
   assert.doesNotMatch(text, /Ctrl\+C/, "closing the terminal window stops the serve; the hint is noise");
-  assert.match(text, /控制台 http:\/\/127\.0\.0\.1:8123\/console\//, "the web console entry rides the footer");
+  assert.match(text, /控制台 http:\/\/127\.0\.0\.1:8123\/console/, "the web console entry rides the footer");
   assert.match(text, /调用 7（✓ 6 ✕ 1）/, "counters are since-launch, not the persisted window");
   assert.match(text, /概览/);
 });
@@ -263,7 +263,8 @@ test("renderFrame pins addresses to the bottom of the sidebar in tall workbench 
   const plain = lines.map(stripAnsi);
   assert.equal(charAtColumn(plain[39] ?? "", 24), "│", "sidebar divider extends to the last row");
   assert.match(plain[38] ?? "", /控制台 http/, "the console entry is pinned to the bottom of the sidebar");
-  assert.match(plain[39] ?? "", /8123\/console\//, "console URL continuation on the last line");
+  assert.match(plain[39] ?? "", /8123\/console/, "console URL continuation on the last line");
+  assert.doesNotMatch(plain[39] ?? "", /console\//, "no trailing slash");
   assert.doesNotMatch(plain.join("\n"), /MCP http/, "MCP address is removed from the sidebar");
 });
 
@@ -281,7 +282,7 @@ test("renderFrame degrades gracefully on a small window", () => {
   }
   const text = lines.map(stripAnsi).join("\n");
   assert.match(text, /运行中/);
-  assert.match(text, /控制台 http:\/\/127\.0\.0\.1:8123\/console\//, "the console entry survives even the smallest window");
+  assert.match(text, /控制台 http:\/\/127\.0\.0\.1:8123\/console/, "the console entry survives even the smallest window");
 });
 
 test("workbench layout: exact geometry with a sidebar divider column", () => {
@@ -354,7 +355,8 @@ test("sidebar wraps web console URL within narrow sidebar width and omits MCP ad
   const plain = lines.map(stripAnsi);
   const sidebarLines = plain.slice(2, 30).map(l => l.split("│")[0]?.trimEnd() ?? "");
   const sidebarText = sidebarLines.join("\n");
-  assert.match(sidebarText, /控制台 http:\/\/127\.0\.0\.1:8123\/cons\nole\//);
+  assert.match(sidebarText, /控制台 http:\/\/127\.0\.0\.1:8123\/cons\nole/);
+  assert.doesNotMatch(sidebarText, /console\//);
   assert.doesNotMatch(sidebarText, /MCP https:/);
 });
 
