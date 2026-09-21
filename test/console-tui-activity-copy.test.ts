@@ -221,4 +221,42 @@ test("semantic hints for high-frequency tools are operator-friendly", () => {
     message: "Completed in 8 ms.",
     args_summary: buildArgsSummary({ pattern: "*.ts", path: "src" }),
   }), "*.ts (src)");
+
+  assert.equal(tuiActivityMessage({
+    tool: "workspace_brief",
+    status: "completed",
+    message: "Completed in 15 ms.",
+  }), "项目概况");
+
+  assert.equal(tuiActivityMessage({
+    tool: "review_changes",
+    status: "completed",
+    message: "Completed in 20 ms.",
+  }), "审查代码变更");
+
+  assert.equal(tuiActivityMessage({
+    tool: "get_todos",
+    status: "completed",
+    message: "Completed in 3 ms.",
+  }), "读取任务清单");
+
+  assert.equal(tuiActivityMessage({
+    tool: "edit_block",
+    status: "completed",
+    message: "Completed in 10 ms.",
+    args_summary: buildArgsSummary({ path: "src/app.ts", edits: [{ old_text: "a", new_text: "b" }, { old_text: "c", new_text: "d" }] }),
+  }), "src/app.ts (2 处修改)");
+
+  assert.equal(tuiActivityMessage({
+    tool: "list_directory",
+    status: "completed",
+    message: "Completed in 5 ms.",
+    args_summary: buildArgsSummary({ path: "." }),
+  }), ".");
+
+  assert.equal(tuiActivityMessage({
+    tool: "list_directory",
+    status: "completed",
+    message: "Completed in 5 ms.",
+  }), "列出目录");
 });

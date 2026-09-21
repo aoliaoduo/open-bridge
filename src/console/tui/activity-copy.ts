@@ -24,6 +24,18 @@ const BRIDGE_STARTED = /^Started:\s*https?:\/\//i;
 
 const MESSAGE_CAP = 56;
 
+const TOOL_LABELS: Record<string, string> = {
+  workspace_brief: "项目概况",
+  review_changes: "审查代码变更",
+  get_todos: "读取任务清单",
+  list_skills: "可用技能清单",
+  get_config: "读取系统配置",
+  get_usage_stats: "读取统计信息",
+  get_process_snapshot: "进程快照",
+  service_status: "服务状态",
+  list_directory: "列出目录",
+};
+
 /** Transport / process lifecycle rows stay in the log, not on the dashboard. */
 export function tuiActivityVisible(entry: ActivityLike): boolean {
   if (entry.tool === "mcp" || entry.tool === "process") return false;
@@ -46,6 +58,12 @@ export function tuiActivityMessage(entry: ActivityLike): string {
 
   const requestCommand = REQUEST_COMMAND.exec(raw);
   if (requestCommand) return clip(firstCommand(requestCommand[1] ?? ""));
+
+  if (TOOL_LABELS[entry.tool]) {
+    if (BOILER_REQUEST.test(raw) || BOILER_DONE.test(raw) || raw === "") {
+      return TOOL_LABELS[entry.tool]!;
+    }
+  }
 
   if (BOILER_REQUEST.test(raw) || BOILER_DONE.test(raw)) return "";
 
@@ -120,8 +138,16 @@ function hintFromSummary(summary: string | undefined, tool: string): string {
   const mode = quotedField(summary, "mode");
   const section = quotedField(summary, "section");
 
-  if (tool === "search_files" && query) return query;
+  const editsCount = arrayCount(summary, "edits");
+
+  if (tool === "search_files" && (query || pattern)) return (query ?? pattern)!;
   if (tool === "find_files" && pattern) return path ? `${pattern} (${path})` : pattern;
+  if (tool === "list_directory") return path || ".";
+  if (tool === "get_file_info" && path) return path;
+  if (tool === "edit_block") {
+    if (path && editsCount !== undefined) return `${path} (${editsCount} 处修改)`;
+    if (path) return path;
+  }
   if (tool === "file_op") {
     if ((op === "move" || op === "copy") && source && destination) {
       return `${op} ${source} → ${destination}`;
@@ -135,10 +161,14 @@ function hintFromSummary(summary: string | undefined, tool: string): string {
     if (action) return action;
     if (target) return target;
   }
+  if (tool === "save_service" && name) return `保存服务 ${name}`;
+  if (tool === "read_service_log" && name) return `服务日志 ${name}`;
   if (tool === "process_control") {
     if (action && cmdId) return `${action} ${cmdId.slice(0, 8)}`;
     if (action) return action;
   }
+  if (tool === "read_process_output" && cmdId) return `进程输出 ${cmdId.slice(0, 8)}`;
+  if (tool === "set_process_policy" && cmdId) return `重启策略 ${cmdId.slice(0, 8)}`;
   if (tool === "connectivity") {
     if (url) return url;
     if (port) return `port ${port}`;
@@ -163,6 +193,11 @@ function hintFromSummary(summary: string | undefined, tool: string): string {
   if (tool === "batch") {
     if (callsCount !== undefined) return `${callsCount} calls${mode ? ` (${mode})` : ""}`;
   }
+  if (tool === "run_script") {
+    const src = quotedField(summary, "source");
+    if (src) return firstCommand(src);
+    return "运行脚本";
+  }
   if (tool === "set_config_value") {
     if (key && value !== undefined) return `${key} = ${value}`;
     if (key) return key;
@@ -172,6 +207,11 @@ function hintFromSummary(summary: string | undefined, tool: string): string {
   if (tool === "apply_patch") {
     if (patchFile) return patchFile;
     return "inline patch";
+  }
+  if (tool === "notify") {
+    const notifyMsg = quotedField(summary, "message") ?? quotedField(summary, "title");
+    if (notifyMsg) return notifyMsg;
+    return "发送通知";
   }
 
   if (command) return firstCommand(command);
