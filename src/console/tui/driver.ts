@@ -170,13 +170,10 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
             return;
           }
           if (ch === "\t" || key?.name === "tab") {
-            // The one extra navigation: swap the wide panel between the
-            // activity stream and the full-width task view.
+            // The one navigation key: toggle the wide panel between the
+            // activity stream and the full-width task view. One key, both
+            // directions — Esc as a second way back was surplus.
             panelView = panelView === "tasks" ? "activity" : "tasks";
-            return;
-          }
-          if (panelView === "tasks" && key?.name === "escape") {
-            panelView = "activity"; // Esc closes the task view
             return;
           }
           const mapped = KEY_MAP[key?.name ?? ""];
