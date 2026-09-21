@@ -14,7 +14,7 @@
  */
 
 import { paint, healthColor, spinnerFrame, type ColorName } from "./theme.js";
-import { fillVisualWidth, stripAnsi, inlineText, truncateVisual, padEndVisual, padStartVisual, visualWidth, wrapVisual } from "./text.js";
+import { fillVisualWidth, stripAnsi, inlineText, truncateVisual, padEndVisual, padStartVisual, visualWidth, wrapVisual, wrapVisualSoft } from "./text.js";
 
 export type TuiEventStatus = "running" | "completed" | "error" | "progress" | "warning";
 
@@ -223,7 +223,7 @@ export function eventRows(
     event.status === "running"
       ? `${formatDuration(Math.max(0, now - Date.parse(event.at)))}…`
       : event.durationMs !== undefined
-        ? formatDuration(event.durationMs)
+        ? (event.durationMs < 1000 ? `${Math.round(event.durationMs)}ms` : formatDuration(event.durationMs))
         : "";
   const clock = formatClock(event.at);
   const mark = event.status === "running" ? spinnerFrame(spin)
@@ -236,7 +236,7 @@ export function eventRows(
   const prefixW = visualWidth(prefixPlain);
   const rightW = rightText === "" ? 0 : visualWidth(rightText);
   const msgWidth = Math.max(1, width - prefixW - (rightW > 0 ? rightW + 1 : 0));
-  const chunks = wrapVisual(message, msgWidth);
+  const chunks = wrapVisualSoft(message, msgWidth);
   if (chunks.length === 0) chunks.push("");
   return chunks.map((chunk, index) => {
     if (index === 0) {

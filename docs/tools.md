@@ -102,7 +102,7 @@
 
 同一份「必须有值」的契约覆盖所有带路径的工具：`write_file` / `edit_block` / `get_file_info` 的 `path`、`read_files` 的 `paths` 每一项，缺失或为空时一律 `Missing "path".` / `paths[0] must be a non-empty string.`。**不会有任何操作去写、改、删一个名叫 `undefined` 或 `null` 的文件**（这正是修之前的实际行为）。
 
-**set_todos** — 存**完整**任务列表（条目需 `id` / `title` / 合法 `status`）。多步工作的正式清单。
+**set_todos** — 存**完整**任务列表（条目需 `id` / `title` / 合法 `status`）。多步工作的正式清单；操作者 TUI「任务」面板只显示这里。开始前写入，推进时整表替换，不要留过期的 `in_progress`。
 
 **report_progress** — 报**瞬时**进度：写入活动日志并以 MCP `notifications/message` 推给客户端。`phase` 与 `category` 是**封闭词表**，表外取值会被丢掉；自由文本放进 `message`。
 

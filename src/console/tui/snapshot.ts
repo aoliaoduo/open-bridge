@@ -8,6 +8,7 @@
  */
 
 import { MAX_CAPTURED_OUTPUT } from "../../bridge/state.js";
+import { tuiActivityMessage, tuiActivityVisible } from "./activity-copy.js";
 import type { TuiEventStatus, TuiSnapshot } from "./render.js";
 
 export interface TuiStateView {
@@ -129,38 +130,40 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
   //      a pruned one degrades to a neutral marker with no invented time.
   const entries = view.activity.slice(0, MAX_EVENTS);
   const collected: Array<TuiSnapshot["events"][number] | null> = [];
-  const openByTool = new Map<string, { idx: number; startedAt: number }[]>();
+  const openByTool = new Map<string, { idx: number; startedAt: number; args_summary?: string }[]>();
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const entry = entries[i]!;
+    if (!tuiActivityVisible(entry)) continue;
     const ts = entry.ts ?? Date.parse(entry.at);
+    const message = tuiActivityMessage(entry);
 
     if (entry.tool === "process" && entry.status === "running") {
       const id = /^Started ([0-9a-f]{8,}):/.exec(entry.message)?.[1];
       const command = id === undefined ? undefined : view.commands.get(id);
       if (command === undefined) {
         // Pruned from the table: the fact stays, the animation does not.
-        collected.push({ at: entry.at, tool: entry.tool, status: "progress", message: entry.message });
+        collected.push({ at: entry.at, tool: entry.tool, status: "progress", message });
       } else if (command.done) {
         collected.push({
           at: entry.at,
           tool: entry.tool,
           status: "completed",
-          message: entry.message,
+          message,
           ...(command.endedAt !== undefined && Number.isFinite(command.endedAt) && command.endedAt >= command.startedAt
             ? { durationMs: command.endedAt - command.startedAt }
             : {}),
         });
       } else {
-        collected.push({ at: entry.at, tool: entry.tool, status: "running", message: entry.message });
+        collected.push({ at: entry.at, tool: entry.tool, status: "running", message });
       }
       continue;
     }
 
     if (entry.status === "running") {
       const queue = openByTool.get(entry.tool) ?? [];
-      if (Number.isFinite(ts)) queue.push({ idx: collected.length, startedAt: ts });
+      if (Number.isFinite(ts)) queue.push({ idx: collected.length, startedAt: ts, args_summary: entry.args_summary });
       openByTool.set(entry.tool, queue);
-      collected.push({ at: entry.at, tool: entry.tool, status: "running", message: entry.message });
+      collected.push({ at: entry.at, tool: entry.tool, status: "running", message });
       continue;
     }
     const pending = openByTool.get(entry.tool)?.shift();
@@ -169,7 +172,7 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
       at: entry.at,
       tool: entry.tool,
       status: toEventStatus(entry.status),
-      message: entry.message,
+      message: tuiActivityMessage({ ...entry, args_summary: entry.args_summary ?? pending?.args_summary }),
       ...(pending !== undefined && Number.isFinite(ts) && ts >= pending.startedAt
         ? { durationMs: ts - pending.startedAt }
         : {}),

@@ -21,6 +21,7 @@ import { killTunnelTree, loadNgrokAuthtoken, revertToLocalUrl, setInstanceRestar
 import { publishSelf, stopRepublishLoop, withdrawSelf } from "./peer-registry.js";
 import { startHttpInternal, stopLocalServer } from "./http-listener.js";
 import { stopSessionPruneLoop } from "./session-table.js";
+import { flushSessionTickets } from "./session-store.js";
 import { clearNotifyLedger } from "./notify.js";
 
 async function startInternal(): Promise<void> {
@@ -132,6 +133,7 @@ async function stopInternal(notify = true): Promise<void> {
   await withdrawSelf();
   const transportCloses = [...state.sessions.values()].map(session => Promise.resolve(session.transport.close()));
   await Promise.allSettled(transportCloses);
+  await flushSessionTickets();
   state.sessions.clear();
   state.latestSession = undefined;
   // Same reset the session table gets: a stopped Bridge must not carry a

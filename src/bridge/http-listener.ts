@@ -10,36 +10,24 @@
  */
 import { host } from "../host/host.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { randomBytes } from "node:crypto";
 import * as path from "node:path";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { classifyInboundRequest } from "@modelcontextprotocol/server";
 import { bridgeTokenFromPath, findPeerIn, proxyToPeer } from "../http/peers.js";
 import { bridgeAllowedHosts, isAllowedBridgeHost } from "../http/request-policy.js";
 import { authorizeRequest } from "../http/auth.js";
-import { record, state, type SessionState } from "./state.js";
+import { record, state } from "./state.js";
 import { exchangeLine, isNoteworthy, traceId, tracedFormat, tracedMethod, type TracedEra } from "./request-trace.js";
 import { root } from "./paths.js";
 import { buildServeTitle, clearServeConsoleTitle, installServeConsoleTitle } from "./console-title.js";
-import { loadTodoStore } from "./todo-store.js";
-import { createMcp, headerValue, modernNodeHandlerOf, sharedEventStore } from "./mcp-endpoint.js";
+import { headerValue, modernNodeHandlerOf } from "./mcp-endpoint.js";
 import { currentExtraRouteHandler, notifyLocalServerReady } from "./route-hooks.js";
-import { makeRoomForSession, pruneSessions, startSessionPruneLoop } from "./session-table.js";
+import { pruneSessions, startSessionPruneLoop } from "./session-table.js";
 import { legacySessionProblem } from "./session-guidance.js";
+import { openLegacySession, resumeLegacySession } from "./session-resume.js";
+import { touchSessionTicket } from "./session-store.js";
 import { publishSelf, readablePeerFiles, startRepublishLoop } from "./peer-registry.js";
 import { selfProbe } from "./self-probe.js";
 import { readJsonBody } from "../http/request-body.js";
-
-/** Ensure one slot is free before creating a session; false when all are busy. */
-/**
- * clientInfo from the initialize request that is about to create a session.
- *
- * The session object is built inside `onsessioninitialized`, which never sees
- * the parsed body, so the label travels through this variable. Single-threaded
- * request handling makes that safe: it is written and consumed within one
- * handleRequest() call.
- */
-let pendingClientLabel: string | undefined;
 
 function clientLabelFrom(body: unknown): string | undefined {
   const info = (body as { params?: { clientInfo?: { name?: unknown; version?: unknown } } } | undefined)
@@ -348,14 +336,23 @@ export async function startHttpInternal(): Promise<void> {
         return;
       }
 
+      // A restarted (or capacity-evicted) Bridge still has the ticket for an
+      // id it issued. Rebuild the in-memory transport under that id so the
+      // client does not have to handshake again. Never-issued ids fall through
+      // to the 404 below. initialize always mints; it is the way to get a new id.
+      const requestMethod = typeof (parsedBody as { method?: unknown } | undefined)?.method === "string"
+        ? String((parsedBody as { method: string }).method)
+        : undefined;
+      if (!session && sessionId && requestMethod !== "initialize") {
+        session = await resumeLegacySession(sessionId, allowedHosts);
+      }
+
       // Legacy traffic that arrives without a live session: name which of the two
       // failures this is, instead of handing it to the transport for the one
       // opaque refusal it gives both. See session-guidance.ts for why that
       // distinction is the fix and not a nicety.
       const legacyProblem = legacySessionProblem({
-        method: typeof (parsedBody as { method?: unknown } | undefined)?.method === "string"
-          ? String((parsedBody as { method: string }).method)
-          : undefined,
+        method: requestMethod,
         hasSessionId: Boolean(sessionId),
         known: Boolean(session),
       });
@@ -380,52 +377,16 @@ export async function startHttpInternal(): Promise<void> {
       }
 
       if (!session) {
-        if (!makeRoomForSession()) {
+        // Only an initialize reaches here without a live session (the expired
+        // case 404'd above). The client label is read off this body because
+        // onsessioninitialized never sees it.
+        const opened = await openLegacySession({ allowedHosts, clientLabel: clientLabelFrom(parsedBody) });
+        if (!opened) {
           if (!res.headersSent) res.writeHead(503, { ...securityHeaders, "content-type": "application/json" });
           res.end(JSON.stringify({ error: "Bridge session capacity reached. Close an existing MCP session and retry." }));
           return;
         }
-        // Only an initialize mints a session, and only then is there a client
-        // name to show: the console prints "cursor/0.42 · 空闲 2 分钟" instead of
-        // a bare count. onsessioninitialized below never sees the parsed body,
-        // so the label is handed over here — same call, same tick.
-        pendingClientLabel = clientLabelFrom(parsedBody);
-        const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomBytes(16).toString("hex"),
-          enableDnsRebindingProtection: true,
-          allowedHosts,
-          eventStore: sharedEventStore,
-          // SSE keep-alive comment frames every 15 s so proxies (ngrok edge
-          // included) do not reap idle streams; retryInterval hints clients to
-          // reconnect after 2 s (ShunCode parity).
-          keepAliveMs: 15_000,
-          retryInterval: 2_000,
-          onsessioninitialized: id => {
-            // The SDK only invokes this while handling a request — i.e. after
-            // `session = newSession` below — so the reference is always
-            // assigned here. The `!` is deliberate: if the SDK ever fired it
-            // during construction, the resulting TypeError is the honest
-            // failure, where a silent skip would drop the session from the
-            // table and leak its transport.
-            state.sessions.set(id, session!);
-            pruneSessions();
-            // Keep the panel's session count live instead of ≤30 s stale.
-            host().ui.update();
-          },
-        });
-        transport.onclose = () => {
-          if (transport.sessionId) {
-            state.sessions.delete(transport.sessionId);
-            host().ui.update();
-          }
-        };
-        const persisted = loadTodoStore();
-        const persistedTodos = Array.isArray(persisted.todos) ? persisted.todos.map(t => (t !== null && typeof t === "object" ? { ...t as object } : t)) : [];
-        const newSession: SessionState = { transport, lastUsed: Date.now(), connectedAt: Date.now(), calls: 0, client: pendingClientLabel, todos: persistedTodos, activeRequests: 0 };
-        session = newSession;
-        const mcpServer = createMcp(newSession);
-        newSession.mcp = mcpServer as unknown as NonNullable<SessionState["mcp"]>;
-        await mcpServer.connect(transport);
+        session = opened;
       }
       session.lastUsed = Date.now();
       state.latestSession = session;
@@ -435,6 +396,8 @@ export async function startHttpInternal(): Promise<void> {
       } finally {
         session.activeRequests = Math.max(0, session.activeRequests - 1);
         session.lastUsed = Date.now();
+        const id = session.transport.sessionId;
+        if (id) touchSessionTicket(id);
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);

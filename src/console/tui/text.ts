@@ -167,6 +167,40 @@ export function wrapVisual(text: string, width: number): string[] {
   return lines;
 }
 
+/** Prefer breaking on spaces and path separators so a wrapped command stays readable. */
+export function wrapVisualSoft(text: string, width: number): string[] {
+  if (width <= 0) return [""];
+  if (visualWidth(text) <= width) return [text];
+  const lines: string[] = [];
+  let rest = text;
+  while (rest.length > 0) {
+    if (visualWidth(rest) <= width) {
+      lines.push(rest);
+      break;
+    }
+    let used = 0;
+    let cut = 0;
+    let lastBreak = 0;
+    for (const ch of rest) {
+      const w = visualWidth(ch);
+      if (used + w > width) break;
+      used += w;
+      cut += ch.length;
+      if (/[\s/\\-_]/.test(ch)) lastBreak = cut;
+    }
+    if (cut === 0) {
+      const ch = [...rest][0] ?? "";
+      lines.push(ch);
+      rest = rest.slice(ch.length);
+      continue;
+    }
+    const keep = lastBreak > 0 ? lastBreak : cut;
+    lines.push(rest.slice(0, keep).trimEnd());
+    rest = rest.slice(keep).trimStart();
+  }
+  return lines.length > 0 ? lines : [""];
+}
+
 export function fillVisualWidth(ch: string, width: number): string {
   const w = visualWidth(ch);
   if (w <= 0 || width <= 0) return "";

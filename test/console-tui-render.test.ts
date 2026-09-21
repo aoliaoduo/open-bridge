@@ -205,7 +205,7 @@ test("invoke rows retire against outcome rows that carry no args summary", () =>
   assert.equal(snap.events[1]?.durationMs, 1000);
 });
 
-test("process Started rows resolve their truth from the command table", () => {
+test("process lifecycle rows stay off the dashboard", () => {
   const base = {
     ...fixtureView(),
     activity: [
@@ -219,12 +219,7 @@ test("process Started rows resolve their truth from the command table", () => {
     ["aaaa0000bbbb2222", { id: "aaaa0000bbbb2222", command: "finished one", done: true, startedAt: 1000, endedAt: 3500, output: { state: () => ({ totalBytes: 1, capacityBytes: 1 }) } }],
   ]);
   const snap = buildSnapshot(base, { version: "v", rootName: "r", logPath: "l", now: 60_000 });
-  assert.equal(snap.events[0]?.status, "running", "a live process keeps its spinner");
-  assert.equal(snap.events[0]?.durationMs, undefined, "a lifecycle row never shows a paired-call duration");
-  assert.equal(snap.events[1]?.status, "completed", "a finished process shows its real lifetime");
-  assert.equal(snap.events[1]?.durationMs, 2500);
-  assert.equal(snap.events[2]?.status, "progress", "a pruned process degrades to a neutral marker");
-  assert.equal(snap.events[2]?.durationMs, undefined);
+  assert.equal(snap.events.some(event => event.tool === "process"), false);
 });
 
 test("renderFrame fills the exact geometry and shows the dashboard vocabulary", () => {
@@ -403,24 +398,24 @@ test("workbench panel follows the tail and reports history when scrolled", () =>
   assert.doesNotMatch(scrollText, /tool_29 /, "events above the view are not shown");
 });
 
-test("activity messages wrap instead of dropping their tail", () => {
+test("activity messages wrap on spaces instead of dropping their tail", () => {
   const snap = buildSnapshot(fixtureView(), {
     version: "1.0.0-rc.2",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
   });
-  const token = "WRAP_TOKEN_TAIL_NOT_ELLIPSIS";
+  const token = "WRAPTOKENTAILNOTELLIPSIS";
   snap.events = [{
     at: new Date(60_000).toISOString(),
-    tool: "bridge",
-    status: "completed",
-    message: `Started: https://example.invalid/mcp/${"abcd".repeat(40)}${token}`,
+    tool: "write_file",
+    status: "error",
+    message: `cannot write ${"subdir/".repeat(12)}${token}`,
   }];
   const metrics = panelScrollMetrics(snap, { width: 110, height: 30, panelView: "activity", now: 60_000 });
   assert.ok(metrics.totalRows > 1, "a long live line becomes several viewport rows");
   const top = renderFrame(snap, { width: 110, height: 30, now: 60_000, panelView: "activity", firstVisible: 0 }).map(stripAnsi).join("\n");
-  assert.doesNotMatch(top, /example\.invalid\/mcp\/\.\.\./, "the URL is not amputated with ...");
+  assert.match(top, /cannot write/, "the reason stays on the first rows");
   const bottom = renderFrame(snap, {
     width: 110, height: 30, now: 60_000, panelView: "activity",
     firstVisible: Math.max(0, metrics.totalRows - metrics.rows),

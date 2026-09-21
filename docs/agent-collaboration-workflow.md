@@ -50,7 +50,7 @@
 
 ### 长任务与恢复
 
-多步工作用 `set_todos` 维护完整清单，`report_progress` 报瞬时进度；相关调用使用
+多步工作开始前用 `set_todos` 写下完整清单，推进时整表替换（操作者 TUI「任务」只显示这份清单，不写就等于停了）；`report_progress` 报瞬时进度，不能代替清单。相关调用使用
 `batch` 或 `run_script`，仍须返回必要事实。构建、测试等长命令使用
 `run_command{background:true}`；构建加 `resource_keys:["build:dist"]`，保存 `command_id`，
 以 `wait` / `read_process_output` 续读。前台超时不会杀进程。

@@ -9,9 +9,7 @@ import { host } from "../host/host.js";
 import { MAX_SESSIONS, state } from "./state.js";
 import { pruneCommands } from "./processes.js";
 import { finishNoticeTick } from "./notify.js";
-
-/** Idle MCP sessions are reclaimed after this long without activity. */
-const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
+import { forgetSessionTicket, pruneSessionTickets, SESSION_IDLE_TIMEOUT_MS } from "./session-store.js";
 
 /** How often the idle-session reclamation sweep runs. */
 const SESSION_PRUNE_INTERVAL_MS = 60_000;
@@ -35,6 +33,7 @@ export function pruneSessions(): void {
   for (const [id, session] of state.sessions) {
     if (session.activeRequests === 0 && session.lastUsed < idleCutoff) {
       state.sessions.delete(id);
+      forgetSessionTicket(id);
       void session.transport.close();
       prunedAny = true;
     }
@@ -44,6 +43,7 @@ export function pruneSessions(): void {
     if (!evictOldestIdleSession()) break; // every session is mid-request; leave them alone
     prunedAny = true;
   }
+  pruneSessionTickets();
   if (prunedAny) host().ui.update();
 }
 

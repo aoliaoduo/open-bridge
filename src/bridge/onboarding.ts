@@ -36,9 +36,12 @@ export function buildWebAiPrompt(inputs: WebAiPromptInputs): string {
   // Plain strings for the fixed tail: a template literal that spans lines can
   // silently swallow its own continuation, and tsc has nothing to complain about.
   const instruction = "快速连接这个 MCP（URL），明确使用规则，熟悉可用工具，做好处理接下来一系列工作的准备。";
+  // The operator's TUI task panel is this list and nothing else. A web AI
+  // that never calls set_todos leaves the panel stuck on the previous session.
+  const todoNote = "多步工作一开始就用 set_todos 写下完整清单，推进时整表替换（操作者的 TUI 任务面板只显示这份清单）；瞬时进度用 report_progress，不能代替清单。";
   // Public tunnels (ngrok's free edge in particular) drop mid-session and come
   // back. A client that treats the first SSL EOF as a hard failure reports a
   // working tool as broken, so the prompt says what to do about it.
   const transportNote = "若遇到传输层报错（SSL EOF、连接被重置或超时），等 5 秒后重试一次；这不是工具失败。";
-  return `${localNote}【${inputs.url}】${authNote}\n\n${instruction}\n${transportNote}`;
+  return `${localNote}【${inputs.url}】${authNote}\n\n${instruction}\n${todoNote}\n${transportNote}`;
 }

@@ -8,8 +8,9 @@
  *
  *  - the client never handshook (send `initialize` first), and
  *  - the client handshook against a session that no longer exists: the Bridge
- *    restarted, the session was reaped while it sat idle, or this URL now points
- *    at a different instance (send `initialize` again; the old id stays dead).
+ *    id was never issued, idle-expired, or belongs to a different workspace
+ *    (send `initialize` again). A restart of the same Bridge does not 404 an id
+ *    it issued: the ticket is persisted and the transport is rebuilt on arrival.
  *
  * From the outside those are the same three words, and the natural reading of
  * them is "this endpoint is broken" — the one conclusion that leads nowhere.
@@ -65,9 +66,9 @@ export function legacySessionProblem(input: {
       code: -32001,
       reason: "session-expired",
       message: "This request's mcp-session-id is not a live session on this Bridge.",
-      hint: "Sessions live in memory only, so a restart, an idle reap or a different "
-        + "instance behind the same URL drops them. Send initialize again to get a new id, then "
-        + "repeat this request with it — the old id does not come back.",
+      hint: "This session id was never issued by this Bridge, or it idle-expired. "
+        + "Send initialize to get a new id, then repeat this request with it. "
+        + "A restart does not drop an id this Bridge issued: retry the same id first.",
     };
   }
   return {
