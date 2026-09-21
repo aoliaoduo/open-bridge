@@ -148,7 +148,12 @@ test("buildSnapshot counts live state and shows the full MCP URL", () => {
   assert.equal(snap.todos.length, 4, "the task list rides along for the panel");
   assert.equal(snap.todos[1]?.title, "接入任务列表");
   assert.equal(snap.todosTotal, 4, "the count stays honest beyond the render cap");
-  assert.equal(snap.changes, undefined, "no workspace changes passed — the row stays hidden");
+  assert.equal(snap.changes, undefined, "no workspace changes passed — the renderer names it 非 git");
+  const clean = buildSnapshot(fixtureView(), {
+    version: "v", rootName: "r", logPath: "l", now: 60_000,
+    workspaceChanges: { files: 0, insertions: 0, deletions: 0 },
+  });
+  assert.deepEqual(clean.changes, { files: 0, insertions: 0, deletions: 0 }, "a clean tree carries an all-zero summary, not absence");
   assert.equal(snap.tunnel, "local");
   // Operator's call: the full address, token included — the startup banner
   // and `open-bridge url` print it in full; a redacted copy is unusable for
@@ -312,6 +317,17 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   assert.match(joined, /任务\s+4（1 进行中）/, "a one-line summary replaces the truncated section");
   assert.match(joined, /Tab 任务/, "the activity panel title points at the task view");
   assert.match(joined, /\+53 -18 · 2 文件/, "workspace changes since the last commit");
+  // The row is a permanent resident: clean reads as 干净 and a workspace
+  // without git is named — a missing row cannot say which state it is in.
+  const cleanSnap = buildSnapshot(fixtureView(), {
+    version: "1.0.0-rc.2", rootName: "open-bridge", logPath: "C:/x/bridge.log", now: 60_000,
+    workspaceChanges: { files: 0, insertions: 0, deletions: 0 },
+  });
+  assert.match(renderFrame(cleanSnap, { width: 110, height: 30, now: 60_000 }).map(stripAnsi).join("\n"), /变更\s+干净/, "a clean tree keeps the row, reading 干净");
+  const noGitSnap = buildSnapshot(fixtureView(), {
+    version: "1.0.0-rc.2", rootName: "open-bridge", logPath: "C:/x/bridge.log", now: 60_000,
+  });
+  assert.match(renderFrame(noGitSnap, { width: 110, height: 30, now: 60_000 }).map(stripAnsi).join("\n"), /变更\s+非 git/, "no git is named honestly, never silently hidden");
   assert.match(joined, /会话\s+2 · 活跃 1/);
   assert.doesNotMatch(joined, /\/64/, "the session cap is developer knowledge");
   assert.match(plain[28] ?? "", /控制台 http/, "the console entry on the second-to-last row");

@@ -126,7 +126,12 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
             if (buf.byteLength <= 512 * 1024) insertions += Math.max(1, buf.toString("utf8").split("\n").length);
           } catch { /* deleted between status and read */ }
         }
-        workspaceChanges = entries.length > 0 ? { files: entries.length, insertions, deletions } : undefined;
+        // Clean tree carries an all-zero summary (the sidebar row is a
+        // permanent resident reading 干净); undefined is reserved for
+        // "no git / not a repository", which renders as 非 git.
+        workspaceChanges = entries.length > 0
+          ? { files: entries.length, insertions, deletions }
+          : { files: 0, insertions: 0, deletions: 0 };
       })().catch(() => {
         workspaceChanges = undefined;
       });

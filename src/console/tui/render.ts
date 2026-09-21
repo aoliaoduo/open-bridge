@@ -331,7 +331,14 @@ function renderSidebar(snap: TuiSnapshot, width: number): string[] {
   if (snap.serviceRows.length > 0) {
     sidebarField(lines, width, "服务", `${snap.serviceRows.filter(s => s.running).length}/${snap.serviceRows.length}`);
   }
-  if (snap.changes !== undefined) {
+  // A permanent resident: the row answers "is there uncommitted work?" and a
+  // missing row cannot say whether that means clean or not-watching. Clean
+  // reads as 干净; a workspace without git is named honestly, not faked.
+  if (snap.changes === undefined) {
+    sidebarField(lines, width, "变更", "非 git", "dim");
+  } else if (snap.changes.files === 0 && snap.changes.insertions === 0 && snap.changes.deletions === 0) {
+    sidebarField(lines, width, "变更", "干净", "dim");
+  } else {
     sidebarField(lines, width, "变更", `+${formatCount(snap.changes.insertions)} -${formatCount(snap.changes.deletions)} · ${snap.changes.files} 文件`);
   }
 
