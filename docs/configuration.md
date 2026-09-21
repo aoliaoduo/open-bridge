@@ -86,6 +86,7 @@ The frontend router owns these paths (`ui/src/routes.ts`); the server returns th
 - **CORS headers go to `/mcp`, `/oauth` and `/.well-known` only** — never to `/api`, `/console` or `/healthz`. The console is same-origin and never needed CORS, while three read-only `/api` endpoints return this instance's MCP address, **route token included** (`settings` in `state.mcpUrl`, `prompt` in its text, and `status`). One `Access-Control-Allow-Origin: *` would let any page open in your browser read it locally — the loopback check cannot stop a page inside the same browser, and private-network rules are vendor policy rather than specification.
 - Every write requires an `X-Open-Bridge-Console` header matching the route token. The server injects it into the page; a cross-site page can neither read nor send it.
 - **The bearer gate is off by default** to preserve URL-only client access. Enable individually issued credentials from the Security page: issue a token and flip the switch, or use **"issue a token and enable the gate"** to do both at once (an existing token is reused; the plaintext is shown once). With the gate on and no valid token, it **fails closed**. The local console can always turn it back off, so you cannot lock yourself out.
+- Issued tokens are permanent unless a lifetime is configured: `auth.tokenTtlSeconds` (default `0` = never expire, ceiling 2^31) applies to newly minted tokens.
 - **Publicly reachable means whoever has the URL can read and write your files and run commands.** The app will not quietly restrict your permissions, but it says this everywhere: `status`, the console, `health`, and the startup banner. To tighten it, enable the bearer gate — or run `--no-tunnel` and stay local.
 
 > The full threat model, the three exposure levels, and **what is deliberately left unlocked** (`unrestrictedFileAccess` defaults on, exit codes are not verdicts, behaviour hints are information rather than limits) are in [`SECURITY.md`](../SECURITY.md), which is also where vulnerability reports go.
@@ -107,6 +108,7 @@ The settings page does the same thing. Once on, a client discovers the server at
 - **`resource` is required and must be this host**, otherwise a token issued here could be replayed against another service (RFC 8707).
 - **Refresh tokens rotate once.** A used refresh token is dead immediately, so a replay buys nothing.
 - OAuth exposes metadata, authorize, register, token and revoke endpoints publicly. `/api` and `/console` remain loopback-only, and what the console reads (`/api/oauth`) contains **no secrets or digests**.
+- `oauth.allowedRedirectHosts` (default `[]` = the built-in list) adds extra redirect hosts a dynamically registered client may use.
 
 ---
 
@@ -187,6 +189,7 @@ open-bridge serve                 # note: without --no-tunnel; --open is optiona
 - Account/domain quotas are determined by ngrok. **One reserved domain can only be held by one instance at a time**. You do not have to stop the instance already holding it: the local instance registry (`bridge-peers.json`) is shared, so the tunnel holder looks up the token digest and forwards to the right instance. A new instance appends its row to the **existing** registry — it never fabricates one in someone else's directory — public requests arrive through that tunnel, `tunnel_role` reads `follower`, and the console notes that this address depends on another instance. When the holder exits, the next probe promotes this instance to `owner`.
 - Claiming a domain is deliberately cautious: **only an explicit "nobody holds this" from ngrok counts as free**. Timeouts and 5xx mean "unknown" and it keeps watching. On `ERR_NGROK_334` (already taken) the instance serves locally, keeps watching that tunnel, and switches to `follower` the moment it sees traffic forwarded to it — it neither wedges itself nor starts a second ngrok to fight the first.
 - A missing or misspelled domain produces a clear error such as `ERR_NGROK_313`; the local service is unaffected.
+- Knobs: `ngrokUseHttpProxy` (default `true`) sends the ngrok agent through the system HTTP proxy; `publicHealthTimeoutMs` (default 20000) bounds the public-URL health check; `autoReconnect` (default `true`) re-dials the tunnel after a drop.
 
 ---
 
@@ -209,6 +212,7 @@ open-bridge serve                 # without --no-tunnel
 - The CLI is found the way ngrok's is: `tailscaleExecutable` wins when set, otherwise PATH, otherwise the MSI's default install dir (`C:\Program Files\Tailscale\tailscale.exe` — the MSI does not put `tailscale` on PATH, so on Windows this fallback is the common case, not a curiosity). Leave the setting empty to let the resolver decide.
 - **Bridge instances share the HTTPS 443 mount.** This implementation uses 443 and the daemon keeps one mount per port, so two Bridge instances in tailscale mode cannot both hold it — and no longer try: the second instance reads the daemon's mount (`funnel status --json`, whose backend port is the holder's listener), finds a live holder behind it and FOLLOWS it rather than replacing it. The two addresses still both work: the holder's listener looks the other instance's token up in the shared registry (`bridge-peers.json`) and forwards to it — the same mechanism the ngrok section describes, and the reason that registry is shared. When the mount is released — the holder stopped, or died without running `funnel off` and left a mount pointing at a dead port — the follower's watch (same cadence and same two-round rule as ngrok) claims it and becomes the owner. The one asymmetry left with ngrok is deliberate: an OWNER does not watch its own mount. ngrok's tunnel is a child process this instance owns, so its exit arms a reconnect; the funnel mount is daemon-side state that outlives this process, and nothing in-process notices if the daemon loses it — `Start`, or a provider switch, rebuilds it.
 - Tailscale not installed or not logged in? The start logs `tailscale status failed` and the instance stays local-only; the error names the cause.
+- `sharedPeerRegistry` (default `""`) points at an explicit peer-registry file instead of the discovered one; leave it empty unless a peer's registry lives outside the standard data directories.
 
 ---
 
@@ -221,7 +225,19 @@ Notifications are deliberately limited to two moments that genuinely need a pers
 - Task completion and ordinary progress never notify the phone. The server does retain one conservative fallback for an agent that forgets to announce an ending, but it waits **ten full minutes** of quiet activity first; it never repeats.
 - When an agent asks a blocking question it sends `waiting` once; on a genuine ending it sends `finished` once.
 - The key only goes one way: the console and `get_config` show a mask; the audit and runtime logs never contain it. `notify.serverUrl` can point at a self-hosted Bark (plain http is allowed on loopback only).
-- A configured local sound uses the same two-event, once-per-episode rule and does not require Bark.
+- A configured local sound uses the same two-event, once-per-episode rule and does not require Bark; its keys are `sound.enabled` (default `false`), `sound.fileWaiting` and `sound.fileFinished` (empty = unset).
+- Config keys: the pasted link fills `notify.barkKey`, and `notify.enabled` (default `true`) is only a mute switch — an unset key is already off.
+
+---
+
+## Shell, concurrency and tool surface
+
+Knobs without a settings card; set them with `open-bridge config set` or the config file.
+
+- `shellPath` / `shellArgs` (defaults `""` / `[]`) override the shell behind `run_command`, `open_shell` and `run_script`; empty means the platform default — the bundled Git Bash on Windows.
+- `concurrency.enabled` (default `true`) turns the one-caller queue on; `concurrency.holdTimeoutMs` (default 300000) bounds how long a call may hold the slot, `concurrency.waitTimeoutMs` (default 120000) how long the next caller waits in line.
+- `toolProfile` (default `"full"`; the other value is `"core"`) selects which tools `tools/list` advertises.
+- `allowedDirectories` (default `[]`) matters only when `unrestrictedFileAccess` is off: file tools are then limited to the workspace root plus these absolute directories (the Settings page exposes the same list, one per line).
 
 ---
 
