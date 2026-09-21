@@ -403,16 +403,17 @@ function taskPanelRows(snap: TuiSnapshot, width: number, spin: number): string[]
   const rows: string[] = [];
   const gutter = Math.max(visualWidth("✓"), visualWidth("·"), visualWidth(spinnerFrame(spin))) + 1;
   for (const todo of snap.todos) {
+    const isCurrent = todo.status === "in_progress";
     const mark = todo.status === "completed" ? paint("success", "✓")
-      : todo.status === "in_progress" ? paint("accent", spinnerFrame(spin))
+      : isCurrent ? paint("accent", spinnerFrame(spin), { bold: true })
       : paint("dim", "·");
-    const titleColor: ColorName = todo.status === "in_progress" ? "text" : "dim";
+    const titleColor: ColorName = isCurrent ? "text" : "dim";
     // A title may contain real line breaks. They must become viewport rows,
     // never embedded terminal newlines that escape the frame's height budget.
     const wrapped = stripAnsi(todo.title).replace(/\r\n?/g, "\n").split("\n")
       .flatMap(line => wrapVisual(inlineText(line.replace(/\t/g, "    ")), Math.max(1, width - gutter)));
     wrapped.forEach((line, index) => {
-      rows.push(`${index === 0 ? padEndVisual(mark, gutter) : " ".repeat(gutter)}${paint(titleColor, line)}`);
+      rows.push(`${index === 0 ? padEndVisual(mark, gutter) : " ".repeat(gutter)}${paint(titleColor, line, { bold: isCurrent })}`);
     });
     rows.push("");
   }
@@ -525,9 +526,26 @@ function renderPanel(
   const listView = tasksView || changesView;
   // Scroll position only: Tab still cycles the views, but the title no longer
   // advertises the next page (「Tab 任务」 read as the current view).
-  let hint = listView
-    ? content.length > rows ? `${first + 1}-${Math.min(first + rows, content.length)}/${content.length} 行` : ""
-    : first > 0 ? `↑${first} 行 · Home 回顶` : "";
+  let hint = "";
+  if (tasksView && snap.todosTotal > 0) {
+    const completed = snap.todos.filter(t => t.status === "completed").length;
+    const inProgress = snap.todos.filter(t => t.status === "in_progress").length;
+    const pct = Math.round((completed / snap.todosTotal) * 100);
+    const scrollInfo = content.length > rows ? `${first + 1}-${Math.min(first + rows, content.length)}/${content.length} 行` : "";
+    if (content.length > rows) {
+      hint = `${completed}/${snap.todosTotal} · ${scrollInfo}`;
+      if (visualWidth(title) + visualWidth(hint) > width) hint = scrollInfo;
+    } else {
+      hint = `${bar(pct, 8)} ${pct}% · ${completed}/${snap.todosTotal} 完成${inProgress > 0 ? ` · ${inProgress} 进行中` : ""}`;
+      if (visualWidth(title) + visualWidth(hint) > width) {
+        hint = `${pct}% · ${completed}/${snap.todosTotal}`;
+      }
+    }
+  } else if (listView) {
+    hint = content.length > rows ? `${first + 1}-${Math.min(first + rows, content.length)}/${content.length} 行` : "";
+  } else {
+    hint = first > 0 ? `↑${first} 行 · Home 回顶` : "";
+  }
   if (visualWidth(title) + visualWidth(hint) > width) hint = "";
   if (visualWidth(title) + visualWidth(hint) > width) title = `${label} `;
   const titleWidth = Math.max(1, width - visualWidth(hint));

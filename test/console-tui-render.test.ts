@@ -9,7 +9,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { charAtColumn, fillVisualWidth, setAmbiguousWideForTests, stripAnsi, visualWidth, truncateVisual, padEndVisual } from "../src/console/tui/text.js";
-import { paint } from "../src/console/tui/theme.js";
 import { healthColor, paint } from "../src/console/tui/theme.js";
 import { advanceScroll, formatDuration, formatBytes, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
 import { buildSnapshot, type TuiStateView } from "../src/console/tui/snapshot.js";
@@ -350,6 +349,8 @@ test("task view: Tab swaps the wide panel and shows full titles", () => {
   const text = lines.map(stripAnsi).join("\n");
   assert.match(text, /─ 任务 \(4\)/, "the wide panel belongs to the tasks");
   assert.doesNotMatch(text, /Tab 任务|Tab 变更|Tab 返回活动|Tab 活动/, "the title row does not advertise the Tab cycle");
+  assert.match(text, /25% · 1\/4 完成 · 1 进行中/, "heading displays completion percentage and status breakdown");
+  assert.ok(lines.some(line => line.includes("\x1b[1m") && line.includes("接入任务列表")), "in-progress task is painted bold");
   assert.match(text, /✓ 验证 TUI 布局/);
   assert.match(text, /接入任务列表/);
   assert.match(text, /· 清理收尾/);
