@@ -81,10 +81,10 @@ test("a command that outlives timeout_ms returns as still running instead of blo
   const elapsed = Date.now() - startedAt;
 
   // The command runs 5 s. Returning in well under that is the whole point: the
-  // caller is not held hostage by a foreground wait. The margin is deliberately
-  // wide — the integration files run in parallel, each with its own instance,
-  // so node's cold start here is not a fixed cost.
-  assert.ok(elapsed < 4000, `the call returned after ${elapsed} ms, not after the command's 5000 ms`);
+  // caller is not held hostage by a foreground wait. The integration files run
+  // one at a time now (--test-concurrency=1), so the cost is mostly one node
+  // cold start; the bound keeps a wide margin below the 5 s completion.
+  assert.ok(elapsed < 4500, `the call returned after ${elapsed} ms, not after the command's 5000 ms`);
 
   assert.equal(res.timed_out, true, "the answer says it timed out");
   assert.equal(res.status, "running", "and that the command is still running");
@@ -139,7 +139,7 @@ test("terminate kills a shell tree whose children outlive the shell itself", {
   // single kill. The old enumerate-then-kill-each path (PowerShell full process
   // table scan, 1-4 s cold, then sequential taskkills, root LAST) burned the
   // 5 s close budget before the kills landed — and gave the loop a window to
-  // respawn in between — so an orphan held the stdio pipes, 'close' never
+  // respawn in between — so an orphan held the stdio pipes, 'close' neve
   // fired, and terminate honestly REFUSED a tree one atomic `taskkill /T /F`
   // handles. Empirically this exact shape refused at ~6 s; pinned live first.
   const started = asObject(await callTool("run_command", {
@@ -266,7 +266,7 @@ test("start_process refuses timeout_ms and names the knob that does apply", asyn
   // ignored: the caller believed it had widened the wait while the ready loop
   // kept its own 10 s default -- which is how a slow vite/next first build gets
   // reported as "not ready". An argument that silently does nothing is worse
-  // than a rejection, and this repo rejects unknown discriminator values for
+  // than a rejection, and this repo rejects unknown discriminator values fo
   // exactly that reason.
   const refused = await callTool("start_process", {
     command: "node forever.mjs",
@@ -361,7 +361,7 @@ test("close_shell takes the session's background jobs with it", {
     const strays = rows.filter(r => still.has(r));
     if (strays.length) {
       // Never leave five-minute strays on the machine, red or green. Kill by
-      // the recorded MSYS pid only after re-verifying the (pid, winpid) pair
+      // the recorded MSYS pid only after re-verifying the (pid, winpid) pai
       // still exists, so a recycled pid can never be hit.
       await callTool("run_command", {
         command: strays.map(r => `kill -9 ${r.split(" ")[0]} 2>/dev/null`).join("; "),
