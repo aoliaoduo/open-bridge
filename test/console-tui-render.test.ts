@@ -10,7 +10,7 @@ import { test } from "node:test";
 
 import { charAtColumn, fillVisualWidth, setAmbiguousWideForTests, stripAnsi, visualWidth, truncateVisual, padEndVisual } from "../src/console/tui/text.js";
 import { healthColor, paint } from "../src/console/tui/theme.js";
-import { advanceScroll, formatDuration, formatBytes, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
+import { advanceScroll, eventRows, formatDuration, formatBytes, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
 import { buildSnapshot, type TuiStateView } from "../src/console/tui/snapshot.js";
 
 test("visual width counts CJK as two columns and ignores ANSI", () => {
@@ -551,4 +551,29 @@ test("the diff panel shows loading and failure states", () => {
     diff: { loading: false, ok: true, text: "", truncated: false, since: "workspace_open", checkpoint: "established", reason: "" },
   });
   assert.ok(renderFrame(established, { width: 100, height: 30, panelView: "diff" }).join("\n").includes("已建立审阅基线"));
+});
+
+test("the duration column keeps a fixed width so rows stop flickering", () => {
+  const base = { at: "2026-09-22T10:00:00Z", tool: "run_command", status: "completed" as const, message: "审查代码变更" };
+  // "900ms" / "1s" / "59s" 各不相同，但正文必须从同一列开始 —— 右列宽度
+  // 不再随时长单位变化，底部行因此不会偶发翻转。
+  const columns = [900, 1000, 59000].map(durationMs =>
+    stripAnsi(eventRows({ ...base, durationMs }, 80, 0, 0)[0] ?? "").indexOf("审查代码变更"));
+  assert.ok(columns[0] >= 0 && columns[0] === columns[1] && columns[1] === columns[2]);
+});
+
+test("the changes panel advertises d and the preview advertises Esc", () => {
+  const changesSnap = buildSnapshot(fixtureView(), {
+    version: "1.0.0", rootName: "r", logPath: "l",
+    workspaceChanges: { files: 0, insertions: 0, deletions: 0, entries: [] },
+  });
+  const changes = renderFrame(changesSnap, { width: 100, height: 30, panelView: "changes" }).join("\n");
+  assert.ok(stripAnsi(changes).includes("d 预览 diff"), "the changes title hints the preview key");
+
+  const diffSnap = buildSnapshot(fixtureView(), {
+    version: "1.0.0", rootName: "r", logPath: "l",
+    diff: { loading: false, ok: true, text: "", truncated: false, since: "last_shown", checkpoint: "retained", reason: "" },
+  });
+  const diff = renderFrame(diffSnap, { width: 100, height: 30, panelView: "diff" }).join("\n");
+  assert.ok(stripAnsi(diff).includes("Esc 返回变更"), "the preview title hints the only exit");
 });

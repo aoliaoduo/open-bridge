@@ -268,16 +268,21 @@ export function eventRows(
   const prefixPlain = `${clock} ${mark} ${tool} `;
   const prefix = `${paint("dim", clock)} ${icon} ${paint("tool", tool)} `;
   const prefixW = visualWidth(prefixPlain);
-  const rightW = rightText === "" ? 0 : visualWidth(rightText);
+  // 时长列固定宽：运行中行的时长逐秒变化（9s→10s、59s→1m00s），右侧宽度一变，
+  // 正文的软换行边界就移动一列，面板底部行因此偶发翻转 —— 操作者看到的是
+  // 「最后一行偶尔闪烁」。右列一律右对齐到固定宽，换行边界与时间彻底无关。
+  const DURATION_W = 7; // 容纳 "59m59s"；正常时长不会更宽，超宽走已有的整行截断。
+  const rightW = rightText === "" ? 0 : DURATION_W;
+  const rightShown = rightText === "" ? "" : padStartVisual(rightText, DURATION_W);
   const msgWidth = Math.max(1, width - prefixW - (rightW > 0 ? rightW + 1 : 0));
   const chunks = wrapVisualSoft(message, msgWidth);
   if (chunks.length === 0) chunks.push("");
   return chunks.map((chunk, index) => {
     if (index === 0) {
       const left = `${prefix}${chunk.length > 0 ? paint("muted", chunk) : ""}`;
-      const line = rightText === ""
+      const line = rightShown === ""
         ? padEndVisual(left, width)
-        : `${padEndVisual(left, Math.max(0, width - rightW))}${paint("dim", rightText)}`;
+        : `${padEndVisual(left, Math.max(0, width - rightW))}${paint("dim", rightShown)}`;
       if (visualWidth(line) > width) return padEndVisual(truncateVisual(stripAnsi(line), width), width);
       return padEndVisual(line, width);
     }
@@ -615,7 +620,12 @@ function renderPanel(
       }
     }
   } else if (listView) {
-    hint = content.length > rows ? `${first + 1}-${Math.min(first + rows, content.length)}/${content.length} 行` : "";
+    const scroll = content.length > rows ? `${first + 1}-${Math.min(first + rows, content.length)}/${content.length} 行` : "";
+    // 让功能可被发现：变更页提示 d，预览页提示唯一的出口 Esc；放不下时由
+    // 下方既有的宽度检查统一丢弃，窄面板维持原状。
+    hint = diffView ? "Esc 返回变更" : changesView ? "d 预览 diff" : "";
+    if (hint !== "" && scroll !== "") hint = `${hint} · ${scroll}`;
+    else if (hint === "") hint = scroll;
   } else {
     hint = first > 0
       ? `↑${first} 行 · Home 回顶`

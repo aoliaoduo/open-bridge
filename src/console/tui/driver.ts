@@ -199,10 +199,11 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
             return;
           }
           if (ch === "\t" || key?.name === "tab") {
-            // The one navigation key: toggle the wide panel between the
-            // activity stream and the full-width task view. One key, both
-            // directions — Esc as a second way back was surplus.
-            panelView = panelView === "diff" ? "changes" : nextPanelView(panelView);
+            // The one navigation key: cycle the wide panel views. Inside the
+            // diff preview Tab is inert by contract — d opens the preview,
+            // Esc is the one way out, and Tab must not fling the operator
+            // elsewhere while they are reading the diff.
+            if (panelView !== "diff") panelView = nextPanelView(panelView);
             paint();
             return;
           }
@@ -213,7 +214,8 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
           }
           if (panelView === "diff") {
             if (ch === "d") { loadDiff(); return; }
-            if (ch === "q" || key?.name === "escape") { panelView = "changes"; paint(); return; }
+            // Esc 是预览的唯一出口（回到变更页）；滚动键仍归 KEY_MAP。
+            if (key?.name === "escape") { panelView = "changes"; paint(); return; }
           }
           const mapped = KEY_MAP[key?.name ?? ""];
           if (mapped === undefined) return;
