@@ -129,7 +129,7 @@ test("checkPortTool names a missing port instead of a generic range error", asyn
 });
 
 test("checkPortTool probes a real loopback listener and echoes target", async () => {
-  const { server, port, close } = await tcpServer();
+  const { port, close } = await tcpServer();
   try {
     const r = await checkPortTool({ host: "127.0.0.1", port, scope: "loopback", timeout_ms: 2000 }) as Record<string, unknown>;
     assert.equal(r.open, true); // TCP probes answer `open` (the HTTP probe field is `ok`)
