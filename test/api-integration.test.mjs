@@ -359,6 +359,38 @@ async function consoleLegacyRpc(method, params, sessionId) {
   return { sessionId: response.headers.get("mcp-session-id"), payload };
 }
 
+test("a completion stamp survives to /api/todos in snake_case", async () => {
+  const init = await consoleLegacyRpc("initialize", {
+    protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "todo-stamp-regression", version: "1" },
+  });
+  const sessionId = init.sessionId;
+  assert.ok(sessionId);
+  try {
+    await consoleLegacyRpc("tools/call", {
+      name: "set_todos",
+      arguments: { todos: [{ id: "stamped", title: "Finish the stamped task", status: "completed" }] },
+    }, sessionId);
+    let live;
+    for (let i = 0; i < 20; i += 1) {
+      live = await (await fetch(`${base()}/api/todos`)).json();
+      if (live.todos.some(todo => todo.id === "stamped")) break;
+      await delay(50);
+    }
+    const stamped = live.todos.find(todo => todo.id === "stamped");
+    assert.ok(stamped, "the completed todo is listed");
+    assert.equal(stamped.status, "completed");
+    assert.match(String(stamped.completed_at), /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    // Leave no trace: clear the panel AND close the session — an open session
+    // here would break the "last session removed" accounting in the tests below.
+    await consoleLegacyRpc("tools/call", { name: "set_todos", arguments: { todos: [] } }, sessionId);
+    await fetch(`${base()}/api/sessions/close`, {
+      method: "POST", headers: { "content-type": "application/json", "x-open-bridge-console": routeToken },
+      body: JSON.stringify({ id: sessionId }),
+    });
+  }
+});
+
 for (const closeVia of ["console", "MCP DELETE"]) {
   test(`todos become historical after the last session is removed through ${closeVia}`, async () => {
     const init = await consoleLegacyRpc("initialize", {

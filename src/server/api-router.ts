@@ -618,11 +618,17 @@ function asTodo(value: unknown): TodoView | undefined {
   const title = typeof raw.title === "string" ? raw.title : "";
   const status = typeof raw.status === "string" ? raw.status : "";
   if (!id || !title) return undefined;
+  // applyCompletionTimes stamps the in-memory copy camel-style (`completedAt`);
+  // historical API payloads may carry the snake spelling. Accept either so the
+  // console page sees the same stamp the TUI panel already shows.
+  const completedAt = typeof raw.completed_at === "string"
+    ? raw.completed_at
+    : typeof raw.completedAt === "string" ? raw.completedAt : undefined;
   return {
     id,
     title,
     status: ["pending", "in_progress", "completed"].includes(status) ? status : "pending",
-    ...(typeof raw.completed_at === "string" ? { completed_at: raw.completed_at } : {}),
+    ...(completedAt !== undefined ? { completed_at: completedAt } : {}),
   };
 }
 
