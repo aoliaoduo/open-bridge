@@ -26,6 +26,7 @@ export type TuiSnapshot = {
   bridgeState: "running" | "stopping" | "stopped";
   port: number;
   tunnel: "public" | "local" | "follower" | "blocked";
+  tunnelProvider?: string;
   mcpUrl: string;
   uptimeMs: number;
   calls: number;
@@ -94,13 +95,29 @@ const CAPSULE: Record<TuiSnapshot["bridgeState"], { icon: string; label: string;
   stopped: { icon: "○", label: "未启动", color: "dim" },
 };
 
-const TUNNEL_TAG: Record<TuiSnapshot["tunnel"], { text: string; color: ColorName }> = {
-  // The value must not repeat the field label: 「隧道 隧道 ●」 read as a stutter.
-  public: { text: "公网 ●", color: "accent" },
-  local: { text: "仅本机", color: "dim" },
-  follower: { text: "跟随实例", color: "review" },
-  blocked: { text: "隧道受阻", color: "error" },
-};
+export function tunnelTag(snap: TuiSnapshot, width?: number): { text: string; color: ColorName } {
+  if (snap.tunnel === "public") {
+    const provider = snap.tunnelProvider;
+    if (provider === "tailscale") {
+      const full = "tailscale 公网 ●";
+      return { text: width !== undefined && Math.max(4, width - 10) < visualWidth(full) ? "tailscale ●" : full, color: "accent" };
+    }
+    if (provider === "ngrok") {
+      return { text: "ngrok 公网 ●", color: "accent" };
+    }
+    return { text: "公网 ●", color: "accent" };
+  }
+  if (snap.tunnel === "follower") {
+    const provider = snap.tunnelProvider;
+    if (provider === "tailscale") return { text: "跟随 tailscale", color: "review" };
+    if (provider === "ngrok") return { text: "跟随 ngrok", color: "review" };
+    return { text: "跟随实例", color: "review" };
+  }
+  if (snap.tunnel === "blocked") {
+    return { text: "隧道受阻", color: "error" };
+  }
+  return { text: "仅本机", color: "dim" };
+}
 
 function bar(percent: number, cells: number): string {
   const filled = Math.max(0, Math.min(cells, Math.round((percent / 100) * cells)));
@@ -122,7 +139,7 @@ function boxLines(title: string, rows: string[], width: number): string[] {
 
 function renderTopBar(snap: TuiSnapshot, width: number, busy: boolean, spin: number): string {
   const version = inlineText(snap.version.replace(/^v/, ""));
-  const leftText = `◆ v${version}`;
+  const leftText = `v${version}`;
   const capsule = CAPSULE[snap.bridgeState];
   // The busy state replaces the static dot with the live spinner — the same
   // trick ainovel-cli's top bar uses so the capsule itself carries motion.
@@ -185,7 +202,7 @@ function renderOverviewRows(snap: TuiSnapshot, width: number): string[] {
 
   // The tunnel tag rides the counters row; the MCP address moved to the
   // footer, which owns it exclusively (it used to appear in both places).
-  const tag = TUNNEL_TAG[snap.tunnel];
+  const tag = tunnelTag(snap);
   segments.push({ text: tag.text, color: tag.color });
 
   return [counters];
@@ -340,7 +357,7 @@ function renderSidebar(snap: TuiSnapshot, width: number): string[] {
 
   section("概览");
   // No 状态 or 工作区 fields: the top-bar capsule and title already own those facts.
-  const tag = TUNNEL_TAG[snap.tunnel];
+  const tag = tunnelTag(snap, width);
   sidebarField(lines, width, "隧道", tag.text, tag.color);
   sidebarField(lines, width, "运行", formatDuration(snap.uptimeMs));
   sidebarField(lines, width, "调用", `${formatCount(snap.calls)} · ✓ ${formatCount(snap.successes)} ✕ ${formatCount(snap.failures)}`, snap.failures > 0 ? "review" : "text");

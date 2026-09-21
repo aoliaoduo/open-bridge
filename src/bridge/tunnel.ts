@@ -260,6 +260,7 @@ async function watchPublicDomain(domain: string): Promise<boolean> {
     state.missingPublicRounds = 0;
     if (state.tunnelRole === "follower") return true;
     state.tunnelRole = "follower";
+    state.tunnelProvider = domain.endsWith(".ts.net") ? "tailscale" : "ngrok";
     // Routed through a peer tunnel again: a future tunnel exit should start
     // reconnecting at the fast end of the backoff curve, not at the 60 s cap
     // left over from the failed attempts that led here.
@@ -455,6 +456,7 @@ export function teardownTailscaleFunnel(): void {
 export async function startTunnelInternal(generation: number): Promise<void> {
   if (generation !== state.tunnelGeneration || !state.server) return;
   const provider = host().config.get<string>("tunnelProvider", "ngrok");
+  state.tunnelProvider = provider;
   state.tunnelUrl = "";
   if (provider === "tailscale") {
     await startTailscaleFunnel(generation);

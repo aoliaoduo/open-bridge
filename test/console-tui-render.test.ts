@@ -334,7 +334,7 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   assert.match(plain[29] ?? "", /MCP http/, "the MCP address gets the full last row — sharing truncated it on small screens");
 });
 
-test("top bar displays active workspace directory, version, and omits port/name", () => {
+test("top bar displays active workspace directory, version, and omits port/name/diamond", () => {
   const view = { ...fixtureView(), activeWorkspaceRoot: "C:/Projects/my-app" };
   const snap = buildSnapshot(view, {
     version: "1.0.0-rc.2",
@@ -344,11 +344,40 @@ test("top bar displays active workspace directory, version, and omits port/name"
   });
   const lines = renderFrame(snap, { width: 110, height: 30, now: 60_000 });
   const topBar = stripAnsi(lines[0] ?? "");
-  assert.match(topBar, /◆ v1\.0\.0-rc\.2/);
+  assert.match(topBar, /v1\.0\.0-rc\.2/);
+  assert.doesNotMatch(topBar, /◆/);
   assert.match(topBar, /C:\/Projects\/my-app/);
   assert.match(topBar, /运行中/);
   assert.doesNotMatch(topBar, /端口/);
   assert.doesNotMatch(topBar, /open-bridge/);
+});
+
+test("sidebar displays specific tunnel provider (ngrok / tailscale)", () => {
+  const ngrokView = {
+    ...fixtureView(),
+    tunnelUrl: "https://demo.ngrok-free.dev/mcp/token",
+  };
+  const ngrokSnap = buildSnapshot(ngrokView, {
+    version: "1.0.0-rc.2",
+    rootName: "open-bridge",
+    logPath: "C:/x/bridge.log",
+    now: 60_000,
+  });
+  const ngrokLines = renderFrame(ngrokSnap, { width: 110, height: 30, now: 60_000 });
+  assert.match(ngrokLines.map(stripAnsi).join("\n"), /隧道\s+ngrok 公网 ●/);
+
+  const tsView = {
+    ...fixtureView(),
+    tunnelUrl: "https://my-node.ts.net/mcp/token",
+  };
+  const tsSnap = buildSnapshot(tsView, {
+    version: "1.0.0-rc.2",
+    rootName: "open-bridge",
+    logPath: "C:/x/bridge.log",
+    now: 60_000,
+  });
+  const tsLines = renderFrame(tsSnap, { width: 110, height: 30, now: 60_000 });
+  assert.match(tsLines.map(stripAnsi).join("\n"), /隧道\s+tailscale 公网 ●/);
 });
 
 test("task view: Tab swaps the wide panel and shows full titles", () => {

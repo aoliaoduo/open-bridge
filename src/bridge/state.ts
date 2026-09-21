@@ -190,6 +190,7 @@ export const state = {
    * tunnel lets `clientMcpUrl()` derive the URL worth handing out.
    */
   tunnelUrl: "",
+  tunnelProvider: "",
   activeWorkspaceRoot: "",
   reconnectTimer: undefined as ReturnType<typeof setTimeout> | undefined,
   stopping: false,

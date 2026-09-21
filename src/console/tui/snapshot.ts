@@ -16,6 +16,7 @@ export interface TuiStateView {
   routeToken: string;
   tunnelUrl: string;
   tunnelRole: string;
+  tunnelProvider?: string;
   stopping: boolean;
   activeWorkspaceRoot?: string;
   sessions: Map<unknown, { activeRequests: number; calls: number; lastUsed: number }>;
@@ -194,6 +195,10 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
   // `open-bridge url` both print it in full — a redacted copy was the odd one
   // out, and unusable for the paste-it-into-a-client job the footer exists for.
 
+  const inferredProvider = view.tunnelProvider
+    || (view.tunnelUrl.includes(".ts.net") ? "tailscale"
+        : (view.tunnelUrl.includes("ngrok") ? "ngrok" : undefined));
+
   return {
     version: options.version,
     rootName: options.rootName,
@@ -207,6 +212,7 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
         : view.tunnelRole === "blocked"
           ? "blocked"
           : "local",
+    tunnelProvider: inferredProvider,
     mcpUrl,
     uptimeMs: Math.max(0, now - (options.launchedAt ?? now)),
     calls: view.runtimeUsage.calls,
