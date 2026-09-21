@@ -88,7 +88,7 @@ export async function openLegacySession(input: {
   }
   if (!makeRoomForSession()) return undefined;
 
-  let session: SessionState | undefined;
+  const slot: { session?: SessionState } = {};
   const sessionIdGenerator = resumeId ? () => resumeId : mintSessionId;
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator,
@@ -98,7 +98,7 @@ export async function openLegacySession(input: {
     keepAliveMs: 15_000,
     retryInterval: 2_000,
     onsessioninitialized: async id => {
-      state.sessions.set(id, session!);
+      state.sessions.set(id, slot.session!);
       rememberSessionTicket(id, input.clientLabel);
       await flushSessionTickets();
       pruneSessions();
@@ -111,7 +111,8 @@ export async function openLegacySession(input: {
     },
   });
   bindTransportLifecycle(transport);
-  session = newSessionState(transport, input.clientLabel ?? (resumeId ? sessionTicket(resumeId)?.client : undefined));
+  const session = newSessionState(transport, input.clientLabel ?? (resumeId ? sessionTicket(resumeId)?.client : undefined));
+  slot.session = session;
   if (resumeId) {
     markTransportInitialized(transport, resumeId);
     state.sessions.set(resumeId, session);
