@@ -420,10 +420,8 @@ function renderSidebar(snap: TuiSnapshot, width: number, maxRows?: number): stri
     }
   }
 
-  const addrLines = [
-    ...wrapVisual(`控制台 http://127.0.0.1:${snap.port}/console/`, width),
-    ...wrapVisual(`MCP ${inlineText(snap.mcpUrl)}`, width),
-  ].map(line => paint("muted", line));
+  const addrLines = wrapVisual(`控制台 http://127.0.0.1:${snap.port}/console/`, width)
+    .map(line => paint("muted", line));
 
   if (maxRows !== undefined) {
     if (lines.length + addrLines.length <= maxRows) {

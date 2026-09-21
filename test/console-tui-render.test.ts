@@ -262,8 +262,9 @@ test("renderFrame pins addresses to the bottom of the sidebar in tall workbench 
   }
   const plain = lines.map(stripAnsi);
   assert.equal(charAtColumn(plain[39] ?? "", 24), "│", "sidebar divider extends to the last row");
-  assert.match(plain[35] ?? "", /控制台 http/, "the console entry is pinned to the bottom of the sidebar");
-  assert.match(plain[37] ?? "", /MCP http/, "the MCP address is wrapped at the bottom of the sidebar");
+  assert.match(plain[38] ?? "", /控制台 http/, "the console entry is pinned to the bottom of the sidebar");
+  assert.match(plain[39] ?? "", /8123\/console\//, "console URL continuation on the last line");
+  assert.doesNotMatch(plain.join("\n"), /MCP http/, "MCP address is removed from the sidebar");
 });
 
 test("renderFrame degrades gracefully on a small window", () => {
@@ -331,13 +332,13 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   assert.match(renderFrame(noGitSnap, { width: 110, height: 30, now: 60_000 }).map(stripAnsi).join("\n"), /变更\s+非 git/, "no git is named honestly, never silently hidden");
   assert.match(joined, /会话\s+2 · 活跃 1/);
   assert.doesNotMatch(joined, /\/64/, "the session cap is developer knowledge");
-  assert.match(plain[26] ?? "", /控制台 http/, "the console entry is wrapped in the sidebar");
-  assert.match(plain[28] ?? "", /MCP http/, "the MCP address is wrapped in the sidebar");
+  assert.match(plain[28] ?? "", /控制台 http/, "the console entry is wrapped in the sidebar");
+  assert.doesNotMatch(joined, /MCP http/, "MCP address is removed from the sidebar");
   assert.equal(charAtColumn(plain[28] ?? "", sidebarW), "│", "body row 28 has the divider column, not a full-width footer");
   assert.equal(charAtColumn(plain[29] ?? "", sidebarW), "│", "body row 29 has the divider column, not a full-width footer");
 });
 
-test("sidebar wraps long URLs within narrow sidebar width", () => {
+test("sidebar wraps web console URL within narrow sidebar width and omits MCP address", () => {
   const snap = buildSnapshot({
     ...fixtureView(),
     tunnelUrl: "https://bridge.example.invalid/mcp/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -354,7 +355,7 @@ test("sidebar wraps long URLs within narrow sidebar width", () => {
   const sidebarLines = plain.slice(2, 30).map(l => l.split("│")[0]?.trimEnd() ?? "");
   const sidebarText = sidebarLines.join("\n");
   assert.match(sidebarText, /控制台 http:\/\/127\.0\.0\.1:8123\/cons\nole\//);
-  assert.match(sidebarText, /MCP https:\/\/unshackle-sinless-cha\nrter\.ngrok-free\.dev\/mcp\/0e58ba2b3\nbe2633d325ac6b66a5624a2/);
+  assert.doesNotMatch(sidebarText, /MCP https:/);
 });
 
 test("top bar displays active workspace directory, version, and omits port/name/diamond", () => {
