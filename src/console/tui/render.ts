@@ -307,8 +307,8 @@ function renderFooter(snap: TuiSnapshot, width: number): string[] {
 
 /** Event rows visible in the workbench panel for a terminal size. */
 export function workbenchPanelRows(width: number, height: number): number {
-  void width;
-  return Math.max(1, height - 5); // top bar + divider (2) + panel title (1) + footer (2)
+  const wide = width >= 76 && height >= 22;
+  return Math.max(1, height - (wide ? 3 : 5)); // wide: top bar + divider (2) + panel title (1); narrow has footer (2)
 }
 
 /** Largest first-visible index that still shows the oldest event (the bottom). */
@@ -349,7 +349,7 @@ function sidebarField(lines: string[], width: number, label: string, value: stri
   lines.push(`${labelPart} ${paint(color, truncateVisual(value, Math.max(4, width - 10)))}`);
 }
 
-function renderSidebar(snap: TuiSnapshot, width: number): string[] {
+function renderSidebar(snap: TuiSnapshot, width: number, maxRows?: number): string[] {
   const lines: string[] = [];
   const section = (title: string): void => {
     lines.push(paint("dim", padEndVisual(`─ ${title} `, width)));
@@ -419,7 +419,22 @@ function renderSidebar(snap: TuiSnapshot, width: number): string[] {
       lines.push(`${mark} ${paint(service.running ? "text" : "dim", truncateVisual(inlineText(service.name), Math.max(4, width - 3)))}`);
     }
   }
-  return lines;
+
+  const addrLines = [
+    ...wrapVisual(`控制台 http://127.0.0.1:${snap.port}/console/`, width),
+    ...wrapVisual(`MCP ${inlineText(snap.mcpUrl)}`, width),
+  ].map(line => paint("muted", line));
+
+  if (maxRows !== undefined) {
+    if (lines.length + addrLines.length <= maxRows) {
+      const padCount = maxRows - lines.length - addrLines.length;
+      return [...lines, ...Array.from({ length: padCount }, () => ""), ...addrLines];
+    }
+    const allowedTop = Math.max(0, maxRows - addrLines.length);
+    return [...lines.slice(0, allowedTop), ...addrLines];
+  }
+
+  return [...lines, ...addrLines];
 }
 
 /** Task titles wrap with a measured icon gutter, including in CJK terminals. */
@@ -593,8 +608,7 @@ function renderWorkbench(
   const { layout, spin, now, busy, panelView } = options;
   const { width, height, sidebarWidth, panelWidth, panelRows } = layout;
   const bodyRows = panelRows + 1;
-  const sidebar = renderSidebar(snap, sidebarWidth).slice(0, bodyRows);
-  while (sidebar.length < bodyRows) sidebar.push("");
+  const sidebar = renderSidebar(snap, sidebarWidth, bodyRows);
   const first = panelView === "tasks" ? options.taskFirstVisible
     : panelView === "changes" ? options.changeFirstVisible
     : options.firstVisible;
@@ -603,7 +617,6 @@ function renderWorkbench(
   for (let i = 0; i < bodyRows; i += 1) {
     lines.push(`${padEndVisual(sidebar[i] ?? "", sidebarWidth)}${paint("dim", "│")}${padEndVisual(panel[i] ?? "", panelWidth)}`);
   }
-  lines.push(...renderFooter(snap, width));
   return fitFrame(lines, width, height);
 }
 

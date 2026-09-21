@@ -248,7 +248,7 @@ test("renderFrame fills the exact geometry and shows the dashboard vocabulary", 
   assert.match(text, /概览/);
 });
 
-test("renderFrame pins the footer to the bottom rows however few the events", () => {
+test("renderFrame pins addresses to the bottom of the sidebar in tall workbench window", () => {
   const snap = buildSnapshot(fixtureView(), {
     version: "1.0.0-rc.2",
     rootName: "open-bridge",
@@ -260,8 +260,10 @@ test("renderFrame pins the footer to the bottom rows however few the events", ()
   for (const [i, line] of lines.entries()) {
     assert.equal(visualWidth(line), 80, `tall line ${i} must be exactly 80 columns`);
   }
-  assert.match(stripAnsi(lines[38] ?? ""), /控制台 http:\/\/127\.0\.0\.1:8123\/console\//, "the console entry owns its own row");
-  assert.match(stripAnsi(lines[39] ?? ""), /MCP http/, "the MCP address gets a full row; sharing one row truncated it into ...");
+  const plain = lines.map(stripAnsi);
+  assert.equal(charAtColumn(plain[39] ?? "", 24), "│", "sidebar divider extends to the last row");
+  assert.match(plain[35] ?? "", /控制台 http/, "the console entry is pinned to the bottom of the sidebar");
+  assert.match(plain[37] ?? "", /MCP http/, "the MCP address is wrapped at the bottom of the sidebar");
 });
 
 test("renderFrame degrades gracefully on a small window", () => {
@@ -297,7 +299,7 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   const plain = lines.map(stripAnsi);
   assert.match(plain[0] ?? "", /运行中/, "top bar present");
   const sidebarW = Math.max(24, Math.min(40, Math.floor(110 * 0.3)));
-  for (let i = 2; i < 28; i += 1) {
+  for (let i = 2; i < 30; i += 1) {
     // Column, not string index: the sidebar contains CJK (2-column) characters.
     assert.equal(charAtColumn(plain[i] ?? "", sidebarW), "│", `divider column on body row ${i}`);
   }
@@ -329,9 +331,30 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   assert.match(renderFrame(noGitSnap, { width: 110, height: 30, now: 60_000 }).map(stripAnsi).join("\n"), /变更\s+非 git/, "no git is named honestly, never silently hidden");
   assert.match(joined, /会话\s+2 · 活跃 1/);
   assert.doesNotMatch(joined, /\/64/, "the session cap is developer knowledge");
-  assert.match(plain[28] ?? "", /控制台 http/, "the console entry on the second-to-last row");
-  assert.doesNotMatch(plain[28] ?? "", /会话|调用|端口/, "counters live in the sidebar, not repeated in the footer");
-  assert.match(plain[29] ?? "", /MCP http/, "the MCP address gets the full last row — sharing truncated it on small screens");
+  assert.match(plain[26] ?? "", /控制台 http/, "the console entry is wrapped in the sidebar");
+  assert.match(plain[28] ?? "", /MCP http/, "the MCP address is wrapped in the sidebar");
+  assert.equal(charAtColumn(plain[28] ?? "", sidebarW), "│", "body row 28 has the divider column, not a full-width footer");
+  assert.equal(charAtColumn(plain[29] ?? "", sidebarW), "│", "body row 29 has the divider column, not a full-width footer");
+});
+
+test("sidebar wraps long URLs within narrow sidebar width", () => {
+  const snap = buildSnapshot({
+    ...fixtureView(),
+    tunnelUrl: "https://bridge.example.invalid/mcp/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    tunnelRole: "public",
+    tunnelProvider: "ngrok",
+  }, {
+    version: "1.0.0",
+    rootName: "open-bridge",
+    logPath: "C:/x/bridge.log",
+    now: 60_000,
+  });
+  const lines = renderFrame(snap, { width: 110, height: 30, now: 60_000 });
+  const plain = lines.map(stripAnsi);
+  const sidebarLines = plain.slice(2, 30).map(l => l.split("│")[0]?.trimEnd() ?? "");
+  const sidebarText = sidebarLines.join("\n");
+  assert.match(sidebarText, /控制台 http:\/\/127\.0\.0\.1:8123\/cons\nole\//);
+  assert.match(sidebarText, /MCP https:\/\/unshackle-sinless-cha\nrter\.ngrok-free\.dev\/mcp\/0e58ba2b3\nbe2633d325ac6b66a5624a2/);
 });
 
 test("top bar displays active workspace directory, version, and omits port/name/diamond", () => {
