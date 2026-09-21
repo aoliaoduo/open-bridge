@@ -139,6 +139,30 @@ export function padStartVisual(text: string, width: number): string {
  * is only correct when every repetition renders one column, which stops being
  * true the moment a CJK-terminal regime doubles the box-drawing characters.
  */
+/**
+ * Split `text` into chunks of at most `width` visual columns, never splitting
+ * a two-column character across lines. Titles that outgrow one row wrap
+ * instead of being amputated — that is the whole point of the wide task view.
+ */
+export function wrapVisual(text: string, width: number): string[] {
+  if (width <= 0) return [""];
+  const lines: string[] = [];
+  let line = "";
+  let used = 0;
+  for (const ch of text) {
+    const w = visualWidth(ch);
+    if (used + w > width && line !== "") {
+      lines.push(line);
+      line = "";
+      used = 0;
+    }
+    line += ch;
+    used += w;
+  }
+  lines.push(line);
+  return lines;
+}
+
 export function fillVisualWidth(ch: string, width: number): string {
   const w = visualWidth(ch);
   if (w <= 0 || width <= 0) return "";

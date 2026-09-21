@@ -14,7 +14,7 @@
  */
 
 import { paint, healthColor, spinnerFrame, type ColorName } from "./theme.js";
-import { fillVisualWidth, stripAnsi, truncateVisual, padEndVisual, padStartVisual, visualWidth } from "./text.js";
+import { fillVisualWidth, stripAnsi, truncateVisual, padEndVisual, padStartVisual, visualWidth, wrapVisual } from "./text.js";
 
 export type TuiEventStatus = "running" | "completed" | "error" | "progress" | "warning";
 
@@ -32,8 +32,10 @@ export type TuiSnapshot = {
   failures: number;
   sessions: number;
   sessionsActive: number;
-  /** Current task list for the sidebar (capped; title and status only). */
+  /** Current task list for the wide task view (capped; title and status only). */
   todos: Array<{ title: string; status: string }>;
+  /** Honest task count, beyond the render cap. */
+  todosTotal: number;
   /** Workspace changes since the last commit; absent when clean. */
   changes?: { files: number; insertions: number; deletions: number };
   runningCommands: Array<{
@@ -153,6 +155,10 @@ function renderOverviewRows(snap: TuiSnapshot, width: number): string[] {
     { text: `会话 ${snap.sessions}${snap.sessionsActive > 0 ? ` · 活跃 ${snap.sessionsActive}` : ""}`, color: "text" },
     { text: `进程 ${snap.runningCommands.length}`, color: "text" },
   ];
+  if (snap.todosTotal > 0) {
+    const inProgress = snap.todos.filter(todo => todo.status === "in_progress").length;
+    segments.push({ text: `任务 ${snap.todosTotal}（${inProgress} 进行中）`, color: inProgress > 0 ? "accent" : "text" });
+  }
   if (snap.servicesTotal > 0) {
     segments.push({ text: `服务 ${snap.servicesRunning}/${snap.servicesTotal}`, color: snap.servicesRunning < snap.servicesTotal ? "review" : "success" });
   }
@@ -305,7 +311,7 @@ function sidebarField(lines: string[], width: number, label: string, value: stri
   lines.push(`${labelPart} ${paint(color, truncateVisual(value, Math.max(4, width - 10)))}`);
 }
 
-function renderSidebar(snap: TuiSnapshot, width: number, spin: number): string[] {
+function renderSidebar(snap: TuiSnapshot, width: number): string[] {
   const lines: string[] = [];
   const section = (title: string): void => {
     lines.push(paint("dim", padEndVisual(`─ ${title} `, width)));
@@ -329,16 +335,11 @@ function renderSidebar(snap: TuiSnapshot, width: number, spin: number): string[]
     sidebarField(lines, width, "变更", `+${formatCount(snap.changes.insertions)} -${formatCount(snap.changes.deletions)} · ${snap.changes.files} 文件`);
   }
 
-  if (snap.todos.length > 0) {
-    // What the connected agent is working through, in its own words.
-    section("任务");
-    for (const todo of snap.todos) {
-      const mark = todo.status === "completed" ? paint("success", "✓")
-        : todo.status === "in_progress" ? paint("accent", spinnerFrame(spin))
-        : paint("dim", "·");
-      const titleColor: ColorName = todo.status === "in_progress" ? "text" : "dim";
-      lines.push(`${mark} ${paint(titleColor, truncateVisual(todo.title, Math.max(4, width - 3)))}`);
-    }
+  if (snap.todosTotal > 0) {
+    // One summary line, never truncated titles: the full list lives in the
+    // wide task view (Tab) — a 33-column sidebar can only amputate them.
+    const inProgress = snap.todos.filter(todo => todo.status === "in_progress").length;
+    sidebarField(lines, width, "任务", `${snap.todosTotal}（${inProgress} 进行中）`, inProgress > 0 ? "accent" : "text");
   }
 
   if (snap.runningCommands.length > 0) {
@@ -362,9 +363,31 @@ function renderSidebar(snap: TuiSnapshot, width: number, spin: number): string[]
   return lines;
 }
 
+/** The wide task view: full titles wrapped to the panel width — the narrow
+ *  sidebar could only ever show them amputated. */
+function taskPanelRows(snap: TuiSnapshot, width: number, spin: number): string[] {
+  const rows: string[] = [];
+  for (const todo of snap.todos) {
+    const mark = todo.status === "completed" ? paint("success", "✓")
+      : todo.status === "in_progress" ? paint("accent", spinnerFrame(spin))
+      : paint("dim", "·");
+    const titleColor: ColorName = todo.status === "in_progress" ? "text" : "dim";
+    const wrapped = wrapVisual(todo.title, Math.max(4, width - 2));
+    wrapped.forEach((line, index) => {
+      rows.push(index === 0 ? `${mark} ${paint(titleColor, line)}` : `  ${paint(titleColor, line)}`);
+    });
+    rows.push(""); // air between tasks
+  }
+  if (rows.length > 0 && rows[rows.length - 1] === "") rows.pop();
+  if (snap.todosTotal > snap.todos.length) {
+    rows.push(paint("dim", `… 仅显示前 ${snap.todos.length} 条`));
+  }
+  return rows;
+}
+
 function renderWorkbench(
   snap: TuiSnapshot,
-  options: { width: number; height: number; spin: number; now: number; busy: boolean; firstVisible: number },
+  options: { width: number; height: number; spin: number; now: number; busy: boolean; firstVisible: number; panelView?: "activity" | "tasks" },
 ): string[] {
   const { width, height, spin, now, busy } = options;
   const sidebarW = Math.max(24, Math.min(40, Math.floor(width * 0.3)));
@@ -372,19 +395,34 @@ function renderWorkbench(
   const bodyRows = height - 4;
   const rows = Math.max(1, bodyRows - 1);
 
-  const sidebar = renderSidebar(snap, sidebarW, spin).slice(0, bodyRows);
+  const sidebar = renderSidebar(snap, sidebarW).slice(0, bodyRows);
   while (sidebar.length < bodyRows) sidebar.push("");
 
   const maxFirst = maxFirstVisible(snap.events.length, rows);
   const first = Math.min(Math.max(0, Math.floor(options.firstVisible)), maxFirst);
-  // Newer events (indices below `first`) render ABOVE the view, so leaving
-  // the head — index 0, the newest — is the only state that deserves a hint.
-  const titleLeft = `─ 活动 (${snap.events.length}) `;
-  const hint = first > 0 ? `↑${first} 行 · Home 回顶 ` : "";
+  const tasksView = options.panelView === "tasks";
+  const titleLeft = tasksView ? `─ 任务 (${snap.todosTotal}) ` : `─ 活动 (${snap.events.length}) `;
+  // The hint always names the way across views; the scroll hint only exists
+  // where scrolling is real (the activity panel).
+  const hintParts: string[] = [];
+  if (tasksView) hintParts.push("Tab 返回活动");
+  else {
+    if (snap.todosTotal > 0) hintParts.push("Tab 任务");
+    if (first > 0) hintParts.push(`↑${first} 行 · Home 回顶`);
+  }
+  const hint = hintParts.length > 0 ? `${hintParts.join(" · ")} ` : "";
+  const body = tasksView
+    ? taskPanelRows(snap, panelW, spin)
+    : visibleEvents(snap.events, first, rows).map(event => eventRow(event, panelW, spin, now));
   const panel: string[] = [
     `${padEndVisual(paint("dim", titleLeft), Math.max(1, panelW - visualWidth(hint)))}${hint === "" ? "" : paint("accent", hint)}`,
-    ...visibleEvents(snap.events, first, rows).map(event => eventRow(event, panelW, spin, now)),
+    ...body,
   ];
+  if (panel.length > bodyRows) {
+    const hidden = panel.length - bodyRows + 1;
+    panel.length = Math.max(1, bodyRows - 1);
+    panel.push(paint("dim", `… 还有 ${hidden} 行`));
+  }
   while (panel.length < bodyRows) panel.push("");
 
   const lines: string[] = [renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width))];
@@ -410,7 +448,7 @@ function renderWorkbench(
  */
 export function renderFrame(
   snap: TuiSnapshot,
-  options: { width: number; height: number; spinnerFrame?: number; now?: number; firstVisible?: number },
+  options: { width: number; height: number; spinnerFrame?: number; now?: number; firstVisible?: number; panelView?: "activity" | "tasks" },
 ): string[] {
   const width = Math.max(20, Math.min(400, Math.floor(options.width)));
   const height = Math.max(6, Math.min(200, Math.floor(options.height)));
@@ -423,7 +461,7 @@ export function renderFrame(
   if (width >= 76 && height >= 22) {
     // The follow default is the head sentinel: below zero clamps to index 0,
     // the newest event — never the array tail, which is the oldest window.
-    return renderWorkbench(snap, { width, height, spin, now, busy, firstVisible: options.firstVisible ?? -1 });
+    return renderWorkbench(snap, { width, height, spin, now, busy, firstVisible: options.firstVisible ?? -1, panelView: options.panelView });
   }
 
   const lines: string[] = [renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width))];

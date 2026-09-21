@@ -201,7 +201,8 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     failures: view.runtimeUsage.failures,
     sessions,
     sessionsActive,
-    todos: view.todos.slice(0, 8).map(todo => ({ title: todo.title, status: todo.status })),
+    todos: view.todos.slice(0, 16).map(todo => ({ title: todo.title, status: todo.status })),
+    todosTotal: view.todos.length,
     ...(options.workspaceChanges !== undefined
       && (options.workspaceChanges.files > 0 || options.workspaceChanges.insertions > 0 || options.workspaceChanges.deletions > 0)
       ? { changes: options.workspaceChanges }

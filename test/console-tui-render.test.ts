@@ -122,6 +122,9 @@ function fixtureView(): TuiStateView {
       { id: "t1", title: "验证 TUI 布局", status: "completed" },
       { id: "t2", title: "接入任务列表", status: "in_progress" },
       { id: "t3", title: "清理收尾", status: "pending" },
+      // A title no 33-column sidebar could ever show whole — the reason the
+      // task view exists.
+      { id: "t4", title: "TUI 阶段一：仪表盘（7c75440）+ 阶段三只读工作台（3f8fc6b）+ CJK 行尾修复全部完成待提交推送", status: "pending" },
     ],
   };
 }
@@ -142,8 +145,9 @@ test("buildSnapshot counts live state and shows the full MCP URL", () => {
   assert.equal(snap.serviceRows.length, 3);
   assert.equal(snap.serviceRows.filter(s => s.running).length, 1);
   assert.deepEqual(snap.serviceRows[0], { name: "s1", running: true });
-  assert.equal(snap.todos.length, 3, "the task list rides along for the sidebar");
+  assert.equal(snap.todos.length, 4, "the task list rides along for the panel");
   assert.equal(snap.todos[1]?.title, "接入任务列表");
+  assert.equal(snap.todosTotal, 4, "the count stays honest beyond the render cap");
   assert.equal(snap.changes, undefined, "no workspace changes passed — the row stays hidden");
   assert.equal(snap.tunnel, "local");
   // Operator's call: the full address, token included — the startup banner
@@ -304,16 +308,40 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   assert.doesNotMatch(joined, /状态/, "the top-bar capsule owns the status; the sidebar does not repeat it");
   assert.match(joined, /仅本机/, "tunnel wording reads 隧道 · 仅本机, not 隧道 隧道 ●");
   assert.match(joined, /活动 \(\d+\)/);
-  assert.match(joined, /─ 任务/, "the task list gets its own sidebar section");
-  assert.match(joined, /✓ 验证 TUI 布局/);
-  assert.match(joined, /接入任务列表/);
-  assert.match(joined, /· 清理收尾/);
+  assert.doesNotMatch(joined, /─ 任务/, "titles no longer cram into the narrow sidebar");
+  assert.match(joined, /任务\s+4（1 进行中）/, "a one-line summary replaces the truncated section");
+  assert.match(joined, /Tab 任务/, "the activity panel title points at the task view");
   assert.match(joined, /\+53 -18 · 2 文件/, "workspace changes since the last commit");
   assert.match(joined, /会话\s+2 · 活跃 1/);
   assert.doesNotMatch(joined, /\/64/, "the session cap is developer knowledge");
   assert.match(plain[28] ?? "", /控制台 http/, "the console entry on the second-to-last row");
   assert.doesNotMatch(plain[28] ?? "", /会话|调用|端口/, "counters live in the sidebar, not repeated in the footer");
   assert.match(plain[29] ?? "", /MCP http/, "the MCP address gets the full last row — sharing truncated it on small screens");
+});
+
+test("task view: Tab swaps the wide panel and shows full titles", () => {
+  const snap = buildSnapshot(fixtureView(), {
+    version: "1.0.0-rc.2",
+    rootName: "open-bridge",
+    logPath: "C:/x/bridge.log",
+    now: 60_000,
+  });
+  const lines = renderFrame(snap, { width: 110, height: 30, now: 60_000, panelView: "tasks" });
+  assert.equal(lines.length, 30);
+  for (const [i, line] of lines.entries()) {
+    assert.equal(visualWidth(line), 110, `task line ${i} must be exactly 110 columns`);
+  }
+  const text = lines.map(stripAnsi).join("\n");
+  assert.match(text, /─ 任务 \(4\)/, "the wide panel belongs to the tasks");
+  assert.match(text, /Tab 返回活动/, "the way back is named");
+  assert.match(text, /✓ 验证 TUI 布局/);
+  assert.match(text, /接入任务列表/);
+  assert.match(text, /· 清理收尾/);
+  // The long title survives by WRAPPING, not truncation: its tail must be on
+  // screen — the 33-column sidebar could only ever amputate it. The wrap can
+  // land mid-phrase, so the assertion allows the line break + indent.
+  assert.match(text, /行尾修复全/, "the wrap keeps the tail — part one");
+  assert.match(text, /部完成待提交推送/, "the wrap keeps the tail — part two");
 });
 
 test("workbench panel follows the tail and reports history when scrolled", () => {

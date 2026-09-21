@@ -49,6 +49,8 @@ let frameIndex = 0;
 let active = false;
 /** Panel scroll position; negative = locked to the head (the newest event). */
 let scrollFirst = -1;
+/** Which view owns the wide panel: the activity stream or the full task list. */
+let panelView: "activity" | "tasks" = "activity";
 /** Event count of the last painted frame, so scroll steps clamp correctly. */
 let lastEventCount = 0;
 /** Workspace changes since the last commit; undefined = clean or no repo. */
@@ -78,6 +80,7 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
   if (!out.isTTY) return false;
   if (active) return true;
   active = true;
+  panelView = "activity";
   // THIS process's start: 「运行」 must not read the persisted stats window
   // (a freshly restarted Bridge used to claim 50 hours of uptime).
   const launchedAt = Date.now();
@@ -144,6 +147,7 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
         height: out.rows ?? 24,
         spinnerFrame: frameIndex++,
         firstVisible: scrollFirst,
+        panelView,
       });
       write(`\x1b[H${lines.map(line => `${line}\x1b[K`).join("\n")}\x1b[J`);
     } catch { /* see above */ }
@@ -163,6 +167,16 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
             // Raw mode swallows the terminal's SIGINT; raise the real one so
             // the graceful shutdown path (and its cleanup) runs as before.
             process.kill(process.pid, "SIGINT");
+            return;
+          }
+          if (ch === "\t" || key?.name === "tab") {
+            // The one extra navigation: swap the wide panel between the
+            // activity stream and the full-width task view.
+            panelView = panelView === "tasks" ? "activity" : "tasks";
+            return;
+          }
+          if (panelView === "tasks" && key?.name === "escape") {
+            panelView = "activity"; // Esc closes the task view
             return;
           }
           const mapped = KEY_MAP[key?.name ?? ""];
