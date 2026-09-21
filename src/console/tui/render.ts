@@ -339,7 +339,17 @@ function renderSidebar(snap: TuiSnapshot, width: number): string[] {
   } else if (snap.changes.files === 0 && snap.changes.insertions === 0 && snap.changes.deletions === 0) {
     sidebarField(lines, width, "变更", "干净", "dim");
   } else {
-    sidebarField(lines, width, "变更", `+${formatCount(snap.changes.insertions)} -${formatCount(snap.changes.deletions)} · ${snap.changes.files} 文件`);
+    // The diff convention every tool shares: additions green, deletions red.
+    // The numbers outrank the tail — on a narrow sidebar the file count is
+    // the first thing to go, never the signs.
+    const add = `+${formatCount(snap.changes.insertions)}`;
+    const del = `-${formatCount(snap.changes.deletions)}`;
+    const tail = ` · ${snap.changes.files} 文件`;
+    const budget = Math.max(4, width - 10);
+    const tailFits = visualWidth(add) + 1 + visualWidth(del) + visualWidth(tail) <= budget;
+    lines.push(
+      `${paint("muted", padEndVisual("变更", 8))} ${paint("success", add)} ${paint("error", del)}${tailFits ? paint("text", tail) : ""}`,
+    );
   }
 
   if (snap.todosTotal > 0) {

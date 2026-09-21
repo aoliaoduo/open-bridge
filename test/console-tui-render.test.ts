@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { charAtColumn, fillVisualWidth, setAmbiguousWideForTests, stripAnsi, visualWidth, truncateVisual, padEndVisual } from "../src/console/tui/text.js";
+import { paint } from "../src/console/tui/theme.js";
 import { healthColor, paint } from "../src/console/tui/theme.js";
 import { advanceScroll, formatDuration, formatBytes, renderFrame } from "../src/console/tui/render.js";
 import { buildSnapshot, type TuiStateView } from "../src/console/tui/snapshot.js";
@@ -317,6 +318,10 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   assert.match(joined, /任务\s+4（1 进行中）/, "a one-line summary replaces the truncated section");
   assert.match(joined, /Tab 任务/, "the activity panel title points at the task view");
   assert.match(joined, /\+53 -18 · 2 文件/, "workspace changes since the last commit");
+  // Additions green, deletions red — the diff convention every tool shares.
+  const rawChangeRow = lines.find(line => stripAnsi(line).includes("+53")) ?? "";
+  assert.ok(rawChangeRow.includes(paint("success", "+53")), "insertions paint green");
+  assert.ok(rawChangeRow.includes(paint("error", "-18")), "deletions paint red");
   // The row is a permanent resident: clean reads as 干净 and a workspace
   // without git is named — a missing row cannot say which state it is in.
   const cleanSnap = buildSnapshot(fixtureView(), {
