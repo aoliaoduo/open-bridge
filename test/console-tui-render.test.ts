@@ -37,6 +37,10 @@ test("the cursor row is highlighted and the detail page shows the full copy", ()
   const frame = renderFrame(snap, { width: 100, height: 30, panelView: "activity", now: 70_000, activityCursor: 1 });
   const rawSecond = frame.find(l => stripAnsi(l).includes("second")) ?? "";
   assert.ok(rawSecond.includes("\x1b[1m"), "the cursor row paints bold");
+  // 分层保留：时刻 dim、工具青、正文升为 text —— 光标不再把整行刷成单色。
+  assert.ok(rawSecond.includes("38;2;138;129;117"), "clock keeps dim #8a8175");
+  assert.ok(rawSecond.includes("38;2;126;197;216"), "tool keeps its cyan #7ec5d8");
+  assert.ok(rawSecond.includes("38;2;232;224;208"), "message upgrades to text #e8e0d0");
   const detail = renderFrame(snap, { width: 100, height: 30, panelView: "event", now: 70_000, eventDetailKey: "2026-09-22T06:01:00Z|run_command" });
   const plain = detail.map(stripAnsi);
   assert.ok(plain.some(l => l.includes("事件详情")), "detail heading");

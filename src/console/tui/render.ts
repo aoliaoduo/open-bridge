@@ -320,12 +320,15 @@ export function eventListRow(
 ): string {
   const tool = inlineText(event.tool);
   const message = inlineText(event.message);
+  // 光标行保持每段自己的色相、只叠加粗体 —— 整行刷成单色会把状态、
+  // 工具、时刻的分层全部抹平（默认光标就停在最上面一行上）。
+  const bold = selected ? { bold: true } : undefined;
   const icon =
     event.status === "running" ? paint("accent", spinnerFrame(spin), { bold: true })
-    : event.status === "completed" ? paint("success", "✓")
+    : event.status === "completed" ? paint("success", "✓", bold)
     : event.status === "error" ? paint("error", "✕", { bold: true })
-    : event.status === "warning" ? paint("review", "⚠")
-    : paint("context", "◆");
+    : event.status === "warning" ? paint("review", "⚠", bold)
+    : paint("context", "◆", bold);
   const rightText =
     event.status === "running"
       ? `${formatDuration(Math.max(0, now - Date.parse(event.at)))}…`
@@ -339,20 +342,19 @@ export function eventListRow(
     : event.status === "warning" ? "⚠"
     : "◆";
   const prefixPlain = `${clock} ${mark} ${tool} `;
-  const prefix = `${paint("dim", clock)} ${icon} ${paint(event.subtle === true ? "dim" : "tool", tool)} `;
+  const prefix = `${paint("dim", clock, bold)} ${icon} ${paint(event.subtle === true ? "dim" : "tool", tool, bold)} `;
   const prefixW = visualWidth(prefixPlain);
   const DURATION_W = 7; // 与 eventRows 同一约定：右列定宽，正文宽度与时长无关。
   const rightW = rightText === "" ? 0 : DURATION_W;
   const rightShown = rightText === "" ? "" : padStartVisual(rightText, DURATION_W);
   const msgWidth = Math.max(1, width - prefixW - (rightW > 0 ? rightW + 1 : 0));
   const shown = truncateVisual(message, msgWidth);
-  const left = `${prefix}${shown.length > 0 ? paint(event.subtle === true ? "dim" : "muted", shown) : ""}`;
+  const left = `${prefix}${shown.length > 0 ? paint(selected ? "text" : event.subtle === true ? "dim" : "muted", shown, bold) : ""}`;
   const line = rightShown === ""
     ? padEndVisual(left, width)
     : `${padEndVisual(left, Math.max(0, width - rightW))}${paint("dim", rightShown)}`;
   const safe = visualWidth(line) > width ? padEndVisual(truncateVisual(stripAnsi(line), width), width) : padEndVisual(line, width);
-  // 光标行：整行加粗提亮，布局零位移。
-  return selected ? paint("text", stripAnsi(safe), { bold: true }) : safe;
+  return safe;
 }
 
 /** Enter 的目的地：一条事件的全文（record 已在源头截到 500 字符）。 */
