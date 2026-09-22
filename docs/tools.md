@@ -163,7 +163,7 @@
 
 ### 桥自身状态
 
-**bridge_status** — 一次一个 section：`overview`（健康与计数：`state` / `tool_count` / `build_stale` 等）· `auth`（Bearer 门禁状态、默认有效期、每个令牌的 id/标签/到期/最后使用；**密钥只在创建那一刻显示一次、从不落库**，签发与吊销在控制台「安全」页完成）· `locks`（并发准入表：谁持有什么、等了多久、谁在排队）· `sessions`（谁在连：legacy 会话逐条给 `session_id` / `connected_at` / `last_used` / `calls` / `todo_count` / `closable`；无会话的现代协议客户端占一行 `era: "modern"`、`stateless: true`、`closable: false`，带 `connected_at: null` 与 `first_seen`，不谎报挂在会话上的 `calls` / `todo_count`；这一行还带 `in_flight`（此刻正在服务的现代请求数：一次长调用期间它不为 0，而这正是「安静」与「还在干活」的区别）。overview 里的 `active_sessions` **只数 legacy 会话**，旁边的 `modern_last_used`（ISO 时间戳或 `null`）与 `modern_in_flight` 才说明另一端有没有现代客户端在说话、以及它当下忙不忙 —— 「有没有人连着我」要这几个字段一起看。）
+**bridge_status** — 一次一个 section：`overview`（健康与计数：`state` / `tool_count` / `build_stale` 等；另有 `instructions_bytes` 与 `catalog_bytes`，分别是发现时下发的 `instructions` 与 `tools/list` 序列化后的 UTF-8 字节数 —— 客户端提示词缓存按字节命中，这两个数是「前缀变贵了吗」和「两次相同请求之间前缀变了吗」的唯一可读口径）· `auth`（Bearer 门禁状态、默认有效期、每个令牌的 id/标签/到期/最后使用；**密钥只在创建那一刻显示一次、从不落库**，签发与吊销在控制台「安全」页完成）· `locks`（并发准入表：谁持有什么、等了多久、谁在排队）· `sessions`（谁在连：legacy 会话逐条给 `session_id` / `connected_at` / `last_used` / `calls` / `todo_count` / `closable`；无会话的现代协议客户端占一行 `era: "modern"`、`stateless: true`、`closable: false`，带 `connected_at: null` 与 `first_seen`，不谎报挂在会话上的 `calls` / `todo_count`；这一行还带 `in_flight`（此刻正在服务的现代请求数：一次长调用期间它不为 0，而这正是「安静」与「还在干活」的区别）。overview 里的 `active_sessions` **只数 legacy 会话**，旁边的 `modern_last_used`（ISO 时间戳或 `null`）与 `modern_in_flight` 才说明另一端有没有现代客户端在说话、以及它当下忙不忙 —— 「有没有人连着我」要这几个字段一起看。）
 
 **get_config** / **set_config_value** — 读/改运行配置（改完是否需要重启看具体键）。`get_config` 的 `structuredContent` 完整声明当前所有运行时配置字段及其类型；Bark 设备密钥仍仅返回掩码，绝不返回明文。
 
