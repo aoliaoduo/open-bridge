@@ -93,3 +93,23 @@ priority over the issue tracker.
 Please do **not** file a report for the documented behaviours in "What is
 deliberately not locked down" -- they are choices, and the reasoning is above.
 If you think a choice is wrong, an issue arguing the case is welcome.
+
+
+## Leaked connection credentials
+
+An MCP route token is a credential, including when it appears in a test fixture.
+Never paste a real instance URL or token into source, tests, documentation, issues,
+or CI output. Use reserved example domains and conspicuously synthetic tokens.
+`npm run security:check` scans publishable working-tree files, including new files;
+it is a targeted guard, not a replacement for full-history secret scanning.
+
+If a real credential was published, stop public exposure and rotate/revoke it first.
+Deleting the current file, replacing only the hostname, or rewriting Git history
+cannot invalidate copies that have already been downloaded. Review access logs,
+then clean the current tree and coordinate any history rewrite with collaborators.
+Enable GitHub secret scanning and push protection; custom route tokens also need
+the repository guard because provider-oriented scanners may not recognise them.
+A public bridge should additionally use Bearer authentication. Configure credentials
+in the local console and update clients before reconnecting; do not share them in
+an issue or commit. History cleanup and remote authentication changes must be
+coordinated so they do not silently invalidate collaborators or active clients.

@@ -68,15 +68,7 @@ test("inline repository source references point at existing files", () => {
   assert.deepEqual(broken, [], `stale source references:\n  ${broken.join("\n  ")}`);
 });
 
-// Connection examples are copied into public repos and prompts. Check the
-// document names only: a failing assertion must not echo a live route token.
-test("shared documentation uses placeholders for MCP connection credentials", () => {
-  const root = process.cwd();
-  const exposed = markdownFiles(root)
-    .filter(file => /https?:\/\/[^\s`"<>]+\/mcp\/[a-f0-9]{32}\b/i.test(readFileSync(file, "utf8")))
-    .map(file => path.relative(root, file));
-  assert.deepEqual(exposed, [], "replace instance-specific MCP addresses with placeholders in these documents");
-});
+// Credential checks live in credential-hygiene.test.mjs and cover all source files.
 
 // A copied policy with an unfinished reporting channel cannot be used safely.
 test("the conduct policy has a usable reporting contact, not a template placeholder", () => {

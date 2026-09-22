@@ -14,6 +14,8 @@
 
 ### Fixed
 
+- 清除测试夹具中误用的真实 MCP 路由令牌与实例域名，统一改为明显的虚构数据。新增覆盖源码、测试和文档的凭据检查，接入 CI 与 `release:check`，失败信息只列位置、不回显凭据；本地运行数据与敏感文件加入忽略规则。曾公开的令牌必须轮换，仅修改仓库文件不能使其失效。
+
 - 修复 `activity_log` 搜索将 `warning` 审计行误报为 `completed`、按 `warning` 筛选漏掉警告的问题。写入端、审计读取端和 TUI 共用状态词表；未知状态的既有兜底行为不变。
 
 - `open-bridge logs --follow` 在 Linux 下不再永久孤儿：零字节写探针在 POSIX 上探测不到断管（内核对空写返回成功），静默日志的 follower 在 `| head` 退出后继续常驻。现以只读哨兵 socket 监听写端的 EPOLLERR/EPOLLHUP，读到断管即退出；健康管道、文件重定向与 TTY 行为不变，Windows 路径不变。
