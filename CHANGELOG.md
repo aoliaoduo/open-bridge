@@ -4,6 +4,12 @@
 
 详细的设计过程、根因分析和测试用例请查阅 Git 历史、源码注释与对应文档；本文件只保留面向使用者的发布摘要。
 
+## [Unreleased]
+
+### Fixed
+
+- `open-bridge logs --follow` 在 Linux 下不再永久孤儿：零字节写探针在 POSIX 上探测不到断管（内核对空写返回成功），静默日志的 follower 在 `| head` 退出后继续常驻。现以只读哨兵 socket 监听写端的 EPOLLERR/EPOLLHUP，读到断管即退出；健康管道、文件重定向与 TTY 行为不变，Windows 路径不变。
+
 ## [1.3.0] — 2026-09-22
 
 ### Added
