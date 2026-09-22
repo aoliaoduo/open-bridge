@@ -173,6 +173,19 @@ class SharedJsonStore {
       };
       const temp = `${this.file}.${process.pid}.tmp`;
       await fsp.writeFile(temp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
+      // Rename is atomic for a concurrent reader but means nothing to a crash:
+      // without a sync the directory entry can survive while the data does not,
+      // and the file comes back empty. These three files are config.json,
+      // state.json and secrets.json, and an empty secrets.json is a route token
+      // nobody can reproduce — the URL every client holds stops working and
+      // nothing on screen says why. Best-effort on purpose: a filesystem that
+      // cannot sync must not turn a correct write into a failed one.
+      await fsp.open(temp, "r+")
+        .then(async handle => {
+          try { await handle.sync(); } catch { /* not syncable here: the rename still publishes */ }
+          await handle.close();
+        })
+        .catch(() => undefined);
       await fsp.rename(temp, this.file);
       this.data = merged;
       this.loadedMtimeMs = this.mtimeMs();

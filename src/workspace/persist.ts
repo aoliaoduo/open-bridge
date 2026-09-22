@@ -10,6 +10,13 @@ import * as fs from "node:fs/promises";
  * Accepts a Buffer as well as a string because the binary write path needs it;
  * `fs.writeFile` treats a missing encoding as utf8 for strings, so one function
  * covers both callers instead of two copies of this rule.
+ *
+ * Deliberately NOT synced, unlike the data-dir store in `host/node-host.ts`.
+ * This path carries workspace files an agent writes many times a minute, where
+ * a lost tail is re-written by the next edit and a sync would be paid on every
+ * one of them; that path carries three files that cannot be reconstructed, so
+ * it buys durability instead. Same primitive, two different answers, because
+ * the two have different costs for being wrong.
  */
 export async function writeFileAtomic(fullPath: string, data: Buffer | string): Promise<void> {
   const temp = `${fullPath}.${process.pid}.tmp`;
