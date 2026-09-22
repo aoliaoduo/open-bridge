@@ -10,7 +10,7 @@ import { test } from "node:test";
 
 import { charAtColumn, fillVisualWidth, setAmbiguousWideForTests, stripAnsi, visualWidth, truncateVisual, padEndVisual } from "../src/console/tui/text.js";
 import { healthColor, paint } from "../src/console/tui/theme.js";
-import { advanceScroll, eventKeyOf, eventRows, formatDuration, formatBytes, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
+import { advanceScroll, eventKeyOf, eventRows, formatClock, formatDuration, formatBytes, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
 
 test("activity rows are single-line: the message truncates instead of wrapping", () => {
   const long = "curl -s http://127.0.0.1:8123/api/skills | head -c 400 plus extra padding padding padding to push this well past one panel width for sure";
@@ -499,11 +499,15 @@ test("heading freshness time shares the completion-clock column", () => {
   ];
   const snap = buildSnapshot({ ...fixtureView(), todos }, { version: "1.0.0", rootName: "r", logPath: "l", now: 60_000, todosUpdatedAt: "2026-09-22T09:58:00Z" });
   const frame = renderFrame(snap, { width: 100, height: 30, panelView: "tasks", now: 60_000 }).map(stripAnsi);
-  const heading = frame.find(l => l.includes("更新 09:58:00")) ?? "";
+  // formatClock renders local time; derive the expected clocks instead of
+  // hardcoding the UTC source strings, so the column contract holds in any TZ.
+  const headingClock = formatClock("2026-09-22T09:58:00Z");
+  const taskClock = formatClock("2026-09-22T06:00:00Z");
+  const heading = frame.find(l => l.includes(`更新 ${headingClock}`)) ?? "";
   const task = frame.find(l => l.includes("写补丁")) ?? "";
-  assert.ok(heading.includes("09:58:00") && task.includes("06:00:00"), `${heading} | ${task}`);
-  const a = heading.indexOf("09:58:00");
-  const b = task.indexOf("06:00:00");
+  assert.ok(heading.includes(headingClock) && task.includes(taskClock), `${heading} | ${task}`);
+  const a = heading.indexOf(headingClock);
+  const b = task.indexOf(taskClock);
   assert.equal(b, a, `task clock column ${b} must match heading time column ${a}`);
 });
 
@@ -706,7 +710,7 @@ test("the completion clock keeps a gap and its own tone apart from the title", a
   const frame = renderFrame(snap, { width: 100, height: 30, panelView: "tasks", now: 60_000 });
   const line = frame.map(l => stripAnsi(l)).find(l => l.includes("这一行标题很长")) ?? "";
   const titleEnd = line.indexOf("这一行标题很长") + visualWidth("这一行标题很长");
-  const clockAt = line.indexOf("06:00:00");
+  const clockAt = line.indexOf(formatClock("2026-09-22T06:00:00Z"));
   assert.ok(clockAt > 0, `clock missing in ${line}`);
   assert.ok(clockAt - titleEnd >= 2, `clock jammed against title (gap ${clockAt - titleEnd})`);
   // 标题 muted (#b8b09c)、时钟 dim (#8a8175)：真彩 SGR 直接断言两种灰阶。
