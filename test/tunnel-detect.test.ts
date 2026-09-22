@@ -74,8 +74,8 @@ test("reserved domains survive an odd payload", () => {
 
 test("tailscale status is read for the three facts the card shows", () => {
   assert.deepEqual(
-    parseTailscaleStatus(JSON.stringify({ Self: { DNSName: "desktop-ccbufa0.tail170424.ts.net.", Online: true } })),
-    { loggedIn: true, domain: "desktop-ccbufa0.tail170424.ts.net", online: true },
+    parseTailscaleStatus(JSON.stringify({ Self: { DNSName: "desktop-demo.tail9999.ts.net.", Online: true } })),
+    { loggedIn: true, domain: "desktop-demo.tail9999.ts.net", online: true },
   );
   assert.deepEqual(parseTailscaleStatus("not json"), { loggedIn: false, domain: "", online: false });
 });

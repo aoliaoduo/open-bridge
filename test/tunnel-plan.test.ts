@@ -131,13 +131,13 @@ test("tailscale: the executable is written, the discovered domain never is", () 
   const facts = emptyTunnelFacts();
   facts.tailscale = {
     installed: true, executable: "C:\\Program Files\\Tailscale\\tailscale.exe", executableLabel: "默认安装目录",
-    loggedIn: true, domain: "desktop-ccbufa0.tail170424.ts.net", online: true, mountPort: null, mountPublic: false,
+    loggedIn: true, domain: "desktop-demo.tail9999.ts.net", online: true, mountPort: null, mountPublic: false,
   };
 
   const plan = planTunnelAutoConfig(input({ provider: "tailscale", facts }));
 
   assert.deepEqual(keys(plan.writes), ["tailscaleExecutable"]);
-  assert.match(plan.notes.join(" "), /desktop-ccbufa0\.tail170424\.ts\.net/);
+  assert.match(plan.notes.join(" "), /desktop-demo\.tail9999\.ts\.net/);
   // The tunnel start path fills this in from the CLI; auto-config must say so
   // rather than quietly writing a second, frozen copy of the name.
   assert.match(plan.notes.join(" "), /自动填写/);

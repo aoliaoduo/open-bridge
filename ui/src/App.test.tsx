@@ -260,7 +260,7 @@ function tunnelFactsFixture(): TunnelFacts {
       executable: "C:\\Program Files\\Tailscale\\tailscale.exe",
       executableLabel: "默认安装目录",
       loggedIn: true,
-      domain: "demo.tail170424.ts.net",
+      domain: "demo.tail9999.ts.net",
       online: true,
       mountPort: null,
       mountPublic: false,
@@ -947,7 +947,7 @@ describe("App shell: in-page filtering and rails", () => {
     await screen.findByText(/隧道让公网上的客户端连到这台机器/);
 
     // Same shape as ngrok's card: a status chip, the action row, the fold.
-    expect(await screen.findByText("已登录 · demo.tail170424.ts.net")).toBeTruthy();
+    expect(await screen.findByText("已登录 · demo.tail9999.ts.net")).toBeTruthy();
     expect(screen.getByText("443：还没有挂载任何服务")).toBeTruthy();
     expect(screen.getByRole("button", { name: "一键自动配置" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "测试公网可达" })).toBeTruthy();
