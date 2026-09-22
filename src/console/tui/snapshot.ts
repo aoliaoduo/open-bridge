@@ -7,6 +7,7 @@
  * without spawning child processes or installing a host.
  */
 
+import { isActivityStatus } from "../../mcp/activity-status.js";
 import { MAX_CAPTURED_OUTPUT } from "../../bridge/state.js";
 import { tuiActivityDetail, tuiActivityMessage } from "./activity-copy.js";
 import type { TuiEventStatus, TuiSnapshot } from "./render.js";
@@ -89,7 +90,7 @@ export interface SnapshotOptions {
 const MAX_EVENTS = 200;
 
 function toEventStatus(status: string): TuiEventStatus {
-  return status === "running" || status === "completed" || status === "error" || status === "progress" || status === "warning"
+  return isActivityStatus(status)
     ? status
     : "progress";
 }

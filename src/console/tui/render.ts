@@ -16,7 +16,8 @@
 import { paint, healthColor, spinnerFrame, type ColorName } from "./theme.js";
 import { fillVisualWidth, stripAnsi, inlineText, truncateVisual, padEndVisual, padStartVisual, visualWidth, wrapVisual, wrapVisualSoft } from "./text.js";
 
-export type TuiEventStatus = "running" | "completed" | "error" | "progress" | "warning";
+export type { ActivityStatus as TuiEventStatus } from "../../mcp/activity-status.js";
+import type { ActivityStatus as TuiEventStatus } from "../../mcp/activity-status.js";
 
 /** The driver's whole view model. Assembled by snapshot.ts, rendered here. */
 export type TuiSnapshot = {

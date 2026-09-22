@@ -1,3 +1,4 @@
+import type { ActivityStatus } from "../mcp/activity-status.js";
 import { host } from "../host/host.js";
 import type { Server as HttpServer } from "node:http";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
@@ -75,7 +76,7 @@ export type Activity = {
   /** Epoch ms for relative-time rendering (the locale `at` string is display-only). */
   ts?: number;
   tool: string;
-  status: "running" | "completed" | "error" | "progress" | "warning";
+  status: ActivityStatus;
   message: string;
   /** Redacted argument summary captured at invoke time (T-1); absent on old log lines. */
   args_summary?: string;

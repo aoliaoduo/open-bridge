@@ -7,12 +7,13 @@
  * malformed lines are skipped and missing files count as empty.
  */
 import { readFile } from "node:fs/promises";
+import { isActivityStatus, type ActivityStatus } from "./activity-status.js";
 
 export interface ActivityLogEntry {
   at: string;
   ts?: number;
   tool: string;
-  status: "running" | "completed" | "error" | "progress";
+  status: ActivityStatus;
   message: string;
   /** Redacted argument summary (T-1); undefined on entries written before the field existed. */
   args_summary?: string;
@@ -44,10 +45,7 @@ function toEntry(value: unknown): ActivityLogEntry | undefined {
     at: raw.at,
     ts: typeof raw.ts === "number" ? raw.ts : new Date(raw.at).getTime() || undefined,
     tool: String(raw.tool ?? ""),
-    status:
-      status === "running" || status === "completed" || status === "error" || status === "progress"
-        ? status
-        : "completed",
+    status: isActivityStatus(status) ? status : "completed",
     message: String(raw.message ?? ""),
     args_summary: typeof raw.args_summary === "string" ? raw.args_summary : undefined,
   };

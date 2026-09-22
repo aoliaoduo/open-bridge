@@ -77,3 +77,34 @@ test("limit/offset pagination and truncated flag", async () => {
   assert.equal(p2.entries.length, 1);
   assert.equal(p2.truncated, false);
 });
+
+
+test("warning audit rows retain their recorded status", async () => {
+  const f = tmpLog("audit.log", [entry("run_command", "warning", "slow call", "2026-09-01T00:00:00.000Z")]);
+  try {
+    const r = await searchActivityLog(f, {});
+    assert.equal(r.entries[0]?.status, "warning");
+  } finally { fs.rmSync(path.dirname(f), { recursive: true, force: true }); }
+});
+
+test("warning filter finds warnings and completed filter excludes them", async () => {
+  const f = tmpLog("audit.log", [entry("run_command", "warning", "slow call", "2026-09-01T00:00:00.000Z")]);
+  try {
+    assert.equal((await searchActivityLog(f, { status: "warning" })).entries.length, 1);
+    assert.equal((await searchActivityLog(f, { status: "completed" })).entries.length, 0);
+  } finally { fs.rmSync(path.dirname(f), { recursive: true, force: true }); }
+});
+
+
+test("all recorded statuses round-trip and unknown values retain the legacy fallback", async () => {
+  const statuses = ["running", "completed", "error", "progress", "warning"];
+  const f = tmpLog("audit.log", [...statuses, "future-status"].map(status =>
+    entry("run_command", status, status, "2026-09-01T00:00:00.000Z")));
+  try {
+    const r = await searchActivityLog(f, {});
+    for (const status of statuses) {
+      assert.equal(r.entries.find(row => row.message === status)?.status, status);
+    }
+    assert.equal(r.entries.find(row => row.message === "future-status")?.status, "completed");
+  } finally { fs.rmSync(path.dirname(f), { recursive: true, force: true }); }
+});

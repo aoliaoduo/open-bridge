@@ -14,6 +14,8 @@
 
 ### Fixed
 
+- 修复 `activity_log` 搜索将 `warning` 审计行误报为 `completed`、按 `warning` 筛选漏掉警告的问题。写入端、审计读取端和 TUI 共用状态词表；未知状态的既有兜底行为不变。
+
 - `open-bridge logs --follow` 在 Linux 下不再永久孤儿：零字节写探针在 POSIX 上探测不到断管（内核对空写返回成功），静默日志的 follower 在 `| head` 退出后继续常驻。现以只读哨兵 socket 监听写端的 EPOLLERR/EPOLLHUP，读到断管即退出；健康管道、文件重定向与 TTY 行为不变，Windows 路径不变。
 - `config.json` / `state.json` / `secrets.json` 的写入在 rename 前补一次尽力而为的 `fsync`：rename 对并发读者是原子的，对崩溃不是，掉电后可能只剩目录项而没有数据，`secrets.json` 变空即路由令牌不可复原——客户端手里的 URL 全部失效且界面上看不出原因。不支持 sync 的文件系统会忽略这一步，写入照常发布，不会因为无法 sync 而失败；工作区普通文件的写入路径刻意不同步（见 `src/workspace/persist.ts` 的说明），避免每次写文件都付一次 sync。
 
