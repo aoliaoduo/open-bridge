@@ -24,7 +24,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
-import { pidAlive, resolveHome } from "./registry.js";
+import { MAX_AUDIT_LOG_BYTES, ROUTE_TOKEN_KEY } from "../bridge/state.js";
+import { pidAlive, resolveHome, RUNTIME_FILE, SERVE_LOCK_FILE } from "./registry.js";
 import { t } from "../bridge/cli-i18n.js";
 import { fail, type ParsedArgs } from "./args.js";
 import { VERSION } from "./version.js";
@@ -33,9 +34,6 @@ import { VERSION } from "./version.js";
 const AUDIT_TAIL_BYTES = 8 * 1024 * 1024;
 /** A lock or runtime record older than this, with no live process, is leftover. */
 const STALE_AFTER_MS = 5_000;
-/** registry.ts's own patterns, so one definition decides what an instance record is. */
-const RUNTIME_FILE = /^runtime(-[0-9a-f]{24})?\.json$/;
-const SERVE_LOCK_FILE = /^serve-(.+)\.lock$/;
 /** One in ten calls failing is worth a sentence; below that it is ordinary noise. */
 const ERROR_RATIO = 0.1;
 /** A ratio needs a denominator before it means anything. */
@@ -44,8 +42,6 @@ const MIN_CALLS_FOR_RATIO = 20;
 const STUCK_LOOP_RUN = 5;
 /** How many tools get a repeated-run line each in the report and in the findings. */
 const MAX_REPORTED_RUNS = 5;
-/** A backup older than this is residue from something long since resolved. */
-const RECENT_BAK_MS = 3_600_000;
 
 export type Severity = "critical" | "investigate" | "info";
 
@@ -364,7 +360,7 @@ function buildBehavior(home: string): BehaviorSkeleton {
  * An absent artifact is a row that says so — never a missing row, because
  * "this file does not exist" is itself a diagnostic fact.
  */
-function buildArtifacts(home: string, now: number, configSubset: Record<string, unknown>): ArtifactRow[] {
+function buildArtifacts(home: string, now: number): ArtifactRow[] {
   const names = listHome(home);
   const rows: ArtifactRow[] = [];
   // Presence is a fact about the disk, never about what this report expected:
@@ -385,7 +381,7 @@ function buildArtifacts(home: string, now: number, configSubset: Record<string, 
   const secretsPath = path.join(home, "secrets.json");
   const secrets = readJsonFile(secretsPath);
   const secretsPresent = statOf(secretsPath, now).bytes !== null;
-  const tokenKeys = Object.keys(secrets ?? {}).filter(key => key.startsWith("openBridge.routeToken."));
+  const tokenKeys = Object.keys(secrets ?? {}).filter(key => key.startsWith(`${ROUTE_TOKEN_KEY}.`));
   row("config.json", "Settings. This report carries a whitelist subset of it, never a URL, key or domain.");
   row("state.json", "Service definitions, todos and usage counters. Rebuilt state, not identity.");
   // Absent and empty are different facts and only one of them is an emergency:
@@ -396,9 +392,10 @@ function buildArtifacts(home: string, now: number, configSubset: Record<string, 
     : tokenKeys.length === 0
       ? "PRESENT WITH NO ROUTE TOKEN: every MCP URL for this machine has stopped working. Content never read."
       : `${tokenKeys.length} route token record(s). Content never read, not even redacted.`);
-  // A backup that is still here means a write failed at some point; the file is
-  // evidence, and its size is the only thing worth saying about it.
-  row("state.json.bak", "Left by a failed state write. Investigate if it reappears or grows.");
+  // No row for state.json.bak on purpose: nothing in this repo writes one. Both
+  // data-dir writers go through a `.<pid>.tmp` file and a rename, so a .bak that
+  // turns up came from outside, and the unrecognised bucket below says exactly
+  // that instead of this report inventing a cause for it.
   row("audit.log", "Behaviour history. Projected into counts below; no line is copied into this report.");
   row("audit.log.1", "One rotated generation of the audit log.");
   row("bridge-peers.json", "Which instance on this machine owns the shared tunnel.");
@@ -489,12 +486,14 @@ function buildArtifacts(home: string, now: number, configSubset: Record<string, 
     });
   }
 
-  const logMaxBytes = Number(configSubset.logMaxBytes ?? CONFIG_DEFAULTS.logMaxBytes);
+  // logMaxBytes is logs/bridge.log's ceiling, not this file's: audit.log rotates
+  // at MAX_AUDIT_LOG_BYTES, and comparing it against the wrong limit reported a
+  // log one rename away from rotating as barely started.
   const audit = rows.find(entry => entry.name === "audit.log");
-  if (audit?.bytes !== undefined && audit.bytes !== null && Number.isFinite(logMaxBytes) && logMaxBytes > 0) {
-    const ratio = audit.bytes / logMaxBytes;
+  if (audit?.bytes !== undefined && audit.bytes !== null) {
+    const ratio = audit.bytes / MAX_AUDIT_LOG_BYTES;
     if (ratio >= 0.9) {
-      audit.health += ` At ${Math.round(ratio * 100)}% of logMaxBytes: about to rotate.`;
+      audit.health += ` At ${Math.round(ratio * 100)}% of its ${String(MAX_AUDIT_LOG_BYTES >> 20)} MB rotation limit: about to rotate.`;
     }
   }
   return rows;
@@ -541,24 +540,11 @@ function buildFindings(
     });
   }
 
-  if (artifacts.some(artifact => /^serve-.+\.lock$/.test(artifact.name) && artifact.health.startsWith("STALE"))) {
+  if (artifacts.some(artifact => SERVE_LOCK_FILE.test(artifact.name) && artifact.health.startsWith("STALE"))) {
     findings.push({
       severity: "investigate",
       name: "stale serve lock",
       detail: "A start wedged or crashed while holding the lock. `serve` refuses to start until the lock file is gone.",
-    });
-  }
-
-  const bak = byName.get("state.json.bak");
-  if (bak?.present === true) {
-    const recent = bak.age_ms !== null && bak.age_ms <= RECENT_BAK_MS;
-    findings.push({
-      severity: recent ? "investigate" : "info",
-      name: "state.json.bak is present",
-      detail: recent
-        ? "A state write failed in the last hour and left its backup behind. Worth reading the narrative log around that time."
-        : `Left behind ${ageOf(bak.age_ms)} ago by a state write that failed then. Residue, not a live problem; `
-          + "it does not get cleaned up on its own.",
     });
   }
 
@@ -623,7 +609,7 @@ function buildFindings(
 export function buildDiagnosticsReport(home: string, version: string): DiagnosticsReport {
   const now = Date.now();
   const configSubset = safeConfigSubset(home);
-  const artifacts = buildArtifacts(home, now, configSubset);
+  const artifacts = buildArtifacts(home, now);
   const behavior = buildBehavior(home);
   // Not readAllRuntimes(): it filters to LIVE instances, so a stale count
   // derived from it is always zero and the field says nothing. The artifact rows

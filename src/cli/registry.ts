@@ -17,10 +17,19 @@ import * as net from "node:net";
 import * as path from "node:path";
 
 import { t } from "../bridge/cli-i18n.js";
-import { workspaceSuffixFor } from "../bridge/paths.js";
+import { WORKSPACE_SUFFIX_PATTERN, workspaceSuffixFor } from "../bridge/paths.js";
 import type { ParsedArgs } from "./args.js";
 
 // --- runtime registry -------------------------------------------------------
+
+/**
+ * The two data-dir file names that identify an instance. Built from the same
+ * suffix pattern the generators use, so what gets written and what gets
+ * recognised cannot drift apart. The runtime group is optional because
+ * legacyRuntimePath() writes a plain runtime.json.
+ */
+export const RUNTIME_FILE = new RegExp(`^runtime(-${WORKSPACE_SUFFIX_PATTERN})?\\.json$`);
+export const SERVE_LOCK_FILE = new RegExp(`^serve-(${WORKSPACE_SUFFIX_PATTERN})\\.lock$`);
 
 export function runtimePath(home: string, root: string): string {
   return path.join(home, `runtime-${workspaceSuffixFor(root)}.json`);
@@ -77,7 +86,7 @@ export function readAllRuntimes(home: string): RuntimeInfo[] {
   const files: string[] = [];
   try {
     for (const entry of fs.readdirSync(home)) {
-      if (/^runtime(-[0-9a-f]{24})?\.json$/.test(entry)) files.push(path.join(home, entry));
+      if (RUNTIME_FILE.test(entry)) files.push(path.join(home, entry));
     }
   } catch { /* no data dir yet */ }
   const seen = new Set<string>();

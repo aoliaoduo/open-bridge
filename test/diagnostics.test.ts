@@ -247,14 +247,16 @@ test("an absent artifact is a row that says so, never a missing row", () => {
   // Not created by the fixture, so genuinely absent.
   assert.equal(byName.get("bridge-peers.json")?.present, false);
   assert.equal(byName.get("bridge-peers.json")?.bytes, null);
-  // Present but not expected: presence is read off the disk, not off a plan.
+  // Present but not expected. Nothing in this repo writes a .bak -- both data-dir
+  // writers use a `.<pid>.tmp` file and a rename -- so the report must not
+  // invent a cause for one. It goes in the unrecognised bucket, named, unread.
   writeFileSync(path.join(home, "state.json.bak"), "{}\n", "utf8");
   const again = buildDiagnosticsReport(home, "9.9.9-test");
-  const bak = again.artifacts.find(artifact => artifact.name === "state.json.bak");
-  assert.equal(bak?.present, true);
-  assert.ok((bak?.bytes ?? 0) > 0);
-  // A fresh backup is evidence; an old one is residue. This one is fresh.
-  assert.equal(again.findings.find(finding => finding.name === "state.json.bak is present")?.severity, "investigate");
+  const unknown = again.artifacts.find(artifact => artifact.name.startsWith("(unrecognised:"));
+  assert.ok(unknown?.name.includes("state.json.bak"), `named: ${String(unknown?.name)}`);
+  assert.match(unknown?.health ?? "", /not known to this report/);
+  assert.equal(again.findings.some(finding => finding.name.includes("state.json.bak")), false,
+    "no fabricated cause for a file this codebase never creates");
 });
 
 test("an empty data dir still produces a readable report", () => {

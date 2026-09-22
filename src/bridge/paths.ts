@@ -18,6 +18,13 @@ export const currentWorkspaceRoot = (): string => path.resolve(host().projectRoo
 export const workspaceSuffixFor = (rootPath: string): string =>
   sha256(rootPath || "<no-workspace>").slice(0, 24);
 
+/**
+ * What that suffix looks like on disk. The generators above and the parsers in
+ * the CLI both encode its length, so the 24 lives here once: a data-dir file
+ * name is only an instance record if it matches this.
+ */
+export const WORKSPACE_SUFFIX_PATTERN = "[0-9a-f]{24}";
+
 export const workspaceStateSuffix = (): string => workspaceSuffixFor(state.activeWorkspaceRoot);
 
 export const allowedRoots = (): string[] => workspaceContext.allowedRoots();

@@ -42,7 +42,7 @@ open-bridge diagnostics --out D:\ob.md
 | `audit.log` | 大小相对 `logMaxBytes`（默认 10 MB） | 未接近上限 | 接近即轮转；报表只读最新 8 MB，更早的按字节数报为 skipped |
 | `audit.log.1` | 存在即正常轮转 | 一份 | 无（尚未轮转过） |
 | `state.json` | 服务定义、todos、用量计数 | 可解析 | 内容为空或不可解析。它是可重建状态，不是身份 |
-| `state.json.bak` | 存在与否、多久之前 | 不存在 | **最近一小时内出现**：一次状态写入失败过。更久则是残留——它不会被自动清理，但也不该按新故障报 |
+| 未识别的文件 | 名字、有无 | 没有 | 报表以 `(unrecognised: …)` 单独列一行。注意仓内**没有任何代码会产生 `.bak`**：两个写入器都走 `.<pid>.tmp` 再 rename，所以 `state.json.bak` 一旦出现就是外来物，报表不为它编成因 |
 | `config.json` | 行为开关与超时 | 可解析 | 报表只带白名单子集；`notify.barkKey` 只报 `<set>`/`<unset>` |
 | `bridge-peers.json` | 同机哪个实例持有共享隧道 | 多实例共用隧道时存在 | 单实例或无隧道时不存在属正常 |
 | `logs/bridge.log` | 叙事日志，**含命令文本与路径** | 大小正常轮转 | 本报表不读它。要看用 `open-bridge logs`，但别直接贴进 issue |
@@ -57,7 +57,7 @@ open-bridge diagnostics --out D:\ob.md
 | `no secrets.json in this data dir` | info | 文件不存在 | 正常。若确实跑过实例，说明 `--home`/`OPEN_BRIDGE_HOME` 指错了地方 |
 | `N stale instance record(s)` | investigate | 记录里的 pid 已消失且记录超过 5 秒 | 删掉该 `runtime-*.json` |
 | `stale serve lock` | investigate | 锁无活实例持有且超过 5 秒 | 删掉该 `serve-*.lock` 后才能再 `serve` |
-| `state.json.bak is present` | investigate / info | 一小时内为 investigate，更久为 info | 近期的去读 `logs/bridge.log` 对应时段；陈旧的忽略 |
+| `数据目录里有本报表不认识的文件` | info | 有未识别文件即列名 | 报表只报名字不读内容。先确认是不是 `--home`/`OPEN_BRIDGE_HOME` 指错了目录 |
 | `N unparsable audit line(s)` | investigate | JSONL 行解析失败 | 写入撕裂或并发追加交错。**只计数，不引用原文** |
 | `N of M tool calls errored` | investigate | 样本 ≥20 次调用且错误率 ≥10% | 看错误类分布。小分母不报，避免噪声 |
 | `<tool> called N times in a row` | investigate | 同一工具连续 ≥5 次**调用** | 这是 agent 空转的形状。按调用计而非按审计行计，每工具只报最长的一段 |

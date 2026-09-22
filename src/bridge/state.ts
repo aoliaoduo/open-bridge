@@ -18,7 +18,12 @@ export const MAX_SESSIONS = 64;
 export const MAX_CAPTURED_OUTPUT = 32 * 1024 * 1024;
 export const READY_PATTERN_WINDOW_BYTES = 64 * 1024;
 export const READY_PATTERN_TEST_TIMEOUT_MS = 500;
-const MAX_AUDIT_LOG_BYTES = 1024 * 1024;
+/**
+ * audit.log rotates to audit.log.1 at this size. Exported because it is a
+ * different ceiling from config.logMaxBytes, which governs logs/bridge.log:
+ * anything reporting how full the audit log is must compare against this one.
+ */
+export const MAX_AUDIT_LOG_BYTES = 1024 * 1024;
 export const SERVICE_HEALTH_TIMEOUT_MS = 120_000;
 export const SERVICE_PORT_PROBE_TIMEOUT_MS = 30_000;
 /** service_status per-service health-check budget (default); the max is SERVICE_HEALTH_TIMEOUT_MS. */
