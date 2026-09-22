@@ -62,6 +62,7 @@ import {
 import { cmdPrompt, cmdStatus, cmdStop, cmdUrl } from "./cli/query-commands.js";
 import { cmdHealth, cmdInstances, cmdLogs } from "./cli/inspect-commands.js";
 import { cmdConfig, cmdDoctor, cmdToken, setHostInstaller } from "./cli/local-commands.js";
+import { cmdDiagnostics } from "./cli/diagnostics.js";
 import { VERSION } from "./cli/version.js";
 
 
@@ -77,6 +78,7 @@ const HELP = (): string => t(`open-bridge ${VERSION} — standalone MCP bridge f
   open-bridge config [list] [get KEY] [set KEY VALUE] [path]
   open-bridge token create [--label L] [--ttl SEC] | list | revoke ID | delete ID | rotate ID
   open-bridge doctor
+  open-bridge diagnostics [--out FILE]
   open-bridge version
 
 说明:
@@ -91,6 +93,10 @@ const HELP = (): string => t(`open-bridge ${VERSION} — standalone MCP bridge f
   prompt    打印给 AI 客户端的接入提示词（含 MCP URL，可直接粘贴）
   config    配置文件位于 ~/.open-bridge/config.json（OPEN_BRIDGE_HOME 可改）
   token     管理 Bearer 令牌；明文只在 create/rotate 时显示一次
+  diagnostics
+            生成可直接贴进 issue 的脱敏诊断（数据目录工件清单 + 行为骨架 + 阈值发现）
+            白名单投影：不含审计行原文、参数、工作区路径、命令文本、日志内容与任何密钥
+            默认覆盖式写入 ~/.open-bridge/diagnostics.md，--out FILE 指定别处
 
 工作区 = 当前目录:
   在 A 目录运行 open-bridge serve，A 就是这次运行的工作区（相对路径的基准）；
@@ -105,6 +111,7 @@ Usage:
   open-bridge config [list] [get KEY] [set KEY VALUE] [path]
   open-bridge token create [--label L] [--ttl SEC] | list | revoke ID | delete ID | rotate ID
   open-bridge doctor
+  open-bridge diagnostics [--out FILE]
   open-bridge version
 
 Commands:
@@ -120,6 +127,12 @@ Commands:
   prompt    Print the onboarding prompt for an AI client (MCP URL included)
   config    The config file lives at ~/.open-bridge/config.json (OPEN_BRIDGE_HOME moves it)
   token     Manage Bearer tokens; the plaintext is shown once, at create/rotate
+  diagnostics
+            Write the redacted diagnostic you can paste into an issue: artifact
+            inventory, behaviour skeleton, threshold findings. A whitelist
+            projection — no audit line, argument, workspace path, command text,
+            log content or secret. Overwrites ~/.open-bridge/diagnostics.md
+            unless --out FILE says otherwise
 
 Workspace = current directory:
   Run open-bridge serve in directory A and A is this run's workspace, the base
@@ -451,6 +464,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     case "config": return cmdConfig(parsed);
     case "token": return cmdToken(parsed);
     case "doctor": return cmdDoctor(parsed);
+    case "diagnostics": return cmdDiagnostics(parsed);
     case "version": case "--version": case "-v":
       console.log(VERSION);
       return;
