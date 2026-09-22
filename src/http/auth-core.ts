@@ -270,10 +270,6 @@ export class AuthFailureLimiter {
     return this.entries.size;
   }
 
-  reset(): void {
-    this.entries.clear();
-  }
-
   private evictIfFull(now: number): void {
     if (this.entries.size < this.maxKeys) return;
     this.prune(now);

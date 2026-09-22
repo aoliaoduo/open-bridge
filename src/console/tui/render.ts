@@ -211,11 +211,6 @@ function renderOverviewRows(snap: TuiSnapshot, width: number): string[] {
     counters = candidate;
   }
 
-  // The tunnel tag rides the counters row; the MCP address moved to the
-  // footer, which owns it exclusively (it used to appear in both places).
-  const tag = tunnelTag(snap);
-  segments.push({ text: tag.text, color: tag.color });
-
   return [counters];
 }
 
@@ -234,70 +229,6 @@ function renderProcessRows(snap: TuiSnapshot, width: number, maxRows: number): s
     rows.push(`${paint("text", left)}${" ".repeat(pad)}${paint(healthColor(pct), rightPlain)}`);
   }
   return rows;
-}
-
-/** One event, wrapped to `width` columns. Continuation lines keep the message; nothing is `...`-amputated. */
-export function eventRows(
-  event: TuiSnapshot["events"][number],
-  width: number,
-  spin: number,
-  now: number,
-): string[] {
-  const tool = inlineText(event.tool);
-  const message = inlineText(event.message);
-  const icon =
-    event.status === "running" ? paint("accent", spinnerFrame(spin), { bold: true })
-    : event.status === "completed" ? paint("success", "✓")
-    : event.status === "error" ? paint("error", "✕", { bold: true })
-    : event.status === "warning" ? paint("review", "⚠")
-    : paint("context", "◆");
-  // A running row shows live elapsed time; a finished row shows the matched
-  // duration only when the invoke/outcome pair was actually observed —
-  // never an invented one.
-  const rightText =
-    event.status === "running"
-      ? `${formatDuration(Math.max(0, now - Date.parse(event.at)))}…`
-      : event.durationMs !== undefined
-        ? (event.durationMs < 1000 ? `${Math.round(event.durationMs)}ms` : formatDuration(event.durationMs))
-        : "";
-  const clock = formatClock(event.at);
-  const mark = event.status === "running" ? spinnerFrame(spin)
-    : event.status === "completed" ? "✓"
-    : event.status === "error" ? "✕"
-    : event.status === "warning" ? "⚠"
-    : "◆";
-  const prefixPlain = `${clock} ${mark} ${tool} `;
-  const prefix = `${paint("dim", clock)} ${icon} ${paint("tool", tool)} `;
-  const prefixW = visualWidth(prefixPlain);
-  // 时长列固定宽：运行中行的时长逐秒变化（9s→10s、59s→1m00s），右侧宽度一变，
-  // 正文的软换行边界就移动一列，面板底部行因此偶发翻转 —— 操作者看到的是
-  // 「最后一行偶尔闪烁」。右列一律右对齐到固定宽，换行边界与时间彻底无关。
-  const DURATION_W = 7; // 容纳 "59m59s"；正常时长不会更宽，超宽走已有的整行截断。
-  const rightW = rightText === "" ? 0 : DURATION_W;
-  const rightShown = rightText === "" ? "" : padStartVisual(rightText, DURATION_W);
-  const msgWidth = Math.max(1, width - prefixW - (rightW > 0 ? rightW + 1 : 0));
-  const chunks = wrapVisualSoft(message, msgWidth);
-  if (chunks.length === 0) chunks.push("");
-  return chunks.map((chunk, index) => {
-    if (index === 0) {
-      const left = `${prefix}${chunk.length > 0 ? paint("muted", chunk) : ""}`;
-      const line = rightShown === ""
-        ? padEndVisual(left, width)
-        : `${padEndVisual(left, Math.max(0, width - rightW))}${paint("dim", rightShown)}`;
-      if (visualWidth(line) > width) return padEndVisual(truncateVisual(stripAnsi(line), width), width);
-      return padEndVisual(line, width);
-    }
-    return padEndVisual(`${" ".repeat(prefixW)}${paint("muted", chunk)}`, width);
-  });
-}
-
-export function eventRow(
-  event: TuiSnapshot["events"][number],
-  width: number,
-  spin: number,
-  now: number,
-): string {
-  return eventRows(event, width, spin, now)[0] ?? padEndVisual("", width);
 }
 
 /** Stable event identity; old in-memory rows fall back to their legacy key. */
@@ -343,7 +274,10 @@ export function eventListRow(
   const prefixPlain = `${clock} ${mark} ${tool} `;
   const prefix = `${paint("dim", clock, bold)} ${icon} ${paint(event.subtle === true ? "dim" : "tool", tool, bold)} `;
   const prefixW = visualWidth(prefixPlain);
-  const DURATION_W = 7; // 与 eventRows 同一约定：右列定宽，正文宽度与时长无关。
+  // 时长列固定宽：运行中行的时长逐秒变化（9s→10s、59s→1m00s），右侧宽度一变，
+  // 正文边界就移动一列，面板底部行因此偶发翻转 —— 操作者看到的是「最后一行
+  // 偶尔闪烁」。右列一律右对齐到固定宽，行布局与时长彻底无关。
+  const DURATION_W = 7; // 容纳 "59m59s"；正常时长不会更宽，超宽走整行截断。
   const rightW = rightText === "" ? 0 : DURATION_W;
   const rightShown = rightText === "" ? "" : padStartVisual(rightText, DURATION_W);
   const msgWidth = Math.max(1, width - prefixW - (rightW > 0 ? rightW + 1 : 0));

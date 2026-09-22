@@ -10,7 +10,7 @@ import { test } from "node:test";
 
 import { charAtColumn, fillVisualWidth, setAmbiguousWideForTests, stripAnsi, visualWidth, truncateVisual, padEndVisual } from "../src/console/tui/text.js";
 import { healthColor, paint } from "../src/console/tui/theme.js";
-import { advanceScroll, eventKeyOf, eventRows, formatClock, formatDuration, formatBytes, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
+import { advanceScroll, eventKeyOf, eventListRow, formatClock, formatDuration, formatBytes, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
 
 test("activity rows are single-line: the message truncates instead of wrapping", () => {
   const long = "curl -s http://127.0.0.1:8123/api/skills | head -c 400 plus extra padding padding padding to push this well past one panel width for sure";
@@ -680,7 +680,7 @@ test("the duration column keeps a fixed width so rows stop flickering", () => {
   // "900ms" / "1s" / "59s" 各不相同，但正文必须从同一列开始 —— 右列宽度
   // 不再随时长单位变化，底部行因此不会偶发翻转。
   const columns = [900, 1000, 59000].map(durationMs =>
-    stripAnsi(eventRows({ ...base, durationMs }, 80, 0, 0)[0] ?? "").indexOf("审查代码变更"));
+    stripAnsi(eventListRow({ ...base, durationMs }, 80, 0, 0)).indexOf("审查代码变更"));
   assert.ok(columns[0] >= 0 && columns[0] === columns[1] && columns[1] === columns[2]);
 });
 

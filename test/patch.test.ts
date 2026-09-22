@@ -15,7 +15,6 @@ function workspaceFor(root: string): WorkspaceContext {
     resolveSecure: async (input = ".") => (path.isAbsolute(input) ? path.resolve(input) : path.resolve(root, input)),
     unrestricted: () => true,
     allowedRoots: () => [path.parse(root).root],
-    assertAllowed: (full: string) => path.resolve(full),
   } as unknown as WorkspaceContext;
 }
 

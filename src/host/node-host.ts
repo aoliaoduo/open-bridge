@@ -49,7 +49,6 @@ export interface NodeHostOptions {
   /** Active project root; defaults to process.cwd() at server start. */
   projectRoot?: string;
   version?: string;
-  ui?: UiChannel;
 }
 
 export function resolveDefaultHome(): string {
@@ -273,15 +272,6 @@ class FileConfig extends SharedJsonStore {
     await this.write(key, value);
   }
 
-  /** All effective values (config page rendering). */
-  effective(): Record<string, unknown> {
-    const merged: Record<string, unknown> = {};
-    for (const [key, declared] of Object.entries(CONFIG_DEFAULTS)) {
-      merged[key] = this.get(key, declared);
-    }
-    return merged;
-  }
-
   rawFile(): string {
     return this.file;
   }
@@ -326,36 +316,20 @@ class FileSecretStore extends SharedJsonStore {
   }
 }
 
-class MultiSubscriberUi implements UiChannel {
-  private readonly subscribers = new Set<UiChannel>();
-  private pending: "update" | "refresh" | undefined;
-
-  subscribe(channel: UiChannel): () => void {
-    this.subscribers.add(channel);
-    return () => { this.subscribers.delete(channel); };
-  }
-
-  update(): void {
-    this.schedule("update");
-  }
-
-  refresh(): void {
-    this.schedule("refresh");
-  }
-
-  /** Coalesce bursts: one notification per tick per kind (refresh wins). */
-  private schedule(kind: "update" | "refresh"): void {
-    if (this.pending === "refresh") return;
-    this.pending = kind === "refresh" ? "refresh" : "update";
-    queueMicrotask(() => {
-      const deliver = this.pending;
-      this.pending = undefined;
-      if (!deliver) return;
-      for (const channel of this.subscribers) {
-        try { channel[deliver](); } catch { /* subscriber errors never propagate */ }
-      }
-    });
-  }
+/**
+ * The Host contract's console push channel.
+ *
+ * Honest no-ops today: the web console discovers state by polling, so nothing
+ * subscribes and these calls have no receiver. The seam stays in Host because
+ * the core is full of call sites that say "the console should hear about
+ * this" — a real push transport (SSE, websocket) plugs in here without any of
+ * them changing. The old multi-subscriber fanout was deleted rather than
+ * wired up: it scheduled microtasks to deliver into a subscriber set that was
+ * permanently empty, so the machinery did observable work for nobody.
+ */
+class ConsolePushChannel implements UiChannel {
+  update(): void {}
+  refresh(): void {}
 }
 
 /** `logs/bridge.log` rotates to a single previous generation at this size. */
@@ -528,17 +502,15 @@ export interface NodeHost extends Host {
   /** Change the active project root at runtime (project switch). */
   setProjectRoot(root: string): void;
   configPath(): string;
-  statePath(): string;
-  logsDir(): string;
   /** The bridge activity log (file + live line stream). */
   readonly bridgeLog: FileLog;
 }
 
 /**
- * Build and install the file-backed host. Returns the host (with a couple of
- * Node-specific helpers) plus the shared UI channel the API router uses.
+ * Build and install the file-backed host, with a couple of Node-specific
+ * helpers on top of the Host contract.
  */
-export function installNodeHost(options: NodeHostOptions = {}): { host: NodeHost; ui: MultiSubscriberUi } {
+export function installNodeHost(options: NodeHostOptions = {}): { host: NodeHost } {
   const home = ensureDir(path.resolve(options.homeDir ?? resolveDefaultHome()));
   const logsDir = ensureDir(path.join(home, "logs"));
   const config = new FileConfig(home);
@@ -547,7 +519,7 @@ export function installNodeHost(options: NodeHostOptions = {}): { host: NodeHost
   const log = new FileLog(logsDir, {
     maxBytes: config.get("logMaxBytes", CONFIG_DEFAULTS.logMaxBytes as number),
   });
-  const ui = new MultiSubscriberUi();
+  const ui = new ConsolePushChannel();
   // package.json is the only place a version is written. This fallback used to
   // be a second literal, so every bump left a stale copy behind for whoever
   // built the host without passing one (tests, embedders, a hand-made dist).
@@ -587,13 +559,11 @@ export function installNodeHost(options: NodeHostOptions = {}): { host: NodeHost
       log.write(`[INFO] Project root switched: ${resolved}`);
     },
     configPath: () => config.rawFile(),
-    statePath: () => path.join(home, "state.json"),
-    logsDir: () => logsDir,
     bridgeLog: log,
   };
 
   setHost(installed);
-  return { host: installed, ui };
+  return { host: installed };
 }
 
 /** The installed host, typed with its Node-specific helpers. Throws when not installed. */

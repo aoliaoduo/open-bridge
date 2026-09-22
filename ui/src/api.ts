@@ -225,7 +225,6 @@ export const api = {
   settings: () => getJson<{ state: SettingsState }>("/api/settings").then(r => r.state),
   /** Read-only tunnel reconnaissance + the plan 「自动配置」 would run. */
   tunnel: () => getJson<{ tunnel: SettingsTunnelView }>("/api/tunnel").then(r => r.tunnel),
-  bridgeRotate: () => postJson<{ status: BridgeStatus }>("/api/bridge/rotate").then(r => r.status),
   settingsAction: (action: Record<string, unknown>) =>
     postJson<SettingsActionResult>("/api/settings/action", action),
   services: () => getJson<{ services: ServiceView[] }>("/api/services").then(r => r.services),

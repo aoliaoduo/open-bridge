@@ -90,10 +90,11 @@ test("every /api route has a caller, or a written reason it does not", () => {
 
 test("the console drives the routes it owns and leaves the lifecycle alone", () => {
   const client = readFileSync(path.join(repoRoot, "ui", "src", "api.ts"), "utf8");
-  // The panel's own verbs: reading state, rotating the endpoint (an in-process
-  // token flip, which is why it is safe from the page), closing a session, and
-  // acting on a project service.
-  for (const route of ["/api/status", "/api/bridge/rotate", "/api/sessions/close", "/api/services/action"]) {
+  // The panel's own verbs: reading state, acting on settings (endpoint rotation
+  // is an in-process token flip done through the settings action channel — the
+  // standalone /api/bridge/rotate remains script API, not a console verb),
+  // closing a session, and acting on a project service.
+  for (const route of ["/api/status", "/api/settings/action", "/api/sessions/close", "/api/services/action"]) {
     assert.ok(client.includes(route), `ui/src/api.ts must call ${route}`);
   }
   // The lifecycle routes are the terminal's: the page must not grow buttons that

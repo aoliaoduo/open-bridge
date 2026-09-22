@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
  * yet" looked identical — and neither told the operator what to do next.
  */
 export function EmptyState(
-  { title, children, action }: { title: string; children?: ReactNode; action?: ReactNode },
+  { title, children }: { title: string; children?: ReactNode },
 ) {
   return (
     <div className="empty">
@@ -19,7 +19,6 @@ export function EmptyState(
       </svg>
       <div className="empty-title">{title}</div>
       {children ? <div className="empty-body">{children}</div> : null}
-      {action ? <div className="empty-action">{action}</div> : null}
     </div>
   );
 }

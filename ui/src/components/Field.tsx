@@ -13,10 +13,10 @@ import type { ReactNode } from "react";
  * id/htmlFor pair to keep in sync.
  */
 export function Field(
-  { label, hint, children, span }: { label: ReactNode; hint?: ReactNode; children: ReactNode; span?: boolean },
+  { label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode },
 ) {
   return (
-    <label className={`field${span ? " span2" : ""}`}>
+    <label className="field">
       <span className="field-label">{label}</span>
       <span className="field-control">{children}</span>
       {hint ? <span className="field-hint">{hint}</span> : null}

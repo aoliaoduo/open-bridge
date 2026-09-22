@@ -463,40 +463,6 @@ button.menu-btn { display: none; }
 .token-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .token-table tbody tr:last-child td { border-bottom: none; }
 
-/* The notify matrix carries two prose columns and two controls. Without
-   explicit widths the browser gives the label column whatever the controls
-   leave over, which on a narrow card is a few characters -- 需要你回来 came
-   out one character per line. The names never wrap; the "when" column is the
-   one that should absorb the slack. */
-.notify-table th:first-child, .notify-table td:first-child { width: 1%; white-space: nowrap; }
-.notify-table td:first-child .field-hint { white-space: normal; }
-.notify-table th:nth-child(2) { width: auto; }
-/* nowrap here is what pushed 持续响铃 into the ringtone column: label.check is
-   inline-flex, so the checkbox and its text were forced onto the select's own
-   line, overflowed a 1%-wide cell, and landed on top of the next one — the
-   label vanished under the input and only the dot showed. The delivery cell
-   stacks instead: select on one line, the optional ring toggle under it. */
-.notify-table th:nth-child(3), .notify-table td:nth-child(3) { width: 1%; }
-.notify-table .delivery-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
-/* Three columns now: the ringtone picker is gone. Bark already remembers a
-   sound per device, and a per-event override was a setting nobody asked for
-   sitting next to two that matter. */
-.notify-table th:last-child, .notify-table td:last-child { width: 1%; }
-.notify-name { display: flex; align-items: center; gap: 6px; }
-/* "总是发" is a property of the event, not a setting, so it reads as a badge
-   rather than a second line of label text — stacked under the name it looked
-   like part of it. */
-.always-chip {
-  flex: none;
-  font-size: var(--fs-xs);
-  line-height: 1;
-  padding: 3px 6px;
-  border-radius: 999px;
-  background: var(--hover);
-  color: var(--muted);
-}
-.notify-table select { width: 100%; min-width: 148px; }
-
 .token-table tbody tr { transition: background-color .12s; }
 .token-table tbody tr:hover { background: var(--surface-2); }
 .token-table tr.dead td { opacity: .45; }
@@ -562,8 +528,6 @@ button.menu-btn { display: none; }
 .empty-icon { width: 26px; height: 26px; opacity: 0.6; margin-bottom: 6px; }
 .empty-title { color: var(--text); font-size: var(--fs-md); font-weight: 500; }
 .empty-body { font-size: var(--fs-sm); margin-top: 4px; }
-.empty-action { margin-top: 12px; }
-
 /* --- buttons and inputs ---------------------------------------------------- */
 
 button {
@@ -905,7 +869,6 @@ label.check { display: inline-flex; align-items: center; gap: 7px; cursor: point
 .prop-label { width: 132px; flex: none; color: var(--muted); font-size: var(--fs-sm); }
 .prop-value { flex: 1; min-width: 0; font-size: var(--fs-md); overflow-wrap: anywhere; }
 .prop-value.mono { font-family: var(--mono); font-size: var(--fs-sm); }
-.prop-actions { flex: none; display: inline-flex; gap: 6px; align-items: center; }
 
 /* --- form fields ----------------------------------------------------------- */
 

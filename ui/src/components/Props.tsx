@@ -3,8 +3,6 @@ import type { ReactNode } from "react";
 export interface PropItem {
   label: string;
   value: ReactNode;
-  /** Right-aligned actions for this row (a copy button, a jump link…). */
-  actions?: ReactNode;
   mono?: boolean;
 }
 
@@ -24,7 +22,6 @@ export function Props({ items }: { items: PropItem[] }) {
         <div className="prop" key={item.label}>
           <span className="prop-label">{item.label}</span>
           <span className={`prop-value${item.mono ? " mono" : ""}`}>{item.value}</span>
-          {item.actions ? <span className="prop-actions">{item.actions}</span> : null}
         </div>
       ))}
     </div>

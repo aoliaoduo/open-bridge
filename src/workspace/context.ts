@@ -36,12 +36,4 @@ export class WorkspaceContext {
     // access for absolute paths but must never displace the workspace anchor.
     return [...new Set([path.resolve(this.root()), ...roots])];
   }
-
-  assertAllowed(fullPath: string): string {
-    const full = path.resolve(fullPath);
-    if (!this.allowedRoots().some(base => full === base || full.startsWith(base + path.sep))) {
-      throw new Error("Path is outside configured allowed directories.");
-    }
-    return full;
-  }
 }
