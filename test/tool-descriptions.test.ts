@@ -85,11 +85,13 @@ test("the per-tool detail has a documented home", () => {
 
 test("the shared rules are stated once, in the server instructions", () => {
   // The field-set sentence used to be repeated in run_command, edit_block and
-  // read_files; every copy is a separate thing to keep in sync.
-  const endpoint = readFileSync(path.join(repoRoot, "src", "bridge", "mcp-endpoint.ts"), "utf8");
+  // read_files; every copy is a separate thing to keep in sync. It lives in
+  // SERVER_INSTRUCTIONS_BASE, which moved to instruction-prefix.ts when the
+  // connect-time prefix became a measured, byte-stability-tested thing.
+  const prefix = readFileSync(path.join(repoRoot, "src", "bridge", "instruction-prefix.ts"), "utf8");
 
-  assert.match(endpoint, /parse by field name and never by line presence/);
-  assert.match(endpoint, /docs\/tools\.md/);
+  assert.match(prefix, /parse by field name and never by line presence/);
+  assert.match(prefix, /docs\/tools\.md/);
 
   const repeated = TOOL_DEFINITIONS
     .filter(tool => /parse by field name, never by line presence/i.test(tool.description))

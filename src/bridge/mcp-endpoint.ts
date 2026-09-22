@@ -8,9 +8,7 @@
  * from drifting apart between the two.
  */
 import { host } from "../host/host.js";
-import * as fsSync from "node:fs";
 import { randomBytes } from "node:crypto";
-import * as path from "node:path";
 import { type EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -18,17 +16,13 @@ import { createMcpHandler, Server as SpecServer } from "@modelcontextprotocol/se
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { TOOL_DEFINITIONS } from "../mcp/tool-definitions.js";
 import { listToolDefinitions } from "./tool-catalog.js";
+import { serverInstructions } from "./instruction-prefix.js";
 import { asStructuredContent, createActivityId, record, state, text, type SessionState } from "./state.js";
-import { root } from "./paths.js";
-import { discoverWorkspaceSkills, skillsIndexSuffix } from "./skills.js";
 import { invoke } from "./dispatcher.js";
 import { normalizeToolCall } from "./tool-call-shape.js";
 import { describeToolError } from "./tool-error.js";
 import { buildStaleness, staleBuildAdvice } from "./build-staleness.js";
 import { persistUsageStats } from "./usage-store.js";
-import { notifyUsageInstructions, resolveNotifySettings } from "./notify.js";
-import { resolveShell } from "../shell/shell-provider.js";
-import { shellUsageInstructions } from "../shell/shell-usage.js";
 
 /**
  * The typed payload for one tool result: `asStructuredContent`, minus the
@@ -96,73 +90,6 @@ class BoundedInMemoryEventStore implements EventStore {
 }
 
 export const sharedEventStore = new BoundedInMemoryEventStore();
-
-// The advertised catalog (toolProfile + host-capability filters) lives in
-// tool-catalog.ts so tools/list and the status surface's tool_count agree.
-
-/** Shared discovery guidance for both protocol eras, with bounded root project files. */
-function serverInstructions(): string {
-  return SERVER_INSTRUCTIONS_BASE + shellSuffix() + notifySuffix() + projectInstructionSuffix() + skillsSuffix();
-}
-
-/**
- * Which interpreter answers run_command / start_process / open_shell, stated
- * once at connect time: the same resolveShell() the spawner consults, so the
- * sentence and the spawn can never disagree. Same rule as the other suffixes
- * — a detection failure must not keep a session from starting.
- */
-function shellSuffix(): string {
-  try {
-    return shellUsageInstructions(resolveShell());
-  } catch {
-    return "";
-  }
-}
-
-/**
- * The live notification guidance — a connect-time snapshot, like skills. Mode
- * flips after connect take effect on the server side immediately (the gate
- * reads config per push); the suffix is coaching, not contract. Discovery
- * failure must not keep a session from starting, same rule as the skills index.
- */
-function notifySuffix(): string {
-  try {
-    return notifyUsageInstructions(resolveNotifySettings());
-  } catch {
-    return "";
-  }
-}
-
-const SERVER_INSTRUCTIONS_BASE =
-  "You are connected to a local project workspace through the standalone Open Bridge. Relative paths, default command cwd, and project services always use that workspace. Other directories can be accessed only with explicit absolute paths; never let them change the workspace anchor. When starting work on an unfamiliar project, call workspace_brief once for orientation instead of exploring blindly. Use file tools for project management, run_command/start_process for commands, and wait/interact_with_process/process_control/set_process_policy for supervised long-running services. Use connectivity for readiness and save_service/service/service_status for reusable project orchestration. Related single-purpose tools are grouped behind an action parameter: service{action}, file_op{op}, process_control{action}, bridge_status{section}, activity_log{action}, connectivity{target}; the older per-action names still work and are reported as deprecated. For any multi-step work, call set_todos with the full list before you start and replace it as you go — the operator's TUI task panel shows only this list. Use report_progress for transient status, not as a substitute. Use batch to combine multiple tool calls in a single roundtrip. When a task needs several related calls or a tool result is large, prefer run_script: compose the calls in one JavaScript program and return only what you need. After finishing a batch of related edits, call review_changes so the user can see the full cumulative change set. Tool results are JSON objects with a fixed field set per tool: absent facts are explicit nulls or empty strings, so parse by field name and never by line presence; command tools return merged `output` plus separate `stdout`/`stderr`, and a non-zero exit code is not a call failure. Per-tool detail - limits, edge cases, and which sibling tool to prefer - is in docs/tools.md; read it when a description is not enough.";
-
-function projectInstructionSuffix(): string {
-  const parts: string[] = [];
-  for (const name of ["AGENTS.md", "CLAUDE.md"]) {
-    try {
-      const raw = fsSync.readFileSync(path.join(root(), name), "utf8");
-      if (!raw.trim()) continue;
-      parts.push(`### ${name}\n${raw.slice(0, 8_000)}${raw.length > 8_000 ? "\n…[truncated]" : ""}`);
-    } catch {
-      // Missing or unreadable file: nothing to inject.
-    }
-  }
-  return parts.length ? `\n\n# Project instructions\n${parts.join("\n\n")}` : "";
-}
-
-/**
- * The skills index for the server instructions (see skills.ts). Read once per
- * server construction — each protocol era builds its own — so a skill added
- * later is picked up by `list_skills` rather than by a reconnect. A discovery
- * failure must never keep a session from starting.
- */
-function skillsSuffix(): string {
-  try {
-    return skillsIndexSuffix(discoverWorkspaceSkills().skills);
-  } catch {
-    return "";
-  }
-}
 
 export function createMcp(session: SessionState): Server {
   const serverVersion = host().version();
