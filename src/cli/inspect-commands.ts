@@ -4,6 +4,7 @@
  */
 
 import * as fs from "node:fs";
+import * as net from "node:net";
 import * as path from "node:path";
 
 import { t } from "../bridge/cli-i18n.js";
@@ -132,6 +133,7 @@ export async function cmdLogs(parsed: ParsedArgs): Promise<void> {
   // would but does not depend on there being anything to say.
   await new Promise<void>(resolve => {
     let done = false;
+    let pipeWatch: net.Socket | undefined;
     const finish = (): void => {
       if (done) return; // every path below can fire more than once
       done = true;
@@ -156,6 +158,30 @@ export async function cmdLogs(parsed: ParsedArgs): Promise<void> {
       if (process.stdout.destroyed || process.stdout.writableEnded) { finish(); return; }
       try { process.stdout.write(""); } catch { finish(); }
     }, 1000);
+    // POSIX needs more than the probes above: the kernel answers a zero-length
+    // write with success even when every reader of the pipe is gone, so the
+    // probe can never fail there, and stdout's handle never reports destroyed
+    // on its own. Watch the write end instead: an O_WRONLY pipe fd whose
+    // readers all closed reports EPOLLERR/EPOLLHUP, which surfaces as an error
+    // on a read-side socket wrapped over the same fd -- while a healthy pipe
+    // (or a file or TTY, which we skip) stays silent. Windows keeps the
+    // destroyed/probe path, which is what made the head test pass there.
+    try {
+      const fifo = process.stdout.fd >= 0
+        && process.platform !== "win32"
+        && fs.fstatSync(process.stdout.fd).isFIFO();
+      if (fifo) {
+        // The socket holds the fd read-style only to observe it: never call
+        // destroy() on the healthy path, it would close fd 1 out from under
+        // the process. unref() keeps it from holding the event loop.
+        pipeWatch = new net.Socket({ fd: process.stdout.fd, readable: true, writable: false });
+        pipeWatch.unref();
+        pipeWatch.on("error", finish);
+        pipeWatch.on("close", finish);
+        pipeWatch.on("end", finish);
+        pipeWatch.on("data", finish);
+      }
+    } catch { /* no watch; the probes still cover the loud cases */ }
   });
 }
 
