@@ -10,6 +10,7 @@ import { resolve } from "node:path";
 
 export const requiredPackagePaths = [
   "docs/ARCHITECTURE.md",
+  "docs/observability.md",
   "CHANGELOG.md",
   "LICENSE",
   "README.md",

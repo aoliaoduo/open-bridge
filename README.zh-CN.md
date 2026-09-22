@@ -76,6 +76,7 @@ open-bridge prompt      # 打印一段现成的接入提示词
 | [SECURITY.md](SECURITY.md) | 威胁模型与漏洞报告 |
 | [AGENTS.md](https://github.com/aoliaoduo/open-bridge/blob/main/AGENTS.md) | 改这个仓库的约定 —— 提 PR 前先读 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 当前模块职责、执行路径与状态边界 |
+| [docs/observability.md](docs/observability.md) | 用哪个表面排查、数据目录工件速查表、脱敏诊断导出 |
 | [Agent 协作流程](https://github.com/aoliaoduo/open-bridge/blob/main/docs/agent-collaboration-workflow.md) | 仓库协作、验证与交接 |
 | [CHANGELOG.md](CHANGELOG.md) | 改了什么，以及为什么 |
 

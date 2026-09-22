@@ -40,6 +40,7 @@
     "docs/tools.md",
     "CHANGELOG.md",
     "docs/ARCHITECTURE.md",
+    "docs/observability.md",
     "LICENSE"
   ],
   "scripts": {

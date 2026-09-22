@@ -103,6 +103,7 @@ vulnerability.
 | [SECURITY.md](SECURITY.md) | Threat model and reporting |
 | [AGENTS.md](https://github.com/aoliaoduo/open-bridge/blob/main/AGENTS.md) | Conventions for changing this repo — read before a PR |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Current module ownership, execution and state boundaries |
+| [docs/observability.md](docs/observability.md) | Which surface to diagnose with, the data-dir artifact table, and the redacted export |
 | [Agent workflow](https://github.com/aoliaoduo/open-bridge/blob/main/docs/agent-collaboration-workflow.md) | Repository collaboration, verification and handoff |
 | [CHANGELOG.md](CHANGELOG.md) | What changed and why |
 
