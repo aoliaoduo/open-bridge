@@ -20,11 +20,11 @@ import assert from "node:assert/strict";
 import {test, before, after} from "node:test";
 import {spawn} from "node:child_process";
 import http from "node:http";
-import {mkdtempSync} from "node:fs";
+import {mkdtempSync, rmSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import {tmpdir} from "node:os";
 import path from "node:path";
-import {routeTokenFor, waitForRuntime} from "./lib/bridge-runtime.mjs";
+import {routeTokenFor, runtimeFileFor, waitForRuntime} from "./lib/bridge-runtime.mjs";
 import {setTimeout as delay} from "node:timers/promises";
 
 const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
@@ -448,4 +448,144 @@ test("console stateless activity reports requests that are still in flight", asy
   }
   const response = await rawRequest("GET", "/api/sessions", null);
   assert.equal(JSON.parse(response.body).sessions.find(row => row.era === "modern").active_requests, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Dependency contract: what the three @modelcontextprotocol packages must keep
+// doing. Run these before bumping any of them.
+//
+// `mcp-protocol-integration.test.mjs` and the checks above prove the Bridge
+// behaves. These prove the *assumptions underneath it* still hold, which is what
+// a dependency bump breaks. Each one names the module that depends on it:
+//
+//  A. sdk/server `Server` accepts `instructions` and hands the string back
+//     verbatim in the initialize result            -> bridge/mcp-endpoint.ts
+//  B. sdk/server passes a `tools/list` handler's return through unmodified,
+//     preserving array order and per-entry annotations
+//                                                    -> bridge/tool-catalog.ts
+//  C. `server` SpecServer routes on the method STRING ("tools/list"), and
+//     `createMcpHandler` calls the factory per request
+//                                                    -> bridge/mcp-endpoint.ts
+//  D. both eras therefore emit one catalog, byte for byte — the claim
+//     createSpecMcp makes in a comment and nothing else checked
+//
+// If a bump renames a handler key, starts normalizing schemas, or drops
+// `instructions`, the assertion that fails names the assumption instead of
+// surfacing later as a client that silently sees fewer tools.
+// ---------------------------------------------------------------------------
+
+/** A legacy (2025-era) session: initialize, then the initialized notification. */
+async function legacyInitialize() {
+  const res = await rawRequest("POST", `/mcp/${routeToken}`, JSON.stringify({
+    jsonrpc: "2.0", id: rpcId++, method: "initialize",
+    params: {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "contract-test", version: "1" },
+    },
+  }), { "content-type": "application/json", accept: "application/json, text/event-stream" });
+  const sessionId = res.headers["mcp-session-id"];
+  assert.ok(sessionId, "the legacy era still mints a session id (assumption A)");
+  await rawRequest("POST", `/mcp/${routeToken}`,
+    JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+    { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-session-id": sessionId });
+  return { sessionId, payload: res.body ? decode(res.body) : null };
+}
+
+// Named for the era, not `legacyCall`: an existing test below uses that name
+// for a local, and a module-scope helper with the same name would shadow it.
+async function legacyRpc(sessionId, method, params) {
+  const res = await rawRequest("POST", `/mcp/${routeToken}`,
+    JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method, params: params ?? {} }),
+    {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      "mcp-session-id": sessionId,
+      "mcp-protocol-version": "2025-06-18",
+    });
+  return { status: res.status, payload: res.body ? decode(res.body) : null };
+}
+
+test("CONTRACT A/B: initialize carries instructions verbatim, and tools/list is a faithful passthrough", async () => {
+  const { sessionId, payload } = await legacyInitialize();
+  const instructions = payload?.result?.instructions;
+
+  assert.equal(typeof instructions, "string", "the sdk Server surfaces `instructions` (assumption A)");
+  assert.ok(instructions.includes("standalone Open Bridge"), "our own text reaches the client unrewritten");
+  assert.equal(payload?.result?.serverInfo?.name, "open-bridge");
+
+  // Called twice: a passthrough that sorted, deduplicated, re-serialized or
+  // stripped annotations would still return the right tools the first time.
+  const first = await legacyRpc(sessionId, "tools/list", {});
+  const second = await legacyRpc(sessionId, "tools/list", {});
+  const wireA = JSON.stringify(first.payload?.result?.tools);
+  const wireB = JSON.stringify(second.payload?.result?.tools);
+
+  assert.equal(wireB, wireA, "repeated tools/list is byte-identical (assumption B)");
+  assert.equal(wireA, JSON.stringify(second.payload?.result?.tools), "no re-encoding between calls");
+
+  const advertised = first.payload.result.tools;
+  assert.deepEqual(
+    advertised.map(tool => tool.name),
+    [...new Set(advertised.map(tool => tool.name))],
+    "order is preserved and nothing was deduplicated away",
+  );
+  assert.ok(
+    advertised.every(tool => tool.inputSchema && tool.annotations),
+    "annotations survive the sdk's serialization (assumption B)",
+  );
+});
+
+test("CONTRACT C/D: the modern era routes on the method string and emits the identical catalog", async () => {
+  const { sessionId } = await legacyInitialize();
+  const legacy = await legacyRpc(sessionId, "tools/list", {});
+  const modernList = await modern("tools/list");
+
+  assert.equal(modernList.status, 200, "SpecServer routes the string \"tools/list\" (assumption C)");
+  // createSpecMcp claims the JSON a client receives is byte-identical to the
+  // legacy path's. That is assumption D, and until this test it was a comment.
+  assert.equal(
+    JSON.stringify(modernList.payload?.result?.tools),
+    JSON.stringify(legacy.payload?.result?.tools),
+    "both protocol eras emit one catalog, byte for byte (assumption D)",
+  );
+});
+
+test("bridge_status reports the prefix it actually sends, and the prefix survives a restart", async () => {
+  const { sessionId, payload } = await legacyInitialize();
+  const instructions = payload.result.instructions;
+
+  const status = await legacyRpc(sessionId, "tools/call", { name: "bridge_status", arguments: {} });
+  const overview = status.payload?.result?.structuredContent;
+  assert.equal(overview?.instructions_bytes, Buffer.byteLength(instructions, "utf8"),
+    "instructions_bytes is the bytes on the wire, not a character count");
+
+  const list = await legacyRpc(sessionId, "tools/list", {});
+  assert.equal(overview?.catalog_bytes, Buffer.byteLength(JSON.stringify(list.payload?.result?.tools), "utf8"),
+    "catalog_bytes is the serialized catalog the same client just received");
+
+  // A prefix that moved between two starts of the same workspace would defeat
+  // every client's cache on each reconnect, and nothing else would notice.
+  const priorInstructions = instructions;
+  const previous = child;
+  previous.kill("SIGTERM");
+  await delay(400);
+  // The dead instance leaves its record behind, and waitForRuntime returns the
+  // first record with a port — so without this it would hand back the port
+  // nobody is listening on any more.
+  rmSync(runtimeFileFor(home, home), { force: true });
+  child = spawn(process.execPath, [
+    path.join(ROOT, "bin", "open-bridge.js"),
+    "serve", "--no-tunnel", "--port", "0", "--root", home, "--home", home,
+  ], { stdio: ["ignore", "pipe", "pipe"] });
+  const runtime = await waitForRuntime(home, home);
+  port = runtime.port;
+  routeToken = routeTokenFor(home, home);
+
+  const reopened = await legacyInitialize();
+  assert.equal(reopened.payload.result.instructions, priorInstructions,
+    "a restart hands out byte-identical instructions");
+  const relisted = await legacyRpc(reopened.sessionId, "tools/list", {});
+  assert.equal(JSON.stringify(relisted.payload?.result?.tools), JSON.stringify(list.payload?.result?.tools),
+    "a restart advertises a byte-identical catalog");
 });
