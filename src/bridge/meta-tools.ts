@@ -21,6 +21,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { discoverWorkspaceSkills } from "./skills.js";
 import { buildStaleness } from "./build-staleness.js";
+import { measurePrefix } from "./instruction-prefix.js";
 
 type Args = JsonArgs;
 
@@ -29,6 +30,7 @@ const execFileAsync = promisify(execFile);
 export function getBridgeStatus(): Record<string, unknown> {
   const shell = shellSpec();
   const locks = lockSnapshot();
+  const prefix = measurePrefix();
   return {
     state: state.server ? "running" : "stopped",
     /**
@@ -65,10 +67,20 @@ export function getBridgeStatus(): Record<string, unknown> {
     modern_in_flight: state.modernInFlight,
     active_commands: [...state.commands.values()].filter(command => !command.done).length,
     tool_profile: host().config.get<string>("toolProfile", "full"),
-    // Must report what tools/list actually advertises: the toolProfile filter
-    // AND the host-capability filter (a standalone instance has no language
-    // server, so editor-only tools are absent from the catalog).
+    // Must report what tools/list actually advertises, which is the catalog
+    // after the one filter that exists: the operator's toolProfile. The count
+    // and the catalog come from the same call so they cannot disagree.
     tool_count: listToolDefinitions().length,
+    /**
+     * What the connect-time prefix costs a client, in UTF-8 bytes: the
+     * instructions handed out at discovery, and the serialized catalog behind
+     * tool_count. Both are part of the prompt prefix every provider caches by
+     * byte, so they are the two numbers that answer "did this get more
+     * expensive" and "did this change between two identical requests" —
+     * neither of which any functional test would notice.
+     */
+    instructions_bytes: prefix.instructions_bytes,
+    catalog_bytes: prefix.catalog_bytes,
     /** The same string `open-bridge --version` prints: one version everywhere. */
     version: host().version(),
     /**
