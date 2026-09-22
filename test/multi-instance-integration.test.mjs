@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
-import { spawn, execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import http from "node:http";
 import net from "node:net";
@@ -21,12 +21,10 @@ import { mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } from "no
 import { removeTempDir } from "./tmpdir.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createHash } from "node:crypto";
+import { CLI_BIN, routeTokenFor, runtimeFileFor, suffixFor } from "./lib/bridge-runtime.mjs";
 import { setTimeout as delay } from "node:timers/promises";
 
 const run = promisify(execFile);
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
-const CLI = path.join(ROOT, "bin", "open-bridge.js");
 
 let home;
 let dirA;
@@ -36,19 +34,6 @@ let dirD;
 /** The port one shared config file names, claimed by whichever copy starts first. */
 let sharedPort;
 const instances = {};
-
-function suffixFor(root) {
-  return createHash("sha256").update(root).digest("hex").slice(0, 24);
-}
-
-function runtimeFileFor(root) {
-  return path.join(home, `runtime-${suffixFor(root)}.json`);
-}
-
-function routeTokenFor(root) {
-  const secrets = JSON.parse(readFileSync(path.join(home, "secrets.json"), "utf8"));
-  return secrets[`openBridge.routeToken.${suffixFor(root)}`];
-}
 
 async function waitFor(predicate, what, timeoutMs = 25_000) {
   const started = Date.now();
@@ -85,7 +70,7 @@ function getJson(port, pathname, token) {
 
 /** Boot a copy of the app in `dir`; the default asks for an arbitrary port. */
 function boot(label, dir, args = ["--port", "0"]) {
-  const child = spawn(process.execPath, [CLI, "serve", "--no-tunnel", "--root", dir, "--home", home, ...args], {
+  const child = spawn(process.execPath, [CLI_BIN, "serve", "--no-tunnel", "--root", dir, "--home", home, ...args], {
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
@@ -96,8 +81,8 @@ function boot(label, dir, args = ["--port", "0"]) {
 
 async function statusFor(label) {
   const info = instances[label];
-  const runtime = JSON.parse(readFileSync(runtimeFileFor(info.dir), "utf8"));
-  const res = await getJson(runtime.port, "/api/status", routeTokenFor(info.dir));
+  const runtime = JSON.parse(readFileSync(runtimeFileFor(home, info.dir), "utf8"));
+  const res = await getJson(runtime.port, "/api/status", routeTokenFor(home, info.dir));
   return { runtime, status: JSON.parse(res.body).status, http: res.status };
 }
 
@@ -107,7 +92,7 @@ before(async () => {
   dirB = mkdtempSync(path.join(tmpdir(), "ob-multi-B-"));
   boot("A", dirA);
   boot("B", dirB);
-  await waitFor(() => existsSync(runtimeFileFor(dirA)) && existsSync(runtimeFileFor(dirB)), "both runtime records");
+  await waitFor(() => existsSync(runtimeFileFor(home, dirA)) && existsSync(runtimeFileFor(home, dirB)), "both runtime records");
 });
 
 after(async () => {
@@ -143,25 +128,25 @@ test("each instance reports the directory it was started in", async () => {
 
 test("each instance gets a route token of its own, and both survive", async () => {
   const both = await waitFor(() => {
-    const a = routeTokenFor(dirA);
-    const b = routeTokenFor(dirB);
+    const a = routeTokenFor(home, dirA);
+    const b = routeTokenFor(home, dirB);
     return a && b ? { a, b } : undefined;
   }, "both route tokens", 15_000);
   assert.notEqual(both.a, both.b, "the two instances must not share a route token");
 });
 
 test("`open-bridge status` answers for the directory it is typed in", async () => {
-  const fromA = await run(process.execPath, [CLI, "status", "--home", home], { cwd: dirA });
+  const fromA = await run(process.execPath, [CLI_BIN, "status", "--home", home], { cwd: dirA });
   assert.match(fromA.stdout, /状态:\s+running/);
   assert.ok(fromA.stdout.includes(path.resolve(dirA)), `status in A must name A:\n${fromA.stdout}`);
   assert.equal(fromA.stdout.includes(path.resolve(dirB)), false, "and must not name B");
 
-  const fromB = await run(process.execPath, [CLI, "status", "--home", home], { cwd: dirB });
+  const fromB = await run(process.execPath, [CLI_BIN, "status", "--home", home], { cwd: dirB });
   assert.ok(fromB.stdout.includes(path.resolve(dirB)), `status in B must name B:\n${fromB.stdout}`);
 });
 
 test("`open-bridge instances` lists both, and marks the current directory", async () => {
-  const listed = await run(process.execPath, [CLI, "instances", "--home", home], { cwd: dirA });
+  const listed = await run(process.execPath, [CLI_BIN, "instances", "--home", home], { cwd: dirA });
   assert.match(listed.stdout, /2 个实例/);
   assert.ok(listed.stdout.includes(path.resolve(dirA)), "A is listed");
   assert.ok(listed.stdout.includes(path.resolve(dirB)), "B is listed");
@@ -174,7 +159,7 @@ test("`open-bridge stop` in A stops A only", async () => {
   // Read both ports BEFORE stopping: a stopped instance removes its own record.
   const aBefore = await statusFor("A");
   const bBefore = await statusFor("B");
-  const stopped = await run(process.execPath, [CLI, "stop", "--home", home], { cwd: dirA });
+  const stopped = await run(process.execPath, [CLI_BIN, "stop", "--home", home], { cwd: dirA });
   assert.match(stopped.stdout, /已发送停止指令/);
 
   const aGone = await waitFor(async () => {
@@ -182,16 +167,16 @@ test("`open-bridge stop` in A stops A only", async () => {
     catch { return true; }
   }, "A's listener to close");
   assert.ok(aGone, "A is gone");
-  assert.equal(existsSync(runtimeFileFor(dirA)), false, "A's runtime record is cleaned up with it");
+  assert.equal(existsSync(runtimeFileFor(home, dirA)), false, "A's runtime record is cleaned up with it");
 
-  const stillThere = await getJson(bBefore.runtime.port, "/api/status", routeTokenFor(dirB));
+  const stillThere = await getJson(bBefore.runtime.port, "/api/status", routeTokenFor(home, dirB));
   assert.equal(stillThere.status, 200, "B keeps serving — stopping one directory must not touch the other");
   const bStatus = JSON.parse(stillThere.body).status;
   assert.equal(path.resolve(String(bStatus.workspace_root)), path.resolve(dirB));
 });
 
 test("a second serve in the same directory is refused with a clear message", async () => {
-  const again = await run(process.execPath, [CLI, "serve", "--no-tunnel", "--port", "0", "--root", dirB, "--home", home], { cwd: dirB })
+  const again = await run(process.execPath, [CLI_BIN, "serve", "--no-tunnel", "--port", "0", "--root", dirB, "--home", home], { cwd: dirB })
     .then(() => ({ code: 0, stderr: "" }))
     .catch(error => ({ code: error.code, stderr: String(error.stderr ?? "") }));
   assert.notEqual(again.code, 0, "the duplicate must fail, not silently double-bind");
@@ -219,21 +204,21 @@ test("the startup lock dies with its instance, and a stale one is reclaimed", as
   // A lock left by an abruptly killed instance (a dead pid, which is the normal
   // case on Windows) must not refuse the next serve in that directory.
   writeFileSync(lockFor(dirA), JSON.stringify({ pid: 999_999_999, root: dirA }));
-  rmSync(runtimeFileFor(dirA), { force: true });
+  rmSync(runtimeFileFor(home, dirA), { force: true });
   boot("A2", dirA);
   const a2 = instances.A2;
 
   const runtime = await waitFor(() => {
-    try { return JSON.parse(readFileSync(runtimeFileFor(dirA), "utf8")); } catch { return false; }
+    try { return JSON.parse(readFileSync(runtimeFileFor(home, dirA), "utf8")); } catch { return false; }
   }, "the reclaiming serve to publish its record");
   assert.equal(runtime.pid, a2.child.pid, "the serve that reclaimed the lock is the one that bound");
   assert.equal(JSON.parse(readFileSync(lockFor(dirA), "utf8")).pid, a2.child.pid,
     "the stale claim was replaced by the live one");
 
-  const stopped = await run(process.execPath, [CLI, "stop", "--home", home], { cwd: dirA });
+  const stopped = await run(process.execPath, [CLI_BIN, "stop", "--home", home], { cwd: dirA });
   assert.match(stopped.stdout, /已发送停止指令/);
   await waitFor(() => !existsSync(lockFor(dirA)), "the lock to disappear with its instance");
-  assert.equal(existsSync(runtimeFileFor(dirA)), false, "and the runtime record with it");
+  assert.equal(existsSync(runtimeFileFor(home, dirA)), false, "and the runtime record with it");
 });
 
 test("a serve refused for a taken port names the holder, its directory, and how to free it", async () => {
@@ -246,7 +231,7 @@ test("a serve refused for a taken port names the holder, its directory, and how 
   boot("C", dirA, []);
   const holder = await waitFor(() => {
     try {
-      const info = JSON.parse(readFileSync(runtimeFileFor(dirA), "utf8"));
+      const info = JSON.parse(readFileSync(runtimeFileFor(home, dirA), "utf8"));
       return info.port === sharedPort ? info : undefined;
     } catch { return undefined; }
   }, "the copy that owns the configured port");
@@ -254,7 +239,7 @@ test("a serve refused for a taken port names the holder, its directory, and how 
   // A directory with no instance of its own - the copy that was just moved
   // here, which is the position the operator is actually in.
   dirD = mkdtempSync(path.join(tmpdir(), "ob-multi-D-"));
-  const refused = await run(process.execPath, [CLI, "serve", "--no-tunnel", "--port", String(sharedPort), "--root", dirD, "--home", home], { cwd: dirD })
+  const refused = await run(process.execPath, [CLI_BIN, "serve", "--no-tunnel", "--port", String(sharedPort), "--root", dirD, "--home", home], { cwd: dirD })
     .then(() => ({ code: 0, text: "" }))
     .catch(error => ({ code: error.code, text: String(error.stderr ?? "") + String(error.stdout ?? "") }));
 
@@ -269,19 +254,19 @@ test("a serve refused for a taken port names the holder, its directory, and how 
 });
 
 test("`open-bridge stop --pid` stops that instance from any directory, and nothing else", async () => {
-  const holder = JSON.parse(readFileSync(runtimeFileFor(dirA), "utf8"));
+  const holder = JSON.parse(readFileSync(runtimeFileFor(home, dirA), "utf8"));
   const bBefore = await statusFor("B");
 
-  const stopped = await run(process.execPath, [CLI, "stop", "--pid", String(holder.pid), "--home", home], { cwd: dirB });
+  const stopped = await run(process.execPath, [CLI_BIN, "stop", "--pid", String(holder.pid), "--home", home], { cwd: dirB });
   assert.match(stopped.stdout, /已发送停止指令/, `the named pid is the one to stop:\n${stopped.stdout}${stopped.stderr ?? ""}`);
 
   const gone = await waitFor(async () => {
     try { await getJson(holder.port, "/healthz/none"); return false; } catch { return true; }
   }, "the pid-named instance to stop");
   assert.ok(gone, "the named instance is gone");
-  assert.equal(existsSync(runtimeFileFor(dirA)), false, "and its runtime record with it");
+  assert.equal(existsSync(runtimeFileFor(home, dirA)), false, "and its runtime record with it");
 
-  const bAfter = await getJson(bBefore.runtime.port, "/api/status", routeTokenFor(dirB));
+  const bAfter = await getJson(bBefore.runtime.port, "/api/status", routeTokenFor(home, dirB));
   assert.equal(bAfter.status, 200, "the instance in the directory the command was typed in must be untouched");
 });
 
@@ -290,10 +275,10 @@ test("with the port freed, the copy in the new directory serves on the configure
   boot("D", dirC, []);
   const info = await waitFor(() => {
     try {
-      const record = JSON.parse(readFileSync(runtimeFileFor(dirC), "utf8"));
+      const record = JSON.parse(readFileSync(runtimeFileFor(home, dirC), "utf8"));
       return record.port === sharedPort ? record : undefined;
     } catch { return undefined; }
   }, "the new copy to bind the configured port");
-  const res = await getJson(info.port, "/api/status", routeTokenFor(dirC));
+  const res = await getJson(info.port, "/api/status", routeTokenFor(home, dirC));
   assert.equal(res.status, 200, "stop the holder, serve again: that recovery path has to work");
 });

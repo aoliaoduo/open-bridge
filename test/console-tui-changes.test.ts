@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -8,6 +7,8 @@ import { buildSnapshot, type TuiStateView } from "../src/console/tui/snapshot.js
 import { nextPanelView, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
 import { paint } from "../src/console/tui/theme.js";
 import { stripAnsi, visualWidth } from "../src/console/tui/text.js";
+import { git, gitAvailable } from "./lib/git.js";
+import { tuiView } from "./lib/tui-view.js";
 import {
   classifyGitError,
   collectFileDiffPreview,
@@ -21,43 +22,10 @@ import {
 const NOW = 1_700_000_000_000;
 
 function fixtureView(): TuiStateView {
-  return {
+  return tuiView({
     port: 12345,
     routeToken: "synthetic-changes-fixture",
-    tunnelUrl: "",
-    tunnelRole: "none",
-    stopping: false,
-    sessions: new Map(),
-    commands: new Map(),
-    services: new Map(),
-    activity: [],
     usage: { startedAt: NOW, calls: 0, successes: 0, failures: 0 },
-    runtimeUsage: { calls: 0, successes: 0, failures: 0 },
-    todos: [],
-  };
-}
-
-function gitAvailable(): boolean {
-  try {
-    execFileSync("git", ["--version"], { stdio: "ignore", windowsHide: true });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function git(cwd: string, args: string[]): void {
-  execFileSync("git", [
-    "-c", "user.email=tui@test",
-    "-c", "user.name=tui",
-    "-c", "commit.gpgsign=false",
-    "-c", "init.defaultBranch=main",
-    "-c", "core.autocrlf=false",
-    ...args,
-  ], {
-    cwd,
-    stdio: "ignore",
-    windowsHide: true,
   });
 }
 

@@ -17,17 +17,13 @@
  */
 import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
-import { spawn } from "node:child_process";
 import http from "node:http";
 import net from "node:net";
 import {mkdtempSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { waitForRuntime } from "./lib/bridge-runtime.mjs";
-import { setTimeout as delay } from "node:timers/promises";
-
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+import { spawnServe, stopServe, waitForRuntime } from "./lib/bridge-runtime.mjs";
 
 let home;
 let child;
@@ -37,10 +33,7 @@ let serveOutput = "";
 
 before(async () => {
   home = mkdtempSync(path.join(tmpdir(), "ob-crashguards-"));
-  child = spawn(process.execPath, [
-    path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--no-tunnel", "--port", "0", "--root", home, "--home", home,
-  ], { stdio: ["ignore", "pipe", "pipe"] });
+  child = spawnServe({ root: home, home });
   child.stdout.on("data", d => { serveOutput += d; });
   child.stderr.on("data", d => { serveOutput += d; });
   child.on("exit", (code, signal) => { serveExit = { code, signal }; });
@@ -49,8 +42,7 @@ before(async () => {
 });
 
 after(async () => {
-  if (child && !child.killed) child.kill("SIGTERM");
-  await delay(300);
+  await stopServe(child);
   removeTempDir(home);
 });
 

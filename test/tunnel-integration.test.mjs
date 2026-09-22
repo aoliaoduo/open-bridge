@@ -23,14 +23,12 @@
 import assert from "node:assert/strict";
 import {test, before, after} from "node:test";
 import {spawn} from "node:child_process";
-import {mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync} from "node:fs";
+import {mkdtempSync, readFileSync, writeFileSync, existsSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import {tmpdir} from "node:os";
 import path from "node:path";
-import {readRuntimeFor, runtimeFileFor} from "./lib/bridge-runtime.mjs";
+import {ROOT, readRuntimeFor, runtimeFileFor, spawnServe, stopServe} from "./lib/bridge-runtime.mjs";
 import {setTimeout as delay} from "node:timers/promises";
-
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 
 /** Sleeps past the listener's bind, then fails the way ngrok refuses a domain. */
 const FAKE_NGROK = `
@@ -112,11 +110,8 @@ before(async () => {
     publicHealthTimeoutMs: 15_000,
   }, null, 2));
 
-  child = spawn(process.execPath, [
-    path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--port", "0", "--root", fixture, "--home", home,
-  ], {
-    stdio: ["ignore", "pipe", "pipe"],
+  child = spawnServe({
+    root: fixture, home, tunnel: true,
     cwd: fixture, // so the stand-in `http` script resolves
     env: { ...process.env, OB_FAKE_NGROK_COUNTER: counterFile },
   });
@@ -130,10 +125,9 @@ before(async () => {
 });
 
 after(async () => {
-  if (child && !child.killed) child.kill("SIGTERM");
-  await delay(300);
+  await stopServe(child);
   removeTempDir(home);
-  rmSync(fixture, { recursive: true, force: true });
+  removeTempDir(fixture);
 });
 
 test("the listener is published to the CLI while the tunnel is still failing", async () => {

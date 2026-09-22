@@ -17,17 +17,14 @@
 
 import assert from "node:assert/strict";
 import {test, before, after} from "node:test";
-import {spawn} from "node:child_process";
-import http from "node:http";
 import {createHash} from "node:crypto";
 import {mkdtempSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import {tmpdir} from "node:os";
 import path from "node:path";
-import {routeTokenFor, waitForRuntime} from "./lib/bridge-runtime.mjs";
-import {setTimeout as delay} from "node:timers/promises";
-
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+import {
+  createRpcId, makeRawRequest, startBridge, stopServe,
+} from "./lib/bridge-runtime.mjs";
 
 let home;
 let child;
@@ -38,16 +35,7 @@ let ownerToken;
 
 before(async () => {
   home = mkdtempSync(path.join(tmpdir(), "ob-oauth-"));
-  child = spawn(process.execPath, [
-    path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--no-tunnel", "--port", "0", "--root", home, "--home", home,
-  ], { stdio: ["ignore", "pipe", "pipe"] });
-  const runtime = await waitForRuntime(home, home);
-  port = runtime.port;
-  for (let i = 0; i < 40 && !routeToken; i += 1) {
-    try { routeToken = routeTokenFor(home, home); } catch { await delay(250); }
-  }
-  assert.ok(routeToken, "route token was persisted");
+  ({ child, port, routeToken } = await startBridge({ root: home, home }));
   ownerToken = routeToken;
 
   // Switch OAuth on through the same console action the settings page uses.
@@ -61,30 +49,11 @@ before(async () => {
 });
 
 after(async () => {
-  if (child && !child.killed) child.kill("SIGTERM");
-  await delay(300);
+  await stopServe(child);
   removeTempDir(home);
 });
 
-function rawRequest(method, reqPath, body, headers = {}) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, method, path: reqPath, headers, agent: false, signal: AbortSignal.timeout(15_000) },
-      res => {
-        const chunks = [];
-        res.on("data", chunk => chunks.push(chunk));
-        res.on("end", () => resolve({
-          status: res.statusCode,
-          headers: res.headers,
-          body: Buffer.concat(chunks).toString("utf8"),
-        }));
-      },
-    );
-    req.on("error", reject);
-    if (body != null) req.write(body);
-    req.end();
-  });
-}
+const rawRequest = makeRawRequest(() => port, 15_000);
 
 const form = fields => new URLSearchParams(fields).toString();
 const formHeaders = extra => ({ "content-type": "application/x-www-form-urlencoded", ...extra });
@@ -127,8 +96,8 @@ async function token(fields) {
   return { status: res.status, body: res.body ? JSON.parse(res.body) : null };
 }
 
-let rpcId = 1;
-const rpc = (method, params) => ({ jsonrpc: "2.0", id: rpcId++, method, params: params ?? {} });
+const rpcId = createRpcId();
+const rpc = (method, params) => ({ jsonrpc: "2.0", id: rpcId(), method, params: params ?? {} });
 
 /** Open a 2025-era session with the OAuth token, exactly as a client would. */
 async function openSessionWith(accessToken) {

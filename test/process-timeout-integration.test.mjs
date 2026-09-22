@@ -17,15 +17,15 @@
 import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
 import { spawn, spawnSync } from "node:child_process";
-import http from "node:http";
 import {mkdtempSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { routeTokenFor, waitForRuntime } from "./lib/bridge-runtime.mjs";
+import {
+  ROOT, createRpcId, makeOpenSession, makeRawRequest, makeToolCaller,
+  startBridge, stopServe,
+} from "./lib/bridge-runtime.mjs";
 import { setTimeout as delay } from "node:timers/promises";
-
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 
 let workspace;
 let home;
@@ -54,23 +54,13 @@ before(async () => {
     'setTimeout(() => { console.log("done"); }, 300);\n',
     "utf8",
   );
-  child = spawn(process.execPath, [
-    path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--no-tunnel", "--port", "0", "--root", workspace, "--home", home,
-  ], { stdio: ["ignore", "pipe", "pipe"] });
-  const runtime = await waitForRuntime(home, workspace);
-  port = runtime.port;
-  for (let i = 0; i < 40 && !routeToken; i += 1) {
-    try { routeToken = routeTokenFor(home, workspace); } catch { await delay(250); }
-  }
-  assert.ok(routeToken, "route token was persisted");
+  ({ child, port, routeToken } = await startBridge({ root: workspace, home }));
   sessionId = (await openSession()).sessionId;
   assert.ok(sessionId, "MCP session was established");
 });
 
 after(async () => {
-  if (child && !child.killed) child.kill("SIGTERM");
-  await delay(300);
+  await stopServe(child);
   removeTempDir(workspace);
   removeTempDir(home);
 });
@@ -189,67 +179,10 @@ test("a garbage timeout_ms falls back to the default instead of firing at ~0 ms"
 
 // --- harness ---------------------------------------------------------------
 
-function rawRequest(method, reqPath, body, headers = {}) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, method, path: reqPath, headers, agent: false, signal: AbortSignal.timeout(20_000) },
-      res => {
-        const chunks = [];
-        res.on("data", chunk => chunks.push(chunk));
-        res.on("end", () => resolve({
-          status: res.statusCode,
-          headers: res.headers,
-          body: Buffer.concat(chunks).toString("utf8"),
-        }));
-      },
-    );
-    req.on("error", reject);
-    if (body != null) req.write(body);
-    req.end();
-  });
-}
-
-function lastSsePayload(body) {
-  let payload;
-  for (const line of body.split(/\r?\n/)) {
-    if (line.startsWith("data: ")) payload = JSON.parse(line.slice(6));
-  }
-  return payload;
-}
-
-let rpcId = 1;
-const jsonHeaders = extra => ({
-  "content-type": "application/json",
-  accept: "application/json, text/event-stream",
-  ...extra,
-});
-
-async function openSession() {
-  const res = await rawRequest("POST", `/mcp/${routeToken}`, JSON.stringify({
-    jsonrpc: "2.0", id: rpcId++, method: "initialize",
-    params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "process-timeout", version: "1" } },
-  }), jsonHeaders());
-  const session = res.headers["mcp-session-id"];
-  if (session) {
-    await rawRequest("POST", `/mcp/${routeToken}`,
-      JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
-      jsonHeaders({ "mcp-session-id": session }));
-  }
-  return { sessionId: session, body: res.body };
-}
-
-/** One tool call, flattened to what these assertions care about. */
-async function callTool(name, args) {
-  const res = await rawRequest("POST", `/mcp/${routeToken}`,
-    JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method: "tools/call", params: { name, arguments: args } }),
-    jsonHeaders({ "mcp-session-id": sessionId }));
-  assert.equal(res.status, 200, `tools/call ${name} answered`);
-  const payload = lastSsePayload(res.body);
-  assert.ok(payload?.result, `tools/call ${name} returned a result`);
-  const result = payload.result;
-  const text = result.content?.[0]?.text ?? JSON.stringify(result);
-  return { isError: result.isError === true, text };
-}
+const rawRequest = makeRawRequest(() => port, 20_000);
+const rpcId = createRpcId();
+const openSession = makeOpenSession({ request: rawRequest, routeToken: () => routeToken, clientName: "process-timeout", nextId: rpcId });
+const { callTool } = makeToolCaller({ request: rawRequest, routeToken: () => routeToken, nextId: rpcId, getSessionId: () => sessionId });
 
 /** The tool's own JSON payload, or `{}` when it answered with prose. */
 function asObject({ text }) {
@@ -350,8 +283,14 @@ test("close_shell takes the session's background jobs with it", {
     const closed = asObject(await callTool("close_shell", { name }));
     assert.equal(closed.closed, true, `close_shell reports closed: ${JSON.stringify(closed).slice(0, 200)}`);
 
-    await delay(2500);
-    const still = await alivePairs();
+    // The kill lands asynchronously: poll within a bounded budget (the same
+    // 40 x 250 ms shape stop-guard uses for its teardown waits) instead of
+    // sampling once after a fixed sleep, which read false red on slow machines.
+    let still = await alivePairs();
+    for (let i = 0; i < 40 && rows.some(row => still.has(row)); i += 1) {
+      await delay(250);
+      still = await alivePairs();
+    }
     const survivors = rows.filter(r => still.has(r));
     assert.equal(survivors.length, 0,
       `close_shell killed the session's background jobs; survivors (msys pid, winpid): ${survivors.join(", ")}`);
@@ -459,8 +398,13 @@ test("cli stop's kill fallback reaps the wedged instance's session jobs", {
     ]);
     assert.ok(exited, "the fallback actually stopped the instance");
 
-    await delay(2500);
-    const still = alivePairs();
+    // Same bounded poll as the close_shell case above: the reap lands
+    // asynchronously, so wait for it instead of sleeping a fixed 2.5 s.
+    let still = alivePairs();
+    for (let i = 0; i < 40 && rows.some(row => still.has(row)); i += 1) {
+      await delay(250);
+      still = alivePairs();
+    }
     const survivors = rows.filter(r => still.has(r));
     assert.equal(survivors.length, 0,
       `cli stop's fallback killed the session jobs with the instance; survivors (msys pid, winpid): ${survivors.join(", ")}`);

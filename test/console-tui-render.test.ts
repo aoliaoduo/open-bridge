@@ -11,6 +11,7 @@ import { test } from "node:test";
 import { charAtColumn, fillVisualWidth, setAmbiguousWideForTests, stripAnsi, visualWidth, truncateVisual, padEndVisual } from "../src/console/tui/text.js";
 import { healthColor, paint } from "../src/console/tui/theme.js";
 import { advanceScroll, eventKeyOf, eventListRow, formatClock, formatDuration, formatBytes, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
+import { tuiView } from "./lib/tui-view.js";
 
 test("activity rows are single-line: the message truncates instead of wrapping", () => {
   const long = "curl -s http://127.0.0.1:8123/api/skills | head -c 400 plus extra padding padding padding to push this well past one panel width for sure";
@@ -141,12 +142,9 @@ test("formatters are stable and unit-friendly", () => {
 });
 
 function fixtureView(): TuiStateView {
-  return {
+  return tuiView({
     port: 8123,
     routeToken: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    tunnelUrl: "",
-    tunnelRole: "none",
-    stopping: false,
     sessions: new Map([
       ["a", { activeRequests: 1, calls: 5, lastUsed: 1 }],
       ["b", { activeRequests: 0, calls: 1, lastUsed: 1 }],
@@ -190,7 +188,7 @@ function fixtureView(): TuiStateView {
       // task view exists.
       { id: "t4", title: "TUI 阶段一：仪表盘（7c75440）+ 阶段三只读工作台（3f8fc6b）+ CJK 行尾修复全部完成待提交推送", status: "pending" },
     ],
-  };
+  });
 }
 
 test("buildSnapshot counts live state and shows the full MCP URL", () => {

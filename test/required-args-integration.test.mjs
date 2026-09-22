@@ -37,16 +37,15 @@
 
 import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
-import { spawn } from "node:child_process";
-import http from "node:http";
 import {mkdirSync, mkdtempSync, writeFileSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { routeTokenFor, waitForRuntime } from "./lib/bridge-runtime.mjs";
+import {
+  createRpcId, makeOpenSession, makeRawRequest, makeToolCaller, startBridge,
+  stopServe,
+} from "./lib/bridge-runtime.mjs";
 import { setTimeout as delay } from "node:timers/promises";
-
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 
 let workspace;
 let home;
@@ -67,23 +66,13 @@ before(async () => {
     'process.stdin.on("data", d => process.stdout.write("GOT:" + d));\nconsole.log("READY");\n',
     "utf8",
   );
-  child = spawn(process.execPath, [
-    path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--no-tunnel", "--port", "0", "--root", workspace, "--home", home,
-  ], { stdio: ["ignore", "pipe", "pipe"] });
-  const runtime = await waitForRuntime(home, workspace);
-  port = runtime.port;
-  for (let i = 0; i < 40 && !routeToken; i += 1) {
-    try { routeToken = routeTokenFor(home, workspace); } catch { await delay(250); }
-  }
-  assert.ok(routeToken, "route token was persisted");
+  ({ child, port, routeToken } = await startBridge({ root: workspace, home }));
   sessionId = (await openSession()).sessionId;
   assert.ok(sessionId, "MCP session was established");
 });
 
 after(async () => {
-  if (child && !child.killed) child.kill("SIGTERM");
-  await delay(300);
+  await stopServe(child);
   removeTempDir(workspace);
   removeTempDir(home);
 });
@@ -359,72 +348,10 @@ test("`save_service` validates the same two knobs through the same validator, an
 
 // --- harness ---------------------------------------------------------------
 
-function rawRequest(method, reqPath, body, headers = {}) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, method, path: reqPath, headers, agent: false, signal: AbortSignal.timeout(15_000) },
-      res => {
-        const chunks = [];
-        res.on("data", chunk => chunks.push(chunk));
-        res.on("end", () => resolve({
-          status: res.statusCode,
-          headers: res.headers,
-          body: Buffer.concat(chunks).toString("utf8"),
-        }));
-      },
-    );
-    req.on("error", reject);
-    if (body != null) req.write(body);
-    req.end();
-  });
-}
-
-function lastSsePayload(body) {
-  let payload;
-  for (const line of body.split(/\r?\n/)) {
-    if (line.startsWith("data: ")) payload = JSON.parse(line.slice(6));
-  }
-  return payload;
-}
-
-let rpcId = 1;
-const jsonHeaders = extra => ({
-  "content-type": "application/json",
-  accept: "application/json, text/event-stream",
-  ...extra,
-});
-
-async function openSession() {
-  const res = await rawRequest("POST", `/mcp/${routeToken}`, JSON.stringify({
-    jsonrpc: "2.0", id: rpcId++, method: "initialize",
-    params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "required-args", version: "1" } },
-  }), jsonHeaders());
-  const session = res.headers["mcp-session-id"];
-  if (session) {
-    await rawRequest("POST", `/mcp/${routeToken}`,
-      JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
-      jsonHeaders({ "mcp-session-id": session }));
-  }
-  return { sessionId: session, body: res.body };
-}
-
-async function callToolPayload(name, args) {
-  const res = await rawRequest("POST", `/mcp/${routeToken}`,
-    JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method: "tools/call", params: { name, arguments: args } }),
-    jsonHeaders({ "mcp-session-id": sessionId }));
-  assert.equal(res.status, 200, `tools/call ${name} answered`);
-  const payload = lastSsePayload(res.body);
-  assert.ok(payload?.result, `tools/call ${name} returned a result`);
-  return payload;
-}
-
-/** One tool call, flattened to what these assertions care about. */
-async function callTool(name, args) {
-  const payload = await callToolPayload(name, args);
-  const result = payload.result;
-  const text = result.content?.[0]?.text ?? JSON.stringify(result);
-  return { isError: result.isError === true, text };
-}
+const rawRequest = makeRawRequest(() => port, 15_000);
+const rpcId = createRpcId();
+const openSession = makeOpenSession({ request: rawRequest, routeToken: () => routeToken, clientName: "required-args", nextId: rpcId });
+const { callTool } = makeToolCaller({ request: rawRequest, routeToken: () => routeToken, nextId: rpcId, getSessionId: () => sessionId });
 
 /** The tool's payload as an array, whether it answered with one or with {items}. */
 function asItems(res) {

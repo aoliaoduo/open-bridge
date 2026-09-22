@@ -15,16 +15,14 @@
 
 import assert from "node:assert/strict";
 import {test, before, after} from "node:test";
-import {spawn} from "node:child_process";
-import http from "node:http";
 import {mkdtempSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import {tmpdir} from "node:os";
 import path from "node:path";
-import {routeTokenFor, waitForRuntime} from "./lib/bridge-runtime.mjs";
-import {setTimeout as delay} from "node:timers/promises";
+import {
+  createRpcId, jsonHeaders, makeRawRequest, startBridge, stopServe,
+} from "./lib/bridge-runtime.mjs";
 
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 const MODERN_REVISION = "2026-07-28";
 
 let home;
@@ -34,50 +32,20 @@ let routeToken;
 
 before(async () => {
   home = mkdtempSync(path.join(tmpdir(), "ob-legacy-session-"));
-  child = spawn(process.execPath, [
-    path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--no-tunnel", "--port", "0", "--root", home, "--home", home,
-  ], { stdio: ["ignore", "pipe", "pipe"] });
-  const runtime = await waitForRuntime(home, home);
-  port = runtime.port;
-  for (let i = 0; i < 40 && !routeToken; i += 1) {
-    try { routeToken = routeTokenFor(home, home); } catch { await delay(250); }
-  }
-  assert.ok(routeToken, "route token was persisted");
+  ({ child, port, routeToken } = await startBridge({ root: home, home }));
 });
 
 after(async () => {
-  if (child && !child.killed) child.kill("SIGTERM");
-  await delay(300);
+  await stopServe(child);
   removeTempDir(home);
 });
 
-function rawRequest(method, reqPath, body, headers = {}) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, method, path: reqPath, headers, agent: false, signal: AbortSignal.timeout(15_000) },
-      res => {
-        const chunks = [];
-        res.on("data", chunk => chunks.push(chunk));
-        res.on("end", () => resolve({
-          status: res.statusCode,
-          headers: res.headers,
-          body: Buffer.concat(chunks).toString("utf8"),
-        }));
-      },
-    );
-    req.on("error", reject);
-    if (body != null) req.write(body);
-    req.end();
-  });
-}
-
-let rpcId = 1;
-const jsonHeaders = extra => ({ "content-type": "application/json", accept: "application/json, text/event-stream", ...extra });
+const rawRequest = makeRawRequest(() => port, 15_000);
+const rpcId = createRpcId();
 const call = sessionId => rawRequest(
   "POST",
   `/mcp/${routeToken}`,
-  JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method: "tools/call", params: { name: "bridge_status", arguments: {} } }),
+  JSON.stringify({ jsonrpc: "2.0", id: rpcId(), method: "tools/call", params: { name: "bridge_status", arguments: {} } }),
   jsonHeaders(sessionId ? { "mcp-session-id": sessionId } : {}),
 );
 
@@ -113,7 +81,7 @@ test("an unknown session id is answered as expired, and sounds like it", async (
 test("the handshake itself is untouched: the id it mints still serves calls", async () => {
   const init = await rawRequest("POST", `/mcp/${routeToken}`, JSON.stringify({
     jsonrpc: "2.0",
-    id: rpcId++,
+    id: rpcId(),
     method: "initialize",
     params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "session-guidance-test", version: "1" } },
   }), jsonHeaders());
@@ -135,7 +103,7 @@ test("a handshake that carries a dead id still succeeds, so reconnecting needs n
   // a fresh session rather than a refusal.
   const init = await rawRequest("POST", `/mcp/${routeToken}`, JSON.stringify({
     jsonrpc: "2.0",
-    id: rpcId++,
+    id: rpcId(),
     method: "initialize",
     params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "session-guidance-test", version: "1" } },
   }), jsonHeaders({ "mcp-session-id": "1".repeat(32) }));
@@ -149,7 +117,7 @@ test("the modern era is not intercepted by any of this", async () => {
     `/mcp/${routeToken}`,
     JSON.stringify({
       jsonrpc: "2.0",
-      id: rpcId++,
+      id: rpcId(),
       method: "tools/call",
       params: {
         name: "bridge_status",

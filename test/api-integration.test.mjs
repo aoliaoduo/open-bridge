@@ -14,10 +14,10 @@ import {mkdtempSync, readFileSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import {tmpdir} from "node:os";
 import path from "node:path";
-import {readRuntimeFor, routeTokenFor, waitForRuntime} from "./lib/bridge-runtime.mjs";
+import {
+  ROOT, readRuntimeFor, spawnServe, stopServe, waitForRouteToken, waitForRuntime,
+} from "./lib/bridge-runtime.mjs";
 import {setTimeout as delay} from "node:timers/promises";
-
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 
 let home;
 let child;
@@ -30,10 +30,7 @@ let serveOutput = "";
 
 before(async () => {
   home = mkdtempSync(path.join(tmpdir(), "ob-api-test-"));
-  child = spawn(process.execPath, [
-    path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--no-tunnel", "--port", "0", "--root", home, "--home", home,
-  ], { stdio: ["ignore", "pipe", "pipe"] });
+  child = spawnServe({ root: home, home });
   child.stdout.on("data", d => { serveOutput += d; });
   child.stderr.on("data", d => { serveOutput += d; });
   child.on("exit", (code, signal) => {
@@ -43,15 +40,12 @@ before(async () => {
   const runtime = await waitForRuntime(home, home);
   port = runtime.port;
   // The route token is written during start(); give it a moment if absent.
-  for (let i = 0; i < 40 && !routeToken; i += 1) {
-    try { routeToken = routeTokenFor(home, home); } catch { await delay(250); }
-  }
+  routeToken = await waitForRouteToken(home, home);
   assert.ok(routeToken, "route token was persisted");
 });
 
 after(async () => {
-  if (child && !child.killed) child.kill("SIGTERM");
-  await delay(300);
+  await stopServe(child);
   removeTempDir(home);
 });
 
@@ -454,16 +448,10 @@ test("one step arms the second lock: mint, enable, and /mcp really refuses", asy
   // 「签发令牌并启用门禁」exists because the guarded two-step flow (mint on 安全,
   // then flip the switch) is easy to get wrong. The only proof that matters is
   // an anonymous request actually being refused once it is armed.
-  const consolePost = (body) => fetch(`${base()}/api/settings/action`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-open-bridge-console": routeToken },
-    body: JSON.stringify(body),
-  });
-
   // Start from zero usable tokens so the arm has to mint one itself.
-  assert.equal((await consolePost({ command: "revokeAll" })).status, 200);
+  assert.equal((await postAction({ command: "revokeAll" })).status, 200);
 
-  const armed = await consolePost({ command: "armPublicLock", label: "integration-lock", ttlSeconds: 3_600 });
+  const armed = await postAction({ command: "armPublicLock", label: "integration-lock", ttlSeconds: 3_600 });
   assert.equal(armed.status, 200);
   const armedBody = await armed.json();
   assert.equal(armedBody.ok, true);
@@ -482,42 +470,37 @@ test("one step arms the second lock: mint, enable, and /mcp really refuses", asy
   assert.notEqual(bearer.status, 401, "the token the arm minted works");
 
   // Arming again is a no-op, not a second token.
-  const again = await (await consolePost({ command: "armPublicLock" })).json();
+  const again = await (await postAction({ command: "armPublicLock" })).json();
   assert.equal(again.ok, true);
   assert.equal(again.secret, undefined, "already armed: no new secret");
   assert.match(again.info ?? "", /已经开着/);
 
   // Gate off but a usable token in place: arming reuses it.
-  assert.equal((await consolePost({ command: "setAuthEnabled", enabled: false })).status, 200);
-  const reused = await (await consolePost({ command: "armPublicLock" })).json();
+  assert.equal((await postAction({ command: "setAuthEnabled", enabled: false })).status, 200);
+  const reused = await (await postAction({ command: "armPublicLock" })).json();
   assert.equal(reused.ok, true);
   assert.equal(reused.secret, undefined, "reused the existing token instead of minting another");
   assert.equal(reused.state.usableCount, 1);
 
   // Leave the instance as found, so the rest of the suite runs unauthenticated.
-  const off = await (await consolePost({ command: "setAuthEnabled", enabled: false })).json();
+  const off = await (await postAction({ command: "setAuthEnabled", enabled: false })).json();
   assert.equal(off.state.authEnabled, false);
   const anonymousAgain = await fetch(`${base()}/mcp/${routeToken}`);
   assert.notEqual(anonymousAgain.status, 401, "lock off: the endpoint answers again");
 });
 
 test("console setConfig shares MCP validation: garbage refused, valid saved", async () => {
-  const consolePost = (body) => fetch(`${base()}/api/settings/action`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-open-bridge-console": routeToken },
-    body: JSON.stringify(body),
-  });
   // The drift this unification fixes: garbage booleans used to be stored as
   // `false`, relative directories kept as-is. Both are refused now, with the
   // stored values untouched.
-  const badBool = await (await consolePost({ command: "setConfig", key: "autoReconnect", value: "yes" })).json();
+  const badBool = await (await postAction({ command: "setConfig", key: "autoReconnect", value: "yes" })).json();
   assert.equal(badBool.ok, false);
-  const badDir = await (await consolePost({ command: "setConfig", key: "allowedDirectories", value: ["relative/path"] })).json();
+  const badDir = await (await postAction({ command: "setConfig", key: "allowedDirectories", value: ["relative/path"] })).json();
   assert.equal(badDir.ok, false);
   assert.equal(badDir.state.config.autoReconnect, badBool.state.config.autoReconnect, "refused write changed nothing");
   assert.deepEqual(badDir.state.config.allowedDirectories, badBool.state.config.allowedDirectories, "refused write changed nothing");
   // A valid write still lands (same value back: harmless on the shared instance).
-  const sameBack = await (await consolePost({ command: "setConfig", key: "toolProfile", value: badDir.state.config.toolProfile })).json();
+  const sameBack = await (await postAction({ command: "setConfig", key: "toolProfile", value: badDir.state.config.toolProfile })).json();
   assert.equal(sameBack.ok, true);
 });
 

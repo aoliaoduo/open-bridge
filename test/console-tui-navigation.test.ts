@@ -12,19 +12,15 @@ import { consoleTuiActive, startConsoleTui, stopConsoleTui } from "../src/consol
 import { buildSnapshot, type TuiStateView } from "../src/console/tui/snapshot.js";
 import { renderFrame, panelScrollMetrics, type TuiSnapshot } from "../src/console/tui/render.js";
 import { setAmbiguousWideForTests, stripAnsi, visualWidth } from "../src/console/tui/text.js";
+import { git, gitAvailable } from "./lib/git.js";
+import { tuiView } from "./lib/tui-view.js";
 
 const NOW = Date.parse("2026-01-01T00:00:00Z");
 
 function fixtureView(count = 100): TuiStateView {
-  return {
+  return tuiView({
     port: 12345,
     routeToken: "synthetic-navigation-fixture",
-    tunnelUrl: "",
-    tunnelRole: "none",
-    stopping: false,
-    sessions: new Map(),
-    commands: new Map(),
-    services: new Map(),
     activity: Array.from({ length: 40 }, (_, index) => ({
       id: `fixture-event-${index + 1}`,
       at: new Date(NOW - index * 1000).toISOString(),
@@ -40,7 +36,7 @@ function fixtureView(count = 100): TuiStateView {
       title: `TASK_${String(index + 1).padStart(3, "0")}`,
       status: index === count - 1 ? "in_progress" : "pending",
     })),
-  };
+  });
 }
 
 function snapshot(count = 100): TuiSnapshot {
@@ -214,26 +210,6 @@ async function withTerminal(
 
 function eventLabels(text: string): string[] {
   return text.match(/EVENT_\d+/g) ?? [];
-}
-
-function gitAvailable(): boolean {
-  try {
-    childProcess.execFileSync("git", ["--version"], { stdio: "ignore", windowsHide: true });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function git(cwd: string, args: string[]): void {
-  childProcess.execFileSync("git", [
-    "-c", "user.email=tui@test",
-    "-c", "user.name=tui",
-    "-c", "commit.gpgsign=false",
-    "-c", "init.defaultBranch=main",
-    "-c", "core.autocrlf=false",
-    ...args,
-  ], { cwd, stdio: "ignore", windowsHide: true });
 }
 
 async function waitForFrame(

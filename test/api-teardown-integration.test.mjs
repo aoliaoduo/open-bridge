@@ -14,16 +14,11 @@
 
 import assert from "node:assert/strict";
 import {test, before, after} from "node:test";
-import {spawn} from "node:child_process";
-import {mkdtempSync, readFileSync} from "node:fs";
+import {mkdtempSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import {tmpdir} from "node:os";
 import path from "node:path";
-import {waitForRuntime} from "./lib/bridge-runtime.mjs";
-import {createHash} from "node:crypto";
-import {setTimeout as delay} from "node:timers/promises";
-
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+import {startBridge, stopServe} from "./lib/bridge-runtime.mjs";
 
 let home;
 let child;
@@ -32,27 +27,11 @@ let routeToken;
 
 before(async () => {
   home = mkdtempSync(path.join(tmpdir(), "ob-teardown-test-"));
-  child = spawn(process.execPath, [
-    path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--no-tunnel", "--port", "0", "--root", home, "--home", home,
-  ], { stdio: ["ignore", "pipe", "pipe"] });
-  const runtime = await waitForRuntime(home, home);
-  port = runtime.port;
-  const suffix = createHash("sha256").update(home).digest("hex").slice(0, 24);
-  for (let i = 0; i < 40 && !routeToken; i += 1) {
-    try {
-      routeToken = JSON.parse(readFileSync(path.join(home, "secrets.json"), "utf8"))[
-        `openBridge.routeToken.${suffix}`
-      ];
-    } catch { /* not written yet */ }
-    if (!routeToken) await delay(250);
-  }
-  assert.ok(routeToken, "route token was persisted");
+  ({ child, port, routeToken } = await startBridge({ root: home, home }));
 });
 
 after(async () => {
-  if (child && !child.killed) child.kill("SIGTERM");
-  await delay(300);
+  await stopServe(child);
   removeTempDir(home);
 });
 

@@ -19,10 +19,10 @@ import {mkdtempSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import {tmpdir} from "node:os";
 import path from "node:path";
-import {routeTokenFor, waitForRuntime} from "./lib/bridge-runtime.mjs";
-import {setTimeout as delay} from "node:timers/promises";
-
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+import {
+  ROOT, CLI_BIN, createRpcId, jsonHeaders, lastSsePayload, makeOpenSession,
+  makeRawRequest, spawnServe, stopServe, waitForRouteToken, waitForRuntime,
+} from "./lib/bridge-runtime.mjs";
 
 let home;
 let child;
@@ -33,24 +33,18 @@ let serveOutput = "";
 
 before(async () => {
   home = mkdtempSync(path.join(tmpdir(), "ob-guards-"));
-  child = spawn(process.execPath, [
-    path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--no-tunnel", "--port", "0", "--root", home, "--home", home,
-  ], { stdio: ["ignore", "pipe", "pipe"] });
+  child = spawnServe({ root: home, home });
   child.stdout.on("data", d => { serveOutput += d; });
   child.stderr.on("data", d => { serveOutput += d; });
   child.on("exit", (code, signal) => { serveExit = { code, signal }; });
   const runtime = await waitForRuntime(home, home);
   port = runtime.port;
-  for (let i = 0; i < 40 && !routeToken; i += 1) {
-    try { routeToken = routeTokenFor(home, home); } catch { await delay(250); }
-  }
+  routeToken = await waitForRouteToken(home, home);
   assert.ok(routeToken, "route token was persisted");
 });
 
 after(async () => {
-  if (child && !child.killed) child.kill("SIGTERM");
-  await delay(300);
+  await stopServe(child);
   const stillListening = await new Promise(resolve => {
     const probe = http.request({ host: "127.0.0.1", port, path: "/healthz/", timeout: 300 }, () => resolve(false));
     probe.on("error", () => resolve(false));
@@ -61,54 +55,12 @@ after(async () => {
   removeTempDir(home);
 });
 
-function rawRequest(method, reqPath, body, headers = {}) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, method, path: reqPath, headers, agent: false, signal: AbortSignal.timeout(8_000) },
-      res => {
-        const chunks = [];
-        res.on("data", chunk => chunks.push(chunk));
-        res.on("end", () => resolve({
-          status: res.statusCode,
-          headers: res.headers,
-          body: Buffer.concat(chunks).toString("utf8"),
-        }));
-      },
-    );
-    req.on("error", reject);
-    if (body != null) req.write(body);
-    req.end();
-  });
-}
-
-function lastSsePayload(body) {
-  let payload;
-  for (const line of body.split(/\r?\n/)) {
-    if (line.startsWith("data: ")) payload = JSON.parse(line.slice(6));
-  }
-  return payload;
-}
-
-let rpcId = 1;
-const rpc = (method, params) => ({ jsonrpc: "2.0", id: rpcId++, method, params: params ?? {} });
-const jsonHeaders = extra => ({ "content-type": "application/json", accept: "application/json, text/event-stream", ...extra });
+const rawRequest = makeRawRequest(() => port, 8_000);
+const rpcId = createRpcId();
+const rpc = (method, params) => ({ jsonrpc: "2.0", id: rpcId(), method, params: params ?? {} });
 const bearer = secret => ({ authorization: `Bearer ${secret}` });
 
-/** Full MCP handshake; returns the response plus the assigned session id. */
-async function openSession(extraHeaders = {}) {
-  const res = await rawRequest("POST", `/mcp/${routeToken}`, JSON.stringify(rpc("initialize", {
-    protocolVersion: "2025-06-18",
-    capabilities: {},
-    clientInfo: { name: "guards-test", version: "1" },
-  })), jsonHeaders(extraHeaders));
-  const sessionId = res.headers["mcp-session-id"];
-  if (sessionId) {
-    await rawRequest("POST", `/mcp/${routeToken}`,
-      JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
-      jsonHeaders({ "mcp-session-id": sessionId, ...extraHeaders }));
-  }
-  return { res, sessionId };
-}
+const openSession = makeOpenSession({ request: rawRequest, routeToken: () => routeToken, clientName: "guards-test", nextId: rpcId });
 
 async function callTool(sessionId, name, args, extraHeaders = {}) {
   const res = await rawRequest("POST", `/mcp/${routeToken}`,
@@ -265,8 +217,6 @@ test("minting a replacement restores access", async () => {
   assert.match(status.text, new RegExp(fresh.id));
   assert.equal(serveExit, null, `serve died during the guards suite:\n${serveOutput.slice(-600)}`);
 });
-
-const CLI_BIN = path.join(ROOT, "bin", "open-bridge.js");
 
 /** One CLI invocation against the same data dir the running instance uses. */
 function cliToken(args) {

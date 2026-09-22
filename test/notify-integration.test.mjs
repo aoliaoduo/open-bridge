@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
-import { spawn } from "node:child_process";
 import http from "node:http";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { removeTempDir } from "./tmpdir.mjs";
-import { routeTokenFor, waitForRuntime } from "./lib/bridge-runtime.mjs";
+import {
+  createRpcId, jsonHeaders, makeOpenSession, makeRawRequest, startBridge,
+} from "./lib/bridge-runtime.mjs";
 
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 const KEY = "iNTdevicEkey1234567890ab";
 let home, child, port, routeToken, bark, barkPort;
 const pushes = [];
@@ -27,12 +27,7 @@ before(async () => {
   writeFileSync(path.join(home, "config.json"), JSON.stringify({
     "notify.serverUrl": `http://127.0.0.1:${barkPort}`,
   }));
-  child = spawn(process.execPath, [path.join(ROOT, "bin", "open-bridge.js"), "serve", "--no-tunnel", "--port", "0", "--root", home, "--home", home], { stdio: ["ignore", "pipe", "pipe"] });
-  port = (await waitForRuntime(home, home)).port;
-  for (let i = 0; i < 40 && !routeToken; i += 1) {
-    try { routeToken = routeTokenFor(home, home); } catch { await delay(250); }
-  }
-  assert.ok(routeToken, "route token was persisted");
+  ({ child, port, routeToken } = await startBridge({ root: home, home }));
 });
 
 after(async () => {
@@ -49,36 +44,20 @@ async function consoleAction(body) {
   });
   return { status: res.status, body: await res.json() };
 }
-function request(method, reqPath, body, headers = {}) {
-  return new Promise((resolve, reject) => {
-    const req = http.request({ host: "127.0.0.1", port, method, path: reqPath, headers, agent: false, signal: AbortSignal.timeout(15_000) }, res => {
-      const chunks = [];
-      res.on("data", chunk => chunks.push(chunk));
-      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") }));
-    });
-    req.on("error", reject);
-    if (body != null) req.write(body);
-    req.end();
-  });
-}
-let id = 1;
-const rpc = (method, params = {}) => ({ jsonrpc: "2.0", id: id++, method, params });
-const headers = extra => ({ "content-type": "application/json", accept: "application/json, text/event-stream", ...extra });
+const request = makeRawRequest(() => port, 15_000);
+const rpcId = createRpcId();
+const rpc = (method, params = {}) => ({ jsonrpc: "2.0", id: rpcId(), method, params });
 function payload(body) {
   for (const line of body.split(/\r?\n/)) if (line.startsWith("data: ")) return JSON.parse(line.slice(6));
   return undefined;
 }
+const openSessionBase = makeOpenSession({ request, routeToken: () => routeToken, clientName: "notify-test", nextId: rpcId });
 async function openSession() {
-  const res = await request("POST", `/mcp/${routeToken}`, JSON.stringify(rpc("initialize", {
-    protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "notify-test", version: "1" },
-  })), headers());
-  const sessionId = res.headers["mcp-session-id"];
-  const instructions = payload(res.body)?.result?.instructions ?? "";
-  if (sessionId) await request("POST", `/mcp/${routeToken}`, JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }), headers({ "mcp-session-id": sessionId }));
-  return { sessionId, instructions };
+  const opened = await openSessionBase();
+  return { sessionId: opened.sessionId, instructions: payload(opened.body)?.result?.instructions ?? "" };
 }
 async function tool(sessionId, name, args) {
-  const res = await request("POST", `/mcp/${routeToken}`, JSON.stringify(rpc("tools/call", { name, arguments: args })), headers({ "mcp-session-id": sessionId }));
+  const res = await request("POST", `/mcp/${routeToken}`, JSON.stringify(rpc("tools/call", { name, arguments: args })), jsonHeaders({ "mcp-session-id": sessionId }));
   const result = payload(res.body)?.result;
   const text = result?.content?.[0]?.text ?? "null";
   let json;

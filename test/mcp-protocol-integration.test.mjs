@@ -13,17 +13,17 @@
 
 import assert from "node:assert/strict";
 import {test, before, after} from "node:test";
-import {execFileSync, spawn} from "node:child_process";
-import http from "node:http";
+import {execFileSync} from "node:child_process";
 import {mkdtempSync, readFileSync, writeFileSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import {tmpdir} from "node:os";
 import path from "node:path";
-import {routeTokenFor, waitForRuntime} from "./lib/bridge-runtime.mjs";
+import {
+  createRpcId, jsonHeaders, lastSsePayload, makeOpenSession, makeRawRequest,
+  spawnServe, stopServe, waitForRouteToken, waitForRuntime,
+} from "./lib/bridge-runtime.mjs";
 import {setTimeout as delay} from "node:timers/promises";
 import Ajv from "ajv";
-
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 
 let home;
 let dataHome;
@@ -45,18 +45,13 @@ before(async () => {
   execFileSync("git", ["config", "user.name", "Open Bridge protocol test"], { cwd: home });
   execFileSync("git", ["config", "user.email", "protocol-test@example.invalid"], { cwd: home });
   execFileSync("git", ["commit", "--allow-empty", "--quiet", "-m", "protocol baseline"], { cwd: home });
-  child = spawn(process.execPath, [
-    path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--no-tunnel", "--port", "0", "--root", home, "--home", dataHome,
-  ], { stdio: ["ignore", "pipe", "pipe"] });
+  child = spawnServe({ root: home, home: dataHome });
   child.stdout.on("data", d => { serveOutput += d; });
   child.stderr.on("data", d => { serveOutput += d; });
   child.on("exit", (code, signal) => { serveExit = { code, signal }; });
   const runtime = await waitForRuntime(dataHome, home);
   port = runtime.port;
-  for (let i = 0; i < 40 && !routeToken; i += 1) {
-    try { routeToken = routeTokenFor(dataHome, home); } catch { await delay(250); }
-  }
+  routeToken = await waitForRouteToken(dataHome, home);
   assert.ok(routeToken, "route token was persisted");
 
   // Compile the schemas that the running MCP endpoint actually advertises, not
@@ -82,59 +77,17 @@ after(async () => {
     const unexercisedOutputs = [...outputValidators.keys()].filter(name => !validatedOutputTools.has(name));
     assert.deepEqual(unexercisedOutputs, [], "every published outputSchema has a successful live contract example");
   } finally {
-    if (child && !child.killed) child.kill("SIGTERM");
-    await delay(300);
+    await stopServe(child);
     removeTempDir(home);
     removeTempDir(dataHome);
   }
 });
 
-function rawRequest(method, reqPath, body, headers = {}) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, method, path: reqPath, headers, agent: false, signal: AbortSignal.timeout(15_000) },
-      res => {
-        const chunks = [];
-        res.on("data", chunk => chunks.push(chunk));
-        res.on("end", () => resolve({
-          status: res.statusCode,
-          headers: res.headers,
-          body: Buffer.concat(chunks).toString("utf8"),
-        }));
-      },
-    );
-    req.on("error", reject);
-    if (body != null) req.write(body);
-    req.end();
-  });
-}
+const rawRequest = makeRawRequest(() => port, 15_000);
+const rpcId = createRpcId();
+const rpc = (method, params) => ({ jsonrpc: "2.0", id: rpcId(), method, params: params ?? {} });
 
-function lastSsePayload(body) {
-  let payload;
-  for (const line of body.split(/\r?\n/)) {
-    if (line.startsWith("data: ")) payload = JSON.parse(line.slice(6));
-  }
-  return payload;
-}
-
-let rpcId = 1;
-const rpc = (method, params) => ({ jsonrpc: "2.0", id: rpcId++, method, params: params ?? {} });
-const jsonHeaders = extra => ({ "content-type": "application/json", accept: "application/json, text/event-stream", ...extra });
-
-async function openSession() {
-  const res = await rawRequest("POST", `/mcp/${routeToken}`, JSON.stringify(rpc("initialize", {
-    protocolVersion: "2025-06-18",
-    capabilities: {},
-    clientInfo: { name: "protocol-test", version: "1" },
-  })), jsonHeaders());
-  const sessionId = res.headers["mcp-session-id"];
-  if (sessionId) {
-    await rawRequest("POST", `/mcp/${routeToken}`,
-      JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
-      jsonHeaders({ "mcp-session-id": sessionId }));
-  }
-  return { res, sessionId };
-}
+const openSession = makeOpenSession({ request: rawRequest, routeToken: () => routeToken, clientName: "protocol-test", nextId: rpcId });
 
 async function mcpCall(sessionId, method, params) {
   const res = await rawRequest("POST", `/mcp/${routeToken}`, JSON.stringify(rpc(method, params)),

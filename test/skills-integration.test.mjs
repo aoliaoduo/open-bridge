@@ -12,16 +12,14 @@
 
 import assert from "node:assert/strict";
 import { test, before, after } from "node:test";
-import { spawn } from "node:child_process";
-import http from "node:http";
 import {mkdtempSync, mkdirSync, writeFileSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { routeTokenFor, waitForRuntime } from "./lib/bridge-runtime.mjs";
-import { setTimeout as delay } from "node:timers/promises";
-
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+import {
+  createRpcId, jsonHeaders, lastSsePayload, makeOpenSession, makeRawRequest,
+  startBridge, stopServe,
+} from "./lib/bridge-runtime.mjs";
 
 let home;
 let workspace;
@@ -42,24 +40,14 @@ before(async () => {
   writeSkill(path.join(workspace, "skills", "release"), "release", "Cut a release the way this project does it");
   writeSkill(path.join(home, "skills", "global-style"), "global-style", "User-level conventions");
 
-  child = spawn(process.execPath, [
-    path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--no-tunnel", "--port", "0", "--root", workspace, "--home", home,
-  ], { stdio: ["ignore", "pipe", "pipe"] });
-  const runtime = await waitForRuntime(home, workspace);
-  port = runtime.port;
-  for (let i = 0; i < 40 && !routeToken; i += 1) {
-    try { routeToken = routeTokenFor(home, workspace); } catch { await delay(250); }
-  }
-  assert.ok(routeToken, "route token was persisted");
+  ({ child, port, routeToken } = await startBridge({ root: workspace, home }));
   const opened = await openSession();
   sessionId = opened.sessionId;
   instructions = opened.instructions;
 });
 
 after(async () => {
-  if (child && !child.killed) child.kill("SIGTERM");
-  await delay(300);
+  await stopServe(child);
   removeTempDir(home);
   removeTempDir(workspace);
 });
@@ -110,59 +98,18 @@ test("a skill added mid-session appears on the next call, without reconnecting",
 });
 
 // ---------------------------------------------------------------- MCP plumbing
-function rawRequest(method, reqPath, body, headers = {}) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, method, path: reqPath, headers, agent: false, signal: AbortSignal.timeout(8_000) },
-      res => {
-        const chunks = [];
-        res.on("data", chunk => chunks.push(chunk));
-        res.on("end", () => resolve({
-          status: res.statusCode,
-          headers: res.headers,
-          body: Buffer.concat(chunks).toString("utf8"),
-        }));
-      },
-    );
-    req.on("error", reject);
-    if (body != null) req.write(body);
-    req.end();
-  });
-}
+const rawRequest = makeRawRequest(() => port, 8_000);
+const rpcId = createRpcId();
 
-function lastSsePayload(body) {
-  let payload;
-  for (const line of body.split(/\r?\n/)) {
-    if (line.startsWith("data: ")) payload = JSON.parse(line.slice(6));
-  }
-  return payload;
-}
-
-let rpcId = 1;
-const jsonHeaders = extra => ({
-  "content-type": "application/json",
-  accept: "application/json, text/event-stream",
-  ...extra,
-});
-
+const openSessionBase = makeOpenSession({ request: rawRequest, routeToken: () => routeToken, clientName: "skills-test", nextId: rpcId });
 async function openSession() {
-  const res = await rawRequest("POST", `/mcp/${routeToken}`, JSON.stringify({
-    jsonrpc: "2.0", id: rpcId++, method: "initialize",
-    params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "skills-test", version: "1" } },
-  }), jsonHeaders());
-  const payload = lastSsePayload(res.body);
-  const session = res.headers["mcp-session-id"];
-  if (session) {
-    await rawRequest("POST", `/mcp/${routeToken}`,
-      JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
-      jsonHeaders({ "mcp-session-id": session }));
-  }
-  return { sessionId: session, instructions: payload?.result?.instructions ?? "" };
+  const opened = await openSessionBase();
+  return { sessionId: opened.sessionId, instructions: lastSsePayload(opened.body)?.result?.instructions ?? "" };
 }
 
 async function mcpCall(method, params) {
   const res = await rawRequest("POST", `/mcp/${routeToken}`,
-    JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method, params }),
+    JSON.stringify({ jsonrpc: "2.0", id: rpcId(), method, params }),
     jsonHeaders({ "mcp-session-id": sessionId }));
   return { status: res.status, payload: lastSsePayload(res.body), body: res.body };
 }

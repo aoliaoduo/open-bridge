@@ -20,14 +20,12 @@ import {mkdirSync, mkdtempSync, readdirSync, writeFileSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
-const CLI = path.join(ROOT, "bin", "open-bridge.js");
+import { ROOT, CLI_BIN } from "./lib/bridge-runtime.mjs";
 
 /** Run the CLI to completion; fail loudly instead of hanging the suite. */
 function runCli(args, home, timeoutMs = 20_000, extraEnv = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [CLI, ...args], {
+    const child = spawn(process.execPath, [CLI_BIN, ...args], {
       cwd: ROOT,
       env: { ...process.env, OPEN_BRIDGE_HOME: home, ...extraEnv },
       stdio: ["ignore", "pipe", "pipe"],
@@ -208,7 +206,7 @@ test("logs --follow exits when the pipe it writes to closes", async () => {
     // passed against the bug, which is how the first version of this test
     // managed to be useless.
     const pipeline = spawn(
-      `"${process.execPath}" "${CLI}" logs --follow | head -3`,
+      `"${process.execPath}" "${CLI_BIN}" logs --follow | head -3`,
       { env: { ...process.env, OPEN_BRIDGE_HOME: home }, stdio: ["ignore", "ignore", "ignore"], shell: true },
     );
 

@@ -18,16 +18,16 @@
 
 import assert from "node:assert/strict";
 import {test, before, after} from "node:test";
-import {spawn} from "node:child_process";
-import http from "node:http";
 import {mkdtempSync, rmSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import {tmpdir} from "node:os";
 import path from "node:path";
-import {routeTokenFor, runtimeFileFor, waitForRuntime} from "./lib/bridge-runtime.mjs";
+import {
+  createRpcId, makeRawRequest, routeTokenFor, runtimeFileFor, spawnServe,
+  startBridge, stopServe, waitForRuntime,
+} from "./lib/bridge-runtime.mjs";
 import {setTimeout as delay} from "node:timers/promises";
 
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 const MODERN_REVISION = "2026-07-28";
 
 let home;
@@ -37,51 +37,22 @@ let routeToken;
 
 before(async () => {
   home = mkdtempSync(path.join(tmpdir(), "ob-modern-"));
-  child = spawn(process.execPath, [
-    path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--no-tunnel", "--port", "0", "--root", home, "--home", home,
-  ], { stdio: ["ignore", "pipe", "pipe"] });
-  const runtime = await waitForRuntime(home, home);
-  port = runtime.port;
-  for (let i = 0; i < 40 && !routeToken; i += 1) {
-    try { routeToken = routeTokenFor(home, home); } catch { await delay(250); }
-  }
-  assert.ok(routeToken, "route token was persisted");
+  ({ child, port, routeToken } = await startBridge({ root: home, home }));
 });
 
 after(async () => {
-  if (child && !child.killed) child.kill("SIGTERM");
-  await delay(300);
+  await stopServe(child);
   removeTempDir(home);
 });
 
-function rawRequest(method, reqPath, body, headers = {}) {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, method, path: reqPath, headers, agent: false, signal: AbortSignal.timeout(15_000) },
-      res => {
-        const chunks = [];
-        res.on("data", chunk => chunks.push(chunk));
-        res.on("end", () => resolve({
-          status: res.statusCode,
-          headers: res.headers,
-          body: Buffer.concat(chunks).toString("utf8"),
-        }));
-      },
-    );
-    req.on("error", reject);
-    if (body != null) req.write(body);
-    req.end();
-  });
-}
-
-let rpcId = 1;
+const rawRequest = makeRawRequest(() => port, 15_000);
+const rpcId = createRpcId();
 
 /** The per-request envelope a modern client sends, plus its headers. */
 function modernEnvelope(method, params) {
   return {
     jsonrpc: "2.0",
-    id: rpcId++,
+    id: rpcId(),
     method,
     params: {
       ...(params ?? {}),
@@ -341,7 +312,7 @@ test("the legacy era still mints a session and reports errors as isError", async
   // receives tool failures as `isError: true` inside a successful JSON-RPC result.
   const init = await rawRequest("POST", `/mcp/${routeToken}`, JSON.stringify({
     jsonrpc: "2.0",
-    id: rpcId++,
+    id: rpcId(),
     method: "initialize",
     params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "legacy-probe", version: "1" } },
   }), { "content-type": "application/json", accept: "application/json, text/event-stream" });
@@ -352,7 +323,7 @@ test("the legacy era still mints a session and reports errors as isError", async
   const legacyCall = await rawRequest(
     "POST",
     `/mcp/${routeToken}`,
-    JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method: "tools/call", params: { name: "write_file", arguments: { path: "never-written-by-legacy-error-test.txt" } } }),
+    JSON.stringify({ jsonrpc: "2.0", id: rpcId(), method: "tools/call", params: { name: "write_file", arguments: { path: "never-written-by-legacy-error-test.txt" } } }),
     { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-session-id": sessionId },
   );
   const payload = decode(legacyCall.body);
@@ -477,7 +448,7 @@ test("console stateless activity reports requests that are still in flight", asy
 /** A legacy (2025-era) session: initialize, then the initialized notification. */
 async function legacyInitialize() {
   const res = await rawRequest("POST", `/mcp/${routeToken}`, JSON.stringify({
-    jsonrpc: "2.0", id: rpcId++, method: "initialize",
+    jsonrpc: "2.0", id: rpcId(), method: "initialize",
     params: {
       protocolVersion: "2025-06-18",
       capabilities: {},
@@ -496,7 +467,7 @@ async function legacyInitialize() {
 // for a local, and a module-scope helper with the same name would shadow it.
 async function legacyRpc(sessionId, method, params) {
   const res = await rawRequest("POST", `/mcp/${routeToken}`,
-    JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method, params: params ?? {} }),
+    JSON.stringify({ jsonrpc: "2.0", id: rpcId(), method, params: params ?? {} }),
     {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
@@ -574,10 +545,7 @@ test("bridge_status reports the prefix it actually sends, and the prefix survive
   // first record with a port — so without this it would hand back the port
   // nobody is listening on any more.
   rmSync(runtimeFileFor(home, home), { force: true });
-  child = spawn(process.execPath, [
-    path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--no-tunnel", "--port", "0", "--root", home, "--home", home,
-  ], { stdio: ["ignore", "pipe", "pipe"] });
+  child = spawnServe({ root: home, home });
   const runtime = await waitForRuntime(home, home);
   port = runtime.port;
   routeToken = routeTokenFor(home, home);

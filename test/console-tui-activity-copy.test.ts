@@ -5,24 +5,17 @@ import { tuiActivityDetail, tuiActivityMessage } from "../src/console/tui/activi
 import { buildSnapshot, type TuiStateView } from "../src/console/tui/snapshot.js";
 import { renderFrame } from "../src/console/tui/render.js";
 import { stripAnsi } from "../src/console/tui/text.js";
+import { tuiView } from "./lib/tui-view.js";
 
 const NOW = 60_000;
 
 function fixtureView(activity: TuiStateView["activity"]): TuiStateView {
-  return {
+  return tuiView({
     port: 8123,
     routeToken: "tok",
-    tunnelUrl: "",
-    tunnelRole: "none",
-    stopping: false,
-    sessions: new Map(),
-    commands: new Map(),
-    services: new Map(),
     activity,
     usage: { startedAt: NOW, calls: 0, successes: 0, failures: 0 },
-    runtimeUsage: { calls: 0, successes: 0, failures: 0 },
-    todos: [],
-  };
+  });
 }
 
 test("mcp/process ride along dimmed instead of being filtered away", () => {

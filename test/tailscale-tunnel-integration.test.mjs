@@ -28,15 +28,12 @@
 
 import assert from "node:assert/strict";
 import {test, before, after} from "node:test";
-import {spawn} from "node:child_process";
 import {mkdtempSync, readFileSync, writeFileSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import {tmpdir} from "node:os";
 import path from "node:path";
-import {readRuntimeFor, routeTokenFor} from "./lib/bridge-runtime.mjs";
+import {readRuntimeFor, routeTokenFor, spawnServe} from "./lib/bridge-runtime.mjs";
 import {setTimeout as delay} from "node:timers/promises";
-
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 
 /** `tailscale status --json`: a machine name that will not resolve. */
 const FAKE_STATUS = `
@@ -181,11 +178,8 @@ before(async () => {
     publicHealthTimeoutMs: 1_500,
   }, null, 2));
 
-  child = spawn(process.execPath, [
-    path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--port", "0", "--root", fixture, "--home", home,
-  ], {
-    stdio: ["ignore", "pipe", "pipe"],
+  child = spawnServe({
+    root: fixture, home, tunnel: true,
     cwd: fixture, // so the stand-in `status` / `funnel` scripts resolve
     env: { ...process.env, OB_FAKE_TAILSCALE_LOG: counterFile, OB_FAKE_TAILSCALE_STATE: stateFile },
   });
@@ -256,11 +250,8 @@ test("a live mount on 443 is followed, never stolen", async () => {
   secondRoot = mkdtempSync(path.join(tmpdir(), "ob-tailscale-second-"));
   secondLog = path.join(fixture, "calls-second.log");
   writeFileSync(secondLog, "");
-  secondChild = spawn(process.execPath, [
-    path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--port", "0", "--root", secondRoot, "--home", home,
-  ], {
-    stdio: ["ignore", "pipe", "pipe"],
+  secondChild = spawnServe({
+    root: secondRoot, home, tunnel: true,
     cwd: fixture, // same stand-in CLI, its own call log
     env: { ...process.env, OB_FAKE_TAILSCALE_LOG: secondLog, OB_FAKE_TAILSCALE_STATE: stateFile },
   });

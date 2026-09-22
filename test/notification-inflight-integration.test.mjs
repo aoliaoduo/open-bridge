@@ -16,16 +16,14 @@
 
 import assert from "node:assert/strict";
 import {test, before, after} from "node:test";
-import {spawn} from "node:child_process";
 import http from "node:http";
 import {mkdtempSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import {tmpdir} from "node:os";
 import path from "node:path";
-import {routeTokenFor, waitForRuntime} from "./lib/bridge-runtime.mjs";
+import {createRpcId, startBridge, stopServe} from "./lib/bridge-runtime.mjs";
 import {setTimeout as delay} from "node:timers/promises";
 
-const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 const MODERN_REVISION = "2026-07-28";
 
 let home;
@@ -35,31 +33,21 @@ let routeToken;
 
 before(async () => {
   home = mkdtempSync(path.join(tmpdir(), "ob-inflight-"));
-  child = spawn(process.execPath, [
-    path.join(ROOT, "bin", "open-bridge.js"),
-    "serve", "--no-tunnel", "--port", "0", "--root", home, "--home", home,
-  ], { stdio: ["ignore", "pipe", "pipe"] });
-  const runtime = await waitForRuntime(home, home);
-  port = runtime.port;
-  for (let i = 0; i < 40 && !routeToken; i += 1) {
-    try { routeToken = routeTokenFor(home, home); } catch { await delay(250); }
-  }
-  assert.ok(routeToken, "route token was persisted");
+  ({ child, port, routeToken } = await startBridge({ root: home, home }));
 });
 
 after(async () => {
-  if (child && !child.killed) child.kill("SIGTERM");
-  await delay(300);
+  await stopServe(child);
   removeTempDir(home);
 });
 
-let rpcId = 1;
+const rpcId = createRpcId();
 
 /** One modern-era call. Returns the decoded payload (SSE frame or plain JSON). */
 function modernCall(name, args) {
   const body = JSON.stringify({
     jsonrpc: "2.0",
-    id: rpcId++,
+    id: rpcId(),
     method: "tools/call",
     params: {
       name,
