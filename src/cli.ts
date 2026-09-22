@@ -13,6 +13,7 @@
  *   config    list / get / set / path configuration
  *   token     create / list / revoke / delete / rotate auth tokens
  *   doctor    environment diagnostics
+ *   diagnostics  write the redacted report an issue can carry (help lists it)
  *   version / help
  *
  * This file is the ENTRY POINT, not the implementation. It owns three things:
@@ -82,12 +83,12 @@ const HELP = (): string => t(`open-bridge ${VERSION} — standalone MCP bridge f
   open-bridge version
 
 说明:
-  serve     前台启动 Bridge；控制台地址打印在终端
+  serve     前台启动 Bridge；控制台地址打印在终端（别名 start）
   stop      停止「当前目录」那个实例（没有则按唯一运行中的实例；--pid N 指定别的实例）
             由该实例自己启动的命令（例如走它的 MCP 工具执行）会被拒绝——那等于立刻断掉
             自己正在用的连接；要真停，由人在终端里加 --force
   status    同上，打印状态、项目根、MCP URL 与暴露情况
-  instances 列出共用同一数据目录的所有实例（一个目录一个实例）
+  instances 列出共用同一数据目录的所有实例（一个目录一个实例；别名 list）
   logs      读取/跟踪/清空日志文件（~/.open-bridge/logs/bridge.log）
   health    对运行中的实例做一次体检：监听、隧道、暴露、工具数
   prompt    打印给 AI 客户端的接入提示词（含 MCP URL，可直接粘贴）
@@ -115,13 +116,13 @@ Usage:
   open-bridge version
 
 Commands:
-  serve     Start the Bridge in the foreground; the console URL is printed here
+  serve     Start the Bridge in the foreground; the console URL is printed here (alias: start)
   stop      Stop the instance for THIS directory (or the only running one); --pid N picks another
             Commands the instance itself started (through its own MCP tools) are
             refused: that would cut the connection being used to ask. To really
             stop it, a human adds --force in a terminal
   status    Same target, but prints state, project root, MCP URL and exposure
-  instances List every instance sharing this data directory (one per directory)
+  instances List every instance sharing this data directory (one per directory; alias: list)
   logs      Read, follow or clear the log file (~/.open-bridge/logs/bridge.log)
   health    Check a running instance: listener, tunnel, exposure, tool count
   prompt    Print the onboarding prompt for an AI client (MCP URL included)

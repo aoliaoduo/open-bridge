@@ -21,6 +21,11 @@
 - `open-bridge logs --follow` 在 Linux 下不再永久孤儿：零字节写探针在 POSIX 上探测不到断管（内核对空写返回成功），静默日志的 follower 在 `| head` 退出后继续常驻。现以只读哨兵 socket 监听写端的 EPOLLERR/EPOLLHUP，读到断管即退出；健康管道、文件重定向与 TTY 行为不变，Windows 路径不变。
 - `config.json` / `state.json` / `secrets.json` 的写入在 rename 前补一次尽力而为的 `fsync`：rename 对并发读者是原子的，对崩溃不是，掉电后可能只剩目录项而没有数据，`secrets.json` 变空即路由令牌不可复原——客户端手里的 URL 全部失效且界面上看不出原因。不支持 sync 的文件系统会忽略这一步，写入照常发布，不会因为无法 sync 而失败；工作区普通文件的写入路径刻意不同步（见 `src/workspace/persist.ts` 的说明），避免每次写文件都付一次 sync。
 
+### Changed
+
+- `run_script` 脚本内未知工具的拼写建议与 dispatcher 的未知工具报错统一为同一实现与同一格式（`Did you mean: read_files, patch_file?`）。此前脚本路径自带的建议是另一种措辞（带引号、无冒号），同一类错误在两个表面长得不一样。
+- `open-bridge --help` 的 `serve` 与 `instances` 行现在标出各自已有的别名（`start` / `list`）；别名一直存在，只是帮助文本从未提及。
+
 ## [1.3.0] — 2026-09-22
 
 ### Added

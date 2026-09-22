@@ -23,6 +23,8 @@
  * Pure module: no fs, no state import — safe to unit test directly.
  */
 
+import { CONFIG_DEFAULTS } from "./config-defaults.js";
+
 export type LockMode = "read" | "write";
 
 export interface LockRequest {
@@ -43,8 +45,12 @@ export interface LockTuning {
   onContention?: (info: { keys: string[]; label: string; waitedMs: number }) => void;
 }
 
-export const DEFAULT_HOLD_TIMEOUT_MS = 300_000;
-export const DEFAULT_WAIT_TIMEOUT_MS = 120_000;
+// The canonical concurrency defaults from CONFIG_DEFAULTS, re-exported as the
+// lock scheduler's tuning constants so dispatcher's config fallbacks and this
+// module's own tuning cannot drift apart. config-defaults.ts is a frozen
+// literal table with no imports, so this module stays pure.
+export const DEFAULT_HOLD_TIMEOUT_MS = CONFIG_DEFAULTS["concurrency.holdTimeoutMs"] as number;
+export const DEFAULT_WAIT_TIMEOUT_MS = CONFIG_DEFAULTS["concurrency.waitTimeoutMs"] as number;
 /** Contention older than this is worth an audit line. */
 const CONTENTION_NOTICE_MS = 3_000;
 

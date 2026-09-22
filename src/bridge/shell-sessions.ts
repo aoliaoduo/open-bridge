@@ -28,7 +28,7 @@ import {
 } from "../shell/marker-scan.js";
 import { availableHint } from "./error-hints.js";
 import { maybeStripAnsi } from "../process/ansi.js";
-import { waitForSpawnSettled, clampMs } from "./process-tools.js";
+import { waitForSpawnSettled, clampMs, DEFAULT_TOOL_TIMEOUT_MS } from "./process-tools.js";
 import type { JsonArgs } from "./json-args.js";
 
 type Args = JsonArgs;
@@ -246,7 +246,7 @@ async function sendToShellInner(args: Args): Promise<Record<string, unknown>> {
   // produced NaN, the poll loop never ran (Date.now() < NaN is false), and the
   // command was reported timed_out before it had any chance to finish —
   // wedging the session behind a pendingMarker until the next call self-healed.
-  const timeout = clampMs(args.timeout_ms, 120_000);
+  const timeout = clampMs(args.timeout_ms, DEFAULT_TOOL_TIMEOUT_MS);
   const pollInterval = 60;
   const deadline = Date.now() + timeout;
   let exitCode: number | null = null;

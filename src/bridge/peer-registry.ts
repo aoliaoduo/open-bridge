@@ -11,6 +11,7 @@ import { host } from "../host/host.js";
 import * as fsSync from "node:fs";
 import * as path from "node:path";
 import { peerRegistryCandidates, publishPeerTo, withdrawPeerFrom } from "../http/peers.js";
+import { CONFIG_DEFAULTS } from "./config-defaults.js";
 import { record, state } from "./state.js";
 
 // Windows share one public tunnel: each instance advertises its token and loopback port,
@@ -66,7 +67,7 @@ function publishablePeerFiles(): string[] {
   if (!own) return [];
   const cfg = host().config;
   const publishes = tunnelInPlay(
-    String(cfg.get<string>("tunnelProvider", "ngrok")),
+    String(cfg.get<string>("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string)),
     String(cfg.get<string>("ngrokDomain", "") ?? ""),
     String(cfg.get<string>("tailscaleDomain", "") ?? ""),
   );

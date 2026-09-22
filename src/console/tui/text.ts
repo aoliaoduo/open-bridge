@@ -91,7 +91,15 @@ function charWidth(code: number): 0 | 1 | 2 {
   return 1;
 }
 
-/** Printable columns `text` occupies on screen (ANSI stripped, CJK = 2). */
+/**
+ * Printable columns `text` occupies on screen (ANSI stripped, CJK = 2).
+ *
+ * src/cli/format.ts's displayWidth is the other CJK width gauge. The split is
+ * deliberate, not drift: that one aligns CLI table labels and keeps decorative
+ * box-drawing/emoji at one column; this one must lay out the TUI's own frames,
+ * spinner and emoji, so it knows wide emoji, ambiguous punctuation (when the
+ * locale asks for it) and astral CJK. Keep them separate.
+ */
 export function visualWidth(text: string): number {
   let total = 0;
   for (const ch of stripAnsi(text)) {
@@ -137,12 +145,6 @@ export function padStartVisual(text: string, width: number): string {
   return missing > 0 ? " ".repeat(missing) + text : text;
 }
 
-/**
- * Fill exactly `width` columns by repeating `ch`. A 2-column rule cannot split
- * the last cell, so the remainder is padded with spaces — "─".repeat(width)
- * is only correct when every repetition renders one column, which stops being
- * true the moment a CJK-terminal regime doubles the box-drawing characters.
- */
 /**
  * Split `text` into chunks of at most `width` visual columns, never splitting
  * a two-column character across lines. Titles that outgrow one row wrap
@@ -201,6 +203,12 @@ export function wrapVisualSoft(text: string, width: number): string[] {
   return lines.length > 0 ? lines : [""];
 }
 
+/**
+ * Fill exactly `width` columns by repeating `ch`. A 2-column rule cannot split
+ * the last cell, so the remainder is padded with spaces — "─".repeat(width)
+ * is only correct when every repetition renders one column, which stops being
+ * true the moment a CJK-terminal regime doubles the box-drawing characters.
+ */
 export function fillVisualWidth(ch: string, width: number): string {
   const w = visualWidth(ch);
   if (w <= 0 || width <= 0) return "";

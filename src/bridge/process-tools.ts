@@ -117,12 +117,24 @@ export function throwIfSpawnFailed(commandState: { spawnError?: string }): void 
  * than what it says.
  */
 export const MAX_TIMER_MS = 2_147_483_647;
+// The canonical copy of the 2^31-1 ceiling. Two siblings keep their own literal
+// on purpose: src/bridge/config-values.ts must stay dependency-free (the React
+// console bundles it), and src/network/safe-probe.ts does not import bridge
+// modules. If you change one, change all three.
 
 export function clampMs(value: unknown, fallback: number, max = MAX_TIMER_MS): number {
   if (value === undefined || value === null) return Math.min(fallback, MAX_TIMER_MS);
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? Math.min(n, max, MAX_TIMER_MS) : Math.min(fallback, MAX_TIMER_MS);
 }
+
+/**
+ * The default `timeout_ms` for the tools that take one: run_command's
+ * foreground wait (both the missing-argument value and the clamp fallback),
+ * wait_process, and send_to_shell (shell-sessions). One name so the four sites
+ * cannot drift apart; run_command's tool description quotes the same 120000.
+ */
+export const DEFAULT_TOOL_TIMEOUT_MS = 120_000;
 
 /**
  * `timeout_ms` belongs to `run_command`; `start_process` has no such argument.
@@ -239,7 +251,7 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
   // 1e10, which setTimeout turns into a ~1 ms timer — the same inversion at the
   // other end of the range (a "wait essentially forever" timeout that fires
   // instantly). clampMs carries both guards.
-  const timeout = clampMs(args.timeout_ms ?? 120_000, 120_000);
+  const timeout = clampMs(args.timeout_ms ?? DEFAULT_TOOL_TIMEOUT_MS, DEFAULT_TOOL_TIMEOUT_MS);
   // The timeout result flows out through the promise instead of a captured
   // mutable flag. With `let timedOut = false` assigned inside the timer
   // callback, TypeScript narrows the variable to the literal `false` at the
@@ -427,7 +439,7 @@ export async function restartProcess(args: Args): Promise<Record<string, unknown
 
 export async function waitProcess(args: Args): Promise<Record<string, unknown>> {
   const s = commandStateOrThrow(args);
-  const timeout = clampMs(args.timeout_ms, 120_000);
+  const timeout = clampMs(args.timeout_ms, DEFAULT_TOOL_TIMEOUT_MS);
   if (!s.done) {
     await new Promise<void>(resolve => {
       // Listen for 'error' as well as 'close': on some runtimes a failed

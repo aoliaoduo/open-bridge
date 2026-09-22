@@ -1,19 +1,20 @@
 import { useState } from "react";
 import type { Act, SettingsState } from "../../api";
 import { t } from "../../i18n";
+import { SOUND_EXTENSIONS } from "../../../../src/bridge/config-values.js";
 import { Card } from "../Card";
 import { DraftField } from "./DraftField";
 import { SwitchField } from "./SwitchField";
 import { setConfigFor } from "./set-config";
 
 /**
- * Mirrors the sound-path rule in the server's CONFIG_SPEC
- * (src/bridge/config-values.ts: absolute path + audio extension) for the same
- * reason NUMBER_BOUNDS mirrors the numeric ones -- so the field can revert a
- * value the server is about to refuse, instead of leaving the box showing
- * something the config does not hold.
+ * The audio-extension list comes from the server's own validator
+ * (src/bridge/config-values.ts) rather than being mirrored here — that module
+ * is deliberately dependency-free (no node builtins), so importing it keeps
+ * the browser bundle clean. Reason for sharing the rule at all, same as
+ * NUMBER_BOUNDS: the field can revert a value the server is about to refuse,
+ * instead of leaving the box showing something the config does not hold.
  */
-const SOUND_EXTENSIONS = [".wav", ".mp3", ".m4a", ".aac", ".wma", ".flac"];
 
 function isSoundPath(raw: string): boolean {
   // Quotes stripped to match the hint under the field ("paste the path as-is

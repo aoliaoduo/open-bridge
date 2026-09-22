@@ -12,6 +12,7 @@
 import { host } from "../host/host.js";
 import { randomBytes } from "node:crypto";
 import { authEnabled } from "../http/auth.js";
+import { CONFIG_DEFAULTS } from "./config-defaults.js";
 import { ROUTE_TOKEN_KEY, clientMcpUrl, record, state, redactedPublicUrl } from "./state.js";
 import { buildWebAiPrompt } from "./onboarding.js";
 import { workspaceStateSuffix } from "./paths.js";
@@ -37,7 +38,7 @@ async function startInternal(): Promise<void> {
     // and the console's Start button generally). With the tailscale check
     // missing, that instruction was unfollowable — Start answered 「already
     // running」 and the funnel stayed down until a full restart.
-    const provider = host().config.get<string>("tunnelProvider", "ngrok");
+    const provider = host().config.get<string>("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string);
     const wantsTunnel = provider === "ngrok" || provider === "tailscale";
     if (wantsTunnel && state.tunnelRole === "none" && !state.tunnel && !state.reconnectTimer) {
       state.tunnelGeneration += 1; // invalidate anything stale from the failed chain
@@ -113,7 +114,7 @@ async function stopInternal(notify = true): Promise<void> {
   // cannot reach it. Provider is checked here, not inside teardown, so a
   // provider switch (tailscale -> ngrok) never erases a funnel that belongs to
   // a different - still running - bridge configuration.
-  if (host().config.get<string>("tunnelProvider", "ngrok") === "tailscale") {
+  if (host().config.get<string>("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string) === "tailscale") {
     teardownTailscaleFunnel();
   }
   // A crashed command with autoRestart may still hold a pending restart timer;

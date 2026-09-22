@@ -246,7 +246,7 @@ export async function cmdDoctor(parsed: ParsedArgs): Promise<void> {
   // the domain line follows the provider too — under tailscale the ngrok domain
   // is irrelevant, while the ts.net name is the thing worth reporting (and is
   // discovered, so "not configured yet" is a normal state until the first start).
-  const provider = nodeHost.config.get<string>("tunnelProvider", "ngrok");
+  const provider = nodeHost.config.get<string>("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string);
   const tunnelExe = provider === "tailscale"
     ? resolveTailscaleExecutable(nodeHost.config.get<string>("tailscaleExecutable", ""))
     : nodeHost.config.get<string>("ngrokExecutable", "ngrok");

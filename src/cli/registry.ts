@@ -18,6 +18,7 @@ import * as path from "node:path";
 
 import { t } from "../bridge/cli-i18n.js";
 import { WORKSPACE_SUFFIX_PATTERN, workspaceSuffixFor } from "../bridge/paths.js";
+import { ROUTE_TOKEN_KEY } from "../bridge/state.js";
 import type { ParsedArgs } from "./args.js";
 
 // --- runtime registry -------------------------------------------------------
@@ -140,7 +141,7 @@ export function pidAlive(pid: number): boolean {
 /** Console token for talking to a running instance from a second process. */
 export async function consoleTokenFor(home: string, root: string): Promise<string> {
   const secrets = JSON.parse(await fsp.readFile(path.join(home, "secrets.json"), "utf8")) as Record<string, string>;
-  const token = secrets[`openBridge.routeToken.${workspaceSuffixFor(root)}`];
+  const token = secrets[`${ROUTE_TOKEN_KEY}.${workspaceSuffixFor(root)}`];
   if (!token) throw new Error(t("找不到该实例的路由令牌（secrets.json 无记录）。", "No route token found for this instance (nothing recorded in secrets.json)."));
   return token;
 }

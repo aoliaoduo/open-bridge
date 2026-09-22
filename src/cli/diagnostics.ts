@@ -51,9 +51,25 @@ export interface ArtifactRow {
   present: boolean;
   bytes: number | null;
   age_ms: number | null;
-  /** One sentence a maintainer can act on. */
+  /** One sentence a maintainer can act on, rendered from `status` by healthProse. */
   health: string;
+  /** The structured facts `health` restates — and the only thing buildFindings
+   *  reads back. Set on the rows whose health a finding consults; undefined
+   *  means the row carries no machine-readable state, never a guessed one. */
+  status?: ArtifactStatus | undefined;
 }
+
+/**
+ * The machine-readable half of an artifact row, keyed by which artifact it
+ * describes. This is the single source for both halves of the report:
+ * healthProse renders the sentence from it, and buildFindings reads `state`
+ * off it. The prose is therefore output only — re-wording a health sentence
+ * can no longer move a conclusion, because no finding ever parses the text.
+ */
+export type ArtifactStatus =
+  | { kind: "secrets"; state: "absent" | "no-route-token" | "wired"; routeTokenRecords: number }
+  | { kind: "runtime"; state: "alive" | "stale" | "no-live-process"; pid: number | undefined }
+  | { kind: "serve-lock"; state: "held" | "stale" | "starting"; pid: number | undefined };
 
 export interface Finding {
   severity: Severity;
@@ -359,6 +375,27 @@ function buildBehavior(home: string): BehaviorSkeleton {
 }
 
 /**
+ * The health sentence for a status-bearing row, rendered from `status` alone.
+ * These strings are the report's contract with its readers, but they are output
+ * only: every conclusion in buildFindings reads `status.state`, never this
+ * text, so re-wording a sentence cannot silently change what the report claims.
+ */
+function healthProse(status: ArtifactStatus): string {
+  switch (status.state) {
+    case "absent": return "Absent: no instance has run against this data dir yet, so there is no route token to lose.";
+    case "no-route-token": return "PRESENT WITH NO ROUTE TOKEN: every MCP URL for this machine has stopped working. Content never read.";
+    case "wired": return `${String(status.routeTokenRecords)} route token record(s). Content never read, not even redacted.`;
+    case "alive": return `Instance record, pid ${String(status.pid)} alive.`;
+    case "stale": return status.kind === "serve-lock"
+      ? "STALE serve lock: the start wedged or crashed. `serve` will refuse until it is removed."
+      : `STALE: pid ${status.pid === undefined ? "unknown" : String(status.pid)} is gone and the record was never cleaned up.`;
+    case "no-live-process": return "Instance record; no live process (recently stopped, or mid-cleanup).";
+    case "held": return `Serve lock held by the live instance (pid ${String(status.pid)}). Expected while it runs.`;
+    case "starting": return "Serve lock with no live instance behind it, recently taken: a start is in progress.";
+  }
+}
+
+/**
  * Every artifact this report knows about, with the one question each answers.
  * An absent artifact is a row that says so — never a missing row, because
  * "this file does not exist" is itself a diagnostic fact.
@@ -370,7 +407,7 @@ function buildArtifacts(home: string, now: number): ArtifactRow[] {
   // an artifact that is there gets a row that says so, and one that is not gets
   // a row that says that instead. Guessing here would be the one place in the
   // report where a reader could not trust a column.
-  const row = (name: string, health: string): void => {
+  const row = (name: string, health: string, status?: ArtifactStatus | undefined): void => {
     const stat = statOf(path.join(home, name), now);
     rows.push({
       name,
@@ -378,6 +415,7 @@ function buildArtifacts(home: string, now: number): ArtifactRow[] {
       bytes: stat.bytes,
       age_ms: stat.age_ms,
       health,
+      status,
     });
   };
 
@@ -390,11 +428,12 @@ function buildArtifacts(home: string, now: number): ArtifactRow[] {
   // Absent and empty are different facts and only one of them is an emergency:
   // a data dir that never ran an instance has no secrets file at all, while a
   // file that is there with no token in it means every URL just stopped working.
-  row("secrets.json", !secretsPresent
-    ? "Absent: no instance has run against this data dir yet, so there is no route token to lose."
+  const secretsStatus: ArtifactStatus = !secretsPresent
+    ? { kind: "secrets", state: "absent", routeTokenRecords: 0 }
     : tokenKeys.length === 0
-      ? "PRESENT WITH NO ROUTE TOKEN: every MCP URL for this machine has stopped working. Content never read."
-      : `${tokenKeys.length} route token record(s). Content never read, not even redacted.`);
+      ? { kind: "secrets", state: "no-route-token", routeTokenRecords: 0 }
+      : { kind: "secrets", state: "wired", routeTokenRecords: tokenKeys.length };
+  row("secrets.json", healthProse(secretsStatus), secretsStatus);
   // No row for state.json.bak on purpose: nothing in this repo writes one. Both
   // data-dir writers go through a `.<pid>.tmp` file and a rename, so a .bak that
   // turns up came from outside, and the unrecognised bucket below says exactly
@@ -436,16 +475,18 @@ function buildArtifacts(home: string, now: number): ArtifactRow[] {
     const pid = typeof info?.pid === "number" ? info.pid : undefined;
     const alive = pid !== undefined && pidAlive(pid);
     const stale = !alive && stat.age_ms !== null && stat.age_ms > STALE_AFTER_MS;
+    const status: ArtifactStatus = alive
+      ? { kind: "runtime", state: "alive", pid }
+      : stale
+        ? { kind: "runtime", state: "stale", pid }
+        : { kind: "runtime", state: "no-live-process", pid };
     rows.push({
       name,
       present: true,
       bytes: stat.bytes,
       age_ms: stat.age_ms,
-      health: alive
-        ? `Instance record, pid ${String(pid)} alive.`
-        : stale
-          ? `STALE: pid ${pid === undefined ? "unknown" : String(pid)} is gone and the record was never cleaned up.`
-          : "Instance record; no live process (recently stopped, or mid-cleanup).",
+      health: healthProse(status),
+      status,
     });
   }
 
@@ -459,16 +500,18 @@ function buildArtifacts(home: string, now: number): ArtifactRow[] {
     const ownerPid = typeof owner?.pid === "number" ? owner.pid : undefined;
     const heldByLiveInstance = ownerPid !== undefined && pidAlive(ownerPid);
     const stale = !heldByLiveInstance && stat.age_ms !== null && stat.age_ms > STALE_AFTER_MS;
+    const status: ArtifactStatus = heldByLiveInstance
+      ? { kind: "serve-lock", state: "held", pid: ownerPid }
+      : stale
+        ? { kind: "serve-lock", state: "stale", pid: ownerPid }
+        : { kind: "serve-lock", state: "starting", pid: ownerPid };
     rows.push({
       name,
       present: stat.bytes !== null,
       bytes: stat.bytes,
       age_ms: stat.age_ms,
-      health: heldByLiveInstance
-        ? `Serve lock held by the live instance (pid ${String(ownerPid)}). Expected while it runs.`
-        : stale
-          ? "STALE serve lock: the start wedged or crashed. `serve` will refuse until it is removed."
-          : "Serve lock with no live instance behind it, recently taken: a start is in progress.",
+      health: healthProse(status),
+      status,
     });
   }
 
@@ -516,8 +559,10 @@ function buildFindings(
   const findings: Finding[] = [];
   const byName = new Map(artifacts.map(artifact => [artifact.name, artifact]));
 
+  // Findings read the rows' structured status, never the health prose: the
+  // sentence is rendered output, the state is the fact.
   const secrets = byName.get("secrets.json");
-  if (secrets?.health.startsWith("PRESENT WITH NO ROUTE TOKEN")) {
+  if (secrets?.status?.state === "no-route-token") {
     findings.push({
       severity: "critical",
       name: "secrets.json holds no route token",
@@ -533,7 +578,7 @@ function buildFindings(
     });
   }
 
-  const staleRecords = artifacts.filter(artifact => RUNTIME_FILE.test(artifact.name) && artifact.health.startsWith("STALE"));
+  const staleRecords = artifacts.filter(artifact => RUNTIME_FILE.test(artifact.name) && artifact.status?.state === "stale");
   if (staleRecords.length > 0) {
     findings.push({
       severity: "investigate",
@@ -543,7 +588,7 @@ function buildFindings(
     });
   }
 
-  if (artifacts.some(artifact => SERVE_LOCK_FILE.test(artifact.name) && artifact.health.startsWith("STALE"))) {
+  if (artifacts.some(artifact => SERVE_LOCK_FILE.test(artifact.name) && artifact.status?.state === "stale")) {
     findings.push({
       severity: "investigate",
       name: "stale serve lock",
@@ -616,9 +661,10 @@ export function buildDiagnosticsReport(home: string, version: string): Diagnosti
   const behavior = buildBehavior(home);
   // Not readAllRuntimes(): it filters to LIVE instances, so a stale count
   // derived from it is always zero and the field says nothing. The artifact rows
-  // already checked each record's pid, so the truth is counted off them.
+  // already checked each record's pid, so the truth is counted off their
+  // structured status.
   const runtimeRows = artifacts.filter(artifact => RUNTIME_FILE.test(artifact.name));
-  const aliveCount = runtimeRows.filter(artifact => artifact.health.includes("alive")).length;
+  const aliveCount = runtimeRows.filter(artifact => artifact.status?.state === "alive").length;
   const instances = {
     records: runtimeRows.length,
     alive: aliveCount,

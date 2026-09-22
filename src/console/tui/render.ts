@@ -333,7 +333,7 @@ function renderFooter(snap: TuiSnapshot, width: number): string[] {
 // interactions are Tab view switching and scrolling the selected viewport.
 
 /** Event rows visible in the workbench panel for a terminal size. */
-export function workbenchPanelRows(width: number, height: number): number {
+function workbenchPanelRows(width: number, height: number): number {
   const wide = width >= 76 && height >= 22;
   return Math.max(1, height - (wide ? 3 : 5)); // wide: top bar + divider (2) + panel title (1); narrow has footer (2)
 }

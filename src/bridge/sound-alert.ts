@@ -76,8 +76,13 @@ export function stopAlertSound(): boolean {
   return true;
 }
 
-/** Extensions the Windows player handles. Checked at save time, not here. */
-export const SOUND_EXTENSIONS = [".wav", ".mp3", ".m4a", ".aac", ".wma", ".flac"] as const;
+/**
+ * Extensions the Windows player handles. The validator next door owns the
+ * list (config-values.ts checks it at save time, not here) and this re-export
+ * surfaces the very same readonly list, so what the player accepts can never
+ * drift from what the save-time rule enforces.
+ */
+export { SOUND_EXTENSIONS } from "./config-values.js";
 
 /**
  * Quote one argv entry for a cmd command line.

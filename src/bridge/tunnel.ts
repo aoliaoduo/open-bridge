@@ -17,6 +17,7 @@ import { validateNgrokDomain } from "../http/request-policy.js";
 import { isDeterministicNetworkFailure } from "../network/net-failure.js";
 import { isEndpointTakenError, isFatalNgrokError, ngrokFailureSummary } from "../network/ngrok-failure.js";
 import { windowsHideForChild } from "./child-console.js";
+import { CONFIG_DEFAULTS } from "./config-defaults.js";
 import { RECONNECT_DELAYS_MS, record, state, redactedPublicUrl } from "./state.js";
 import { nextFreeRounds, shouldClaimDomain, watchIntervalMs } from "./tunnel-watch.js";
 import { enqueueLifecycle } from "./lifecycle-queue.js";
@@ -315,7 +316,7 @@ function configuredTailscaleExecutable(): string {
  * one that cannot go stale behind a switch.
  */
 function publicVerdictFor(domain: string): Promise<PublicBridgeVerdict> {
-  if (host().config.get<string>("tunnelProvider", "ngrok") !== "tailscale") {
+  if (host().config.get<string>("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string) !== "tailscale") {
     return probePublicBridge(domain, state.routeToken);
   }
   const exe = configuredTailscaleExecutable();
@@ -332,7 +333,7 @@ function publicVerdictFor(domain: string): Promise<PublicBridgeVerdict> {
  * that touches the tunnel.
  */
 async function claimReleasedEndpoint(domain: string): Promise<void> {
-  if (host().config.get<string>("tunnelProvider", "ngrok") !== "tailscale") {
+  if (host().config.get<string>("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string) !== "tailscale") {
     await claimFreedDomain();
     return;
   }
@@ -470,7 +471,7 @@ export function teardownTailscaleFunnel(): void {
  */
 export async function startTunnelInternal(generation: number): Promise<void> {
   if (generation !== state.tunnelGeneration || !state.server) return;
-  const provider = host().config.get<string>("tunnelProvider", "ngrok");
+  const provider = host().config.get<string>("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string);
   state.tunnelProvider = provider;
   state.tunnelUrl = "";
   if (provider === "tailscale") {

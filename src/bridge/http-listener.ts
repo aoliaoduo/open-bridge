@@ -15,6 +15,7 @@ import { classifyInboundRequest } from "@modelcontextprotocol/server";
 import { bridgeTokenFromPath, findPeerIn, proxyToPeer } from "../http/peers.js";
 import { bridgeAllowedHosts, isAllowedBridgeHost } from "../http/request-policy.js";
 import { authorizeRequest } from "../http/auth.js";
+import { CONFIG_DEFAULTS } from "./config-defaults.js";
 import { record, state } from "./state.js";
 import { exchangeLine, isNoteworthy, traceId, tracedFormat, tracedMethod, type TracedEra } from "./request-trace.js";
 import { root } from "./paths.js";
@@ -182,7 +183,7 @@ export async function startHttpInternal(): Promise<void> {
     // The public domain depends on the provider: ngrok takes its reserved
     // domain from config, tailscale's is the machine's ts.net name (discovered
     // at tunnel start and persisted into tailscaleDomain).
-    const provider = String(host().config.get<string>("tunnelProvider", "ngrok"));
+    const provider = String(host().config.get<string>("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string));
     const configuredDomain = (provider === "tailscale"
       ? String(host().config.get<string>("tailscaleDomain", ""))
       : String(host().config.get<string>("ngrokDomain", ""))

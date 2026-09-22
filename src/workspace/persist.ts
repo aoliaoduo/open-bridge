@@ -11,6 +11,14 @@ import * as fs from "node:fs/promises";
  * `fs.writeFile` treats a missing encoding as utf8 for strings, so one function
  * covers both callers instead of two copies of this rule.
  *
+ * Known shared risk, deliberately accepted here: on Windows the rename fails
+ * while another process holds the target open for reading. src/http/peers.ts
+ * (`writePeers`, the bridge-peers.json writer) measured exactly that and backs
+ * off with bounded retries; this workspace write path is exposed to the same
+ * failure but stays single-attempt, on purpose — see the sync/retry tradeoff
+ * below. A failed rename removes its temp file and throws to the caller, so
+ * the target itself is never left torn; only the write is refused.
+ *
  * Deliberately NOT synced, unlike the data-dir store in `host/node-host.ts`.
  * This path carries workspace files an agent writes many times a minute, where
  * a lost tail is re-written by the next edit and a sync would be paid on every

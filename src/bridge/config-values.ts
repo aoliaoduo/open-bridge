@@ -55,13 +55,14 @@ const NON_NEGATIVE_INT_KEYS: ReadonlySet<string> = new Set([
 /**
  * Audio extensions the local alert player handles.
  *
- * Duplicated from sound-alert.ts rather than imported: this module must stay
- * browser-bundle-safe (see the header) and sound-alert.ts pulls in
- * node:child_process. Two short literal lists that can only disagree about
- * which files to *accept* is a cheaper failure than dragging a process
- * spawner into the console bundle.
+ * This module owns the list, and sound-alert.ts plus the console's
+ * NotifySection import it — so the validator, the player and the settings
+ * field all accept exactly the same files. The import edge must keep running
+ * TOWARD this module and never away from it: sound-alert.ts pulls in
+ * node:child_process, and this file has to stay browser-bundle-safe (see the
+ * header).
  */
-const SOUND_EXTENSIONS = [".wav", ".mp3", ".m4a", ".aac", ".wma", ".flac"] as const;
+export const SOUND_EXTENSIONS = [".wav", ".mp3", ".m4a", ".aac", ".wma", ".flac"] as const;
 
 const MAX_LIST_ITEMS = 50;
 const MAX_PATH_CHARS = 500;
@@ -77,6 +78,11 @@ const LOG_MAX_BYTES_MAX = 1024 * 1024 * 1024;
  * a second caller. Refuse at the edit instead of accepting a number that
  * cannot mean what it says. Same family as the Math.max(0, NaN) rule in
  * AGENTS.md: a bad number must be refused, never quietly reinterpreted.
+ *
+ * This module keeps its own literal on purpose: it must stay dependency-free
+ * (see the header), so it cannot import the canonical copy exported by
+ * process-tools.ts (MAX_TIMER_MS) — and src/network/safe-probe.ts keeps a
+ * third for the mirror-image reason. Change all three together.
  */
 const MAX_TIMER_MS = 2_147_483_647;
 

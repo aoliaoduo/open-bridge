@@ -122,8 +122,8 @@ export async function buildSettingsState(): Promise<SettingsState> {
     tokens: status.tokens,
     concurrency: {
       enabled: cfg.get("concurrency.enabled", true),
-      holdTimeoutMs: cfg.get("concurrency.holdTimeoutMs", 300_000),
-      waitTimeoutMs: cfg.get("concurrency.waitTimeoutMs", 120_000),
+      holdTimeoutMs: cfg.get("concurrency.holdTimeoutMs", CONFIG_DEFAULTS["concurrency.holdTimeoutMs"] as number),
+      waitTimeoutMs: cfg.get("concurrency.waitTimeoutMs", CONFIG_DEFAULTS["concurrency.waitTimeoutMs"] as number),
     },
     // One computed object, not a restatement of the key list above: the list
     // is the single source, so the key order — and with it the JSON the
@@ -232,6 +232,16 @@ function secretPayload(minted: MintedToken, kind: "minted" | "rotated"): SecretP
   };
 }
 
+/**
+ * The shared success shape: one fresh state read plus the action's extras.
+ * `dispatch` binds this as its `done`; the case bodies extracted into their own
+ * functions below call it directly, so every success reply keeps the exact
+ * same field construction.
+ */
+async function successWith(extra: Partial<SettingsActionResult> = {}): Promise<SettingsActionResult> {
+  return { ok: true, state: await buildSettingsState(), ...extra };
+}
+
 /** Execute one settings action; returns the structured result for the API response. */
 export async function handleSettingsAction(raw: unknown): Promise<SettingsActionResult> {
   const normalized = normalizeSettingsMessage(raw);
@@ -253,11 +263,7 @@ export async function handleSettingsAction(raw: unknown): Promise<SettingsAction
 
 async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
   const cfg = host().config;
-  const done = async (extra: Partial<SettingsActionResult> = {}): Promise<SettingsActionResult> => ({
-    ok: true,
-    state: await buildSettingsState(),
-    ...extra,
-  });
+  const done = successWith;
 
   switch (action.command) {
     case "clearStats": {
@@ -376,46 +382,8 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       return done({ secret: secretPayload(minted, "minted"), copyText: minted.secret });
     }
 
-    case "armPublicLock": {
-      // 「签发令牌并启用门禁」: the operator sees the risk (public-open, no bearer
-      // gate) on 体检 and wants it closed without a trip to 令牌 to mint, copy,
-      // and then flip a switch on the same page.
-      //
-      // Order is not cosmetic: the gate is fail-closed, so enabling it with zero
-      // usable tokens would refuse every client. Mint first, enable second, and
-      // if enabling fails, delete the token minted for it — a stray secret with
-      // no lock behind it is worse than nothing.
-      if (authEnabled()) {
-        return done({ info: "Bearer 门禁本来就已经开着：/mcp 要求 Bearer 令牌。" });
-      }
-      const existing = await usableTokenCount();
-      let secret: SecretPayload | undefined;
-      let mintedId: string | undefined;
-      if (existing === 0) {
-        // A second token would just be one more thing to lose; reuse is the
-        // point of a one-step action.
-        const minted = await mintToken({
-          label: action.label || "public-lock",
-          ttlSeconds: action.ttlSeconds ?? tokenTtlSeconds(),
-        });
-        mintedId = minted.id;
-        secret = secretPayload(minted, "minted");
-      }
-      try {
-        await cfg.update("auth.enabled", true);
-      } catch (error) {
-        if (mintedId) await deleteToken(mintedId).catch(() => undefined);
-        throw error;
-      }
-      return done({
-        secret,
-        copyText: secret?.secret,
-        info: secret
-          ? "Bearer 门禁已启用：已签发 1 个令牌并打开门禁，客户端必须在请求头带 Authorization: Bearer <令牌>。"
-            + "只填 URL 的客户端（例如 ChatGPT 连接器）会立刻连不上；要恢复就在「安全」页关掉那个开关。"
-          : `Bearer 门禁已启用：复用了现有的 ${existing} 个有效令牌，客户端现在必须携带令牌（只填 URL 会连不上）。`,
-      });
-    }
+    case "armPublicLock":
+      return armPublicLockAction(action);
 
     case "rotateToken": {
       const rotated = await rotateToken(action.id);
@@ -535,44 +503,8 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       });
     }
 
-    case "autoConfigureTunnel": {
-      // The one action that writes several values at once, so it writes exactly
-      // what the page showed: buildTunnelView re-reads the LIVE config and the
-      // plan only ever fills fields that are still empty, which is what makes
-      // the button safe to press for someone who already typed a path.
-      const view = await buildTunnelView(true);
-      const written: string[] = [];
-      for (const write of view.plan.writes) {
-        if (write.kind === "secret") {
-          // Imported here rather than carried in the plan: the plan is rendered
-          // in a browser, and an authtoken must not travel to one.
-          const imported = readNgrokConfigAuthtoken()?.token ?? "";
-          if (!imported) continue;
-          await host().secrets.store(NGROK_AUTHTOKEN_KEY, imported);
-          setCachedAuthtoken(imported);
-          written.push(write.label);
-          continue;
-        }
-        await cfg.update(write.key, write.value);
-        written.push(write.label);
-      }
-      // A running tunnel has to pick the new values up now, not at the next
-      // restart — the same rebuild a provider switch performs.
-      if (written.length && state.tunnel) void restartTunnelForProviderChange();
-
-      const detail = [
-        written.length ? `已写入：${written.join("；")}。` : "",
-        view.plan.keep.length ? `保持不变：${view.plan.keep.join("；")}。` : "",
-        ...view.plan.notes,
-      ].filter(Boolean).join(" ");
-      if (!written.length) {
-        // Nothing to write is only a success when there is also nothing to fix.
-        return view.plan.blocked
-          ? { ok: false, state: await buildSettingsState(), error: view.plan.blocked }
-          : done({ info: detail || "没有需要写入的值：这一项已经配好了。" });
-      }
-      return done({ info: view.plan.blocked ? `${detail} 还差一步：${view.plan.blocked}` : detail });
-    }
+    case "autoConfigureTunnel":
+      return autoConfigureTunnelAction();
 
     case "refreshTunnelDetect": {
       // The operator installed ngrok (or enabled Funnel) and does not want to
@@ -609,6 +541,94 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
 
 function assertHandled(action: never): never {
   throw new Error(`Unhandled console action: ${JSON.stringify(action)}`);
+}
+
+/**
+ * 「签发令牌并启用门禁」: the operator sees the risk (public-open, no bearer
+ * gate) on 体检 and wants it closed without a trip to 令牌 to mint, copy,
+ * and then flip a switch on the same page.
+ *
+ * Order is not cosmetic: the gate is fail-closed, so enabling it with zero
+ * usable tokens would refuse every client. Mint first, enable second, and
+ * if enabling fails, delete the token minted for it — a stray secret with
+ * no lock behind it is worse than nothing.
+ */
+async function armPublicLockAction(
+  action: Extract<SettingsAction, { command: "armPublicLock" }>,
+): Promise<SettingsActionResult> {
+  const cfg = host().config;
+  if (authEnabled()) {
+    return successWith({ info: "Bearer 门禁本来就已经开着：/mcp 要求 Bearer 令牌。" });
+  }
+  const existing = await usableTokenCount();
+  let secret: SecretPayload | undefined;
+  let mintedId: string | undefined;
+  if (existing === 0) {
+    // A second token would just be one more thing to lose; reuse is the
+    // point of a one-step action.
+    const minted = await mintToken({
+      label: action.label || "public-lock",
+      ttlSeconds: action.ttlSeconds ?? tokenTtlSeconds(),
+    });
+    mintedId = minted.id;
+    secret = secretPayload(minted, "minted");
+  }
+  try {
+    await cfg.update("auth.enabled", true);
+  } catch (error) {
+    if (mintedId) await deleteToken(mintedId).catch(() => undefined);
+    throw error;
+  }
+  return successWith({
+    secret,
+    copyText: secret?.secret,
+    info: secret
+      ? "Bearer 门禁已启用：已签发 1 个令牌并打开门禁，客户端必须在请求头带 Authorization: Bearer <令牌>。"
+        + "只填 URL 的客户端（例如 ChatGPT 连接器）会立刻连不上；要恢复就在「安全」页关掉那个开关。"
+      : `Bearer 门禁已启用：复用了现有的 ${existing} 个有效令牌，客户端现在必须携带令牌（只填 URL 会连不上）。`,
+  });
+}
+
+/**
+ * The one action that writes several values at once, so it writes exactly
+ * what the page showed: buildTunnelView re-reads the LIVE config and the
+ * plan only ever fills fields that are still empty, which is what makes
+ * the button safe to press for someone who already typed a path.
+ */
+async function autoConfigureTunnelAction(): Promise<SettingsActionResult> {
+  const cfg = host().config;
+  const view = await buildTunnelView(true);
+  const written: string[] = [];
+  for (const write of view.plan.writes) {
+    if (write.kind === "secret") {
+      // Imported here rather than carried in the plan: the plan is rendered
+      // in a browser, and an authtoken must not travel to one.
+      const imported = readNgrokConfigAuthtoken()?.token ?? "";
+      if (!imported) continue;
+      await host().secrets.store(NGROK_AUTHTOKEN_KEY, imported);
+      setCachedAuthtoken(imported);
+      written.push(write.label);
+      continue;
+    }
+    await cfg.update(write.key, write.value);
+    written.push(write.label);
+  }
+  // A running tunnel has to pick the new values up now, not at the next
+  // restart — the same rebuild a provider switch performs.
+  if (written.length && state.tunnel) void restartTunnelForProviderChange();
+
+  const detail = [
+    written.length ? `已写入：${written.join("；")}。` : "",
+    view.plan.keep.length ? `保持不变：${view.plan.keep.join("；")}。` : "",
+    ...view.plan.notes,
+  ].filter(Boolean).join(" ");
+  if (!written.length) {
+    // Nothing to write is only a success when there is also nothing to fix.
+    return view.plan.blocked
+      ? { ok: false, state: await buildSettingsState(), error: view.plan.blocked }
+      : successWith({ info: detail || "没有需要写入的值：这一项已经配好了。" });
+  }
+  return successWith({ info: view.plan.blocked ? `${detail} 还差一步：${view.plan.blocked}` : detail });
 }
 
 /** Map a push outcome onto the console's ok/info/error shape. */
