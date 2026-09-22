@@ -21,6 +21,14 @@ export type {
 };
 
 /**
+ * The shell's settings-action runner (App.tsx): one POST that applies the
+ * fresh state and the toast/secret/copy side effects. Pages receive this
+ * instead of calling the api directly so every action lands through the same
+ * side-effect path — and so callers can read `result.ok` without a cast.
+ */
+export type Act = (action: Record<string, unknown>) => Promise<SettingsActionResult | null>;
+
+/**
  * API client for the Open Bridge console.
  *
  * GET endpoints are loopback-only server-side and need no credential. Every

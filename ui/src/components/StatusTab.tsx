@@ -1,15 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { api, type BridgeStatus } from "../api";
 import type { LockSnapshot } from "../api";
+import { idleLabel } from "../format";
 import { EXPOSURE_META } from "../exposure";
 import { t } from "../i18n";
 import type { RouteId } from "../routes";
+import { usePolling } from "../use-polling";
 import { Card } from "./Card";
 import { EmptyState } from "./EmptyState";
-import { idleLabel } from "./SessionsPage";
 import { Chip } from "./Chip";
-import { CopyButton } from "./CopyButton";
+import { CopyButton, CopyIcon } from "./CopyButton";
 import { Props as PropList } from "./Props";
+import { SecurityCta } from "./SecurityCta";
 import { Stat } from "./Stat";
 
 interface Props {
@@ -37,22 +39,16 @@ function TunnelRole({ role }: { role?: string }) {
 export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
   const [status, setStatus] = useState<BridgeStatus | null>(null);
   const [busy, setBusy] = useState(false);
-  // Expired-response guard: a poll that started before an action and finished
-  // after it used to overwrite the fresher state with stale data.
-  const pollSeq = useRef(0);
 
-  useEffect(() => {
-    const poll = async () => {
-      const mine = ++pollSeq.current;
+  const statusPoll = usePolling({
+    intervalMs: 2000,
+    poll: async fresh => {
       try {
         const next = await api.status();
-        if (pollSeq.current === mine) setStatus(next);
+        if (fresh()) setStatus(next);
       } catch { /* server may be mid-restart */ }
-    };
-    void poll();
-    const timer = setInterval(() => void poll(), 2000);
-    return () => clearInterval(timer);
-  }, []);
+    },
+  });
 
   const running = status?.state === "running";
   // mcp_url already resolves tunnel-vs-loopback server-side; the UI no longer
@@ -66,10 +62,9 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
     try {
       await fn();
       await onRefresh();
-      // Bump past any poll already in flight so its stale answer cannot land
+      // Expire any poll already in flight so its stale answer cannot land
       // after this fresh one.
-      const mine = pollSeq.current + 1;
-      pollSeq.current = mine;
+      statusPoll.invalidate();
       setStatus(await api.status());
     } catch { /* the settings action already toasted */ }
     setBusy(false);
@@ -77,21 +72,18 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
 
   const [locks, setLocks] = useState<LockSnapshot>({ held: [], waiting: [] });
 
-  useEffect(() => {
-    let alive = true;
-    const pollLocks = async () => {
+  usePolling({
+    intervalMs: 5_000,
+    poll: async fresh => {
       try {
         const snapshot = await api.sessions();
-        if (alive) setLocks(snapshot.locks);
+        if (fresh()) setLocks(snapshot.locks);
       } catch {
         /* The locks table keeps its last snapshot; the status poll beside
            it reports reachability already. */
       }
-    };
-    void pollLocks();
-    const timer = setInterval(() => void pollLocks(), 5_000);
-    return () => { alive = false; clearInterval(timer); };
-  }, []);
+    },
+  });
 
   const lockRows = [
     ...locks.held.map(lock => ({ kind: "held" as const, key: lock.key, mode: lock.mode ?? "", label: lock.label ?? "", ms: lock.held_ms ?? 0 })),
@@ -143,10 +135,7 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
                 disabled={busy || !running}
                 onClick={() => void run(() => act({ command: "copyPrompt" }))}
               >
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="1.6" />
-                  <path d="M15 5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                </svg>
+                <CopyIcon />
                 {t("复制接入提示词", "Copy setup prompt")}
               </button>
             }
@@ -199,11 +188,7 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
                     "⚠️ 公网可达且未开启鉴权：详情与加固去「安全」页。",
                     "⚠️ Publicly reachable with no authentication: detail and hardening on the Security page.",
                   )}
-                  {onOpen ? (
-                    <button type="button" className="small" onClick={() => onOpen("security")}>
-                      {t("去安全页", "Open Security")}
-                    </button>
-                  ) : null}
+                  <SecurityCta onOpen={onOpen} />
                 </div>
               )}
             </div>

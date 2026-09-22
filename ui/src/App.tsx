@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, copyText, reloadConsole, type SecretPayload, type SettingsActionResult, type SettingsState } from "./api";
 import { currentRoute, currentSettingsSection, navigate, navigateToSettings, routeSpec, settingsSectionSpec, type RouteId, type SettingsSectionId } from "./routes";
+import { errorMessage } from "./format";
 import { applyTheme, initTheme, nextThemePref, storeThemePref, watchSystemTheme, type ThemePref } from "./theme";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
@@ -81,7 +82,7 @@ export function App() {
     try {
       setSettings(await api.settings());
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), true);
+      showToast(errorMessage(error), true);
     }
   }, [showToast]);
 
@@ -113,32 +114,37 @@ export function App() {
     return watchSystemTheme(() => { applyTheme("system"); });
   }, [themePref]);
 
+  // The overlays share one keyboard convention: Escape closes whichever are
+  // open — and when the dialog and the drawer are up at once, one Escape
+  // closes both, exactly as their two separate listeners used to. Only the
+  // dialog carries the rest of the modal treatment (scroll lock, focus move),
+  // because only it blocks the page behind it.
+  //
   // The one-time secret is a modal, so it has to behave like one: Escape closes
   // it (there was no keyboard way out at all) and focus moves into it, otherwise
   // the plaintext sat behind a keyboard-invisible wall. The shell below is
   // also marked inert so Tab cannot escape the dialog back into the page.
   useEffect(() => {
-    if (!secret) return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setSecret(null); };
+    if (!secret && !drawer) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (secret) setSecret(null);
+      if (drawer) setDrawer(false);
+    };
     window.addEventListener("keydown", onKey);
     // Lock the page scroll while the dialog is up so a long secret does not
     // bring a scrollbar back and shift the layout behind the mask.
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    secretBox.current?.focus();
+    const hidesPage = Boolean(secret);
+    const previousOverflow = hidesPage ? document.body.style.overflow : "";
+    if (hidesPage) {
+      document.body.style.overflow = "hidden";
+      secretBox.current?.focus();
+    }
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = previousOverflow;
+      if (hidesPage) document.body.style.overflow = previousOverflow;
     };
-  }, [secret]);
-
-  // The drawer is an overlay, so it needs the overlay's keyboard exit.
-  useEffect(() => {
-    if (!drawer) return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setDrawer(false); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [drawer]);
+  }, [secret, drawer]);
 
   const open = useCallback((id: RouteId) => {
     navigate(id);
@@ -186,7 +192,7 @@ export function App() {
       }
       return result;
     } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), true);
+      showToast(errorMessage(error), true);
       return null;
     }
   }, [showToast]);

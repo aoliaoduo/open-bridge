@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type SettingsState, type ToolCatalog } from "../api";
+import { errorMessage } from "../format";
 import { t } from "../i18n";
 import { Card } from "./Card";
 import { Chip } from "./Chip";
 import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
 import { Field } from "./Field";
+import { SearchToolbar, matchesNeedle } from "./SearchToolbar";
 import { Skeleton } from "./Skeleton";
 
 /**
@@ -41,7 +43,7 @@ export function ToolsPage({ notify, settings, act }: {
     let alive = true;
     void api.tools()
       .then(value => { if (alive) { setCatalog(value); setNote(""); } })
-      .catch(error => { if (alive) setNote(error instanceof Error ? error.message : String(error)); });
+      .catch(error => { if (alive) setNote(errorMessage(error)); });
     return () => { alive = false; };
   }, [profileSetting]);
 
@@ -49,9 +51,7 @@ export function ToolsPage({ notify, settings, act }: {
     const needle = query.trim().toLowerCase();
     return (catalog?.tools ?? []).filter(tool =>
       (!onlyCore || tool.core)
-      && (!needle
-        || tool.name.toLowerCase().includes(needle)
-        || tool.description.toLowerCase().includes(needle)));
+      && matchesNeedle(needle, tool.name, tool.description));
   }, [catalog, onlyCore, query]);
 
   const coreCount = (catalog?.tools ?? []).filter(tool => tool.core).length;
@@ -116,20 +116,13 @@ export function ToolsPage({ notify, settings, act }: {
           : <Skeleton lines={5} />
       ) : (
         <>
-          <div className="toolbar">
-            <label className="search">
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle cx="11" cy="11" r="6" stroke="currentColor" strokeWidth="1.7" />
-                <path d="m16 16 4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-              </svg>
-              <input
-                type="text"
-                placeholder={t("按名称或说明过滤…", "Filter by name or description…")}
-                value={query}
-                onChange={event => setQuery(event.target.value)}
-                aria-label={t("过滤工具", "Filter tools")}
-              />
-            </label>
+          <SearchToolbar
+            query={query}
+            onQuery={setQuery}
+            placeholder={t("按名称或说明过滤…", "Filter by name or description…")}
+            label={t("过滤工具", "Filter tools")}
+            count={t(`显示 ${visible.length} 个`, `${visible.length} shown`)}
+          >
             <span className="check-row">
               <input
                 type="checkbox"
@@ -140,9 +133,7 @@ export function ToolsPage({ notify, settings, act }: {
               />
               {t("只看核心", "Core only")}
             </span>
-            <span className="grow" />
-            <span className="count">{t(`显示 ${visible.length} 个`, `${visible.length} shown`)}</span>
-          </div>
+          </SearchToolbar>
 
           {visible.length === 0 ? (
             <EmptyState title={t("没有匹配的工具。", "No matching tools.")}>

@@ -1,23 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { api, type SessionView } from "../api";
+import { errorMessage, idleLabel } from "../format";
 import { t } from "../i18n";
+import { usePolling } from "../use-polling";
 import { Card } from "./Card";
 import { ConfirmButton } from "./ConfirmButton";
 import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
+import { SearchToolbar, matchesNeedle } from "./SearchToolbar";
 import { Skeleton } from "./Skeleton";
-
-/** "空闲 2 分 13 秒" and friends — idleness is the whole point of this table. */
-// The 文件锁明细 card on 状态页 imports this: one formatter, two tables.
-export function idleLabel(ms: number): string {
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 5) return t("刚刚", "just now");
-  if (seconds < 60) return t(`${seconds} 秒`, `${seconds}s`);
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return t(`${minutes} 分 ${seconds % 60} 秒`, `${minutes}m ${seconds % 60}s`);
-  const hours = Math.floor(minutes / 60);
-  return t(`${hours} 小时 ${minutes % 60} 分`, `${hours}h ${minutes % 60}m`);
-}
 
 /**
  * Clock time of a handshake. The row already says how long the session has been
@@ -56,26 +47,18 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
   const [closingId, setClosingId] = useState("");
   const [query, setQuery] = useState("");
   const [view, setView] = useState<View>("all");
-  // Stale-response guard: a slow poll that lands after a newer one (or after
-  // an action) used to overwrite fresh state with expired data.
-  const pollSeq = useRef(0);
 
-  const refresh = useCallback(async () => {
-    const mine = ++pollSeq.current;
-    try {
-      const snapshot = await api.sessions();
-      if (pollSeq.current !== mine) return;
-      setSessions(snapshot.sessions);
-    } catch (error) {
-      if (pollSeq.current === mine) setNote(error instanceof Error ? error.message : String(error));
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    const timer = setInterval(() => void refresh(), 5_000);
-    return () => clearInterval(timer);
-  }, [refresh]);
+  const poll = usePolling({
+    intervalMs: 5_000,
+    poll: async fresh => {
+      try {
+        const snapshot = await api.sessions();
+        if (fresh()) setSessions(snapshot.sessions);
+      } catch (error) {
+        if (fresh()) setNote(errorMessage(error));
+      }
+    },
+  });
 
   /**
    * Two filters, because they answer two different questions: the quick views
@@ -88,9 +71,7 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
     return (sessions ?? []).filter(session => {
       if (view === "active" && session.active_requests <= 0) return false;
       if (view === "idle" && session.idle_ms < STALE_MS) return false;
-      if (!needle) return true;
-      return clientLabel(session).toLowerCase().includes(needle)
-        || session.client.toLowerCase().includes(needle) || session.id.toLowerCase().includes(needle);
+      return matchesNeedle(needle, clientLabel(session), session.client, session.id);
     });
   }, [sessions, query, view]);
 
@@ -108,9 +89,9 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
         `已断开 ${id.slice(0, 8)}…：对方需要重新握手才能继续调用。`,
         `Disconnected ${id.slice(0, 8)}… — that client must handshake again before it can call.`,
       ));
-      await refresh();
+      await poll.refresh();
     } catch (error) {
-      setNote(error instanceof Error ? error.message : String(error));
+      setNote(errorMessage(error));
     } finally {
       setClosingId("");
     }
@@ -146,25 +127,13 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
         }
       >
         {sessions !== null && sessions.length > 0 && (
-          <div className="toolbar">
-            <label className="search">
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <circle cx="11" cy="11" r="6" stroke="currentColor" strokeWidth="1.7" />
-                <path d="m16 16 4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-              </svg>
-              <input
-                type="text"
-                placeholder={t("按客户端或会话 ID 过滤…", "Filter by client or session ID…")}
-                value={query}
-                onChange={event => setQuery(event.target.value)}
-                aria-label={t("过滤会话", "Filter sessions")}
-              />
-            </label>
-            <span className="grow" />
-            <span className="count">
-              {t(`显示 ${visible.length} / 共 ${sessions.length} 项`, `${visible.length} of ${sessions.length} entries`)}
-            </span>
-          </div>
+          <SearchToolbar
+            query={query}
+            onQuery={setQuery}
+            placeholder={t("按客户端或会话 ID 过滤…", "Filter by client or session ID…")}
+            label={t("过滤会话", "Filter sessions")}
+            count={t(`显示 ${visible.length} / 共 ${sessions.length} 项`, `${visible.length} of ${sessions.length} entries`)}
+          />
         )}
 
         {sessions === null ? (

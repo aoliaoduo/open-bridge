@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { DraftField } from "./SettingsTab";
+import { DraftField } from "./settings/DraftField";
 
 /**
  * DraftField holds edits until blur, and rejects a value the server would

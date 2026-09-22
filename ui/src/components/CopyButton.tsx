@@ -3,6 +3,20 @@ import { copyText } from "../api";
 import { t } from "../i18n";
 
 /**
+ * The two overlapping sheets, drawn the same wherever "copy" appears. Shared
+ * with the status page's copy-prompt button, which needs the icon but runs a
+ * server action instead of this component's client-side copy.
+ */
+export function CopyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M15 5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/**
  * Inline copy affordance with its own confirmation.
  *
  * The console had copy buttons only for the MCP URL and prompts; every other
@@ -47,14 +61,11 @@ export function CopyButton(
         });
       }}
     >
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        {done
-          ? <path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          : <>
-            <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="1.6" />
-            <path d="M15 5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-          </>}
-      </svg>
+      {done
+        ? <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        : <CopyIcon />}
       {done ? t("已复制", "Copied") : text}
     </button>
   );

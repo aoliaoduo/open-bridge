@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import {
   api,
+  type Act,
   type OAuthConsoleView,
-  type SettingsActionResult,
   type SettingsState,
   type SettingsTokenRow,
 } from "../api";
@@ -12,13 +12,15 @@ import {
 // never restate.
 import { TTL_CHOICES } from "../../../src/bridge/settings-model.js";
 import { EXPOSURE_META } from "../exposure";
+import { errorMessage } from "../format";
 import { t } from "../i18n";
 import { Card } from "./Card";
 import { Chip } from "./Chip";
 import { ConfirmButton } from "./ConfirmButton";
 import { CopyButton } from "./CopyButton";
 import { Props as PropList } from "./Props";
-import { DraftField } from "./SettingsTab";
+import { DraftField } from "./settings/DraftField";
+import { setConfigFor } from "./settings/set-config";
 import { Skeleton } from "./Skeleton";
 
 function fmtDate(iso: string | null): string {
@@ -27,7 +29,7 @@ function fmtDate(iso: string | null): string {
 
 interface Props {
   settings: SettingsState;
-  act: (action: Record<string, unknown>) => Promise<SettingsActionResult | null>;
+  act: Act;
   /** Copy feedback goes through the shell toast, like every other copy path. */
   notify?: (text: string, isError?: boolean) => void;
 }
@@ -87,7 +89,7 @@ export function SecurityPage({ settings, act, notify }: Props) {
         const status = await api.status();
         if (alive) setReport({ exposure: String(status.exposure ?? "local") });
       } catch (error) {
-        if (alive) setNote(error instanceof Error ? error.message : String(error));
+        if (alive) setNote(errorMessage(error));
       }
     };
     void load();
@@ -105,7 +107,7 @@ export function SecurityPage({ settings, act, notify }: Props) {
       const status = await api.status();
       setReport({ exposure: String(status.exposure ?? "local") });
     } catch (error) {
-      setNote(error instanceof Error ? error.message : String(error));
+      setNote(errorMessage(error));
     }
   };
 
@@ -138,9 +140,7 @@ export function SecurityPage({ settings, act, notify }: Props) {
     }
   };
 
-  const setConfig = (key: string, value: unknown) => {
-    void act({ command: "setConfig", key, value });
-  };
+  const setConfig = setConfigFor(act);
 
   const create = async () => {
     if (creating) return;
@@ -493,7 +493,7 @@ function OAuthPanel({ hosts, setConfig }: {
     let alive = true;
     void api.oauth()
       .then(value => { if (alive) setView(value); })
-      .catch(error => { if (alive) setNote(error instanceof Error ? error.message : String(error)); });
+      .catch(error => { if (alive) setNote(errorMessage(error)); });
     return () => { alive = false; };
   }, []);
 

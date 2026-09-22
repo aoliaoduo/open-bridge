@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { api, type ServiceView } from "../api";
+import { errorMessage } from "../format";
 import { t } from "../i18n";
+import { usePolling } from "../use-polling";
 import { Card } from "./Card";
 import { Chip } from "./Chip";
 import { CopyButton } from "./CopyButton";
@@ -20,26 +22,18 @@ export function ServicesTab({ notify }: { notify?: (text: string, isError?: bool
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
   const inFlight = useRef(new Set<string>());
-  // Expired-response guard. Without it a poll that left BEFORE an action and
-  // landed AFTER it resurrected the old running badge over the action's fresh
-  // answer (a stopped service looked running until the next tick).
-  const pollSeq = useRef(0);
 
-  const refresh = useCallback(async () => {
-    const mine = ++pollSeq.current;
-    try {
-      const list = await api.services();
-      if (pollSeq.current === mine) setServices(list);
-    } catch (error) {
-      if (pollSeq.current === mine) setNote(error instanceof Error ? error.message : String(error));
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    const timer = setInterval(() => void refresh(), 5_000);
-    return () => clearInterval(timer);
-  }, [refresh]);
+  const poll = usePolling({
+    intervalMs: 5_000,
+    poll: async fresh => {
+      try {
+        const list = await api.services();
+        if (fresh()) setServices(list);
+      } catch (error) {
+        if (fresh()) setNote(errorMessage(error));
+      }
+    },
+  });
 
   const run = async (name: string, action: "start" | "stop" | "restart") => {
     if (inFlight.current.has(name)) return;
@@ -47,14 +41,16 @@ export function ServicesTab({ notify }: { notify?: (text: string, isError?: bool
     setBusy(new Set(inFlight.current));
     try {
       const result = await api.serviceAction(action, name);
-      // Invalidate any poll still in flight before applying the action's own
-      // (fresher) answer.
-      pollSeq.current += 1;
+      // Expire any poll still in flight before applying the action's own
+      // (fresher) answer — otherwise a poll that left BEFORE the action and
+      // landed AFTER it resurrected the old running badge over the action's
+      // fresh answer (a stopped service looked running until the next tick).
+      poll.invalidate();
       setServices(result.services);
       setNote(`${name}: ${action === "start" ? t("已启动", "started")
         : action === "stop" ? t("已停止", "stopped") : t("已重启", "restarted")}`);
     } catch (error) {
-      setNote(error instanceof Error ? error.message : String(error));
+      setNote(errorMessage(error));
     } finally {
       inFlight.current.delete(name);
       setBusy(new Set(inFlight.current));

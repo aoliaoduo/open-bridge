@@ -1,12 +1,16 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api, type ActivityEntry, type UsageStats } from "../api";
+import { errorMessage } from "../format";
 import { t } from "../i18n";
+import { usePolling } from "../use-polling";
 import { Card } from "./Card";
 import { ConfirmButton } from "./ConfirmButton";
 import { EmptyState } from "./EmptyState";
 import { Skeleton } from "./Skeleton";
 import { Stat } from "./Stat";
 
+// Not the shared idleLabel: an uptime reads "5 分钟", never "刚刚" or
+// "5 分 0 秒" — merging the two formatters would rewrite what this card says.
 function fmtUptime(ms: number): string {
   const s = Math.floor(ms / 1000);
   if (s < 60) return t(`${s} 秒`, `${s}s`);
@@ -41,20 +45,15 @@ export function StatsTab() {
   const [note, setNote] = useState("");
   const [view, setView] = useState<ActivityView>("all");
 
-  useEffect(() => {
-    // Expired-response guard: drop a slow poll that landed after a newer one.
-    let seq = 0;
-    const poll = async () => {
-      const mine = ++seq;
+  usePolling({
+    intervalMs: 3000,
+    poll: async fresh => {
       try {
         const [u, a] = await Promise.all([api.usage(), api.activity()]);
-        if (seq === mine) { setUsage(u); setActivity(a); }
+        if (fresh()) { setUsage(u); setActivity(a); }
       } catch { /* transient */ }
-    };
-    void poll();
-    const timer = setInterval(() => void poll(), 3000);
-    return () => clearInterval(timer);
-  }, []);
+    },
+  });
 
   const clearStats = async () => {
     try {
@@ -62,7 +61,7 @@ export function StatsTab() {
       setNote(result.info ?? t("已清零", "Counters cleared"));
       setUsage(await api.usage());
     } catch (error) {
-      setNote(error instanceof Error ? error.message : String(error));
+      setNote(errorMessage(error));
     }
   };
 

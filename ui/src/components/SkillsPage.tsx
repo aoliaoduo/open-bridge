@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type SkillCatalog } from "../api";
+import { errorMessage } from "../format";
 import { t } from "../i18n";
 import { Card } from "./Card";
 import { Chip } from "./Chip";
 import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
+import { SearchToolbar, matchesNeedle } from "./SearchToolbar";
 import { Skeleton } from "./Skeleton";
 
 /**
@@ -28,16 +30,14 @@ export function SkillsPage({ notify }: {
     let alive = true;
     void api.skills()
       .then(value => { if (alive) { setCatalog(value); setNote(""); } })
-      .catch(error => { if (alive) setNote(error instanceof Error ? error.message : String(error)); });
+      .catch(error => { if (alive) setNote(errorMessage(error)); });
     return () => { alive = false; };
   }, []);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return (catalog?.skills ?? []).filter(skill =>
-      !needle
-      || skill.name.toLowerCase().includes(needle)
-      || skill.description.toLowerCase().includes(needle));
+      matchesNeedle(needle, skill.name, skill.description));
   }, [catalog, query]);
 
   return (
@@ -65,23 +65,13 @@ export function SkillsPage({ notify }: {
       ) : (
         <>
           {catalog.skills.length > 0 && (
-            <div className="toolbar">
-              <label className="search">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <circle cx="11" cy="11" r="6" stroke="currentColor" strokeWidth="1.7" />
-                  <path d="m16 16 4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                </svg>
-                <input
-                  type="text"
-                  placeholder={t("按名称或说明过滤…", "Filter by name or description…")}
-                  value={query}
-                  onChange={event => setQuery(event.target.value)}
-                  aria-label={t("过滤技能", "Filter skills")}
-                />
-              </label>
-              <span className="grow" />
-              <span className="count">{t(`显示 ${visible.length} 个`, `${visible.length} shown`)}</span>
-            </div>
+            <SearchToolbar
+              query={query}
+              onQuery={setQuery}
+              placeholder={t("按名称或说明过滤…", "Filter by name or description…")}
+              label={t("过滤技能", "Filter skills")}
+              count={t(`显示 ${visible.length} 个`, `${visible.length} shown`)}
+            />
           )}
 
           {visible.length === 0 ? (

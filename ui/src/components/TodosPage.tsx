@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { api, type TodoBoard, type TodoItem } from "../api";
+import { errorMessage } from "../format";
 import { t } from "../i18n";
+import { usePolling } from "../use-polling";
 import { Card } from "./Card";
 import { Chip } from "./Chip";
 import { EmptyState } from "./EmptyState";
@@ -78,29 +80,22 @@ function TodoRow({ todo, index }: { todo: TodoItem; index: number }) {
 export function TodosPage() {
   const [board, setBoard] = useState<TodoBoard | null>(null);
   const [note, setNote] = useState("");
-  // Same expired-response guard the other polling pages use: a slow request
-  // that left before a refresh must not overwrite the newer answer.
-  const pollSeq = useRef(0);
 
-  const refresh = useCallback(async () => {
-    const mine = ++pollSeq.current;
-    try {
-      const next = await api.todos();
-      if (pollSeq.current === mine) {
-        setBoard(next);
-        setNote("");
-      }
-    } catch (error) {
-      if (pollSeq.current === mine) setNote(error instanceof Error ? error.message : String(error));
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
+  usePolling({
     // 2s: fast enough that a watched agent feels live, slow enough to be free.
-    const timer = setInterval(() => void refresh(), 2000);
-    return () => clearInterval(timer);
-  }, [refresh]);
+    intervalMs: 2000,
+    poll: async fresh => {
+      try {
+        const next = await api.todos();
+        if (fresh()) {
+          setBoard(next);
+          setNote("");
+        }
+      } catch (error) {
+        if (fresh()) setNote(errorMessage(error));
+      }
+    },
+  });
 
   if (!board) {
     return (

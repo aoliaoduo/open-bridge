@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type HealthCheck, type HealthReport } from "../api";
+import { errorMessage } from "../format";
 import type { RouteId } from "../routes";
 import { t } from "../i18n";
 import { Card } from "./Card";
 import { Chip } from "./Chip";
+import { SecurityCta } from "./SecurityCta";
 import { Skeleton } from "./Skeleton";
 import { Stat } from "./Stat";
 
@@ -47,7 +49,7 @@ export function HealthPage(
     try {
       setReport(await api.health());
     } catch (error) {
-      setNote(error instanceof Error ? error.message : String(error));
+      setNote(errorMessage(error));
     }
     setBusy(false);
   }, []);
@@ -164,11 +166,7 @@ export function HealthPage(
 
       <div className="card section-note">
         {t("暴露面详情与加固去「安全」页。", "Exposure detail and hardening live on the Security page.")}
-        {onOpen ? (
-          <button type="button" className="small" onClick={() => onOpen("security")}>
-            {t("去安全页", "Open Security")}
-          </button>
-        ) : null}
+        <SecurityCta onOpen={onOpen} />
       </div>
 
       {note && report !== null && <div className="card section-note" role="alert">{note}</div>}
