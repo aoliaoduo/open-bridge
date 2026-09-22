@@ -152,8 +152,13 @@ async function waitForPublicHealth(url: string, abort?: AbortSignal): Promise<vo
   throw new Error(`Public health check failed after ${timeoutMs} ms: ${last}`);
 }
 
-/** Cancels a pending reconnect: the last failure was not one retrying can heal. */
-function stopReconnectChain(): void {
+/**
+ * Cancels a pending reconnect: the last failure was not one retrying can heal.
+ * Exported because lifecycle's teardown paths must cancel the chain with the
+ * exact same three mutations — the inline copies there used to be the one place
+ * a new reconnect bookkeeping field could be forgotten.
+ */
+export function stopReconnectChain(): void {
   if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
   state.reconnectTimer = undefined;
   state.reconnectAttempt = 0;
@@ -293,6 +298,16 @@ async function watchPublicDomain(domain: string): Promise<boolean> {
 }
 
 /**
+ * The configured tailscale CLI, resolved through resolveTailscaleExecutable.
+ * Read live at every call site (not cached): a provider switch tears the tunnel
+ * down anyway, so each caller wants the value as of now, and one helper keeps
+ * the config-key spelling from drifting across the three readers.
+ */
+function configuredTailscaleExecutable(): string {
+  return resolveTailscaleExecutable(String(host().config.get<string>("tailscaleExecutable", "") ?? ""));
+}
+
+/**
  * The provider's own answer to "who is serving the public endpoint now".
  *
  * Read from config on every round rather than captured: a provider switch tears
@@ -303,7 +318,7 @@ function publicVerdictFor(domain: string): Promise<PublicBridgeVerdict> {
   if (host().config.get<string>("tunnelProvider", "ngrok") !== "tailscale") {
     return probePublicBridge(domain, state.routeToken);
   }
-  const exe = resolveTailscaleExecutable(String(host().config.get<string>("tailscaleExecutable", "") ?? ""));
+  const exe = configuredTailscaleExecutable();
   return probeFunnelHolder(exe, domain, state.port);
 }
 
@@ -354,7 +369,7 @@ export function revertToLocalUrl(): void {
  * finished child would leave the funnel serving).
  */
 async function startTailscaleFunnel(_generation: number): Promise<void> {
-  const exe = resolveTailscaleExecutable(String(host().config.get<string>("tailscaleExecutable", "") ?? ""));
+  const exe = configuredTailscaleExecutable();
   let domain: string;
   try {
     domain = await probeTailscaleDomain(exe);
@@ -441,7 +456,7 @@ async function startTailscaleFunnel(_generation: number): Promise<void> {
 export function teardownTailscaleFunnel(): void {
   if (process.platform !== "win32" && process.platform !== "darwin" && process.platform !== "linux") return;
   try {
-    const exe = resolveTailscaleExecutable(String(host().config.get<string>("tailscaleExecutable", "") ?? ""));
+    const exe = configuredTailscaleExecutable();
     if (!funnelMountIsOurs(exe, state.port)) return;
     execFileSync(exe, ["funnel", "--https=443", "off"], { stdio: "ignore", timeout: 5_000, windowsHide: true });
   } catch {

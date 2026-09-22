@@ -32,6 +32,8 @@ export interface NumstatEntry {
   previousPath?: string;
   additions: number;
   deletions: number;
+  /** True when git reported the row as binary (a dash in either count column); the counts are then 0. */
+  binary?: boolean;
 }
 
 export type NameStatus = "A" | "M" | "D" | "R" | "C";
@@ -52,6 +54,11 @@ function parseStatNumber(value: string | undefined): number {
  * Parse `git diff --numstat -z` output. Tokens are NUL-separated records;
  * rename records carry the stats followed by an empty path slot and then TWO
  * path fields, so a plain token split needs to consume the pair.
+ *
+ * The single -z parser in the codebase: review.ts classifies its rows for
+ * review_changes, and the serve-console TUI (changes.ts) derives its per-file
+ * counts from the same entries, so the two surfaces cannot disagree about a
+ * record's shape.
  */
 export function parseNumstat(output: string): NumstatEntry[] {
   const tokens = output.split("\0");
@@ -62,9 +69,11 @@ export function parseNumstat(output: string): NumstatEntry[] {
     const parts = token.split("\t");
     const additions = parseStatNumber(parts[0]);
     const deletions = parseStatNumber(parts[1]);
+    // A dash in either count column is git's binary marker; the counts stay 0.
+    const binary = parts[0] === "-" || parts[1] === "-";
     if (parts.length >= 3 && parts[2]) {
       // Plain record with the path embedded: "N\tM\tpath"
-      files.push({ path: parts.slice(2).join("\t"), additions, deletions });
+      files.push({ path: parts.slice(2).join("\t"), additions, deletions, ...(binary ? { binary: true } : {}) });
       continue;
     }
     // Rename record: stats token ends with a tab and an EMPTY path slot;
@@ -72,7 +81,7 @@ export function parseNumstat(output: string): NumstatEntry[] {
     const previousPath = tokens[index + 1];
     const path = tokens[index + 2];
     if (path) {
-      files.push({ path, previousPath, additions, deletions });
+      files.push({ path, previousPath, additions, deletions, ...(binary ? { binary: true } : {}) });
       index += 2;
     }
   }

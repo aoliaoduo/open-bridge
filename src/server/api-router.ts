@@ -46,6 +46,8 @@ import { listToolDefinitions } from "../bridge/tool-catalog.js";
 import { CORE_TOOLS } from "../mcp/tool-definitions.js";
 import { handleOAuthRequest, oauthConsoleView } from "../http/oauth.js";
 import { sendJson } from "../http/json-response.js";
+import { readBodyText } from "../http/read-body.js";
+import { escapeHtml } from "../http/oauth-protocol.js";
 
 const CONSOLE_HEADER = "x-open-bridge-console";
 
@@ -123,16 +125,17 @@ function afterResponse(res: ServerResponse, task: () => void): void {
   setTimeout(run, 2_000).unref?.();
 }
 
+/**
+ * The shared cap-and-accumulate reader (see read-body.ts) wrapped in this
+ * surface's own contract: an over-cap body THROWS (the router's catch turns
+ * that into a 500), and an empty body is `undefined` rather than the empty
+ * string the reader returns for it.
+ */
 async function readBody(req: IncomingMessage, maxBytes = 64 * 1024): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > maxBytes) throw new Error("Request body too large.");
-    chunks.push(chunk as Buffer);
-  }
-  if (!size) return undefined;
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  const text = await readBodyText(req, maxBytes);
+  if (text === undefined) throw new Error("Request body too large.");
+  if (!text) return undefined;
+  return JSON.parse(text);
 }
 
 // --- SSE log stream ---------------------------------------------------------
@@ -259,7 +262,10 @@ async function serveConsole(res: ServerResponse, url: URL): Promise<void> {
     const type = MIME[path.extname(file).toLowerCase()] ?? "application/octet-stream";
     if (type.startsWith("text/html")) {
       // Inject only a meta value; no inline script is permitted by the CSP.
-      const escaped = state.routeToken.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+      // escapeHtml is byte-identical to the old inline `&`/`"` escape here:
+      // the route token is randomBytes(16).toString("hex") (lifecycle.ts), so
+      // its extra `<`, `>`, `'` rules can never fire on this input.
+      const escaped = escapeHtml(state.routeToken);
       const html = body.toString("utf8").replace(
         "</head>",
         `<meta name="open-bridge-console-token" content="${escaped}"></head>`,

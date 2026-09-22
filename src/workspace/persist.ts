@@ -28,8 +28,3 @@ export async function writeFileAtomic(fullPath: string, data: Buffer | string): 
     throw error;
   }
 }
-
-/** Persist text content for a file path. */
-export async function persistText(fullPath: string, content: string): Promise<void> {
-  await writeFileAtomic(fullPath, content);
-}

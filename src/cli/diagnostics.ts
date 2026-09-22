@@ -24,6 +24,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
+import { FAILURE_LINE_PATTERN } from "../bridge/failure-line.js";
 import { MAX_AUDIT_LOG_BYTES, ROUTE_TOKEN_KEY } from "../bridge/state.js";
 import { pidAlive, resolveHome, RUNTIME_FILE, SERVE_LOCK_FILE } from "./registry.js";
 import { t } from "../bridge/cli-i18n.js";
@@ -207,8 +208,10 @@ function errorClassOf(message: string): string {
   // The bridge's own failure envelope goes first. It distinguishes nothing --
   // every failed call wears one -- and left in place it prefixes every class
   // with the same five words of noise.
+  // The shared envelope pattern (failure-line.ts) stays the wider of the two
+  // parsers on purpose: it must also strip whatever older audit rows carry.
   const normalised = message
-    .replace(/^Failed in [\d.]+ m?s:\s*/, "")
+    .replace(FAILURE_LINE_PATTERN, "")
     .replace(/"[^"]*"/g, '"<q>"')
     .replace(/'[^']*'/g, "'<q>'")
     .replace(/\b[0-9a-f]{8,}\b/gi, "<id>")

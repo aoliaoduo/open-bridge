@@ -18,6 +18,8 @@ import { workspacePath } from "./paths.js";
 import { availableHint } from "./error-hints.js";
 import { maybeStripAnsi } from "../process/ansi.js";
 import { hasUnreadOutput, resolveReadOffset } from "../process/output-cursor.js";
+import type { ProcessOutputBuffer } from "../process/output-buffer.js";
+import { requireValidOffset, requireValidStream } from "../mcp/argument-checks.js";
 import {
   pruneCommands,
   spawnManaged,
@@ -144,6 +146,27 @@ function refuseRunCommandOnlyTimeout(args: Args, name: string): void {
   );
 }
 
+/**
+ * The shared output/stdout/stderr + byte-accounting block of the process tool
+ * results. Five return paths used to repeat these six fields by hand; one
+ * helper keeps them field-for-field identical: the same tail() page per stream,
+ * the same strip_ansi handling, and the merged buffer's tail as the byte source
+ * for output_bytes/dropped_bytes/truncated.
+ */
+function outputFields(commandState: CommandState, stripAnsiValue: unknown): Record<string, unknown> {
+  const snapshot = commandState.output.tail(MAX_INLINE_OUTPUT);
+  const streamText = (buffer: ProcessOutputBuffer): string =>
+    maybeStripAnsi(buffer.tail(MAX_INLINE_OUTPUT).data.toString("utf8"), stripAnsiValue);
+  return {
+    output: streamText(commandState.output),
+    stdout: streamText(commandState.stdoutOutput),
+    stderr: streamText(commandState.stderrOutput),
+    output_bytes: snapshot.totalBytes,
+    dropped_bytes: snapshot.droppedBytes,
+    truncated: snapshot.truncated,
+  };
+}
+
 export async function runOrStartProcess(args: Args, name: string): Promise<unknown> {
   refuseRunCommandOnlyTimeout(args, name);
   const commandText = typeof args.command === "string" ? args.command.trim() : "";
@@ -161,8 +184,6 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
   await waitForSpawnSettled(commandState.child);
   throwIfSpawnFailed(commandState);
   const stripArg = args.strip_ansi;
-  const streamText = (buffer: typeof commandState.output): string =>
-    maybeStripAnsi(buffer.tail(MAX_INLINE_OUTPUT).data.toString("utf8"), stripArg);
 
   if (name === "start_process" || args.background) {
     if (patternText) {
@@ -191,16 +212,13 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
         if (!ready) await new Promise(resolve => setTimeout(resolve, 100));
       }
       if (!ready && !commandState.done) commandState.lastEvent = "ready_timeout";
-      const snapshot = commandState.output.tail(MAX_INLINE_OUTPUT);
       return {
         command_id: id, shell: shellSpec().file, cwd,
         status: commandState.done ? "completed" : "running", ready, ready_checked: true,
         restart_count: commandState.restartCount,
-        output: streamText(commandState.output), stdout: streamText(commandState.stdoutOutput), stderr: streamText(commandState.stderrOutput), output_bytes: snapshot.totalBytes,
-        dropped_bytes: snapshot.droppedBytes, truncated: snapshot.truncated,
+        ...outputFields(commandState, stripArg),
       };
     }
-    const snapshot = commandState.output.tail(MAX_INLINE_OUTPUT);
     return {
       command_id: id, shell: shellSpec().file, cwd,
       status: commandState.done ? "completed" : "running",
@@ -208,8 +226,7 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
       // requested; ready_checked distinguishes that from an observed readiness signal.
       ready: commandState.done || !patternText, ready_checked: false,
       restart_count: commandState.restartCount,
-      output: streamText(commandState.output), stdout: streamText(commandState.stdoutOutput), stderr: streamText(commandState.stderrOutput), output_bytes: snapshot.totalBytes,
-      dropped_bytes: snapshot.droppedBytes, truncated: snapshot.truncated,
+      ...outputFields(commandState, stripArg),
     };
   }
 
@@ -241,7 +258,6 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
     commandState.child.once("close", onExit);
     const raceTimer = setTimeout(() => finish(true), timeout);
   });
-  const snapshot = commandState.output.tail(MAX_INLINE_OUTPUT);
   if (timedOut && !commandState.done) {
     return {
       command_id: id,
@@ -251,19 +267,13 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
       ready: false,
       timed_out: true,
       message: `Command is still running after ${timeout} ms; it was left alive under supervision. Poll with read_process_output/wait_process or stop with force_terminate.`,
-      output: streamText(commandState.output), stdout: streamText(commandState.stdoutOutput), stderr: streamText(commandState.stderrOutput),
-      output_bytes: snapshot.totalBytes,
-      dropped_bytes: snapshot.droppedBytes,
-      truncated: snapshot.truncated,
+      ...outputFields(commandState, stripArg),
       restart_count: commandState.restartCount,
     };
   }
   return {
     command_id: id,
-    output: streamText(commandState.output), stdout: streamText(commandState.stdoutOutput), stderr: streamText(commandState.stderrOutput),
-    output_bytes: snapshot.totalBytes,
-    dropped_bytes: snapshot.droppedBytes,
-    truncated: snapshot.truncated,
+    ...outputFields(commandState, stripArg),
     exit_code: commandState.exitCode,
     timed_out: timedOut,
     status: commandState.done ? "completed" : "running",
@@ -272,10 +282,7 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
 
 export async function readProcessOutput(args: Args): Promise<Record<string, unknown>> {
   const s = commandStateOrThrow(args);
-  const stream = args.stream === undefined ? "merged" : String(args.stream);
-  if (!["merged", "stdout", "stderr"].includes(stream)) {
-    throw new Error('stream must be one of: merged, stdout, stderr.');
-  }
+  const stream = requireValidStream(args.stream === undefined ? "merged" : String(args.stream));
   // Optional long-poll: block until NEW output arrives (event-driven — the next
   // stdout/stderr chunk or process exit), instead of the agent busy-polling.
   const waitMs = Math.max(0, Math.min(Number(args.wait_ms ?? 0) || 0, 60_000));
@@ -339,20 +346,12 @@ export async function interactWithProcess(args: Args): Promise<Record<string, un
   // let the input reach the process while the caller gets a "stream must be
   // one of..." error, so the agent sees a refused call whose side effect
   // already landed.
-  const stream = args.stream === undefined ? "merged" : String(args.stream);
-  if (!["merged", "stdout", "stderr"].includes(stream)) {
-    throw new Error('stream must be one of: merged, stdout, stderr.');
-  }
+  const stream = requireValidStream(args.stream === undefined ? "merged" : String(args.stream));
   // Same rule for `offset`. outputRead rejects a malformed one, but it runs
   // AFTER the write below, so a typo'd offset used to send the input and then
   // fail the call — a refusal the caller cannot undo. Validate it here, once,
   // against the same contract outputRead enforces.
-  if (args.offset !== undefined) {
-    const offset = Number(args.offset);
-    if (!Number.isSafeInteger(offset) || offset < 0) {
-      throw new Error("offset must be a non-negative safe integer.");
-    }
-  }
+  if (args.offset !== undefined) requireValidOffset(Number(args.offset));
   try {
     s.child.stdin.write(String(args.input) + (args.append_newline === false ? "" : "\n"));
   } catch (error) {
@@ -445,16 +444,7 @@ export async function waitProcess(args: Args): Promise<Record<string, unknown>> 
       const timer = setTimeout(settle, timeout);
     });
   }
-  const stripArg = args.strip_ansi;
-  const snapshot = s.output.tail(MAX_INLINE_OUTPUT);
-  return processResult(s, {
-    output: maybeStripAnsi(snapshot.data.toString("utf8"), stripArg),
-    stdout: maybeStripAnsi(s.stdoutOutput.tail(MAX_INLINE_OUTPUT).data.toString("utf8"), stripArg),
-    stderr: maybeStripAnsi(s.stderrOutput.tail(MAX_INLINE_OUTPUT).data.toString("utf8"), stripArg),
-    output_bytes: snapshot.totalBytes,
-    dropped_bytes: snapshot.droppedBytes,
-    truncated: snapshot.truncated,
-  });
+  return processResult(s, outputFields(s, args.strip_ansi));
 }
 
 export async function waitTool(args: Args): Promise<unknown> {

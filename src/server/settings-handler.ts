@@ -31,6 +31,7 @@ import {
   type SecretPayload,
   type SettingsAction,
   type SettingsActionResult,
+  type SettingsConfigView,
   type SettingsDetectedView,
   type SettingsState,
   type SettingsTunnelView,
@@ -56,13 +57,53 @@ import { enqueueLifecycle } from "../bridge/lifecycle-queue.js";
 
 type AuthStatusView = { tokens: SettingsTokenRow[] };
 
-async function authStatusView(): Promise<AuthStatusView> {
-  return authStatus();
+/**
+ * The config keys the settings page shows, in page order, each with the
+ * fallback value both readers share: buildSettingsState passes it to `cfg.get`
+ * as the when-unset default, and fallbackState (the view built when the live
+ * read fails) starts from it verbatim. Adding a config key to the page means
+ * adding one entry here instead of editing two parallel lists.
+ */
+const SETTINGS_CONFIG_FALLBACKS = [
+  ["unrestrictedFileAccess", CONFIG_DEFAULTS.unrestrictedFileAccess as boolean],
+  ["allowedDirectories", CONFIG_DEFAULTS.allowedDirectories as string[]],
+  ["tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string],
+  ["ngrokExecutable", CONFIG_DEFAULTS.ngrokExecutable as string],
+  ["logMaxBytes", CONFIG_DEFAULTS.logMaxBytes as number],
+  ["sound.enabled", false],
+  ["sound.fileWaiting", ""],
+  ["sound.fileFinished", ""],
+  ["shellPath", CONFIG_DEFAULTS.shellPath as string],
+  ["shellArgs", CONFIG_DEFAULTS.shellArgs as string[]],
+  ["tailscaleDomain", CONFIG_DEFAULTS.tailscaleDomain as string],
+  ["tailscaleExecutable", CONFIG_DEFAULTS.tailscaleExecutable as string],
+  ["port", CONFIG_DEFAULTS.port as number],
+  ["publicHealthTimeoutMs", CONFIG_DEFAULTS.publicHealthTimeoutMs as number],
+  ["autoReconnect", CONFIG_DEFAULTS.autoReconnect as boolean],
+  ["ngrokUseHttpProxy", CONFIG_DEFAULTS.ngrokUseHttpProxy as boolean],
+  ["toolProfile", CONFIG_DEFAULTS.toolProfile as string],
+  ["oauth.enabled", CONFIG_DEFAULTS["oauth.enabled"] as boolean],
+  ["oauth.allowedRedirectHosts", CONFIG_DEFAULTS["oauth.allowedRedirectHosts"] as string[]],
+] as const;
+
+/**
+ * Walk the shared key list once with one reader. `Object.fromEntries` yields
+ * an index-signature record TS cannot link back to `SettingsConfigView` (an
+ * interface carries no implicit index signature), so the single staged cast
+ * the compiler asks for lives here instead of at each call site; the pair
+ * list above is what actually pins the keys, their order and the fallbacks.
+ */
+function settingsConfigOf(read: (key: string, fallback: unknown) => unknown): SettingsConfigView {
+  return Object.fromEntries(
+    SETTINGS_CONFIG_FALLBACKS.map(([key, fallback]) => [key, read(key, fallback)]),
+  ) as unknown as SettingsConfigView;
 }
 
 /** Assemble the full page state the console renders from. */
 export async function buildSettingsState(): Promise<SettingsState> {
-  const status = await authStatusView();
+  // Narrowed to the rows the page renders; the rest of authStatus's shape is
+  // an internal detail of the auth module.
+  const status: AuthStatusView = await authStatus();
   const cfg = host().config;
   const running = Boolean(state.server);
   return {
@@ -84,29 +125,10 @@ export async function buildSettingsState(): Promise<SettingsState> {
       holdTimeoutMs: cfg.get("concurrency.holdTimeoutMs", 300_000),
       waitTimeoutMs: cfg.get("concurrency.waitTimeoutMs", 120_000),
     },
-    config: {
-      unrestrictedFileAccess: cfg.get("unrestrictedFileAccess", CONFIG_DEFAULTS.unrestrictedFileAccess as boolean),
-      allowedDirectories: cfg.get("allowedDirectories", CONFIG_DEFAULTS.allowedDirectories as string[]),
-      tunnelProvider: cfg.get("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string),
-      ngrokExecutable: cfg.get("ngrokExecutable", CONFIG_DEFAULTS.ngrokExecutable as string),
-      logMaxBytes: cfg.get("logMaxBytes", CONFIG_DEFAULTS.logMaxBytes as number),
-      "sound.enabled": cfg.get("sound.enabled", false),
-      "sound.fileWaiting": cfg.get("sound.fileWaiting", ""),
-      "sound.fileFinished": cfg.get("sound.fileFinished", ""),
-
-
-      shellPath: cfg.get("shellPath", CONFIG_DEFAULTS.shellPath as string),
-      shellArgs: cfg.get("shellArgs", CONFIG_DEFAULTS.shellArgs as string[]),
-      tailscaleDomain: cfg.get("tailscaleDomain", CONFIG_DEFAULTS.tailscaleDomain as string),
-      tailscaleExecutable: cfg.get("tailscaleExecutable", CONFIG_DEFAULTS.tailscaleExecutable as string),
-      port: cfg.get("port", CONFIG_DEFAULTS.port as number),
-      publicHealthTimeoutMs: cfg.get("publicHealthTimeoutMs", CONFIG_DEFAULTS.publicHealthTimeoutMs as number),
-      autoReconnect: cfg.get("autoReconnect", CONFIG_DEFAULTS.autoReconnect as boolean),
-      ngrokUseHttpProxy: cfg.get("ngrokUseHttpProxy", CONFIG_DEFAULTS.ngrokUseHttpProxy as boolean),
-      toolProfile: cfg.get("toolProfile", CONFIG_DEFAULTS.toolProfile as string),
-      "oauth.enabled": cfg.get("oauth.enabled", CONFIG_DEFAULTS["oauth.enabled"] as boolean),
-      "oauth.allowedRedirectHosts": cfg.get("oauth.allowedRedirectHosts", CONFIG_DEFAULTS["oauth.allowedRedirectHosts"] as string[]),
-    },
+    // One computed object, not a restatement of the key list above: the list
+    // is the single source, so the key order — and with it the JSON the
+    // console receives — is decided in exactly one place.
+    config: settingsConfigOf((key, fallback) => cfg.get(key, fallback)),
     notify: notifyView(),
     detected: detectedView(),
   };
@@ -623,32 +645,10 @@ function fallbackState(): SettingsState {
       holdTimeoutMs: CONFIG_DEFAULTS["concurrency.holdTimeoutMs"] as number,
       waitTimeoutMs: CONFIG_DEFAULTS["concurrency.waitTimeoutMs"] as number,
     },
-    // Every value below is the canonical default, not a restatement: a future
+    // Canonical defaults from the shared list, not a restatement: a future
     // default change propagates here instead of silently diverging. Arrays are
     // copied — CONFIG_DEFAULTS must never be aliased into mutable state.
-    config: {
-      unrestrictedFileAccess: CONFIG_DEFAULTS.unrestrictedFileAccess as boolean,
-      allowedDirectories: [...(CONFIG_DEFAULTS.allowedDirectories as string[])],
-      tunnelProvider: CONFIG_DEFAULTS.tunnelProvider as string,
-      ngrokExecutable: CONFIG_DEFAULTS.ngrokExecutable as string,
-      logMaxBytes: CONFIG_DEFAULTS.logMaxBytes as number,
-      "sound.enabled": false,
-      "sound.fileWaiting": "",
-      "sound.fileFinished": "",
-
-
-      shellPath: CONFIG_DEFAULTS.shellPath as string,
-      shellArgs: [...(CONFIG_DEFAULTS.shellArgs as string[])],
-      tailscaleDomain: CONFIG_DEFAULTS.tailscaleDomain as string,
-      tailscaleExecutable: CONFIG_DEFAULTS.tailscaleExecutable as string,
-      port: CONFIG_DEFAULTS.port as number,
-      publicHealthTimeoutMs: CONFIG_DEFAULTS.publicHealthTimeoutMs as number,
-      autoReconnect: CONFIG_DEFAULTS.autoReconnect as boolean,
-      ngrokUseHttpProxy: CONFIG_DEFAULTS.ngrokUseHttpProxy as boolean,
-      toolProfile: CONFIG_DEFAULTS.toolProfile as string,
-      "oauth.enabled": CONFIG_DEFAULTS["oauth.enabled"] as boolean,
-      "oauth.allowedRedirectHosts": [...(CONFIG_DEFAULTS["oauth.allowedRedirectHosts"] as string[])],
-    },
+    config: settingsConfigOf((key, value) => (Array.isArray(value) ? [...value] : value)),
     // Detection needs no host — it reads the filesystem, not the config — so
     // the pre-host view can still offer the picker instead of a bare box.
     detected: detectedView(),

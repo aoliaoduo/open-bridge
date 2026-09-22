@@ -13,7 +13,7 @@ import {
   collectFileDiffPreview,
   collectWorkspaceChanges,
   countTextLines,
-  parseNumstat,
+  parseNumstatFiles,
   parsePorcelainZ,
   summarizeGitStatus,
 } from "../src/console/tui/changes.js";
@@ -81,8 +81,11 @@ test("parsePorcelainZ expands untracked files and keeps quoted-unsafe paths inta
   assert.equal(renamed[0]?.path, "new.txt");
 });
 
-test("parseNumstat ignores binary dashes and still sums text files", () => {
-  const counted = parseNumstat("3\t1\tsrc/a.ts\n-\t-\tpic.bin\n2\t0\tmy file.txt\n");
+test("parseNumstatFiles ignores binary dashes and still sums text files", () => {
+  const counted = parseNumstatFiles("3\t1\tsrc/a.ts\n-\t-\tpic.bin\n2\t0\tmy file.txt\n").reduce(
+    (acc, file) => ({ insertions: acc.insertions + file.insertions, deletions: acc.deletions + file.deletions }),
+    { insertions: 0, deletions: 0 },
+  );
   assert.equal(counted.insertions, 5);
   assert.equal(counted.deletions, 1);
 });

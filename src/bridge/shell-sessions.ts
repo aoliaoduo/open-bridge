@@ -14,13 +14,13 @@ import { host } from "../host/host.js";
  */
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { record, state, type CommandState } from "./state.js";
+import { record, state } from "./state.js";
 import { workspacePath } from "./paths.js";
-import { killWindowsProcessFamily, shellIsBashLike, shellSpec } from "./processes.js";
+import { killWindowsProcessFamily, shellSpec, wireSpawnedChild } from "./processes.js";
+import { isBashLikeShell } from "../process/tee-capture.js";
 import { ProcessOutputBuffer, type ProcessOutputRead } from "../process/output-buffer.js";
 import { MAX_CAPTURED_OUTPUT } from "./state.js";
 import { windowsHideForChild } from "./child-console.js";
-import { reassertServeConsoleTitle } from "./console-title.js";
 import { createMarker, stripMarkerLines } from "../shell/session-marker.js";
 import {
   createMarkerScanState, resetMarkerScanCarry, scanForMarker,
@@ -80,7 +80,7 @@ function enqueueSend(name: string, op: () => Promise<Record<string, unknown>>): 
 /** Spawn a login shell that reads commands from stdin and keep it registered like a managed command. */
 function spawnSessionShell(name: string, cwd: string): { id: string; child: ChildProcessWithoutNullStreams; output: ProcessOutputBuffer } {
   const spec = shellSpec();
-  if (!shellIsBashLike(spec.file)) {
+  if (!isBashLikeShell(spec.file)) {
     throw new Error(
       `Persistent shell sessions currently require a bash/sh shell (configured: ${spec.file}). `
       + "Use run_command for one-off commands, or pick a bash on the console settings page "
@@ -95,64 +95,39 @@ function spawnSessionShell(name: string, cwd: string): { id: string; child: Chil
     windowsHide: windowsHideForChild(),
     env: { ...process.env, OPEN_BRIDGE_SHELL: name },
   });
-  const output = new ProcessOutputBuffer(MAX_CAPTURED_OUTPUT);
-  const stdoutOutput = new ProcessOutputBuffer(MAX_CAPTURED_OUTPUT);
-  const stderrOutput = new ProcessOutputBuffer(MAX_CAPTURED_OUTPUT);
-  const append = (stream: "stdout" | "stderr") => (d: Buffer | string): void => {
-    const chunk = Buffer.isBuffer(d) ? d : Buffer.from(d);
-    output.append(chunk);
-    (stream === "stdout" ? stdoutOutput : stderrOutput).append(chunk);
-  };
-  child.stdout.on("data", append("stdout"));
-  child.stderr.on("data", append("stderr"));
-  const registered: CommandState = {
-    id,
+  // The spawn wiring (capture buffers, EPIPE guard, spawn-error and close state
+  // machines) is shared with spawnManaged. The close listener is what keeps the
+  // session honest: a shell that exits on its own (crash, external kill, or
+  // `exit` sent via send_to_shell — the sentinel echo never runs in that case)
+  // must reach the done state, otherwise the session looked alive forever,
+  // send_to_shell polled until the full timeout, pendingMarker wedged the
+  // session, and the command entry never became prunable.
+  const registered = wireSpawnedChild(
     child,
-    output,
-    stdoutOutput,
-    stderrOutput,
-    done: false,
-    exitCode: null,
-    command: `[shell:${name}]`,
-    cwd,
-    env: {},
-    startedAt: Date.now(),
-    restartCount: 0,
-    autoRestart: false,
-    maxRestarts: 0,
-    restartDelayMs: 0,
-    lastEvent: "shell_open",
-  };
-  // Spawn failures emit 'error' and may never emit 'close': mark the session
-  // finished so open/send cannot address a shell that never started.
-  child.on("error", error => {
-    if (registered.done) return;
-    registered.spawnError = error.message;
-    registered.done = true;
-    registered.exitCode = null;
-    registered.endedAt = Date.now();
-    registered.lastEvent = "spawn_error";
-  });
-  // Same EPIPE guard as spawnManaged: the shell can die while we are writing.
-  child.stdin.on("error", () => { /* surfaced via isAlive and the next send_to_shell */ });
-  // A session shell that exits on its own (crash, external kill, or `exit`
-  // sent via send_to_shell — the sentinel echo never runs in that case) must
-  // reach the done state: without a close listener the session looked alive
-  // forever, send_to_shell polled until the full timeout, pendingMarker wedged
-  // the session, and the command entry never became prunable.
-  child.on("close", code => {
-    if (registered.done) return;
-    registered.done = true;
-    registered.exitCode = code;
-    registered.endedAt = Date.now();
-    registered.lastEvent = registered.requestedStop ?? "exited";
-    record("process", "completed", `${id} shell closed with code ${String(code)}`);
-    reassertServeConsoleTitle();
-    host().ui.update();
-  });
+    {
+      id,
+      done: false,
+      exitCode: null,
+      command: `[shell:${name}]`,
+      cwd,
+      env: {},
+      startedAt: Date.now(),
+      restartCount: 0,
+      autoRestart: false,
+      maxRestarts: 0,
+      restartDelayMs: 0,
+      lastEvent: "shell_open",
+    },
+    {
+      onClose: (finalState, code) => {
+        record("process", "completed", `${finalState.id} shell closed with code ${String(code)}`);
+        host().ui.update();
+      },
+    },
+  );
   // Register under state.commands so the panel / process tools see it as a live managed process.
   state.commands.set(id, registered);
-  return { id, child, output };
+  return { id, child, output: registered.output };
 }
 
 function sessionOrThrow(name: string): ShellSession {
@@ -338,7 +313,7 @@ export async function closeShell(args: Args): Promise<Record<string, unknown>> {
   shellSessions.delete(name);
   if (cmd && !cmd.done) {
     const pid = cmd.child.pid;
-    if (process.platform === "win32" && pid && shellIsBashLike(shellSpec().file)) {
+    if (process.platform === "win32" && pid && isBashLikeShell(shellSpec().file)) {
       // Straight to the family kill — no graceful "exit\n" first. Bash does
       // NOT take background jobs with it when it exits, and once the executor
       // dies, its MSYS process-group row — the only way to find those orphans

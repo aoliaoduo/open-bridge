@@ -23,6 +23,7 @@ import { normalizeToolCall } from "./tool-call-shape.js";
 import { describeToolError } from "./tool-error.js";
 import { buildStaleness, staleBuildAdvice } from "./build-staleness.js";
 import { persistUsageStats } from "./usage-store.js";
+import { failureLine } from "./failure-line.js";
 
 /**
  * The typed payload for one tool result: `asStructuredContent`, minus the
@@ -246,7 +247,7 @@ async function runToolCall(
     // record() redacts and caps at 500 chars, so the raw text is safe to pass:
     // this is the same treatment every other audit line gets.
     const reason = e instanceof Error ? e.message : String(e);
-    record(name, "error", `Failed in ${Date.now() - startedAt} ms: ${reason}`, undefined, { invocationId });
+    record(name, "error", failureLine(startedAt, reason), undefined, { invocationId });
     return { ok: false, result: toolErrorPayload(name, reason) };
   }
 }

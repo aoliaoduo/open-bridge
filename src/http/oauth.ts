@@ -76,6 +76,7 @@ import {
   verifyPkceS256,
 } from "./oauth-protocol.js";
 import { AuthFailureLimiter, digestEquals, hashSecret, remoteKeyOf } from "./auth-core.js";
+import { readBodyText } from "./read-body.js";
 
 /** Path prefix for the endpoints this module owns. */
 const OAUTH_PREFIX = "/oauth/";
@@ -242,18 +243,6 @@ function html(res: ServerResponse, status: number, body: string): void {
   res.end(body);
 }
 
-async function readBody(req: IncomingMessage, limit = MAX_OAUTH_BODY_BYTES): Promise<string | undefined> {
-  const chunks: Buffer[] = [];
-  let total = 0;
-  for await (const chunk of req) {
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
-    total += buf.length;
-    if (total > limit) return undefined;
-    chunks.push(buf);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
-
 /** Parse an `application/x-www-form-urlencoded` body, or a JSON query for GET. */
 function parseForm(body: string): Record<string, string> {
   const params = new URLSearchParams(body);
@@ -320,7 +309,7 @@ async function handleRegister(req: IncomingMessage, res: ServerResponse): Promis
       "The registered client list is full. Revoke unused clients from the Open Bridge console, then register again.");
     return true;
   }
-  const body = await readBody(req);
+  const body = await readBodyText(req, MAX_OAUTH_BODY_BYTES);
   if (body === undefined) {
     oauthError(res, 413, "invalid_client_metadata", "Registration body is too large.");
     return true;
@@ -471,7 +460,7 @@ function redirectWithError(res: ServerResponse, redirectUri: string, stateValue:
 
 /** POST /oauth/authorize — check the owner credential, then issue a code. */
 async function handleAuthorizePost(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-  const body = await readBody(req);
+  const body = await readBodyText(req, MAX_OAUTH_BODY_BYTES);
   if (body === undefined) {
     oauthError(res, 413, "invalid_request", "Consent body is too large.");
     return true;
@@ -560,7 +549,7 @@ async function handleAuthorizePost(req: IncomingMessage, res: ServerResponse): P
 
 /** POST /oauth/token — the authorization-code and refresh-token grants. */
 async function handleToken(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-  const body = await readBody(req);
+  const body = await readBodyText(req, MAX_OAUTH_BODY_BYTES);
   if (body === undefined) {
     oauthError(res, 413, "invalid_request", "Token body is too large.");
     return true;
@@ -679,7 +668,7 @@ async function issueTokens(
 
 /** POST /oauth/revoke — RFC 7009. Always 200, per the spec, even for a miss. */
 async function handleRevoke(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-  const body = await readBody(req);
+  const body = await readBodyText(req, MAX_OAUTH_BODY_BYTES);
   if (body === undefined) {
     oauthError(res, 413, "invalid_request", "Revocation body is too large.");
     return true;

@@ -23,7 +23,7 @@ test("parseNumstat reads real rename entries (empty path slot then two path fiel
   const files = parseNumstat(REAL_NUMSTAT);
   assert.deepEqual(files, [
     { path: "added.txt", additions: 1, deletions: 0 },
-    { path: "bin2.dat", additions: 0, deletions: 0 },
+    { path: "bin2.dat", additions: 0, deletions: 0, binary: true },
     { path: "del.txt", additions: 0, deletions: 1 },
     { path: "renamed.txt", previousPath: "base.txt", additions: 1, deletions: 0 },
   ]);
@@ -36,7 +36,7 @@ test("parseNumstat reads a pure rename (0/0 counts, empty path slot)", () => {
 
 test("parseNumstat maps binary dashes to zero counts", () => {
   const files = parseNumstat("-\t-\timg.png\0");
-  assert.deepEqual(files, [{ path: "img.png", additions: 0, deletions: 0 }]);
+  assert.deepEqual(files, [{ path: "img.png", additions: 0, deletions: 0, binary: true }]);
 });
 
 test("parseNameStatus reads A/M/D and rename (two path fields) records", () => {

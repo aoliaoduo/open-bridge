@@ -166,9 +166,17 @@ export async function startHttpInternal(): Promise<void> {
       res.setHeader("Access-Control-Expose-Headers", "mcp-session-id");
       res.setHeader("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS");
     }
-    const reject = (status: number, message = "Not found"): void => {
+    // One JSON error body over the shared security headers; `reject` is its
+    // name-and-message form. `skipIfEnded` marks the paths reached AFTER a
+    // transport may already have ended the response itself: re-ending there is
+    // skipped rather than trusted to be a harmless no-op.
+    const respondJson = (status: number, payload: unknown, options?: { skipIfEnded?: boolean }): void => {
       if (!res.headersSent) res.writeHead(status, { ...securityHeaders, "content-type": "application/json" });
-      res.end(JSON.stringify({ error: message }));
+      if (options?.skipIfEnded && res.writableEnded) return;
+      res.end(JSON.stringify(payload));
+    };
+    const reject = (status: number, message = "Not found"): void => {
+      respondJson(status, { error: message });
     };
     const reqHost = req.headers.host;
     // The public domain depends on the provider: ngrok takes its reserved
@@ -327,8 +335,7 @@ export async function startHttpInternal(): Promise<void> {
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e);
           record("bridge", "error", `Modern MCP handler failed: ${message}`);
-          if (!res.headersSent) res.writeHead(500, { ...securityHeaders, "content-type": "application/json" });
-          if (!res.writableEnded) res.end(JSON.stringify({ error: message }));
+          respondJson(500, { error: message }, { skipIfEnded: true });
         } finally {
           state.modernInFlight = Math.max(0, state.modernInFlight - 1);
           state.modernLastUsed = Date.now();
@@ -359,20 +366,15 @@ export async function startHttpInternal(): Promise<void> {
       if (legacyProblem) {
         const requestId = (parsedBody as { id?: unknown } | undefined)?.id;
         const id = typeof requestId === "string" || typeof requestId === "number" ? requestId : null;
-        if (!res.headersSent) {
-          res.writeHead(legacyProblem.status, { ...securityHeaders, "content-type": "application/json" });
-        }
-        if (!res.writableEnded) {
-          res.end(JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            error: {
-              code: legacyProblem.code,
-              message: legacyProblem.message,
-              data: { reason: legacyProblem.reason, hint: legacyProblem.hint },
-            },
-          }));
-        }
+        respondJson(legacyProblem.status, {
+          jsonrpc: "2.0",
+          id,
+          error: {
+            code: legacyProblem.code,
+            message: legacyProblem.message,
+            data: { reason: legacyProblem.reason, hint: legacyProblem.hint },
+          },
+        }, { skipIfEnded: true });
         return;
       }
 
@@ -382,8 +384,7 @@ export async function startHttpInternal(): Promise<void> {
         // onsessioninitialized never sees it.
         const opened = await openLegacySession({ allowedHosts, clientLabel: clientLabelFrom(parsedBody) });
         if (!opened) {
-          if (!res.headersSent) res.writeHead(503, { ...securityHeaders, "content-type": "application/json" });
-          res.end(JSON.stringify({ error: "Bridge session capacity reached. Close an existing MCP session and retry." }));
+          respondJson(503, { error: "Bridge session capacity reached. Close an existing MCP session and retry." });
           return;
         }
         session = opened;
@@ -401,8 +402,7 @@ export async function startHttpInternal(): Promise<void> {
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      if (!res.headersSent) res.writeHead(500, { ...securityHeaders, "content-type": "application/json" });
-      res.end(JSON.stringify({ error: message }));
+      respondJson(500, { error: message });
     }
     } catch (error) {
       // See the try above: turns "process dies on a stray request" into a 400.

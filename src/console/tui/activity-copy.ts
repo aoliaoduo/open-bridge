@@ -6,6 +6,7 @@
  * no JSON argument dumps.
  */
 
+import { FAILURE_LINE_PATTERN } from "../../bridge/failure-line.js";
 import { visualWidth } from "./text.js";
 
 export type ActivityLike = {
@@ -15,10 +16,17 @@ export type ActivityLike = {
   args_summary?: string;
 };
 
-const PROCESS_STARTED = /^Started [0-9a-f]+:\s*(.+)$/i;
+/**
+ * The one writer of this line is processes.ts — `Started <id>: <command>
+ * (cwd: <cwd>)`, where the id is randomBytes(8).toString("hex"): 16 lowercase
+ * hex digits, always followed by a command and the cwd suffix. Snapshot reads
+ * the id out of group 1; the copy below reads the command out of group 2. The
+ * two sites used to carry separately tuned regexes; with a single writer,
+ * one pattern serves both.
+ */
+export const PROCESS_STARTED = /^Started ([0-9a-f]+):\s*(.+)$/i;
 const BOILER_REQUEST = /^Request received\.?$/i;
 const BOILER_DONE = /^Completed in \d+ ms\.?$/i;
-const BOILER_FAIL = /^Failed in \d+ ms:\s*(.*)$/i;
 const REQUEST_COMMAND = /^Request received · command:\s*(.+?)(?:\s·\s+cwd:.*)?$/i;
 const BRIDGE_STARTED = /^Started:\s*https?:\/\//i;
 
@@ -49,7 +57,7 @@ export function tuiActivityDetail(entry: ActivityLike): string {
 
   if (entry.tool === "process") {
     const started = PROCESS_STARTED.exec(raw);
-    if (started) return full(firstCommand(stripCwd(started[1] ?? "")));
+    if (started) return full(firstCommand(stripCwd(started[2] ?? "")));
     return full(stripCwd(raw));
   }
 
@@ -69,8 +77,9 @@ export function tuiActivityDetail(entry: ActivityLike): string {
 
   if (BOILER_REQUEST.test(raw) || BOILER_DONE.test(raw)) return "";
 
-  const failed = BOILER_FAIL.exec(raw);
-  if (failed) return full(failed[1] ?? "");
+  // Same envelope the dispatcher writes (failure-line.ts): detect the prefix,
+  // then the rest of the line is the reason.
+  if (FAILURE_LINE_PATTERN.test(raw)) return full(raw.replace(FAILURE_LINE_PATTERN, ""));
 
   if (raw.startsWith("{") && raw.includes(":")) return "";
   return full(raw);

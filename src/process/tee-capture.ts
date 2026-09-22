@@ -17,7 +17,15 @@ export function bashPath(p: string): string {
   return p.replace(/\\/g, "/");
 }
 
-/** True for bash/sh-style shells (Git Bash on Windows). */
+/**
+ * True for bash/sh-style shells (Git Bash on Windows).
+ *
+ * The single shared predicate: tee wrapping needs bash syntax, and
+ * ../win-family-kill.ts decides its MSYS process-group strategy from the same
+ * fact. It used to be duplicated in both modules; one implementation here (a
+ * leaf module neither of them can cycle through) keeps the two answers from
+ * drifting apart.
+ */
 export function isBashLikeShell(shellFile: string): boolean {
   const n = shellFile.toLowerCase().replace(/\\/g, "/");
   return n.includes("bash") || n.endsWith("/sh") || n.endsWith("/sh.exe") || n.includes("/bin/sh");

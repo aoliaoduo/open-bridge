@@ -39,6 +39,7 @@
 
 import { Worker } from "node:worker_threads";
 
+import { suggestionHint } from "./error-hints.js";
 import { normalizeToolCall } from "./tool-call-shape.js";
 
 /** Hard caps. The defaults are what most callers should get; the maxima are where the Bridge says no. */
@@ -780,7 +781,10 @@ export async function runScriptInSandbox(options: RunScriptOptions): Promise<Scr
       // a script written against the older vocabulary keeps working, while the
       // session's own catalog still decides what is reachable.
       if (!options.allowedTools.has(name) && !options.allowedTools.has(normalizeToolCall(name).tool)) {
-        deny(`Unknown tool "${name}".${toolNameHint(name, options.allowedTools)}`);
+        // Same suggestion vocabulary as the dispatcher's own "Unknown tool"
+        // error (error-hints.ts), minus the tools a script may never call, so
+        // a typo inside a script reads exactly like a typo'd direct call.
+        deny(`Unknown tool "${name}".${suggestionHint(name, [...options.allowedTools].filter(candidate => !NON_SCRIPTABLE_TOOLS.has(candidate)))}`);
         return;
       }
       try {
@@ -823,23 +827,4 @@ export async function runScriptInSandbox(options: RunScriptOptions): Promise<Scr
       }
     }
   });
-}
-
-/** Inlined rather than imported so this module stays dependency-free (and testable on its own). */
-function toolNameHint(name: string, candidates: ReadonlySet<string>): string {
-  const lower = name.toLowerCase();
-  const ranked = [...candidates]
-    .filter(candidate => !NON_SCRIPTABLE_TOOLS.has(candidate))
-    .map(candidate => {
-      const c = candidate.toLowerCase();
-      if (c === lower) return { candidate, rank: 0 };
-      if (c.startsWith(lower) || lower.startsWith(c)) return { candidate, rank: 1 };
-      if (c.includes(lower) || lower.includes(c)) return { candidate, rank: 2 };
-      return { candidate, rank: 3 };
-    })
-    .filter(entry => entry.rank < 3)
-    .sort((left, right) => left.rank - right.rank || left.candidate.localeCompare(right.candidate))
-    .slice(0, 3)
-    .map(entry => entry.candidate);
-  return ranked.length ? ` Did you mean ${ranked.map(entry => `"${entry}"`).join(", ")}?` : "";
 }

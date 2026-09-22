@@ -9,7 +9,7 @@
 
 import { isActivityStatus } from "../../mcp/activity-status.js";
 import { MAX_CAPTURED_OUTPUT } from "../../bridge/state.js";
-import { tuiActivityDetail, tuiActivityMessage } from "./activity-copy.js";
+import { PROCESS_STARTED, tuiActivityDetail, tuiActivityMessage } from "./activity-copy.js";
 import type { TuiEventStatus, TuiSnapshot } from "./render.js";
 
 export interface TuiStateView {
@@ -169,7 +169,9 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     const message = tuiActivityMessage(entry);
 
     if (entry.tool === "process" && entry.status === "running") {
-      const id = /^Started ([0-9a-f]{8,}):/.exec(entry.message)?.[1];
+      // Group 1 is the command id — see PROCESS_STARTED in activity-copy.ts
+      // for why the single-writer pattern also fits this lookup.
+      const id = PROCESS_STARTED.exec(entry.message)?.[1];
       const command = id === undefined ? undefined : view.commands.get(id);
       if (command === undefined) {
         // Pruned from the table: the fact stays, the animation does not.

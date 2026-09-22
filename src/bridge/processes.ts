@@ -8,9 +8,10 @@ import { killWindowsProcessFamily } from "../process/win-family-kill.js";
 
 // Re-exported for shell-sessions.ts and future callers: the family kill lives in
 // ../process/win-family-kill.ts (host-free) so the CLI stop fallback can share it.
-export { killWindowsProcessFamily, shellIsBashLike } from "../process/win-family-kill.js";
+export { killWindowsProcessFamily } from "../process/win-family-kill.js";
 import { maybeStripAnsi } from "../process/ansi.js";
 import { isBashLikeShell, wrapWithTeeAppend } from "../process/tee-capture.js";
+import { requireValidOffset, requireValidStream } from "../mcp/argument-checks.js";
 import { windowsHideForChild } from "./child-console.js";
 import { reassertServeConsoleTitle } from "./console-title.js";
 import {
@@ -76,6 +77,90 @@ export function pruneCommands(): void {
   }
 }
 
+/**
+ * Wire a freshly spawned child into a `CommandState`: create the three capture
+ * buffers, attach the stdout/stderr append closures, guard stdin against EPIPE,
+ * and run the spawn-error and close state machines both spawners share.
+ *
+ * spawnManaged (a fresh shell per command) and shell-sessions' spawnSessionShell
+ * (one persistent login shell) used to hand-write this wiring in two copies and
+ * had already drifted. One helper, parameterized by the few honest differences,
+ * keeps the final-state machine single-sourced: both callers finalize a finished
+ * command exactly once, whoever marked it done first.
+ */
+export function wireSpawnedChild(
+  child: CommandState["child"],
+  base: Omit<CommandState, "child" | "output" | "stdoutOutput" | "stderrOutput">,
+  options: {
+    /** Managed commands record the failure on the process event channel; session shells surface it to open_shell instead. */
+    logSpawnError?: boolean;
+    /** Managed commands name a non-zero self-exit "crashed"; session shells always report "exited". */
+    crashOnNonZeroExit?: boolean;
+    /** Caller-specific close handling (records, exit notify, auto-restart, UI refresh); runs after the shared finalize. */
+    onClose?: (commandState: CommandState, code: number | null) => void;
+  },
+): CommandState {
+  const commandState: CommandState = {
+    ...base,
+    child,
+    output: new ProcessOutputBuffer(MAX_CAPTURED_OUTPUT),
+    stdoutOutput: new ProcessOutputBuffer(MAX_CAPTURED_OUTPUT),
+    stderrOutput: new ProcessOutputBuffer(MAX_CAPTURED_OUTPUT),
+  };
+  const append = (stream: "stdout" | "stderr") => (d: Buffer | string): void => {
+    const chunk = Buffer.isBuffer(d) ? d : Buffer.from(d);
+    commandState.output.append(chunk);
+    (stream === "stdout" ? commandState.stdoutOutput : commandState.stderrOutput).append(chunk);
+  };
+  child.stdout.on("data", append("stdout"));
+  child.stderr.on("data", append("stderr"));
+  // A child that exits (or closes its stdin) mid-write makes stdin emit
+  // 'error'; without a listener that surfaces as an uncaught exception in the
+  // Bridge process instead of a normal process-exit path. Managed commands
+  // report it through the close handler below; session shells through isAlive
+  // and the next send_to_shell.
+  child.stdin.on("error", () => { /* the child is gone; the callers' own surfaces report it */ });
+  child.on("error", error => {
+    if (options.logSpawnError) record("process", "error", `${commandState.id}: ${error.message}`);
+    commandState.spawnError = error.message;
+    // Spawn failures (ENOENT/EACCES) emit 'error' and may never emit 'close':
+    // mark the command finished so foreground callers cannot wait out the full
+    // timeout on a process that never started (ghost-running bug), and so
+    // open_shell cannot address a shell that never started.
+    if (!commandState.done) {
+      commandState.done = true;
+      commandState.exitCode = null;
+      commandState.endedAt = Date.now();
+      commandState.lastEvent = commandState.requestedStop ?? "spawn_error";
+      commandState.releaseResourceLocks?.();
+    }
+  });
+  child.on("close", code => {
+    // The command may already be final when 'close' arrives:
+    //  - Node (v24 observed; ≥18.2 in general) emits BOTH 'error' and 'close'
+    //    after a failed spawn. The 'error' handler above already marked the
+    //    command done with lastEvent "spawn_error"; the trailing 'close'
+    //    carries a meaningless UV errno (e.g. -4058 on Windows) that must not
+    //    overwrite that state — doing so reported an invented "exit code", and
+    //    the autoRestart branch then scheduled futile restarts for a process
+    //    that can never start (missing shell/binary/cwd).
+    //  - closeShell marks an exiting session shell done itself (lastEvent
+    //    "shell_closed") when the graceful path times out; the child's own
+    //    later 'close' must not overwrite that record either.
+    if (commandState.done) return;
+    commandState.done = true;
+    commandState.exitCode = code;
+    commandState.endedAt = Date.now();
+    commandState.lastEvent = commandState.requestedStop
+      ?? (code === 0 || !options.crashOnNonZeroExit ? "exited" : "crashed");
+    // The child had this console and wrote its own title into it (cmd.exe puts its
+    // image path there, npm writes "npm …"): take the window back.
+    reassertServeConsoleTitle();
+    options.onClose?.(commandState, code);
+  });
+  return commandState;
+}
+
 export function spawnManaged(
   commandText: string,
   cwd: string,
@@ -109,113 +194,76 @@ export function spawnManaged(
     windowsHide: windowsHideForChild(),
     env: { ...process.env, ...env, OPEN_BRIDGE_COMMAND_ID: id },
   });
-  // A child that exits (or closes its stdin) mid-write makes stdin emit
-  // 'error'; without a listener that surfaces as an uncaught exception in the
-  // Bridge process instead of a normal process-exit path.
-  child.stdin.on("error", () => { /* the child is gone; the close handler reports it */ });
-  const commandState: CommandState = {
-    id,
+  const commandState = wireSpawnedChild(
     child,
-    output: new ProcessOutputBuffer(MAX_CAPTURED_OUTPUT),
-    stdoutOutput: new ProcessOutputBuffer(MAX_CAPTURED_OUTPUT),
-    stderrOutput: new ProcessOutputBuffer(MAX_CAPTURED_OUTPUT),
-    teeLogPath: options?.teeLogPath,
-    done: false,
-    exitCode: null,
-    command: commandText,
-    cwd,
-    env,
-    startedAt: Date.now(),
-    restartCount,
-    autoRestart: policy?.autoRestart ?? false,
-    maxRestarts: policy?.maxRestarts ?? 3,
-    restartDelayMs: policy?.restartDelayMs ?? 1000,
-    lastEvent: "started",
-  };
-  record("process", "running", `Started ${id}: ${redactSensitiveText(commandText)} (cwd: ${cwd})`);
-  const append = (stream: "stdout" | "stderr") => (d: Buffer | string): void => {
-    const chunk = Buffer.isBuffer(d) ? d : Buffer.from(d);
-    commandState.output.append(chunk);
-    (stream === "stdout" ? commandState.stdoutOutput : commandState.stderrOutput).append(chunk);
-  };
-  child.stdout.on("data", append("stdout"));
-  child.stderr.on("data", append("stderr"));
-  child.on("close", code => {
-    // Node (v24 observed; ≥18.2 in general) emits BOTH 'error' and 'close'
-    // after a failed spawn. The 'error' handler below already marked the
-    // command done with lastEvent "spawn_error"; the trailing 'close' carries
-    // a meaningless UV errno (e.g. -4058 on Windows) that must not overwrite
-    // that state — doing so reported an invented "exit code", and the
-    // autoRestart branch then scheduled futile restarts for a process that can
-    // never start (missing shell/binary/cwd).
-    if (commandState.lastEvent === "spawn_error") return;
-    commandState.done = true;
-    commandState.exitCode = code;
-    commandState.endedAt = Date.now();
-    commandState.lastEvent = commandState.requestedStop ?? (code === 0 ? "exited" : "crashed");
-    record("process", "completed", `${id} ${commandState.lastEvent} with code ${String(code)}`);
-    // The child had this console and wrote its own title into it (cmd.exe puts its
-    // image path there, npm writes "npm …"): take the window back.
-    reassertServeConsoleTitle();
-    // P1-1: best-effort push so a connected client hears about the exit without
-    // polling; only non-zero, unrequested exits notify as errors.
-    notifyLatestLogging(
-      commandState.requestedStop || code === 0 ? "info" : "error",
-      exitNotification(commandState),
-    );
-    if (
-      commandState.autoRestart &&
-      !commandState.requestedStop &&
-      code !== 0 &&
-      commandState.restartCount < commandState.maxRestarts &&
-      !state.stopping
-    ) {
-      commandState.lastEvent = "restart_scheduled";
-      notifyLatestLogging(
-        "warning",
-        `${exitNotification(commandState)} — restart scheduled (attempt ${commandState.restartCount + 1}/${commandState.maxRestarts}, in ${commandState.restartDelayMs} ms)`,
-      );
-      commandState.restartTimer = setTimeout(() => {
-        commandState.restartTimer = undefined;
-        // A stop/terminate that lands during the delay window must win over
-        // the scheduled restart (terminateProcess marks requestedStop).
-        if (state.stopping || commandState.requestedStop) return;
-        if (state.commands.get(commandState.id) !== commandState) return;
-        const replacement = spawnManaged(
-          commandState.command,
-          commandState.cwd,
-          env,
-          commandState.id,
-          commandState.restartCount + 1,
-          commandState,
-          { teeLogPath: commandState.teeLogPath },
+    {
+      id,
+      teeLogPath: options?.teeLogPath,
+      done: false,
+      exitCode: null,
+      command: commandText,
+      cwd,
+      env,
+      startedAt: Date.now(),
+      restartCount,
+      autoRestart: policy?.autoRestart ?? false,
+      maxRestarts: policy?.maxRestarts ?? 3,
+      restartDelayMs: policy?.restartDelayMs ?? 1000,
+      lastEvent: "started",
+    },
+    {
+      logSpawnError: true,
+      crashOnNonZeroExit: true,
+      onClose: (finalState, code) => {
+        record("process", "completed", `${id} ${finalState.lastEvent} with code ${String(code)}`);
+        // P1-1: best-effort push so a connected client hears about the exit
+        // without polling; only non-zero, unrequested exits notify as errors.
+        notifyLatestLogging(
+          finalState.requestedStop || code === 0 ? "info" : "error",
+          exitNotification(finalState),
         );
-        // The resource stays claimed across a restart: hand the lock handle to
-        // the replacement so its own exit still releases it.
-        replacement.releaseResourceLocks = commandState.releaseResourceLocks;
-        commandState.releaseResourceLocks = undefined;
-        state.commands.set(commandState.id, replacement);
-      }, commandState.restartDelayMs);
-    }
-    // Resource locks are held for the process's lifetime. A scheduled restart
-    // keeps them (the resource is still claimed); releaseResourceLocks is
-    // idempotent, so the hold-timeout backstop cannot double-release.
-    if (!commandState.restartTimer) commandState.releaseResourceLocks?.();
-  });
-  child.on("error", error => {
-    record("process", "error", `${id}: ${error.message}`);
-    commandState.spawnError = error.message;
-    // Spawn failures (ENOENT/EACCES) emit 'error' and may never emit 'close':
-    // mark the command finished so foreground callers cannot wait out the full
-    // timeout on a process that never started (ghost-running bug).
-    if (!commandState.done) {
-      commandState.done = true;
-      commandState.exitCode = null;
-      commandState.endedAt = Date.now();
-      commandState.lastEvent = commandState.requestedStop ?? "spawn_error";
-      commandState.releaseResourceLocks?.();
-    }
-  });
+        if (
+          finalState.autoRestart &&
+          !finalState.requestedStop &&
+          code !== 0 &&
+          finalState.restartCount < finalState.maxRestarts &&
+          !state.stopping
+        ) {
+          finalState.lastEvent = "restart_scheduled";
+          notifyLatestLogging(
+            "warning",
+            `${exitNotification(finalState)} — restart scheduled (attempt ${finalState.restartCount + 1}/${finalState.maxRestarts}, in ${finalState.restartDelayMs} ms)`,
+          );
+          finalState.restartTimer = setTimeout(() => {
+            finalState.restartTimer = undefined;
+            // A stop/terminate that lands during the delay window must win over
+            // the scheduled restart (terminateProcess marks requestedStop).
+            if (state.stopping || finalState.requestedStop) return;
+            if (state.commands.get(finalState.id) !== finalState) return;
+            const replacement = spawnManaged(
+              finalState.command,
+              finalState.cwd,
+              env,
+              finalState.id,
+              finalState.restartCount + 1,
+              finalState,
+              { teeLogPath: finalState.teeLogPath },
+            );
+            // The resource stays claimed across a restart: hand the lock handle to
+            // the replacement so its own exit still releases it.
+            replacement.releaseResourceLocks = finalState.releaseResourceLocks;
+            finalState.releaseResourceLocks = undefined;
+            state.commands.set(finalState.id, replacement);
+          }, finalState.restartDelayMs);
+        }
+        // Resource locks are held for the process's lifetime. A scheduled restart
+        // keeps them (the resource is still claimed); releaseResourceLocks is
+        // idempotent, so the hold-timeout backstop cannot double-release.
+        if (!finalState.restartTimer) finalState.releaseResourceLocks?.();
+      },
+    },
+  );
+  record("process", "running", `Started ${id}: ${redactSensitiveText(commandText)} (cwd: ${cwd})`);
   return commandState;
 }
 
@@ -418,13 +466,11 @@ export function outputRead(
   stripAnsiValue?: unknown,
 ): Record<string, unknown> {
   const stream = streamValue === undefined ? "merged" : String(streamValue);
-  if (!["merged", "stdout", "stderr"].includes(stream)) {
-    throw new Error('stream must be one of: merged, stdout, stderr.');
-  }
+  requireValidStream(stream);
   const buffer = stream === "stdout" ? s.stdoutOutput : stream === "stderr" ? s.stderrOutput : s.output;
   const offset = offsetValue === undefined ? buffer.state().bufferStartOffset : Number(offsetValue);
   const requested = maxBytesValue === undefined ? MAX_INLINE_OUTPUT : Number(maxBytesValue);
-  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error("offset must be a non-negative safe integer.");
+  requireValidOffset(offset);
   if (!Number.isSafeInteger(requested) || requested < 0) throw new Error("max_bytes must be a non-negative safe integer.");
   const read: ProcessOutputRead = buffer.read(offset, Math.min(requested, MAX_CAPTURED_OUTPUT));
   return {

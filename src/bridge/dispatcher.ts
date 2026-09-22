@@ -41,6 +41,7 @@ import { normalizeToolCall, type CanonicalCall } from "./tool-call-shape.js";
 import { listSkills } from "./skills.js";
 import { beginNotificationEpisode, notifyTool } from "./notify.js";
 import { enrichFsError, suggestionHint } from "./error-hints.js";
+import { failureLine } from "./failure-line.js";
 import type { JsonArgs } from "./json-args.js";
 
 type Args = JsonArgs;
@@ -131,7 +132,7 @@ export async function invoke(
     return result;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    record(name, "error", `Failed in ${Date.now() - startedAt} ms: ${reason}`, undefined, { invocationId });
+    record(name, "error", failureLine(startedAt, reason), undefined, { invocationId });
     throw error;
   }
 }

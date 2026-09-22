@@ -13,6 +13,7 @@ import { promisify } from "node:util";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { reviewChanges } from "../../bridge/review.js";
+import { parseNumstat } from "../../mcp/review-parse.js";
 import { boundedText, unifiedDiff } from "../../mcp/line-diff.js";
 
 const execFile = promisify(execFileCallback);
@@ -85,31 +86,18 @@ export function parseNumstatFiles(output: string): Array<{ path: string; inserti
   };
 
   if (output.includes("\0")) {
-    const parts = output.split("\0").filter(part => part.length > 0);
-    for (let i = 0; i < parts.length; i += 1) {
-      const part = parts[i] ?? "";
-      const tabs = part.split("\t");
-      if (tabs.length >= 3) {
-        let filePath = tabs.slice(2).join("\t");
-        const next = parts[i + 1];
-        if (next !== undefined && !next.includes("\t")) {
-          filePath = next;
-          i += 1;
-        }
-        push(tabs[0] ?? "0", tabs[1] ?? "0", filePath);
-      } else if (tabs.length === 2) {
-        const src = parts[i + 1] ?? "";
-        const dest = parts[i + 2] ?? "";
-        if (src.length > 0 && !src.includes("\t")) {
-          if (dest.length > 0 && !dest.includes("\t")) {
-            i += 2;
-            push(tabs[0] ?? "0", tabs[1] ?? "0", dest);
-          } else {
-            i += 1;
-            push(tabs[0] ?? "0", tabs[1] ?? "0", src);
-          }
-        }
-      }
+    // NUL mode is `git diff --numstat -z`, parsed by the same shared parser the
+    // review_changes tool consumes (mcp/review-parse.ts) so both surfaces read
+    // the records identically. parsePorcelainZ keys a rename by the path token
+    // FOLLOWING the status record — git's old path — so the numstat side keys
+    // by previousPath to keep the two tables joinable per file.
+    for (const entry of parseNumstat(output)) {
+      files.push({
+        path: entry.previousPath ?? entry.path,
+        insertions: entry.additions,
+        deletions: entry.deletions,
+        binary: entry.binary === true,
+      });
     }
     return files;
   }
@@ -125,13 +113,6 @@ export function parseNumstatFiles(output: string): Array<{ path: string; inserti
     push(added, removed, filePath);
   }
   return files;
-}
-
-export function parseNumstat(output: string): { insertions: number; deletions: number } {
-  return parseNumstatFiles(output).reduce(
-    (acc, file) => ({ insertions: acc.insertions + file.insertions, deletions: acc.deletions + file.deletions }),
-    { insertions: 0, deletions: 0 },
-  );
 }
 
 function parsePorcelainLines(output: string): Array<{ xy: string; path: string }> {

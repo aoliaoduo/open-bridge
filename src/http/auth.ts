@@ -351,7 +351,7 @@ export async function authorizeRequest(
   const presented = bearerFrom(req.headers["authorization"], url);
   let oauthRejection: AuthGateResult | undefined;
   if (oauthEnabled()) {
-    const oauth = await authorizeWithOAuth(req, url);
+    const oauth = await authorizeWithOAuth(presented);
     if (oauth.ok) return oauth;
     oauthRejection = oauth;
   }
@@ -401,15 +401,14 @@ let lastNoTokenWarningAt = 0;
 /**
  * The OAuth half of the `/mcp` gate.
  *
+ * Takes the credential `authorizeRequest` already extracted — one parse of the
+ * Authorization header per request, not one per gate.
+ *
  * A 401 here must carry the discovery challenge, or a client that speaks OAuth
  * has no way to find the authorization server — the spec makes that header, not
  * the status code, the entry point to the whole flow.
  */
-async function authorizeWithOAuth(
-  req: { headers: Record<string, unknown>; socket?: { remoteAddress?: string } },
-  url: URL,
-): Promise<AuthGateResult> {
-  const presented = bearerFrom(req.headers["authorization"], url);
+async function authorizeWithOAuth(presented: ReturnType<typeof bearerFrom>): Promise<AuthGateResult> {
   if (presented.via === "none") {
     return { ok: false, status: 401, reason: "oauth_token_required", challenge: oauthChallenge() };
   }

@@ -11,6 +11,7 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { isBashLikeShell } from "./tee-capture.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -51,16 +52,6 @@ async function descendantPids(rootPid: number): Promise<number[]> {
 }
 
 /**
- * True when `file` is a POSIX-style (MSYS) shell whose process family shares a
- * group. Takes the path explicitly so host-less callers (the CLI stop
- * fallback) can use it too; the Bridge passes its configured shellSpec().
- */
-export function shellIsBashLike(file: string): boolean {
-  const n = file.toLowerCase().replace(/\\/g, "/");
-  return n.includes("bash") || n.endsWith("/sh") || n.endsWith("/sh.exe") || n.includes("/bin/sh");
-}
-
-/**
  * Kill the MSYS process GROUPS of a Windows-visible process family.
  *
  * Windows parent links do not survive MSYS fork/exec emulation: every external
@@ -86,7 +77,7 @@ export function shellIsBashLike(file: string): boolean {
  * itself). Hence the `$3>0` awk guard and the `-gt 0` test.
  */
 async function terminateMsysGroups(winPids: number[], shellFile: string): Promise<void> {
-  if (!shellIsBashLike(shellFile) || winPids.length === 0) return;
+  if (!isBashLikeShell(shellFile) || winPids.length === 0) return;
   const list = winPids.filter(n => Number.isSafeInteger(n) && n > 0).join(" ");
   if (!list) return;
   const script =
@@ -110,7 +101,7 @@ async function terminateMsysGroups(winPids: number[], shellFile: string): Promis
  * atomic `taskkill /T /F` ends the whole family.
  */
 export async function killWindowsProcessFamily(pid: number, shellFile: string): Promise<void> {
-  if (shellIsBashLike(shellFile)) {
+  if (isBashLikeShell(shellFile)) {
     const pids = await descendantPids(pid);
     await terminateMsysGroups(pids, shellFile);
     for (const targetPid of pids) {

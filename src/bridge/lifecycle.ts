@@ -17,7 +17,7 @@ import { buildWebAiPrompt } from "./onboarding.js";
 import { workspaceStateSuffix } from "./paths.js";
 import { cancelAllPendingRestarts, terminateProcess } from "./processes.js";
 import { enqueueLifecycle } from "./lifecycle-queue.js";
-import { killTunnelTree, loadNgrokAuthtoken, revertToLocalUrl, setInstanceRestart, startTunnelInternal, stopPublicWatch, teardownTailscaleFunnel } from "./tunnel.js";
+import { killTunnelTree, loadNgrokAuthtoken, revertToLocalUrl, setInstanceRestart, startTunnelInternal, stopPublicWatch, stopReconnectChain, teardownTailscaleFunnel } from "./tunnel.js";
 import { publishSelf, stopRepublishLoop, withdrawSelf } from "./peer-registry.js";
 import { startHttpInternal, stopLocalServer } from "./http-listener.js";
 import { stopSessionPruneLoop } from "./session-table.js";
@@ -99,10 +99,10 @@ async function stopInternal(notify = true): Promise<void> {
   state.missingPublicRounds = 0;
   // Reset the backoff too: it used to survive a stop, so the next start began
   // reconnecting at the 60 s ceiling left over from the previous session
-  // instead of at the fast end of the curve.
-  state.reconnectAttempt = 0;
-  if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
-  state.reconnectTimer = undefined;
+  // instead of at the fast end of the curve. stopReconnectChain is the tunnel
+  // module's own cancel (timer + handle + backoff); the watch/role/teardown
+  // sequence around it deliberately stays expanded here.
+  stopReconnectChain();
   const activeTunnel = state.tunnel;
   state.tunnel = undefined;
   // The tunnel must die before any await: the hosting process can be killed
@@ -187,9 +187,7 @@ export async function restartTunnelForProviderChange(): Promise<void> {
     stopPublicWatch();
     state.tunnelRole = "none";
     state.missingPublicRounds = 0;
-    if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
-    state.reconnectTimer = undefined;
-    state.reconnectAttempt = 0;
+    stopReconnectChain();
     const oldTunnel = state.tunnel;
     state.tunnel = undefined;
     killTunnelTree(oldTunnel);

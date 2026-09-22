@@ -19,9 +19,13 @@ export function createMarker(): string {
   return `__OB_DONE_${randomBytes(5).toString("hex")}__`;
 }
 
+/** Escape the marker so it matches literally inside a RegExp. */
+function escapedMarker(marker: string): string {
+  return marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function markerPattern(marker: string, global: boolean): RegExp {
-  const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`${escaped}=(-?\\d+)`, global ? "g" : "");
+  return new RegExp(`${escapedMarker(marker)}=(-?\\d+)`, global ? "g" : "");
 }
 
 /**
@@ -49,6 +53,5 @@ export function scanMarkerExitCode(text: string, marker: string): number | null 
 
 /** Remove the sentinel line(s) for `marker` from captured output. */
 export function stripMarkerLines(text: string, marker: string): string {
-  const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return text.replace(new RegExp(`${escaped}=-?\\d+\\r?\\n?`), "");
+  return text.replace(new RegExp(`${escapedMarker(marker)}=-?\\d+\\r?\\n?`), "");
 }

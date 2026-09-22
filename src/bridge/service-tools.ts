@@ -12,6 +12,7 @@ import { terminateProcess, processSnapshot, spawnServiceProcess, requireRestartK
 import { persistServices } from "./services.js";
 import { availableHint } from "./error-hints.js";
 import { readServiceLogRange } from "./service-log.js";
+import { requireValidOffset } from "../mcp/argument-checks.js";
 import { throwIfSpawnFailed, waitForSpawnSettled } from "./process-tools.js";
 import type { JsonArgs } from "./json-args.js";
 
@@ -110,6 +111,19 @@ function serializeServiceOp<T>(name: string, op: () => Promise<T>): Promise<T> {
   serviceOpTails.set(name, tail.catch(() => undefined));
   void tail.catch(() => undefined);
   return tail;
+}
+
+/**
+ * Look up a saved service by name, or refuse with the current roster.
+ *
+ * One shared refusal for every named-service entry point (start/stop/restart/
+ * delete, read_service_log, the console's action endpoint): identical message
+ * and identical hint, so a caller retrying across tools learns one rule.
+ */
+function serviceOrThrow(serviceName: string): ServiceDefinition {
+  const service = state.services.get(serviceName);
+  if (!service) throw new Error(`Unknown service: "${serviceName}".${availableHint("Saved services", state.services.keys())}`);
+  return service;
 }
 
 export function saveService(args: Args): Promise<unknown> {
@@ -250,8 +264,7 @@ export function startService(args: Args): Promise<unknown> {
 
 async function startServiceInner(args: Args): Promise<unknown> {
   const serviceName = String(args.name ?? "");
-  const service = state.services.get(serviceName);
-  if (!service) throw new Error(`Unknown service: "${serviceName}".${availableHint("Saved services", state.services.keys())}`);
+  const service = serviceOrThrow(serviceName);
   if (isServiceRunning(service)) {
     return { name: serviceName, command_id: service.commandId, status: "already_running" };
   }
@@ -266,8 +279,7 @@ export function stopService(args: Args): Promise<unknown> {
 
 async function stopServiceInner(args: Args): Promise<unknown> {
   const serviceName = String(args.name ?? "");
-  const service = state.services.get(serviceName);
-  if (!service) throw new Error(`Unknown service: "${serviceName}".${availableHint("Saved services", state.services.keys())}`);
+  const service = serviceOrThrow(serviceName);
   if (!service.commandId) return { name: serviceName, command_id: null, stopped: false, status: "stopped" };
   const commandId = service.commandId;
   const proc = state.commands.get(commandId);
@@ -296,8 +308,7 @@ export function restartService(args: Args): Promise<unknown> {
 
 async function restartServiceInner(args: Args): Promise<unknown> {
   const serviceName = String(args.name ?? "");
-  const service = state.services.get(serviceName);
-  if (!service) throw new Error(`Unknown service: "${serviceName}".${availableHint("Saved services", state.services.keys())}`);
+  const service = serviceOrThrow(serviceName);
   if (service.commandId) {
     const old = state.commands.get(service.commandId);
     // terminateProcess now clears a pending auto-restart even for an already
@@ -325,8 +336,7 @@ export function deleteService(args: Args): Promise<unknown> {
 
 async function deleteServiceInner(args: Args): Promise<unknown> {
   const serviceName = String(args.name ?? "");
-  const service = state.services.get(serviceName);
-  if (!service) throw new Error(`Unknown service: "${serviceName}".${availableHint("Saved services", state.services.keys())}`);
+  const service = serviceOrThrow(serviceName);
   const proc = service.commandId ? state.commands.get(service.commandId) : undefined;
   const stopped = proc ? await terminateProcess(proc, "stopped") : false;
   if (proc && !stopped) {
@@ -430,15 +440,12 @@ export async function stopAllServices(args: Args): Promise<unknown> {
 
 export async function readServiceLogTool(args: Args): Promise<Record<string, unknown>> {
   const serviceName = String(args.name ?? "").trim();
-  const service = state.services.get(serviceName);
-  if (!service) throw new Error(`Unknown service: "${serviceName}".${availableHint("Saved services", state.services.keys())}`);
+  const service = serviceOrThrow(serviceName);
   const maxBytesValue = Number(args.max_bytes);
   const maxBytes = Number.isFinite(maxBytesValue) && maxBytesValue > 0 ? Math.floor(maxBytesValue) : MAX_INLINE_OUTPUT;
   let offset: number | undefined;
   if (args.offset !== undefined) {
-    const value = Number(args.offset);
-    if (!Number.isSafeInteger(value) || value < 0) throw new Error("offset must be a non-negative safe integer.");
-    offset = value;
+    offset = requireValidOffset(Number(args.offset));
   }
   const logFile = serviceLogPathFor(service, serviceName);
   if (!logFile) throw new Error("No storage location is available for this service log.");
@@ -452,8 +459,9 @@ export async function controlService(
   name: string,
   onChanged?: () => void,
 ): Promise<unknown> {
-  const service = state.services.get(name);
-  if (!service) throw new Error(`Unknown service: "${name}".${availableHint("Saved services", state.services.keys())}`);
+  // Fail fast on an unknown name before dispatching; the start/stop/restart
+  // calls re-resolve the service themselves and only need the name.
+  serviceOrThrow(name);
   let result: unknown;
   if (action === "start") result = await startService({ name });
   else if (action === "stop") result = await stopService({ name });

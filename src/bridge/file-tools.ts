@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { assertExpectedHash, sha256 } from "../workspace/file-version.js";
 import { createHash, randomBytes } from "node:crypto";
 import { applyEol, detectEol, toLf, type EolStyle } from "../workspace/eol.js";
-import { persistText, writeFileAtomic } from "../workspace/persist.js";
+import { writeFileAtomic } from "../workspace/persist.js";
 import { applyPatch as applyPatchFile, resolvePatchSource } from "../mcp/patch.js";
 import { streamReadLines, truncateToUtf8Bytes } from "../mcp/stream-read.js";
 import { findFuzzyMatch, formatFuzzyDiagnostics } from "../mcp/fuzzy-match.js";
@@ -23,6 +23,7 @@ import {
 } from "./state.js";
 import { securePath, rejectSymlink, root } from "./paths.js";
 import { enrichFsError } from "./error-hints.js";
+import { requireValidOffset } from "../mcp/argument-checks.js";
 import type { JsonArgs } from "./json-args.js";
 
 type Args = JsonArgs;
@@ -386,6 +387,21 @@ async function renameOrCopy(source: string, destination: string): Promise<void> 
   }
 }
 
+/**
+ * Refuse to clobber an existing destination unless the caller explicitly asked
+ * for overwrite. Shared by moveFile and copyFile, which used to carry the same
+ * lstat/ENOENT dance verbatim: one copy of the guard so the two tools cannot
+ * drift apart on when a destination is replaceable.
+ */
+async function refuseExistingDestination(destination: string): Promise<void> {
+  try {
+    await fs.lstat(destination);
+    throw new Error("Destination already exists; set overwrite=true to replace it.");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
 export async function listDirectory(args: Args): Promise<unknown> {
   const base = await securePath(args.path);
   // Math.max(0, -5) is 0, so a negative cap listed an empty directory -- which
@@ -552,7 +568,7 @@ export async function findFiles(args: Args): Promise<unknown> {
       // max_results: 3 with 20 matches) -- the one shape where the entry
       // check never fired.
       if (out.length >= probe) return;
-      if ([".git", "node_modules", "dist"].includes(e.name)) continue;
+      if (LIST_SKIP_DIRS.has(e.name)) continue;
       const f = path.join(dir, e.name);
       if (e.isDirectory()) {
         if (!e.isSymbolicLink()) await walk(f);
@@ -692,7 +708,7 @@ export async function searchFiles(args: Args): Promise<unknown> {
     entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
     for (const e of entries) {
       if (out.length >= pageEnd) break;
-      if ([".git", "node_modules", "dist"].includes(e.name)) continue;
+      if (LIST_SKIP_DIRS.has(e.name)) continue;
       const f = path.join(dir, e.name);
       if (e.isDirectory()) {
         if (!e.isSymbolicLink()) await walk(f);
@@ -768,10 +784,7 @@ export async function readFiles(args: Args): Promise<unknown> {
   if (asBase64 && lineRange) {
     throw new Error("encoding=base64 cannot be combined with start_line or end_line.");
   }
-  const base64Offset = args.offset === undefined ? 0 : Number(args.offset);
-  if (!Number.isSafeInteger(base64Offset) || base64Offset < 0) {
-    throw new Error("offset must be a non-negative safe integer.");
-  }
+  const base64Offset = args.offset === undefined ? 0 : requireValidOffset(Number(args.offset));
   return Promise.all(paths.map(async (p, index) => {
     // `String(null)` is "null" and `String("")` resolves to the workspace root:
     // both used to be read as if the caller had named a file that way.
@@ -1020,7 +1033,7 @@ export async function writeFile(args: Args): Promise<unknown> {
     const previousBuf = await readFileOrAbsent(file);
     assertExpectedHash(previousBuf === null ? "" : previousBuf.toString("utf8"), args.expected_sha256, String(args.path));
   }
-  await persistText(file, content);
+  await writeFileAtomic(file, content);
   return {
     path: String(args.path),
     bytes: Buffer.byteLength(content, "utf8"),
@@ -1097,7 +1110,7 @@ export async function editBlock(args: Args): Promise<unknown> {
       content = content.replace(needle, () => applyEol(newText, eol));
       replacements += 1;
     }
-    await persistText(file, content);
+    await writeFileAtomic(file, content);
     const diffRaw = unifiedDiff(raw, content);
     const diff = diffRaw ? boundedText(diffRaw, EDIT_DIFF_MAX_CHARS).text : undefined;
     return { path: String(args.path), replacements, sha256: sha256(content), applied_edits: edits.length, ...(diff ? { diff } : {}) };
@@ -1154,7 +1167,7 @@ export async function editBlock(args: Args): Promise<unknown> {
   // expected count in both single and replace_all mode.
   const next = occurrences === 0 ? raw : raw.split(needle).join(replacement);
   const count = occurrences;
-  await persistText(file, next);
+  await writeFileAtomic(file, next);
   const diffRaw = unifiedDiff(raw, next);
   const diff = diffRaw ? boundedText(diffRaw, EDIT_DIFF_MAX_CHARS).text : undefined;
   return { path: String(args.path), replacements: count, sha256: sha256(next), ...(diff ? { diff } : {}) };
@@ -1175,14 +1188,7 @@ export async function moveFile(args: Args): Promise<unknown> {
   refuseSelfDestruction(source, "move");
   refuseSelfDestruction(destination, "move onto");
   if (args.overwrite === true) await refuseFileOverDirectory(source, destination, args);
-  if (args.overwrite !== true) {
-    try {
-      await fs.lstat(destination);
-      throw new Error("Destination already exists; set overwrite=true to replace it.");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-  }
+  if (args.overwrite !== true) await refuseExistingDestination(destination);
   await fs.mkdir(path.dirname(destination), { recursive: true });
   if (args.overwrite === true) {
     // Safe overwrite order: never delete the destination BEFORE the rename.
@@ -1238,14 +1244,7 @@ export async function copyFile(args: Args): Promise<unknown> {
   // silences and answers success — the deletion-less twin of "move onto",
   // aimed at exactly the ground this guard exists for.
   refuseSelfDestruction(destination, "copy onto");
-  if (args.overwrite !== true) {
-    try {
-      await fs.lstat(destination);
-      throw new Error("Destination already exists; set overwrite=true to replace it.");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-  }
+  if (args.overwrite !== true) await refuseExistingDestination(destination);
   await fs.mkdir(path.dirname(destination), { recursive: true });
   await fs.cp(source, destination, { recursive: true, force: args.overwrite === true });
   return { source: String(args.source), destination: String(args.destination) };
@@ -1286,6 +1285,6 @@ export async function applyPatchTool(args: Args): Promise<unknown> {
   const patchText =
     source.kind === "inline" ? source.content : await fs.readFile(await securePath(source.path), "utf8");
   const { changed, changes } = await applyPatchFile(patchText, workspaceContext, hashes,
-    (f, c) => persistText(f, c));
+    (f, c) => writeFileAtomic(f, c));
   return { applied: true, files: changed, changes };
 }
