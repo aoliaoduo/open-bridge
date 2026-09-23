@@ -14,7 +14,7 @@
  * render, which re-resolves and would otherwise overwrite an applied language.
  */
 import { beforeEach } from "vitest";
-import { applyLang } from "./ui/src/i18n";
+import { applyLang } from "../ui/src/i18n";
 
 beforeEach(() => {
   window.localStorage.setItem("openBridge.console.lang", "zh");

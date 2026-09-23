@@ -14,7 +14,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["ui/src/**/*.test.{ts,tsx}"],
-    setupFiles: ["./vitest.setup.ts"],
+    // Setup path is relative to the repo root (vitest root defaults to cwd,
+  // not to this file) — do not "simplify" it back to ./vitest.setup.ts.
+  setupFiles: ["./config/vitest.setup.ts"],
     restoreMocks: true,
   },
 });
