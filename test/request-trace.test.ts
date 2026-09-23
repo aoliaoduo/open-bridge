@@ -10,8 +10,8 @@ import {
   traceId,
   tracedFormat,
   tracedMethod,
-} from "../src/bridge/request-trace.js";
-import type { ExchangeOutcome } from "../src/bridge/request-trace.js";
+} from "../src/bridge/mcp/request-trace.js";
+import type { ExchangeOutcome } from "../src/bridge/mcp/request-trace.js";
 
 const base: ExchangeOutcome = {
   method: "tools/call",

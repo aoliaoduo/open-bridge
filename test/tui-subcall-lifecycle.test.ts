@@ -3,9 +3,9 @@ import { beforeEach, test } from "node:test";
 import { setHost, type Host } from "../src/host/host.js";
 import { state } from "../src/bridge/state.js";
 import { invoke } from "../src/bridge/dispatcher.js";
-import { batchTool } from "../src/bridge/batch.js";
-import { runScript } from "../src/bridge/script-tools.js";
-import { buildArgsSummary } from "../src/bridge/args-summary.js";
+import { batchTool } from "../src/bridge/tools/batch.js";
+import { runScript } from "../src/bridge/tools/script-tools.js";
+import { buildArgsSummary } from "../src/bridge/tools/args-summary.js";
 import { buildSnapshot } from "../src/console/tui/snapshot.js";
 
 const memoryHost: Host = {

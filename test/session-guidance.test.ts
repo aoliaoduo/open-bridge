@@ -18,7 +18,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { legacySessionProblem } from "../src/bridge/session-guidance.js";
+import { legacySessionProblem } from "../src/bridge/mcp/session-guidance.js";
 
 test("initialize is never refused: it is the way out of both failures", () => {
   assert.equal(legacySessionProblem({ method: "initialize", hasSessionId: false, known: false }), undefined);

@@ -43,9 +43,9 @@ runtime behavior at the MCP boundary:
 
 | Concern | Implementation / verification |
 | --- | --- |
-| Canonical catalog and profiles | `src/bridge/tool-catalog.ts`, `src/bridge/tool-families.ts` |
+| Canonical catalog and profiles | `src/bridge/tools/tool-catalog.ts`, `src/bridge/tools/tool-families.ts` |
 | Published input/output contracts | `src/mcp/tool-definitions.ts`, `test/tool-output-shapes.test.ts`, protocol integration suites |
-| Shared protocol result construction | `src/bridge/mcp-endpoint.ts` |
+| Shared protocol result construction | `src/bridge/mcp/mcp-endpoint.ts` |
 | Orientation, grouped inspection, row failure and script projection | `test/mcp-protocol-integration.test.mjs` |
 | Both protocol generations | `test/mcp-protocol-integration.test.mjs`, `test/mcp-modern-protocol-integration.test.mjs` |
 | Read continuation and incomplete search | `test/read-files-continuation.test.ts`, `test/search-partial.test.ts` |

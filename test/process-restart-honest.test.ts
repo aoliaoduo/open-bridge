@@ -9,9 +9,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { installNodeHost } from "../src/host/node-host.js";
-import { restartProcess } from "../src/bridge/process-tools.js";
+import { restartProcess } from "../src/bridge/tools/process-tools.js";
 import { state } from "../src/bridge/state.js";
-import type { CommandState } from "../src/bridge/processes.js";
+import type { CommandState } from "../src/bridge/runtime/processes.js";
 
 let home: string;
 

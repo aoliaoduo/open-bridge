@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { autoShell, detectShells } from "../src/shell/shell-provider.js";
-import { detectNgrok } from "../src/bridge/ngrok-locate.js";
+import { detectNgrok } from "../src/bridge/tunnel/ngrok-locate.js";
 import { findOnPath } from "../src/shell/which.js";
 
 /**

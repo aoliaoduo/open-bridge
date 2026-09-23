@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as path from "node:path";
-import { deriveLockPlan, type LockPlanContext } from "../src/bridge/lock-plan.js";
+import { deriveLockPlan, type LockPlanContext } from "../src/bridge/tools/lock-plan.js";
 
 const ROOT = path.resolve("C:/ws");
 

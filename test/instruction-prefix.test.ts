@@ -21,12 +21,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setHost, type Host } from "../src/host/host.js";
 import { TOOL_DEFINITIONS } from "../src/mcp/tool-definitions.js";
-import { listToolDefinitions } from "../src/bridge/tool-catalog.js";
+import { listToolDefinitions } from "../src/bridge/tools/tool-catalog.js";
 import {
   SERVER_INSTRUCTIONS_BASE,
   measurePrefix,
   serverInstructions,
-} from "../src/bridge/instruction-prefix.js";
+} from "../src/bridge/mcp/instruction-prefix.js";
 
 let dir: string;
 

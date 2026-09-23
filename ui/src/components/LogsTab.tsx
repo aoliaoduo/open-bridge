@@ -7,7 +7,7 @@ import { Field } from "./Field";
 
 type Level = "error" | "warn" | "info" | "";
 
-/** Mirrors the server's CONFIG_SPEC bound (src/bridge/config-values.ts) so a
+/** Mirrors the server's CONFIG_SPEC bound (src/bridge/config/config-values.ts) so a
  *  value the UI accepts never comes back as an inscrutable 400. */
 const LOG_MAX_BYTES = { min: 0, max: 1_073_741_824 } as const;
 

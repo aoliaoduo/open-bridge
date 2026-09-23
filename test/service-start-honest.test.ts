@@ -9,8 +9,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { installNodeHost } from "../src/host/node-host.js";
-import { startAllServices, startService } from "../src/bridge/service-tools.js";
-import { terminateProcess } from "../src/bridge/processes.js";
+import { startAllServices, startService } from "../src/bridge/tools/service-tools.js";
+import { terminateProcess } from "../src/bridge/runtime/processes.js";
 import { state, type ServiceDefinition } from "../src/bridge/state.js";
 
 let home: string;

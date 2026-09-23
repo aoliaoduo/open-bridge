@@ -5,7 +5,7 @@ import {
   normalizeSettingsMessage,
   ttlLabel,
   TTL_CHOICES,
-} from "../src/bridge/settings-model.js";
+} from "../src/bridge/config/settings-model.js";
 
 // --- message normalization -------------------------------------------------
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { markTransportInitialized } from "../src/bridge/session-resume.js";
+import { markTransportInitialized } from "../src/bridge/sessions/session-resume.js";
 
 test("markTransportInitialized stamps the SDK inner session so the public getter sees it", () => {
   const id = "ab".repeat(16);

@@ -11,7 +11,7 @@
  *  - Mutation gate: every POST also requires the X-Open-Bridge-Console header
  *    matching the route token. A cross-origin page cannot read the token (these
  *    surfaces get no CORS grant — see the per-path `corsGrant` block in
- *    `src/bridge/http-listener.ts`, which is what enforces this) and cannot even
+ *    `src/bridge/mcp/http-listener.ts`, which is what enforces this) and cannot even
  *    SEND the header without a preflight we never answer — CSRF is dead by
  *    construction. The console HTML (loopback-only) has the token injected
  *    server-side.
@@ -28,21 +28,21 @@ import * as fs from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { listSkills } from "../bridge/skills.js";
+import { listSkills } from "../bridge/tools/skills.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { state } from "../bridge/state.js";
-import { getBridgeStatus, getUsageStats } from "../bridge/meta-tools.js";
+import { getBridgeStatus, getUsageStats } from "../bridge/tools/meta-tools.js";
 import { buildSettingsState, buildTunnelView, handleSettingsAction } from "./settings-handler.js";
-import { controlService, listServiceViews } from "../bridge/service-tools.js";
-import { start, stop, webAiPrompt } from "../bridge/lifecycle.js";
-import { buildStaleness } from "../bridge/build-staleness.js";
-import { selfProbe } from "../bridge/self-probe.js";
+import { controlService, listServiceViews } from "../bridge/tools/service-tools.js";
+import { start, stop, webAiPrompt } from "../bridge/lifecycle/lifecycle.js";
+import { buildStaleness } from "../bridge/lifecycle/build-staleness.js";
+import { selfProbe } from "../bridge/lifecycle/self-probe.js";
 import { authEnabled } from "../http/auth.js";
 import { nodeHost } from "../host/node-host.js";
 import { redactSensitiveText } from "../bridge/state.js";
-import { lockSnapshot } from "../bridge/resource-locks.js";
+import { lockSnapshot } from "../bridge/runtime/resource-locks.js";
 import { loadTodoStore } from "../bridge/todo-store.js";
-import { listToolDefinitions } from "../bridge/tool-catalog.js";
+import { listToolDefinitions } from "../bridge/tools/tool-catalog.js";
 import { CORE_TOOLS } from "../mcp/tool-definitions.js";
 import { handleOAuthRequest, oauthConsoleView } from "../http/oauth.js";
 import { sendJson } from "../http/json-response.js";

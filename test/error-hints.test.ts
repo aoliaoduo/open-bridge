@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { availableHint, suggestNames, suggestionHint } from "../src/bridge/error-hints.js";
+import { availableHint, suggestNames, suggestionHint } from "../src/bridge/tools/error-hints.js";
 
 test("availableHint lists current values so clients can self-correct", () => {
   assert.equal(availableHint("Active command ids", ["a1", "b2"]), " Active command ids: a1, b2.");

@@ -1,7 +1,7 @@
 /** In-flight modern requests are activity; the settle clock starts at completion. */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { finishNoticeVerdict, latestSessionActivity } from "../src/bridge/notify.js";
+import { finishNoticeVerdict, latestSessionActivity } from "../src/bridge/tools/notify.js";
 import { state } from "../src/bridge/state.js";
 
 function reset(): void {

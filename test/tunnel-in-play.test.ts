@@ -15,7 +15,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { tunnelInPlay } from "../src/bridge/peer-registry.js";
+import { tunnelInPlay } from "../src/bridge/tunnel/peer-registry.js";
 
 test("ngrok needs a domain to be a tunnel: without one there is nothing to serve", () => {
   assert.equal(tunnelInPlay("ngrok", "fixture.ngrok-free.dev", ""), true);

@@ -11,8 +11,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { validateConfigValue } from "../src/bridge/config-values.js";
-import { normalizeSettingsMessage } from "../src/bridge/settings-model.js";
+import { validateConfigValue } from "../src/bridge/config/config-values.js";
+import { normalizeSettingsMessage } from "../src/bridge/config/settings-model.js";
 
 const ok = (key: string, value: unknown): unknown => {
   const result = validateConfigValue(key, value);
@@ -142,7 +142,7 @@ test("the Bark test button asks for a silent-locally push", () => {
 });
 
 test("pushNotification honours silentLocally without coupling sound to Bark", () => {
-  const notify = readFileSync(path.join(process.cwd(), "src/bridge/notify.ts"), "utf8");
+  const notify = readFileSync(path.join(process.cwd(), "src/bridge/tools/notify.ts"), "utf8");
   const call = notify.indexOf("playAlertSound(soundFile)");
   assert.ok(call > 0, "the send path must still play a sound");
   assert.match(

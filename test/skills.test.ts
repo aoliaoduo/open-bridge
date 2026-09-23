@@ -14,7 +14,7 @@ import * as path from "node:path";
 import {
   MAX_DESCRIPTION_CHARS, MAX_SKILLS, SKILL_FILE,
   discoverSkills, parseSkillFile, skillDirs, skillsIndexSuffix,
-} from "../src/bridge/skills.js";
+} from "../src/bridge/tools/skills.js";
 
 function workspace(): string {
   return mkdtempSync(path.join(tmpdir(), "ob-skills-"));

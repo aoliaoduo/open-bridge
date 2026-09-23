@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { detectCliLang } from "../src/bridge/cli-i18n.js";
+import { detectCliLang } from "../src/cli/cli-i18n.js";
 
 /**
  * The CLI is the first thing a new user runs, so its language choice is pinned

@@ -14,7 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOOL_DEFINITIONS } from "../src/mcp/tool-definitions.js";
-import { CONFIG_DEFAULTS } from "../src/bridge/config-defaults.js";
+import { CONFIG_DEFAULTS } from "../src/bridge/config/config-defaults.js";
 
 type Schema = {
   type?: string | string[];

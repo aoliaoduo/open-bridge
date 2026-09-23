@@ -12,19 +12,19 @@ AI 客户端负责推理、选择工具与编排工作；Bridge 负责真实执�
 
 | 位置 | 实际职责 |
 | --- | --- |
-| `src/cli.ts`、`src/cli/` | CLI 入口、参数、实例定位、检查和本地管理命令。 |
+| `src/cli.ts`、`src/cli/` | CLI 入口、参数、语言、实例定位、检查和本地管理命令。 |
 | `src/host/host.ts` | 唯一的宿主接口：配置、持久化、日志、UI 通知等共享能力。 |
 | `src/host/node-host.ts` | 文件版宿主实现；仅由 CLI 和控制台 API 安装或访问具体实现。 |
-| `src/bridge/http-listener.ts` | HTTP 监听、Host/CORS/认证边界、健康路由、对等转发，以及两代 MCP 请求分流。 |
-| `src/bridge/mcp-endpoint.ts` | 两代 MCP 的发现/初始化、说明注入、工具调用适配及共享结果构造。 |
-| `src/bridge/tool-catalog.ts`、`src/bridge/tool-families.ts` | 工具档过滤、规范工具名和兼容别名归一化。 |
-| `src/bridge/dispatcher.ts`、`src/bridge/lock-plan.ts` | 调用分发、输入检查、资源锁计划、审计和统计。 |
-| `src/bridge/` 的工具与生命周期模块 | 文件/进程/服务/脚本工具执行，会话、任务、通知、隧道和启停编排。 |
+| `src/bridge/mcp/http-listener.ts` | HTTP 监听、Host/CORS/认证边界、健康路由、对等转发，以及两代 MCP 请求分流。 |
+| `src/bridge/mcp/mcp-endpoint.ts` | 两代 MCP 的发现/初始化、说明注入、工具调用适配及共享结果构造。 |
+| `src/bridge/tools/tool-catalog.ts`、`src/bridge/tools/tool-families.ts` | 工具档过滤、规范工具名和兼容别名归一化。 |
+| `src/bridge/dispatcher.ts`、`src/bridge/tools/lock-plan.ts` | 调用分发、输入检查、资源锁计划、审计和统计。 |
+| `src/bridge/` | 子目录按子系统划分：`tools/` 工具执行与编排、`runtime/` 受监管进程与服务、`sessions/` 会话、`tunnel/` 隧道、`lifecycle/` 启停、`mcp/` 协议接入、`config/` 配置；根下只留共享内核（`state.ts`、`dispatcher.ts`、`paths.ts` 等）。 |
 | `src/mcp/` | 工具 schema，以及 glob、搜索、流式读取、补丁、diff 等算法；不是 HTTP 协议入口。 |
 | `src/http/` | 个人令牌与 OAuth、请求体/响应、安全策略和对等实例通信。 |
 | `src/workspace/` | 工作区上下文、路径、换行、文件版本和持久化辅助。 |
-| `src/shell/`、`src/process/` | Shell 选择/参数/标记，以及进程输出缓冲、游标、ANSI 和捕获；工具入口在 `src/bridge/`。 |
-| `src/network/` | 安全网络探测与网络/ngrok 错误分类；隧道生命周期在 `src/bridge/`。 |
+| `src/shell/`、`src/process/` | Shell 选择/参数/标记，以及进程输出缓冲、游标、ANSI 和捕获，子进程控制台隐藏；工具入口在 `src/bridge/tools/`。 |
+| `src/network/` | 安全网络探测与网络/ngrok 错误分类；隧道生命周期在 `src/bridge/tunnel/`。 |
 | `src/server/` | 本机控制台 API、设置处理与静态 UI 路由。 |
 | `ui/src/` | React 控制台及其 UI 测试；Vite 产物进入 `dist/ui/`。 |
 | `test/` | 核心单元测试和会启动真实进程的协议/集成测试，不包含 UI 测试。 |
@@ -60,7 +60,7 @@ AI 客户端负责推理、选择工具与编排工作；Bridge 负责真实执�
 - `unrestrictedFileAccess` 默认开启：工作区固定相对路径的含义，但不是文件系统沙箱。关闭该设置时才按允许目录限制访问；删除/移动工作区根、数据目录或盘根的自毁护栏另行存在。
 - 密钥掩码、路径保护、运行时守卫和兼容输入不能因为“看起来多余”而删除。完整威胁模型见 [SECURITY.md](../SECURITY.md)。
 
-隧道由 `src/bridge/` 管理：ngrok 使用受监管子进程，Tailscale Funnel 使用本机守护进程；实例可以通过共享注册表跟随同机隧道持有者。两种提供商的生命周期并不相同，不能用一次返回的成功布尔值替代实际健康状态。
+隧道由 `src/bridge/tunnel/` 管理：ngrok 使用受监管子进程，Tailscale Funnel 使用本机守护进程；实例可以通过共享注册表跟随同机隧道持有者。两种提供商的生命周期并不相同，不能用一次返回的成功布尔值替代实际健康状态。
 
 ## 6. 通知与控制台
 
@@ -68,7 +68,7 @@ AI 客户端负责推理、选择工具与编排工作；Bridge 负责真实执�
 
 遗漏显式结束通知时，兜底只在连续十分钟无 Bridge 可观察活动、且没有 in-flight MCP 请求后触发一次。这是启发式，不证明模型或外部任务已经结束。
 
-控制台通过相对 URL 调用同一进程的 API，和 CLI、MCP 共用配置与状态，不另行实现工具逻辑。默认 `full` 工具档和可选 `core` 子集由 `src/bridge/tool-catalog.ts` 决定。
+控制台通过相对 URL 调用同一进程的 API，和 CLI、MCP 共用配置与状态，不另行实现工具逻辑。默认 `full` 工具档和可选 `core` 子集由 `src/bridge/tools/tool-catalog.ts` 决定。
 
 ## 7. 构建、验证与维护
 

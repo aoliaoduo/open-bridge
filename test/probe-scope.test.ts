@@ -19,7 +19,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { probeScope } from "../src/bridge/service-tools.js";
+import { probeScope } from "../src/bridge/tools/service-tools.js";
 import { DEFAULT_PROBE_NETWORK_SCOPE, isAddressAllowed } from "../src/network/safe-probe.js";
 
 test("an omitted scope gets the safe default, never the permissive one", () => {

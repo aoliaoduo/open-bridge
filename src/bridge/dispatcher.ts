@@ -1,8 +1,8 @@
 import { createActivityId, record, state, redactSensitiveText, type SessionState } from "./state.js";
 import { host } from "../host/host.js";
 import { persistUsageStats } from "./usage-store.js";
-import { deriveLockPlan, type LockPlanContext } from "./lock-plan.js";
-import { acquireLocks, DEFAULT_HOLD_TIMEOUT_MS, DEFAULT_WAIT_TIMEOUT_MS, type LockRelease } from "./resource-locks.js";
+import { deriveLockPlan, type LockPlanContext } from "./tools/lock-plan.js";
+import { acquireLocks, DEFAULT_HOLD_TIMEOUT_MS, DEFAULT_WAIT_TIMEOUT_MS, type LockRelease } from "./runtime/resource-locks.js";
 import { workspaceContext } from "./state.js";
 import { patchTargetPaths } from "../mcp/patch.js";
 
@@ -18,31 +18,31 @@ const LOCK_CONTEXT: LockPlanContext = {
 import {
   listDirectory, findFiles, searchFiles, readFiles, writeFile, editBlock,
   getFileInfo, applyPatchTool,
-} from "./file-tools.js";
+} from "./tools/file-tools.js";
 import {
   runOrStartProcess, readProcessOutput, interactWithProcess,
   setProcessPolicy, getProcessSnapshot, setTodos,
-} from "./process-tools.js";
-import { saveService, readServiceLogTool } from "./service-tools.js";
-import { batchTool } from "./batch.js";
-import { runScript } from "./script-tools.js";
-import { buildArgsSummary } from "./args-summary.js";
-import { reviewChanges } from "./review.js";
+} from "./tools/process-tools.js";
+import { saveService, readServiceLogTool } from "./tools/service-tools.js";
+import { batchTool } from "./tools/batch.js";
+import { runScript } from "./tools/script-tools.js";
+import { buildArgsSummary } from "./tools/args-summary.js";
+import { reviewChanges } from "./tools/review.js";
 import {
   getConfig, setConfigValue, getUsageStats,
   reportProgress, getTodos, workspaceBrief,
-} from "./meta-tools.js";
-import { sendToShell, closeShell } from "./shell-sessions.js";
+} from "./tools/meta-tools.js";
+import { sendToShell, closeShell } from "./runtime/shell-sessions.js";
 import {
   activityLogFamily, bridgeStatusFamily, connectivityFamily, fileOpFamily,
   openShellFamily, processControlFamily, serviceFamily, serviceStatusFamily, waitFamily,
-} from "./tool-families.js";
-import { normalizeToolCall, type CanonicalCall } from "./tool-call-shape.js";
-import { listSkills } from "./skills.js";
-import { beginNotificationEpisode, notifyTool } from "./notify.js";
-import { enrichFsError, suggestionHint } from "./error-hints.js";
+} from "./tools/tool-families.js";
+import { normalizeToolCall, type CanonicalCall } from "./tools/tool-call-shape.js";
+import { listSkills } from "./tools/skills.js";
+import { beginNotificationEpisode, notifyTool } from "./tools/notify.js";
+import { enrichFsError, suggestionHint } from "./tools/error-hints.js";
 import { failureLine } from "./failure-line.js";
-import type { JsonArgs } from "./json-args.js";
+import type { JsonArgs } from "./tools/json-args.js";
 
 type Args = JsonArgs;
 type Handler = (args: Args, session?: SessionState) => unknown | Promise<unknown>;

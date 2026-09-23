@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setHost, type Host } from "../src/host/host.js";
-import { searchFiles } from "../src/bridge/file-tools.js";
+import { searchFiles } from "../src/bridge/tools/file-tools.js";
 
 const dir = mkdtempSync(path.join(tmpdir(), "ob-search-partial-"));
 const fakeRg = path.join(dir, "fake-rg");

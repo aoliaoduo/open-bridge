@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { describeToolError } from "../src/bridge/tool-error.js";
+import { describeToolError } from "../src/bridge/tools/tool-error.js";
 
 test("P7 input-error prose has stable typed details", () => {
   assert.deepEqual(

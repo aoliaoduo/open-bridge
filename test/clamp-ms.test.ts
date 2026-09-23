@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clampMs } from "../src/bridge/process-tools.js";
+import { clampMs } from "../src/bridge/tools/process-tools.js";
 
 // MCP arguments are LLM-generated: a "30s" string, a null, or a negative all
 // reach the handlers. The raw Math.max(Number(x), 0) pattern passed NaN

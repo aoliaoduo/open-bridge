@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildStaleness, evaluateBuildStaleness, newestJsMtimeMs, staleBuildAdvice } from "../src/bridge/build-staleness.js";
+import { buildStaleness, evaluateBuildStaleness, newestJsMtimeMs, staleBuildAdvice } from "../src/bridge/lifecycle/build-staleness.js";
 
 /** Whole seconds, so the assertion does not depend on filesystem precision. */
 const stamp = (path: string, seconds: number): void => utimesSync(path, seconds, seconds);

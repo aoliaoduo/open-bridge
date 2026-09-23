@@ -10,7 +10,7 @@ import {
   sessionTicket,
   touchSessionTicket,
   pruneSessionTickets,
-} from "../src/bridge/session-store.js";
+} from "../src/bridge/sessions/session-store.js";
 
 const bag = new Map<string, unknown>();
 

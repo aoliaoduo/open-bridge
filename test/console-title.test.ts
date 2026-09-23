@@ -1,5 +1,5 @@
 /**
- * Unit tests for the console-title pin (src/bridge/console-title.ts).
+ * Unit tests for the console-title pin (src/bridge/lifecycle/console-title.ts).
  *
  * The property under test is deliberately dull: whatever a child writes into the
  * shared console title, this instance can put its own back — and it never touches
@@ -12,7 +12,7 @@ import { test } from "node:test";
 
 import {
   TITLE_PREFIX, buildServeTitle, clearServeConsoleTitle, installServeConsoleTitle, reassertServeConsoleTitle,
-} from "../src/bridge/console-title.js";
+} from "../src/bridge/lifecycle/console-title.js";
 
 test("the title says what the window is and which workspace it serves", () => {
   assert.equal(buildServeTitle("open-bridge-app", 18080), "Open Bridge - open-bridge-app (:18080)");

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {processHasConsole, windowsHideForChild} from "../src/bridge/child-console.js";
+import {processHasConsole, windowsHideForChild} from "../src/process/child-console.js";
 
 /**
  * A console window close terminates exactly the processes attached to that

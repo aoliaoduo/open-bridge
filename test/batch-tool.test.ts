@@ -7,8 +7,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { batchTool } from "../src/bridge/batch.js";
-import type { JsonArgs } from "../src/bridge/json-args.js";
+import { batchTool } from "../src/bridge/tools/batch.js";
+import type { JsonArgs } from "../src/bridge/tools/json-args.js";
 
 test("calls must be an array of 1..20 entries", async () => {
   await assert.rejects(() => batchTool({} as JsonArgs), /calls must be an array of 1\.\.20/);

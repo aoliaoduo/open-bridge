@@ -19,8 +19,8 @@
 
 import assert from "node:assert/strict";
 import test, { beforeEach } from "node:test";
-import { acquireLocks, lockSnapshot, resetLocks } from "../src/bridge/resource-locks.js";
-import { cancelPendingRestart, terminateProcess, type CommandState } from "../src/bridge/processes.js";
+import { acquireLocks, lockSnapshot, resetLocks } from "../src/bridge/runtime/resource-locks.js";
+import { cancelPendingRestart, terminateProcess, type CommandState } from "../src/bridge/runtime/processes.js";
 
 const FAST = { holdTimeoutMs: 5_000, waitTimeoutMs: 200 };
 

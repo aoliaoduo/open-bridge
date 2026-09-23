@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {armShutdownDeadline, SHUTDOWN_DEADLINE_MS} from "../src/bridge/shutdown-deadline.js";
+import {armShutdownDeadline, SHUTDOWN_DEADLINE_MS} from "../src/bridge/lifecycle/shutdown-deadline.js";
 
 /**
  * "stop" has to end with a dead process even when a step inside the graceful

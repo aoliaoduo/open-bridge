@@ -484,9 +484,9 @@ function normalizePort(port: number): number {
  * that better than 1ms does.
  *
  * Kept local on purpose: 2^31-1 is the setTimeout cap, and the canonical copy
- * lives in src/bridge/process-tools.ts (MAX_TIMER_MS) — but src/network does
+ * lives in src/bridge/tools/process-tools.ts (MAX_TIMER_MS) — but src/network does
  * not import src/bridge modules, so this file restates the literal instead.
- * The third copy is src/bridge/config-values.ts, browser-bundle-bound and
+ * The third copy is src/bridge/config/config-values.ts, browser-bundle-bound and
  * therefore dependency-free by design. Change all three together.
  */
 const MAX_TIMER_MS = 2_147_483_647;

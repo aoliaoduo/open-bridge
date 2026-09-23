@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url";
 import { CORE_TOOLS, TOOL_DEFINITIONS } from "../src/mcp/tool-definitions.js";
 import {
   FAMILY_ACTIONS, FAMILY_PARAMS, LEGACY_REWRITES, legacyToolNames, normalizeToolCall,
-} from "../src/bridge/tool-call-shape.js";
+} from "../src/bridge/tools/tool-call-shape.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");

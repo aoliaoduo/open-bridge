@@ -17,7 +17,7 @@ import type {
 // Straight from the shared declaration, not restated here: the fixtures below
 // run the SAME planner the server executes, which is also how this file proves
 // the module bundles for the browser at all.
-import { planTunnelAutoConfig, type TunnelFacts } from "../../src/bridge/tunnel-plan.js";
+import { planTunnelAutoConfig, type TunnelFacts } from "../../src/bridge/tunnel/tunnel-plan.js";
 
 const mocks = vi.hoisted(() => ({
   status: vi.fn(),

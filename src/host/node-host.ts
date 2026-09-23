@@ -19,7 +19,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
+import { CONFIG_DEFAULTS } from "../bridge/config/config-defaults.js";
 import {
   host as active,
   setHost,

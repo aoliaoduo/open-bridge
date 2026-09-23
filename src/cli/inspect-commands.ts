@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
 
-import { t } from "../bridge/cli-i18n.js";
+import { t } from "./cli-i18n.js";
 import { fail, type ParsedArgs } from "./args.js";
 import { padLabel } from "./format.js";
 import {

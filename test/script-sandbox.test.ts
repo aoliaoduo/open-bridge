@@ -1,5 +1,5 @@
 /**
- * Unit tests for `run_script`'s Code Mode sandbox (src/bridge/script-sandbox.ts).
+ * Unit tests for `run_script`'s Code Mode sandbox (src/bridge/tools/script-sandbox.ts).
  *
  * These run the real worker and the real `vm` context — a fake tool table stands
  * in for the dispatcher, so what is exercised is the sandbox contract itself:
@@ -23,7 +23,7 @@ import {
   scriptFailureHint,
   truncateScriptText,
   type ScriptRunEnvelope,
-} from "../src/bridge/script-sandbox.js";
+} from "../src/bridge/tools/script-sandbox.js";
 
 interface Harness {
   calls: Array<{ name: string; args: Record<string, unknown> }>;

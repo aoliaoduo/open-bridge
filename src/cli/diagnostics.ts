@@ -23,11 +23,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
+import { CONFIG_DEFAULTS } from "../bridge/config/config-defaults.js";
 import { FAILURE_LINE_PATTERN } from "../bridge/failure-line.js";
 import { MAX_AUDIT_LOG_BYTES, ROUTE_TOKEN_KEY } from "../bridge/state.js";
 import { pidAlive, resolveHome, RUNTIME_FILE, SERVE_LOCK_FILE } from "./registry.js";
-import { t } from "../bridge/cli-i18n.js";
+import { t } from "./cli-i18n.js";
 import { fail, type ParsedArgs } from "./args.js";
 import { VERSION } from "./version.js";
 

@@ -1,5 +1,5 @@
 /**
- * Unit tests for the self-stop guard (see src/bridge/stop-guard.ts): the marker
+ * Unit tests for the self-stop guard (see src/bridge/lifecycle/stop-guard.ts): the marker
  * a serving process stamps into its children, and the exact conditions under
  * which `stop` refuses to kill the instance that issued the command.
  */
@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { HOST_PID_ENV, markHostProcess, selfStopRefusal } from "../src/bridge/stop-guard.js";
+import { HOST_PID_ENV, markHostProcess, selfStopRefusal } from "../src/bridge/lifecycle/stop-guard.js";
 
 const CONSOLE = "http://127.0.0.1:18080/console/";
 

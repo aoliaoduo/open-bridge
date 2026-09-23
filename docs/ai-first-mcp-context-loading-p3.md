@@ -17,7 +17,7 @@ not current product guarantees.
 | 2026-07-28 generation, stateless | `tools/call` | The requested result, without repeating discovery instructions. |
 
 Both generations share `serverInstructions()` and result construction in
-`src/bridge/mcp-endpoint.ts`. The Bridge does not attach the complete catalog
+`src/bridge/mcp/mcp-endpoint.ts`. The Bridge does not attach the complete catalog
 to ordinary tool results. The client decides how often to discover/list,
 what to cache, and what to include in a model turn.
 
@@ -35,7 +35,7 @@ files concise and accurate rather than duplicating the tool reference.
 `toolProfile` is a per-Bridge setting, not automatic client/task negotiation.
 `full` remains the default; `core` is an opt-in subset and omits capabilities
 such as named-service orchestration. The actual membership is maintained in
-`src/bridge/tool-catalog.ts`; use `tools/list` to inspect the running instance.
+`src/bridge/tools/tool-catalog.ts`; use `tools/list` to inspect the running instance.
 
 Per-tool descriptions have a 200-character budget, enforced by
 `test/tool-descriptions.test.ts`. Detailed behavior belongs in

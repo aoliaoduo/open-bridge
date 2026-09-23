@@ -9,7 +9,7 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync, statSync, rmSync 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { installNodeHost, nodeHost } from "../src/host/node-host.js";
-import { CONFIG_DEFAULTS } from "../src/bridge/config-defaults.js";
+import { CONFIG_DEFAULTS } from "../src/bridge/config/config-defaults.js";
 
 let home: string;
 

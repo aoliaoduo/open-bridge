@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { probeTailscaleDomain, resolveTailscaleExecutable } from "../src/bridge/tailscale-locate.js";
+import { probeTailscaleDomain, resolveTailscaleExecutable } from "../src/bridge/tunnel/tailscale-locate.js";
 
 const WIN = process.platform === "win32";
 

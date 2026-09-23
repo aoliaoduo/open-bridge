@@ -10,7 +10,7 @@ import {
   normalizeCategory,
   normalizeLevel,
   normalizePhase,
-} from "../src/bridge/progress-vocabulary.js";
+} from "../src/bridge/tools/progress-vocabulary.js";
 
 test("the vocabularies are non-empty, unique and lowercase", () => {
   for (const list of [PROGRESS_PHASES, PROGRESS_CATEGORIES, PROGRESS_LEVELS]) {

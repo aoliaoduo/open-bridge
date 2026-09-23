@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateConfigValue } from "../src/bridge/config-values.js";
+import { validateConfigValue } from "../src/bridge/config/config-values.js";
 
 const ok = (key: string, value: unknown): unknown => {
   const checked = validateConfigValue(key, value);

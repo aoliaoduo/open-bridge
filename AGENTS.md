@@ -21,7 +21,7 @@
 - 必填参数缺失时点名字段；非法值交给对应校验器。保留有意义的空值、默认值和既有合法范围，共享入口复用同一校验逻辑。
 - 数值先确认有限性；`Math.max(0, Number(x))` 不能修复 `NaN`。安全边界无法判断时拒绝，不能回落成“允许”。
 - 核心和 UI 已启用 `noUncheckedIndexedAccess`。优先消除不必要的索引；兜底必须语义正确，非空断言要有依据。外部输入仍需运行时检查，不因静态类型或 lint 判断删除真守卫。
-- 自检本进程 HTTP 使用 `src/bridge/self-probe.ts` 的 `selfProbe()`，不要用 keep-alive `fetch` 打自己的监听器；后者曾导致 Windows 停机句柄崩溃。
+- 自检本进程 HTTP 使用 `src/bridge/lifecycle/self-probe.ts` 的 `selfProbe()`，不要用 keep-alive `fetch` 打自己的监听器；后者曾导致 Windows 停机句柄崩溃。
 
 ## 编辑与交付
 

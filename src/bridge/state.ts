@@ -281,7 +281,12 @@ export function redactSensitiveText(value: string): string {
 }
 
 export function auditLogPath(): string | undefined {
-  return path.join(host().storageDir(), "audit.log");
+  const dir = host().storageDir();
+  // An empty storage dir means "no disk sink" (unit-test fixtures): without
+  // this, path.join("", "audit.log") lands in the process cwd and every test
+  // run litters the caller's directory with an audit.log.
+  if (!dir) return undefined;
+  return path.join(dir, "audit.log");
 }
 
 async function appendAuditEntry(entry: Omit<Activity, "at"> & { at: string }): Promise<void> {

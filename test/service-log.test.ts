@@ -8,7 +8,7 @@ import {
   sanitizeServiceLogName,
   serviceLogFilePath,
   SERVICE_LOG_MAX_BYTES,
-} from "../src/bridge/service-log.js";
+} from "../src/bridge/runtime/service-log.js";
 
 test("sanitize keeps [a-zA-Z0-9_-] and maps everything else to _", () => {
   assert.equal(sanitizeServiceLogName("api server"), "api_server");

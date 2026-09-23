@@ -1,6 +1,6 @@
 import { t } from "../../i18n";
 
-/** Bounds mirror the server's CONFIG_SPEC (src/bridge/settings-model.ts) so a
+/** Bounds mirror the server's CONFIG_SPEC (src/bridge/config/settings-model.ts) so a
  *  value the UI accepts never comes back as an inscrutable 400. */
 export const NUMBER_BOUNDS = {
   port: { min: 0, max: 65_535, label: () => t("本地端口", "Local port") },

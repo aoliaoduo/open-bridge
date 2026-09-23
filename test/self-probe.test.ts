@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer, type Server } from "node:http";
-import { selfProbe } from "../src/bridge/self-probe.js";
+import { selfProbe } from "../src/bridge/lifecycle/self-probe.js";
 
 async function listen(server: Server): Promise<number> {
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));

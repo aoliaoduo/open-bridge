@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeBatchCalls, runBatchPlan, type BatchCall } from "../src/bridge/batch-plan.js";
+import { normalizeBatchCalls, runBatchPlan, type BatchCall } from "../src/bridge/tools/batch-plan.js";
 
 type Exec = (tool: string, args: Record<string, unknown>) => Promise<unknown>;
 

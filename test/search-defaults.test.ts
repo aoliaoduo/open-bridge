@@ -9,7 +9,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setHost, type Host } from "../src/host/host.js";
-import { listDirectory, searchFiles } from "../src/bridge/file-tools.js";
+import { listDirectory, searchFiles } from "../src/bridge/tools/file-tools.js";
 import { ripgrepAvailable } from "../src/mcp/search-ripgrep.js";
 
 let dir: string;

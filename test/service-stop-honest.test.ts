@@ -14,9 +14,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { installNodeHost } from "../src/host/node-host.js";
-import { restartService, stopService } from "../src/bridge/service-tools.js";
+import { restartService, stopService } from "../src/bridge/tools/service-tools.js";
 import { state, type ServiceDefinition } from "../src/bridge/state.js";
-import type { CommandState } from "../src/bridge/processes.js";
+import type { CommandState } from "../src/bridge/runtime/processes.js";
 
 let home: string;
 

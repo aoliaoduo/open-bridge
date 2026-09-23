@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildArgsSummary, ARGS_SUMMARY_MAX_CHARS } from "../src/bridge/args-summary.js";
+import { buildArgsSummary, ARGS_SUMMARY_MAX_CHARS } from "../src/bridge/tools/args-summary.js";
 
 const identity = (s: string): string => s;
 

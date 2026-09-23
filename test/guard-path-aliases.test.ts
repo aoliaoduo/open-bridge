@@ -22,7 +22,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as path from "node:path";
-import { normalizeGuardPath } from "../src/bridge/file-tools.js";
+import { normalizeGuardPath } from "../src/bridge/tools/file-tools.js";
 
 const IS_WINDOWS = process.platform === "win32";
 const WIN_ROOT = "C:\\projects\\current";

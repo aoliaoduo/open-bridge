@@ -25,9 +25,9 @@ import {
   serviceStatus,
   startService,
   stopService,
-} from "../src/bridge/service-tools.js";
+} from "../src/bridge/tools/service-tools.js";
 import { state, type ServiceDefinition } from "../src/bridge/state.js";
-import { terminateProcess } from "../src/bridge/processes.js";
+import { terminateProcess } from "../src/bridge/runtime/processes.js";
 import type { AddressInfo } from "node:net";
 
 function memoryStateStore(): StateStore & { dump(): Map<string, unknown> } {

@@ -1,5 +1,5 @@
 /**
- * Unit tests for the public-domain watch policy (src/bridge/tunnel-watch.ts):
+ * Unit tests for the public-domain watch policy (src/bridge/tunnel/tunnel-watch.ts):
  * the probe cadence, the consecutive-`free` counter, and the claim gate.
  *
  * The point of these tests is the asymmetry the incident taught: a *healthy*
@@ -14,7 +14,7 @@ import { test } from "node:test";
 import {
   CLAIM_FREE_ROUNDS, WATCH_INTERVAL_HEALTHY_MS, WATCH_INTERVAL_UNHEALTHY_MS,
   nextFreeRounds, shouldClaimDomain, watchIntervalMs,
-} from "../src/bridge/tunnel-watch.js";
+} from "../src/bridge/tunnel/tunnel-watch.js";
 
 test("a healthy tunnel is probed lazily, an unhealthy one quickly", () => {
   assert.equal(watchIntervalMs(true), WATCH_INTERVAL_HEALTHY_MS);

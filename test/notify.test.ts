@@ -13,7 +13,7 @@ import {
   notifyUsageInstructions,
   pushNotification,
   type NotifySettings,
-} from "../src/bridge/notify.js";
+} from "../src/bridge/tools/notify.js";
 
 const KEY = "aaaaaaaaaaaaaaaaaaaaaa";
 const PHONE: NotifySettings = {
@@ -33,7 +33,7 @@ function installHost(config: Record<string, unknown> = {}): void {
     },
     secrets: { async get() { return undefined; }, async store() {} },
     state: { get<T>(_key: string, fallback: T): T { return fallback; }, async update() {} },
-    storageDir: () => ".",
+    storageDir: () => "",
     version: () => "test",
     bundledRipgrep: () => undefined,
     projectRoot: () => ".",

@@ -36,24 +36,24 @@ import {
   type SettingsState,
   type SettingsTunnelView,
   type SettingsTokenRow,
-} from "../bridge/settings-model.js";
-import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
+} from "../bridge/config/settings-model.js";
+import { CONFIG_DEFAULTS } from "../bridge/config/config-defaults.js";
 import { detectShells } from "../shell/shell-provider.js";
-import { detectNgrok } from "../bridge/ngrok-locate.js";
-import { detectTunnelFacts, readNgrokConfigAuthtoken } from "../bridge/tunnel-detect.js";
-import { planTunnelAutoConfig } from "../bridge/tunnel-plan.js";
-import { NGROK_AUTHTOKEN_KEY, setCachedAuthtoken } from "../bridge/tunnel.js";
-import { playAlertSound, stopAlertSound } from "../bridge/sound-alert.js";
+import { detectNgrok } from "../bridge/tunnel/ngrok-locate.js";
+import { detectTunnelFacts, readNgrokConfigAuthtoken } from "../bridge/tunnel/tunnel-detect.js";
+import { planTunnelAutoConfig } from "../bridge/tunnel/tunnel-plan.js";
+import { NGROK_AUTHTOKEN_KEY, setCachedAuthtoken } from "../bridge/tunnel/tunnel.js";
+import { playAlertSound, stopAlertSound } from "../bridge/tools/sound-alert.js";
 import { existsSync } from "node:fs";
-import { maskBarkKey, validateConfigValue } from "../bridge/config-values.js";
-import { NOTIFY_DEFAULT_TITLE, pushNotification, resolveNotifySettings, type NotifyOutcome } from "../bridge/notify.js";
+import { maskBarkKey, validateConfigValue } from "../bridge/config/config-values.js";
+import { NOTIFY_DEFAULT_TITLE, pushNotification, resolveNotifySettings, type NotifyOutcome } from "../bridge/tools/notify.js";
 import * as path from "node:path";
 import { resetUsageStats } from "../bridge/usage-store.js";
 import { host } from "../host/host.js";
 import {
   start, rotateRouteToken, webAiPrompt, republishAfterRotate, restartTunnelForProviderChange,
-} from "../bridge/lifecycle.js";
-import { enqueueLifecycle } from "../bridge/lifecycle-queue.js";
+} from "../bridge/lifecycle/lifecycle.js";
+import { enqueueLifecycle } from "../bridge/lifecycle/lifecycle-queue.js";
 
 type AuthStatusView = { tokens: SettingsTokenRow[] };
 

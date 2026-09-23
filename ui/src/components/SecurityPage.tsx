@@ -10,7 +10,7 @@ import {
 // here let the two drift — this list offered "90 天" (7776000 s), which the
 // server's whitelist rejects, so both selects answered 400 forever. Import,
 // never restate.
-import { TTL_CHOICES } from "../../../src/bridge/settings-model.js";
+import { TTL_CHOICES } from "../../../src/bridge/config/settings-model.js";
 import { EXPOSURE_META } from "../exposure";
 import { errorMessage } from "../format";
 import { t } from "../i18n";

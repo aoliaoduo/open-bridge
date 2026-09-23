@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildArgsSummary } from "../src/bridge/args-summary.js";
+import { buildArgsSummary } from "../src/bridge/tools/args-summary.js";
 import { tuiActivityDetail, tuiActivityMessage } from "../src/console/tui/activity-copy.js";
 import { buildSnapshot, type TuiStateView } from "../src/console/tui/snapshot.js";
 import { renderFrame } from "../src/console/tui/render.js";

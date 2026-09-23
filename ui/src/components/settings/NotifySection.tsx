@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Act, SettingsState } from "../../api";
 import { t } from "../../i18n";
-import { SOUND_EXTENSIONS } from "../../../../src/bridge/config-values.js";
+import { SOUND_EXTENSIONS } from "../../../../src/bridge/config/config-values.js";
 import { Card } from "../Card";
 import { DraftField } from "./DraftField";
 import { SwitchField } from "./SwitchField";
@@ -9,7 +9,7 @@ import { setConfigFor } from "./set-config";
 
 /**
  * The audio-extension list comes from the server's own validator
- * (src/bridge/config-values.ts) rather than being mirrored here — that module
+ * (src/bridge/config/config-values.ts) rather than being mirrored here — that module
  * is deliberately dependency-free (no node builtins), so importing it keeps
  * the browser bundle clean. Reason for sharing the rule at all, same as
  * NUMBER_BOUNDS: the field can revert a value the server is about to refuse,

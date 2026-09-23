@@ -12,7 +12,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { reviewChanges } from "../../bridge/review.js";
+import { reviewChanges } from "../../bridge/tools/review.js";
 import { parseNumstat } from "../../mcp/review-parse.js";
 import { boundedText, unifiedDiff } from "../../mcp/line-diff.js";
 

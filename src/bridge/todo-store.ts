@@ -7,7 +7,7 @@ import {
   type ProgressCategory,
   type ProgressLevel,
   type ProgressPhase,
-} from "./progress-vocabulary.js";
+} from "./tools/progress-vocabulary.js";
 
 const TODOS_STATE_PREFIX = "openBridge.todos.";
 

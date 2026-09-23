@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { planTunnelAutoConfig, type AutoConfigInput, type AutoConfigWrite, type TunnelFacts } from "../src/bridge/tunnel-plan.js";
-import { detectNgrok } from "../src/bridge/ngrok-locate.js";
+import { planTunnelAutoConfig, type AutoConfigInput, type AutoConfigWrite, type TunnelFacts } from "../src/bridge/tunnel/tunnel-plan.js";
+import { detectNgrok } from "../src/bridge/tunnel/ngrok-locate.js";
 
 /**
  * 「自动配置」 is the one action on the settings page that writes several values

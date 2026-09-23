@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { waitTool } from "../src/bridge/process-tools.js";
+import { waitTool } from "../src/bridge/tools/process-tools.js";
 
 /**
  * Await a wait with one ref'd handle of our own in the event loop.
@@ -59,7 +59,7 @@ test("an overflowing ms is capped to the timer limit, not fired at ~1 ms", async
   );
   // The capped value is observable on the settled shape only, so clampMs is
   // asserted directly here as the ceiling waitTool now routes through.
-  const { clampMs, MAX_TIMER_MS } = await import("../src/bridge/process-tools.js");
+  const { clampMs, MAX_TIMER_MS } = await import("../src/bridge/tools/process-tools.js");
   assert.equal(clampMs(3_000_000_000, 0), MAX_TIMER_MS);
 });
 

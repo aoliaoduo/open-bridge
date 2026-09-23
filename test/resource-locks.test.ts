@@ -5,7 +5,7 @@ import {
   lockSnapshot,
   resetLocks,
   type LockRelease,
-} from "../src/bridge/resource-locks.js";
+} from "../src/bridge/runtime/resource-locks.js";
 
 const FAST = { holdTimeoutMs: 5_000, waitTimeoutMs: 2_000 };
 

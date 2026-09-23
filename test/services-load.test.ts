@@ -2,7 +2,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { setHost, type Host } from "../src/host/host.js";
 import { SERVICES_STATE_PREFIX, state } from "../src/bridge/state.js";
-import { loadServices } from "../src/bridge/services.js";
+import { loadServices } from "../src/bridge/runtime/services.js";
 
 const store = new Map<string, unknown>();
 

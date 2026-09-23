@@ -117,7 +117,7 @@ test("CORS is granted only where a browser must reach us — never on the admin 
     // Read the body to the end: a test that leaves a half-read response parked in
     // undici's pool is a test that depends on GC timing. (This was first written as
     // the fix for a `serve` crash on shutdown; that turned out to be the instance
-    // pooling its *own* self-probe connections — fixed in src/bridge/self-probe.ts.
+    // pooling its *own* self-probe connections — fixed in src/bridge/lifecycle/self-probe.ts.
     // The drain is still worth keeping, it just is not the reason it passes.)
     await res.body?.cancel();
   }

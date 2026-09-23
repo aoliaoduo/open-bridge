@@ -11,9 +11,9 @@
 
 import * as fs from "node:fs";
 
-import { CONFIG_DEFAULTS } from "../bridge/config-defaults.js";
-import { resolveTailscaleExecutable } from "../bridge/tailscale-locate.js";
-import { t } from "../bridge/cli-i18n.js";
+import { CONFIG_DEFAULTS } from "../bridge/config/config-defaults.js";
+import { resolveTailscaleExecutable } from "../bridge/tunnel/tailscale-locate.js";
+import { t } from "./cli-i18n.js";
 import {
   deleteToken, listTokenViews, mintToken, revokeToken, rotateToken,
 } from "../http/auth.js";

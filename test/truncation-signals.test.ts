@@ -20,7 +20,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setHost, type Host } from "../src/host/host.js";
-import { listDirectory, findFiles, searchFiles } from "../src/bridge/file-tools.js";
+import { listDirectory, findFiles, searchFiles } from "../src/bridge/tools/file-tools.js";
 
 interface Listing {
   items: Array<{ name: string; type: string; children?: Listing["items"] }>;

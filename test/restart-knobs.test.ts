@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { requireRestartKnob } from "../src/bridge/processes.js";
+import { requireRestartKnob } from "../src/bridge/runtime/processes.js";
 
 // Same class as clamp-ms.test.ts, one level up. MCP arguments are LLM-generated,
 // so "abc", "5s", 2.5 and -1 all reach the handler. `save_service` already

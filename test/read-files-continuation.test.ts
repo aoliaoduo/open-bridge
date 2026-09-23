@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setHost, type Host } from "../src/host/host.js";
-import { readFiles } from "../src/bridge/file-tools.js";
+import { readFiles } from "../src/bridge/tools/file-tools.js";
 
 let dir: string;
 

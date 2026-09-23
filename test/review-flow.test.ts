@@ -13,9 +13,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setHost, type Host } from "../src/host/host.js";
-import { reviewChanges } from "../src/bridge/review.js";
+import { reviewChanges } from "../src/bridge/tools/review.js";
 import { collectReviewDiffPreview } from "../src/console/tui/changes.js";
-import type { JsonArgs } from "../src/bridge/json-args.js";
+import type { JsonArgs } from "../src/bridge/tools/json-args.js";
 
 const run = promisify(execFile);
 

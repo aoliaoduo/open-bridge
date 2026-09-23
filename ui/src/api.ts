@@ -2,7 +2,7 @@
  * Client for the local Bridge console API.
  */
 // The settings shapes are imported, not restated: the server owns the
-// contract (src/bridge/settings-model.ts) and the console consumes it, so the
+// contract (src/bridge/config/settings-model.ts) and the console consumes it, so the
 // two cannot drift apart. Deleting the local copies also surfaced a real
 // drift - the console's token row was missing `permanent` and nothing noticed.
 import { t } from "./i18n";
@@ -13,8 +13,8 @@ import type {
   SettingsState,
   SettingsTokenRow,
   SettingsTunnelView,
-} from "../../src/bridge/settings-model.js";
-import type { ServiceView } from "../../src/bridge/service-tools.js";
+} from "../../src/bridge/config/settings-model.js";
+import type { ServiceView } from "../../src/bridge/tools/service-tools.js";
 
 export type {
   ExecutableChoice, SecretPayload, ServiceView, SettingsActionResult, SettingsState, SettingsTokenRow, SettingsTunnelView,
@@ -114,7 +114,7 @@ export interface SessionView {
 export interface LockRow { key: string; mode?: string; label?: string; held_ms?: number }
 export interface LockWaiter { keys?: string[]; mode?: string; label?: string; waited_ms?: number }
 
-/** Same shape the 状态 card summarises, in full (src/bridge/resource-locks.ts). */
+/** Same shape the 状态 card summarises, in full (src/bridge/runtime/resource-locks.ts). */
 export interface LockSnapshot { held: LockRow[]; waiting: LockWaiter[] }
 
 /** One entry of the AI's plan, exactly as `set_todos` persisted it. */

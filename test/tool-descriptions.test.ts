@@ -88,7 +88,7 @@ test("the shared rules are stated once, in the server instructions", () => {
   // read_files; every copy is a separate thing to keep in sync. It lives in
   // SERVER_INSTRUCTIONS_BASE, which moved to instruction-prefix.ts when the
   // connect-time prefix became a measured, byte-stability-tested thing.
-  const prefix = readFileSync(path.join(repoRoot, "src", "bridge", "instruction-prefix.ts"), "utf8");
+  const prefix = readFileSync(path.join(repoRoot, "src", "bridge", "mcp", "instruction-prefix.ts"), "utf8");
 
   assert.match(prefix, /parse by field name and never by line presence/);
   assert.match(prefix, /docs\/tools\.md/);

@@ -23,7 +23,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   funnelVerdict, parseFunnelBackend, readFunnelConfig, type FunnelBackend,
-} from "../src/bridge/funnel-ownership.js";
+} from "../src/bridge/tunnel/funnel-ownership.js";
 
 const DOMAIN = "fixture-machine.tail9999.ts.net";
 

@@ -10,8 +10,8 @@ import {
   parseTailscaleStatus,
   readNgrokConfigAuthtoken,
   type RunText,
-} from "../src/bridge/tunnel-detect.js";
-import type { TunnelFacts } from "../src/bridge/tunnel-plan.js";
+} from "../src/bridge/tunnel/tunnel-detect.js";
+import type { TunnelFacts } from "../src/bridge/tunnel/tunnel-plan.js";
 
 /**
  * Detection is the half of the tunnel card that talks to the machine, so it is
