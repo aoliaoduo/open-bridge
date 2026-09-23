@@ -23,7 +23,7 @@ function markdownFiles(root: string): string[] {
     cwd: root, encoding: "utf8",
   }).split(String.fromCharCode(0))
     // Bundled/vendor documentation is not this repository's reference contract.
-    .filter(file => file && !file.startsWith("vendor/") && !file.startsWith("参考/"))
+    .filter(file => file && !file.startsWith("vendor/"))
     .map(file => path.join(root, file))
     .filter(file => existsSync(file)); // git still lists a deletion until it is staged.
 }
