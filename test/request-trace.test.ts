@@ -9,6 +9,7 @@ import {
   isNoteworthy,
   traceId,
   tracedFormat,
+  tracedHttpMethod,
   tracedMethod,
 } from "../src/bridge/mcp/request-trace.js";
 import type { ExchangeOutcome } from "../src/bridge/mcp/request-trace.js";
@@ -148,4 +149,20 @@ test("the rendered line omits fields that are absent rather than printing placeh
 test("an aborted exchange is labelled", () => {
   const line = exchangeLine({ ...base, aborted: true });
   assert.match(line, /client-aborted/);
+});
+
+test("the HTTP method is allow-listed and rendered in the line", () => {
+  assert.equal(tracedHttpMethod("POST"), "POST");
+  assert.equal(tracedHttpMethod("get"), "GET", "case-normalized");
+  assert.equal(tracedHttpMethod("DELETE"), "DELETE");
+  // Outside the /mcp surface's verbs: a client cannot smuggle a method string
+  // into the log, and PUT/HEAD never reach this endpoint anyway.
+  assert.equal(tracedHttpMethod("PUT"), "other");
+  assert.equal(tracedHttpMethod(undefined), "other");
+  assert.equal(tracedHttpMethod({ toString: () => "POST" }), "other");
+
+  const line = exchangeLine({ ...base, httpMethod: tracedHttpMethod("POST") });
+  assert.match(line, / · POST · /, "the method reads as its own field");
+  // Without one (older producers), the line keeps its old shape.
+  assert.doesNotMatch(exchangeLine(base), / · POST · /);
 });

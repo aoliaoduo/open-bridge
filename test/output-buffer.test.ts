@@ -111,3 +111,44 @@ test("empty appends are no-ops and zero-capacity buffers retain nothing", () => 
   // Everything is dropped, so no read can succeed past nothing.
   assert.throws(() => zero.read(5, 1), /beyond the end|no longer available/);
 });
+
+test("a read never ends inside an incomplete ANSI escape sequence", () => {
+  // Strip runs per page; an escape split across the boundary left raw ESC
+  // fragments on both pages. The read now stops BEFORE the escape and the
+  // cursor rewinds to it, so the next page re-emits the sequence whole.
+  const output = new ProcessOutputBuffer(64);
+  output.append(Buffer.from("abc\x1B[38;5;196m"));
+
+  const page = output.read(0, 6);
+  assert.equal(page.data.toString("binary"), "abc", "the page ends before the escape");
+  assert.equal(page.endOffset, 3, "the cursor rewinds to the escape start");
+
+  const rest = output.read(page.endOffset, 64);
+  assert.equal(rest.data.toString("binary"), "\x1B[38;5;196m", "the next page carries the sequence whole");
+});
+
+test("complete sequences and non-escape tails are left untouched", () => {
+  const complete = new ProcessOutputBuffer(64);
+  complete.append(Buffer.from("x\x1B[38;5;196m"));
+  const full = complete.read(0, 64);
+  assert.equal(full.data.toString("binary"), "x\x1B[38;5;196m", "a complete sequence is not trimmed");
+  assert.equal(full.endOffset, 12, "x + a 10-byte CSI sequence");
+
+  const plain = new ProcessOutputBuffer(64);
+  plain.append(Buffer.from("no escapes at all"));
+  const tail = plain.read(3, 64);
+  assert.equal(tail.data.toString("utf8"), "escapes at all");
+  assert.equal(tail.endOffset, 17);
+});
+
+test("an incomplete OSC header is trimmed, a complete one is not", () => {
+  const torn = new ProcessOutputBuffer(64);
+  torn.append(Buffer.from("a\x1B]8;;http://x"));
+  const page = torn.read(0, 64);
+  assert.equal(page.data.toString("binary"), "a", "OSC without BEL/ST is incomplete");
+
+  const whole = new ProcessOutputBuffer(64);
+  whole.append(Buffer.from("a\x1B]8;;http://x\x07"));
+  const kept = whole.read(0, 64);
+  assert.equal(kept.data.toString("binary"), "a\x1B]8;;http://x\x07", "BEL-terminated OSC stays");
+});

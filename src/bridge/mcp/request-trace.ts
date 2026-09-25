@@ -49,6 +49,23 @@ export type TracedMethod = (typeof TRACED_METHODS)[number];
 /** Which protocol era served the request. */
 export type TracedEra = "modern" | "legacy";
 
+/** The HTTP methods the /mcp surface serves; anything else collapses. */
+const TRACED_HTTP_METHODS = ["GET", "POST", "DELETE"] as const;
+
+export type TracedHttpMethod = (typeof TRACED_HTTP_METHODS)[number] | "other";
+
+/**
+ * Collapse the HTTP method onto the allow-list. Same rule as the MCP method:
+ * a closed set, so the request line cannot become a channel into the log.
+ */
+export function tracedHttpMethod(value: unknown): TracedHttpMethod {
+  if (typeof value !== "string") return "other";
+  const candidate = value.toUpperCase();
+  return (TRACED_HTTP_METHODS as readonly string[]).includes(candidate)
+    ? candidate as TracedHttpMethod
+    : "other";
+}
+
 /** How the response body was framed, when it could be determined. */
 export type TracedFormat = "json" | "sse" | "none";
 
@@ -127,6 +144,8 @@ export function tracedFormat(contentType: unknown): TracedFormat {
 export interface ExchangeOutcome {
   method: TracedMethod | "other";
   era: TracedEra;
+  /** The HTTP verb, allow-listed — GET/POST answer the endpoint, DELETE ends a session. */
+  httpMethod?: TracedHttpMethod;
   httpStatus: number;
   durationMs: number;
   /** True when the client disconnected before the response was fully written. */
@@ -149,6 +168,10 @@ export interface ExchangeOutcome {
 export function exchangeLine(outcome: ExchangeOutcome): string {
   const parts = [
     `${outcome.era}/${outcome.method}`,
+    // GET vs POST is the question a silent long-held exchange forces you to
+    // ask (a held-open GET stream is by-design, a stuck POST is not); without
+    // it the line says "other" and the log answers nothing.
+    ...(outcome.httpMethod ? [outcome.httpMethod] : []),
     `HTTP ${outcome.httpStatus}`,
     `${Math.round(outcome.durationMs)}ms`,
     outcome.format === "none" ? "no-body" : outcome.format,

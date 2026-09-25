@@ -17,7 +17,7 @@ import { bridgeAllowedHosts, isAllowedBridgeHost } from "../../http/request-poli
 import { authorizeRequest } from "../../http/auth.js";
 import { CONFIG_DEFAULTS } from "../config/config-defaults.js";
 import { record, state } from "../state.js";
-import { exchangeLine, isNoteworthy, traceId, tracedFormat, tracedMethod, type TracedEra } from "./request-trace.js";
+import { exchangeLine, isNoteworthy, traceId, tracedFormat, tracedHttpMethod, tracedMethod, type TracedEra } from "./request-trace.js";
 import { root } from "../paths.js";
 import { buildServeTitle, clearServeConsoleTitle, installServeConsoleTitle } from "../lifecycle/console-title.js";
 import { headerValue, modernNodeHandlerOf } from "./mcp-endpoint.js";
@@ -249,6 +249,7 @@ export async function startHttpInternal(): Promise<void> {
       const outcome = {
         method: tracedMethod(methodHint),
         era: headerEra,
+        httpMethod: tracedHttpMethod(req.method),
         httpStatus: res.statusCode,
         durationMs: Date.now() - exchangeStartedAt,
         // writableFinished is false when the response never completed, which is
