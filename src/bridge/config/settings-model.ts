@@ -9,25 +9,16 @@ import type { AutoConfigPlan, TunnelFacts } from "../tunnel/tunnel-plan.js";
 // executable resolver and its node:fs dependency at runtime.
 import type { ExecutableChoice } from "../../shell/which.js";
 
-/** Whitelisted lifetimes for a newly created token (seconds; 0 = permanent). */
-export const TTL_CHOICES: ReadonlyArray<{ seconds: number; label: string }> = [
-  { seconds: 0, label: "永久（不过期）" },
-  { seconds: 30 * 86_400, label: "30 天" },
-  { seconds: 7 * 86_400, label: "7 天" },
-  { seconds: 86_400, label: "24 小时" },
-  { seconds: 3_600, label: "1 小时" },
+/** Whitelisted lifetimes for a newly created token (seconds; 0 = permanent).
+ *  Labels are bilingual so the console renders them in the page's language
+ *  (the server never knows which language a browser is reading). */
+export const TTL_CHOICES: ReadonlyArray<{ seconds: number; label: string; labelEn: string }> = [
+  { seconds: 0, label: "永久（不过期）", labelEn: "Never (no expiry)" },
+  { seconds: 30 * 86_400, label: "30 天", labelEn: "30 days" },
+  { seconds: 7 * 86_400, label: "7 天", labelEn: "7 days" },
+  { seconds: 86_400, label: "24 小时", labelEn: "24 hours" },
+  { seconds: 3_600, label: "1 小时", labelEn: "1 hour" },
 ];
-
-/** Human label for any TTL value; non-listed values fall back to a generic form. */
-export function ttlLabel(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0) return "永久";
-  const known = TTL_CHOICES.find(choice => choice.seconds === seconds);
-  if (known) return known.label.replace(/（.*/, "");
-  if (seconds % 86_400 === 0) return `${seconds / 86_400} 天`;
-  if (seconds % 3_600 === 0) return `${seconds / 3_600} 小时`;
-  if (seconds % 60 === 0) return `${seconds / 60} 分钟`;
-  return `${seconds} 秒`;
-}
 
 /** Public projection of a token record (mirrors publicTokenView in auth-core). */
 export interface SettingsTokenRow {
@@ -49,7 +40,9 @@ export interface SecretPayload {
   label: string;
   /** Shown exactly once in this response; never stored server-side. */
   secret: string;
-  ttl: string;
+  /** The lifetime as a NUMBER (0 = permanent), not a rendered string: the
+      console formats it in the page's language. */
+  ttl_seconds: number;
 }
 
 /**
@@ -154,7 +147,9 @@ export interface SettingsState {
   running: boolean;
   /** Build version from package.json — the console header shows it. */
   version: string;
-  statusText: string;
+  /** The header badge as STRUCTURE, not prose: the console renders it in the
+      page's language, which the server does not know. */
+  status: { kind: "connected" | "ready" | "offline" | "stopped" | "error"; sessions?: number };
   /** The MCP URL to show and copy — tunnel when published, otherwise loopback. */
   mcpUrl: string;
   configuredDomain: string;

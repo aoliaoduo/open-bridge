@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   authToggleVerdict,
   normalizeSettingsMessage,
-  ttlLabel,
   TTL_CHOICES,
 } from "../src/bridge/config/settings-model.js";
 
@@ -164,18 +163,6 @@ test("auth toggle refuses to enable with zero usable tokens (fail-closed)", () =
   assert.equal(authToggleVerdict(false, 0).allow, true, "disabling is always allowed");
 });
 
-// --- labels ------------------------------------------------------------------
-
-test("ttlLabel covers permanent, known choices and generic fallbacks", () => {
-  assert.equal(ttlLabel(0), "永久");
-  assert.equal(ttlLabel(3_600), "1 小时");
-  assert.equal(ttlLabel(86_400), "24 小时");
-  assert.equal(ttlLabel(7 * 86_400), "7 天");
-  assert.equal(ttlLabel(30 * 86_400), "30 天");
-  assert.equal(ttlLabel(90), "90 秒");
-  assert.equal(ttlLabel(5_400), "90 分钟");
-  assert.equal(ttlLabel(Number.NaN), "永久");
-});
 
 // --- page rendering ----------------------------------------------------------
 

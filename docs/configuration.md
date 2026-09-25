@@ -76,7 +76,7 @@ Open `http://127.0.0.1:18080/console/` (the port follows `--port`). Every page h
 | Logs | `/console/logs` | Live log stream over SSE; the full audit trail is `audit.log` in the data directory |
 | Stats | `/console/stats` | Call counts, distribution by tool, recent activity |
 | Security | `/console/security` | Exposure overview, bearer gate (issue and enable in one click), personal tokens — create, rotate, revoke, delete, purge — and OAuth 2.1. The old `/console/tokens` path redirects here |
-| Settings | `/console/settings/…` | Seven subpages: `tunnel` / `network` / `files` / `shell` / `notify` / `locks` / `logs`. Deep-linkable, and sharing one validation layer with the MCP `get_config` / `set_config_value` tools |
+| Settings | `/console/settings/…` | Six subpages: `tunnel` / `network` / `files` / `shell` / `notify` / `locks`. Deep-linkable, and sharing one validation layer with the MCP `get_config` / `set_config_value` tools. Log rotation (`logMaxBytes`) lives on the top-level `/console/logs` page, not under Settings |
 
 The frontend router owns these paths (`ui/src/routes.ts`); the server returns the same page for any `/console/*` and injects the token, so adding a page needs no server change.
 

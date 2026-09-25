@@ -85,14 +85,17 @@ async function* iterateLines(file: string): AsyncGenerator<string> {
   const decoder = new StringDecoder("utf8");
   let line = "";
   let truncated = false;
-  const take = (): string => {
+  const take = (terminated: boolean): string => {
     let text = line;
     line = "";
     truncated = false;
     // A CRLF whose \r and \n land in different stream chunks leaves the CR on
     // the yielded line (the piece-based strip below only fires when both bytes
     // are in the same chunk); a stray \r in `text` breaks exact-match clients.
-    if (text.endsWith("\r")) text = text.slice(0, -1);
+    // Only a \n-TERMINATED line may lose its \r: on the file's final
+    // unterminated line a trailing \r is the last content byte, and stripping
+    // it made the built-in engine disagree with ripgrep and read_files.
+    if (terminated && text.endsWith("\r")) text = text.slice(0, -1);
     return text;
   };
   const append = (piece: string): void => {
@@ -109,13 +112,13 @@ async function* iterateLines(file: string): AsyncGenerator<string> {
       let piece = text.slice(0, nl);
       if (piece.endsWith("\r")) piece = piece.slice(0, -1); // CRLF is one break
       append(piece);
-      yield take();
+      yield take(true);
       text = text.slice(nl + 1);
     }
     append(text);
   }
   append(decoder.end());
-  if (line.length > 0) yield take();
+  if (line.length > 0) yield take(false);
 }
 
 /**

@@ -5,6 +5,18 @@ import { themePrefLabel, type ThemePref } from "../theme";
 import type { SettingsState } from "../api";
 import { Chip } from "./Chip";
 
+/** The header badge, rendered in the page's language from the structured
+ *  status the server sends (the server does not know the browser's language). */
+function statusLine(status: SettingsState["status"]): string {
+  switch (status.kind) {
+    case "connected": return t(`已连接 · ${status.sessions ?? 0} 个会话`, `Connected · ${status.sessions ?? 0} session(s)`);
+    case "ready": return t("已就绪", "Ready");
+    case "offline": return t("离线", "Offline");
+    case "stopped": return t("已停止", "Stopped");
+    case "error": return t("错误", "Error");
+  }
+}
+
 /**
  * Sun, moon, or half-and-half for "follow the system".
  *
@@ -140,7 +152,7 @@ export function Topbar({
 
       <div className="topbar-actions">
         <Chip tone={running ? "ok" : "idle"}>
-          {settings ? settings.statusText : t("连接中…", "Connecting…")}
+          {settings ? statusLine(settings.status) : t("连接中…", "Connecting…")}
         </Chip>
         {settings?.version ? (
           <span className="mono version" title={t("构建版本（package.json）", "Build version (package.json)")}>

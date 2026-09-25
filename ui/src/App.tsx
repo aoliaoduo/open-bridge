@@ -10,6 +10,19 @@ import { Skeleton } from "./components/Skeleton";
 import { StatusTab } from "./components/StatusTab";
 import { SettingsTab } from "./components/SettingsTab";
 import { initLang, t } from "./i18n";
+import { TTL_CHOICES } from "../../src/bridge/config/settings-model.js";
+
+/** The minted secret's lifetime, in the page's language (the server sends a
+ *  number; rendering it here keeps one language per surface). */
+function ttlLine(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return t("永久", "Never");
+  const known = TTL_CHOICES.find(choice => choice.seconds === seconds);
+  if (known) return t(known.label.replace(/（.*/, ""), known.labelEn);
+  if (seconds % 86_400 === 0) return t(`${seconds / 86_400} 天`, `${seconds / 86_400} days`);
+  if (seconds % 3_600 === 0) return t(`${seconds / 3_600} 小时`, `${seconds / 3_600} hours`);
+  if (seconds % 60 === 0) return t(`${seconds / 60} 分钟`, `${seconds / 60} minutes`);
+  return t(`${seconds} 秒`, `${seconds} seconds`);
+}
 
 // The console follows the browser's language, decided once here — before the
 // first render, so the first paint is already right — and never changed after.
@@ -293,7 +306,7 @@ export function App() {
               {secret.kind === "minted" ? t("令牌已创建", "Token created") : t("令牌已轮换", "Token rotated")}
             </h2>
             <div className="section-note">
-              {secret.label} · {secret.ttl}
+              {secret.label} · {ttlLine(secret.ttl_seconds)}
               {t(" — 明文只显示这一次，请立即保存。", " — the plaintext is shown only now; save it immediately.")}
             </div>
             <div className="secret-value">{secret.secret}</div>

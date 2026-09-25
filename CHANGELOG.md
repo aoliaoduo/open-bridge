@@ -24,6 +24,7 @@
 
 - **隧道与 CLI**：公网域名 watch 链改用代数令牌退休——停止、切换提供商或 claim 让位都能终止"一轮探测在途"的链；owner 的 mount 不再被幽灵链的健康探测降级为 follower（"Published through a peer tunnel" 指向自己的 mount），停机中的实例也不会被链尾的 claim 整体复活重启。CLI 解析器对已知取值旗标（`--home`/`--root`/`--port`/`--label`/`--ttl`/`--pid`/`--out`/`--tail`）的裸旗标直接报用法错误：此前 `token create --ttl` 铸出 1 秒过期的令牌、`stop --pid` 静默改为停当前目录实例、`serve --root` 死于 `path.resolve(true)`。Tailscale 启动路径对 `funnel status` 无从回答（unknown）时改为跟随+等待而非直接 `funnel --bg`——不可读的回答从来不是空闲的证据，此前一次超时就会顶掉活对端的 443 挂载。`pidAlive` 把 EPERM 视为"存在"（仅 ESRCH 判死）：管理员终端启动的实例在普通终端的 `instances`/`stop --pid`/同目录 `serve` 锁判活不再误判，CLI 与隧道 peer 注册表共用同一实现。
 
+- **同批扫描的遗留小项**：`terminateProcess` 不再在终止请求时提前释放 `resource_keys` 租约——存活进程的资源保持被声明直到 close 释放（终止失败的幸存者此前处于「进程活着、锁已空闲」状态，可被二次声明抢同一端口）；仅已退出且挂着待重启的命令由取消动作释放租约。`search_files` 内置引擎不再剥掉文件末行（无换行结尾）的尾随 CR，与 ripgrep / `read_files` 的结果一致。`activity_log` 搜索的 `limit` 现在要求 1–500 的整数并按名拒绝（此前 `limit: 0` 被静默改写成 50 行整页）。控制台英文界面不再出现服务端下发的中文串：顶栏状态徽标改为结构化 `status` 由 UI 按页面语言渲染，TTL 下拉补齐英文标签（`labelEn`），令牌弹窗的有效期改为数字 `ttl_seconds` 由 UI 渲染。文档修正两处：`docs/tools.md` 的 restart `command_id` 说明改为实际行为（复用原 id，而非返回新 id）；`docs/configuration.md` 的设置子页改为实际的六个并注明日志轮转位于 `/console/logs`。
 - 清除测试夹具中误用的真实 MCP 路由令牌与实例域名，统一改为明显的虚构数据。新增覆盖源码、测试和文档的凭据检查，接入 CI 与 `release:check`，失败信息只列位置、不回显凭据；本地运行数据与敏感文件加入忽略规则。曾公开的令牌必须轮换，仅修改仓库文件不能使其失效。
 
 - 修复 `activity_log` 搜索将 `warning` 审计行误报为 `completed`、按 `warning` 筛选漏掉警告的问题。写入端、审计读取端和 TUI 共用状态词表；未知状态的既有兜底行为不变。

@@ -428,7 +428,19 @@ export async function terminateProcess(
   // dead-with-pending-restart command would otherwise never let them go.
   commandState.autoRestart = false;
   commandState.requestedStop = reason;
-  cancelPendingRestart(commandState);
+  // Cancel a scheduled restart WITHOUT releasing the lease here. Two cases
+  // differ. An already-exited command with a restart pending: the close
+  // handler kept the lease alive for the restart that is now cancelled, and
+  // no second close will come, so the cancellation itself must release. A
+  // LIVE process: the lease must survive the request — the process may
+  // outlive this call (the close budget, or a kill that fails outright), and
+  // its resource stays claimed until the close handler releases it, the same
+  // rule restartProcess obeys by transferring the handle before terminating.
+  if (commandState.restartTimer) {
+    clearTimeout(commandState.restartTimer);
+    commandState.restartTimer = undefined;
+    commandState.releaseResourceLocks?.();
+  }
   if (commandState.done) return true;
   const pid = commandState.child.pid;
   try {

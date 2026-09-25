@@ -114,7 +114,7 @@ function settingsState(overrides: Partial<SettingsState> = {}): SettingsState {
   return {
     running: true,
     version: "9.9.9-test",
-    statusText: "已就绪",
+    status: { kind: "ready" },
     mcpUrl: "http://127.0.0.1:18080/mcp/tok",
     configuredDomain: "",
     ngrokAuthtokenMask: "",
@@ -412,7 +412,7 @@ describe("App shell", () => {
     mocks.settingsAction.mockResolvedValue({
       ok: true,
       state: settingsState({ authEnabled: true, usableCount: 1 }),
-      secret: { kind: "minted", id: "t9", label: "public-lock", secret: "ob_lock_value", ttl: "1 小时" },
+      secret: { kind: "minted", id: "t9", label: "public-lock", secret: "ob_lock_value", ttl_seconds: 3_600 },
       info: "Bearer 门禁已启用：已签发 1 个令牌并打开门禁，客户端必须在请求头带 Authorization: Bearer <令牌>。",
     } satisfies SettingsActionResult);
 
@@ -493,7 +493,7 @@ describe("App shell", () => {
     mocks.settingsAction.mockResolvedValue({
       ok: true,
       state: settingsState({ usableCount: 1 }),
-      secret: { kind: "minted", id: "t1", label: "integration", secret: "ob_secret_value", ttl: "永久" },
+      secret: { kind: "minted", id: "t1", label: "integration", secret: "ob_secret_value", ttl_seconds: 0 },
     } satisfies SettingsActionResult);
 
     render(<App />);
@@ -518,7 +518,7 @@ describe("App shell", () => {
     mocks.settingsAction.mockResolvedValue({
       ok: true,
       state: settingsState({ usableCount: 1 }),
-      secret: { kind: "minted", id: "t2", label: "keyboard", secret: "ob_kbd_value", ttl: "永久" },
+      secret: { kind: "minted", id: "t2", label: "keyboard", secret: "ob_kbd_value", ttl_seconds: 0 },
     } satisfies SettingsActionResult);
 
     render(<App />);

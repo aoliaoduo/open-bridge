@@ -89,6 +89,19 @@ export async function searchActivityLog(
   // per-line try/catch and silently match nothing ("no activity"), which is a
   // misleading answer rather than an error.
   if (args.since !== undefined) parseSinceMs(args.since);
+  // A present limit must say what it means: limit:0 is a legal number the old
+  // `|| 50` silently rewrote into a 50-row page — the exact inversion of a
+  // caller probing for matches — and garbage got the same treatment. The
+  // schema's own range is 1..500, so refuse by name (an absent limit keeps
+  // the documented 50 default).
+  if (args.limit !== undefined) {
+    const requested = Number(args.limit);
+    if (!Number.isInteger(requested) || requested < 1 || requested > 500) {
+      throw new Error(
+        `Invalid "limit" value ${JSON.stringify(String(args.limit))} for activity_log search. Expected an integer from 1 to 500.`,
+      );
+    }
+  }
   const entries: ActivityLogEntry[] = [];
   let totalScanned = 0;
   for (const file of [logPath, `${logPath}.1`]) {
@@ -110,7 +123,7 @@ export async function searchActivityLog(
     }
   }
   entries.sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0)); // newest first
-  const limit = Math.min(Math.max(Number(args.limit ?? 50) || 50, 1), 500);
+  const limit = args.limit === undefined ? 50 : Number(args.limit);
   const offset = Math.max(Number(args.offset ?? 0) || 0, 0);
   const page = entries.slice(offset, offset + limit);
   const truncated = entries.length > offset + limit;

@@ -174,3 +174,47 @@ test("the policy toggle's cancel is a no-op while the process is still live", as
   assert.equal(leaseReleased, false, "a live process keeps its lease through a policy change");
   release();
 });
+
+test("terminating a LIVE process leaves the lease to the close handler", async () => {
+  // terminateProcess used to release the resource lease at REQUEST time
+  // (cancelPendingRestart releases unconditionally): for a process that was
+  // still alive the lock went idle while the process kept running — a second
+  // start_process could claim the same port before the first one died, and a
+  // kill that failed outright left the survivor running unclaimed. The
+  // release belongs to the close handler; only an already-exited command
+  // with a cancelled restart needs the cancellation to release, because no
+  // second close will come.
+  const release = await acquireLocks({ keys: ["res:port:5176"], mode: "write", label: "start_process · res:port:5176" }, FAST);
+  release.handOff?.();
+  let released = false;
+  let onClose: (() => void) | undefined;
+  const command = {
+    id: "cmd-live-terminate",
+    done: false,
+    exitCode: null,
+    autoRestart: false,
+    maxRestarts: 3,
+    restartDelayMs: 1000,
+    lastEvent: "started",
+    startedAt: Date.now(),
+    command: "node server.js",
+    cwd: ".",
+    env: {},
+    restartCount: 0,
+    releaseResourceLocks: () => { released = true; release(); },
+    child: {
+      // pid: undefined routes terminateProcess through the direct kill()
+      // branch on every platform; the stub fires close on the microtask, as
+      // a real dying process would.
+      pid: undefined,
+      killed: false,
+      kill() { queueMicrotask(() => onClose?.()); },
+      once(event: string, fn: () => void) { if (event === "close") onClose = fn; },
+      off() {},
+    } as unknown as CommandState["child"],
+  } as unknown as CommandState;
+
+  const stopped = await terminateProcess(command, "terminated");
+  assert.equal(stopped, true, "the stub's close settles the termination");
+  assert.equal(released, false, "the terminate request itself must not release the lease");
+});

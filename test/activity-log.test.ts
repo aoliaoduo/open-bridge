@@ -108,3 +108,19 @@ test("all recorded statuses round-trip and unknown values retain the legacy fall
     assert.equal(r.entries.find(row => row.message === "future-status")?.status, "completed");
   } finally { fs.rmSync(path.dirname(f), { recursive: true, force: true }); }
 });
+
+test("a present limit must be an integer in 1..500, not silently rewritten", async () => {
+  // limit:0 is a legal number the old `|| 50` rewrote into a 50-row page —
+  // the exact inversion of a caller probing for matches — and garbage got
+  // the same treatment. The schema's own range is 1..500; refuse by name.
+  const f = tmpLog("audit.log", [
+    entry("t", "completed", "m0", "2026-09-01T00:00:00.000Z"),
+    entry("t", "completed", "m1", "2026-09-02T00:00:00.000Z"),
+  ]);
+  for (const bad of [0, -3, 501, 1.5, Number.NaN]) {
+    await assert.rejects(searchActivityLog(f, { limit: bad }), /limit/,
+      `limit ${String(bad)} must be refused`);
+  }
+  assert.equal((await searchActivityLog(f, { limit: 1 })).entries.length, 1);
+  assert.equal((await searchActivityLog(f, {})).entries.length, 2, "absent limit keeps the 50 default");
+});

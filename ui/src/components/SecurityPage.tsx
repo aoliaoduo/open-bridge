@@ -314,7 +314,7 @@ export function SecurityPage({ settings, act, notify }: Props) {
               onChange={e => void act({ command: "setDefaultTtl", seconds: Number(e.target.value) })}
             >
               {TTL_CHOICES.map(choice => (
-                <option key={choice.seconds} value={choice.seconds}>{choice.label}</option>
+                <option key={choice.seconds} value={choice.seconds}>{t(choice.label, choice.labelEn)}</option>
               ))}
             </select>
           </span>
@@ -334,7 +334,7 @@ export function SecurityPage({ settings, act, notify }: Props) {
             />
             <select value={ttl} onChange={e => setTtl(Number(e.target.value))} aria-label={t("令牌有效期", "Token lifetime")}>
               {TTL_CHOICES.map(choice => (
-                <option key={choice.seconds} value={choice.seconds}>{choice.label}</option>
+                <option key={choice.seconds} value={choice.seconds}>{t(choice.label, choice.labelEn)}</option>
               ))}
             </select>
             {/* Disabled while in flight: a double click minted two tokens and

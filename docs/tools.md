@@ -118,7 +118,7 @@
 
 **interact_with_process** — 给进程送输入并返回**这次输入之后**产生的输出（不传 `offset` 就不必自己记游标；`wait_ms` 上限 60000，与 `read_process_output` 一致）。面向普通非 PTY 管道；完整终端会话请用 `open_shell`。
 
-**process_control** — `restart`（用原命令与原 cwd 重起，可带 `delay_ms`）· `terminate`（强制结束）。都按 `command_id`。restart 是「先停再启」：成功后返回**新的 `command_id`**（旧 id 保留为可读历史，自动重启同样发新 id）。restart 的 `structuredContent` 为 `{command_id, restarted, restart_count, auto_restart}`；terminate 则提供包含 `terminated`（及必要时 `already_exited`）的最终进程 snapshot。
+**process_control** — `restart`（用原命令与原 cwd 重起，可带 `delay_ms`）· `terminate`（强制结束）。都按 `command_id`。restart 是「先停再启」，**`command_id` 保持不变**（新进程复用原 id，自动重启同样复用；引用该 id 的读输出、继续操作在重启后无缝继续）。restart 的 `structuredContent` 为 `{command_id, restarted, restart_count, auto_restart}`；terminate 则提供包含 `terminated`（及必要时 `already_exited`）的最终进程 snapshot。
 
 **wait** — 至少给 `ms`（睡一会儿）或 `command_id`（+ 可选 `timeout_ms`，等该进程退出）之一；两者都给时按进程算。`structuredContent` 随实际模式返回：`ms` 是 `{ waited_ms }`；`command_id` 是最终进程 snapshot，另带合并 `output`、`stdout`、`stderr` 和 `truncated`（以及相应输出字节计数）。
 

@@ -27,7 +27,6 @@ import {
 import {
   authToggleVerdict,
   normalizeSettingsMessage,
-  ttlLabel,
   type SecretPayload,
   type SettingsAction,
   type SettingsActionResult,
@@ -109,7 +108,9 @@ export async function buildSettingsState(): Promise<SettingsState> {
   return {
     running,
     version: host().version(),
-    statusText: running ? (state.sessions.size ? `已连接 · ${state.sessions.size} 个会话` : "已就绪") : "离线",
+    status: running
+      ? (state.sessions.size ? { kind: "connected", sessions: state.sessions.size } : { kind: "ready" })
+      : { kind: "offline" },
     mcpUrl: clientMcpUrl(),
     configuredDomain: cfg.get("ngrokDomain", ""),
     // Only whether one is stored and a masked hint -- never the token. The
@@ -228,7 +229,7 @@ function secretPayload(minted: MintedToken, kind: "minted" | "rotated"): SecretP
     id: minted.id,
     label: minted.label,
     secret: minted.secret,
-    ttl: ttlLabel(minted.permanent ? 0 : secondsUntil(minted.expires_at)),
+    ttl_seconds: minted.permanent ? 0 : secondsUntil(minted.expires_at),
   };
 }
 
@@ -305,7 +306,7 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       const before = await buildSettingsState();
       return {
         ok: true,
-        state: { ...before, running: false, statusText: "已停止", mcpUrl: "" },
+        state: { ...before, running: false, status: { kind: "stopped" }, mcpUrl: "" },
         info: "Bridge 已停止：本地服务关闭、端口释放，这个控制台也随之失效。重新启动请运行 open-bridge serve。",
         deferStop: true,
       };
@@ -649,7 +650,7 @@ function fallbackState(): SettingsState {
   return {
     running: Boolean(state.server),
     version: host().version(),
-    statusText: "错误",
+    status: { kind: "error" },
     mcpUrl: clientMcpUrl(),
     configuredDomain: "",
     // The fallback runs when state could not be built; claiming "no authtoken"

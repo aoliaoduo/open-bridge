@@ -154,3 +154,20 @@ test("worker-backed matcher composes with the stream scanner", async () => {
   assert.equal(matches.length, 2);
   assert.deepEqual(matches[0].context_after, ["bar"]);
 });
+
+test("a trailing CR on the file's final unterminated line is content, not a break", async () => {
+  // take() stripped a trailing \r unconditionally — right for a CRLF whose
+  // halves straddled chunks, wrong for a final line with no \n: there the \r
+  // is the last content byte, and the built-in engine answered 0 matches
+  // where ripgrep and read_files both see "abc\r".
+  const f = tmpFile("cr-tail.txt", "abc\r");
+  const seen: StreamSearchMatch[] = [];
+  await searchFileStream(
+    f,
+    async lines => lines.map((_, i) => i).filter(i => (lines[i] ?? "").endsWith("\r")),
+    { limit: 10, contextLines: 0 },
+    m => { seen.push(m); },
+  );
+  assert.equal(seen.length, 1, "the CR is content on an unterminated final line");
+  assert.equal(seen[0]?.text, "abc\r");
+});
