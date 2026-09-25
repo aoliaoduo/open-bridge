@@ -43,6 +43,32 @@ setTimeout(() => {
 }, 3000);
 `;
 
+/**
+ * A deterministic stand-in for the public ngrok edge, preloaded into the serve
+ * process via NODE_OPTIONS. The tunnel's START-UP pre-check probes
+ * `https://<domain>/healthz/<token>` against the real internet with a 2 s
+ * timeout; on a loaded CI box that probe sometimes times out, the verdict
+ * flips to "unknown", the start takes the blocked+watch path, and the watch's
+ * claim then restarts the instance mid-test — a suite that is green alone
+ * went red inside the full run through no fault of the properties under test.
+ * Intercepting fetch for the fixture domain makes the edge deterministic:
+ * up, and the domain is FREE (404 whose body does not say "Not found").
+ * Everything else (health checks, watches) gets the same 404 and stays
+ * honestly unhealthy, exactly as with a domain ngrok refuses.
+ */
+const EDGE_INTERCEPT = `
+const FIXTURE_HOSTS = new Set(["fixture-check.ngrok-free.dev"]);
+const realFetch = globalThis.fetch;
+globalThis.fetch = (input, init) => {
+  let host = "";
+  try { host = new URL(typeof input === "string" ? input : input.url).hostname; } catch {}
+  if (FIXTURE_HOSTS.has(host)) {
+    return Promise.resolve(new Response("no endpoint here", { status: 404 }));
+  }
+  return realFetch(input, init);
+};
+`;
+
 let home;
 let fixture;
 let counterFile;
@@ -102,6 +128,8 @@ before(async () => {
   fixture = mkdtempSync(path.join(tmpdir(), "ob-tunnel-fixture-"));
   counterFile = path.join(fixture, "spawns.log");
   writeFileSync(path.join(fixture, "http"), FAKE_NGROK);
+  const interceptFile = path.join(fixture, "edge-intercept.cjs");
+  writeFileSync(interceptFile, EDGE_INTERCEPT);
   // A domain the stand-in refuses, and a public-health budget short enough to
   // keep the test quick.
   writeFileSync(path.join(home, "config.json"), JSON.stringify({
@@ -113,7 +141,13 @@ before(async () => {
   child = spawnServe({
     root: fixture, home, tunnel: true,
     cwd: fixture, // so the stand-in `http` script resolves
-    env: { ...process.env, OB_FAKE_NGROK_COUNTER: counterFile },
+    env: {
+      ...process.env,
+      OB_FAKE_NGROK_COUNTER: counterFile,
+      // The fake edge rides in with the process (see EDGE_INTERCEPT); the
+      // stand-in ngrok inherits it harmlessly — it never fetches.
+      NODE_OPTIONS: `--require ${interceptFile}`,
+    },
   });
   child.stdout.on("data", d => { serveLog += d; });
   child.stderr.on("data", d => { serveLog += d; });
