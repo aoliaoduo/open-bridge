@@ -197,6 +197,21 @@ async function sendToShellInner(args: Args): Promise<Record<string, unknown>> {
   const input = String(args.command ?? "");
   if (!input.trim()) throw new Error("command is required. (expected 'command': string)");
 
+  // A command whose last line ends in a line continuation or an incomplete
+  // pipe makes bash consume the NEXT line — which is the sentinel. The
+  // completion marker then never appears (or appears as a torn fragment the
+  // line-end rule correctly rejects), pendingMarker wedges the session, and
+  // every later send is refused until the shell is closed. A single `&` is a
+  // legitimate background job and stays allowed.
+  const trimmedEnd = input.trimEnd();
+  if (trimmedEnd.endsWith("\\") || trimmedEnd.endsWith("|") || trimmedEnd.endsWith("&&")) {
+    throw new Error(
+      'The command ends with a line continuation ("\\") or an incomplete pipe ("|", "&&"), '
+      + "which would swallow the completion sentinel this session tracks and wedge it. "
+      + "End the command cleanly and send the rest as a separate send_to_shell call.",
+    );
+  }
+
   // Forward scan from the session's cursor, carrying the examined tail across
   // calls (see ../shell/marker-scan.ts): the sentinel can be split by the poll
   // interval as easily as by a chunk boundary.

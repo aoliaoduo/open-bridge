@@ -156,3 +156,17 @@ test("POSIX keeps the strict rule: a dangling symlink is not a program", () => {
   };
   assert.equal(findOnPath("ngrok", env), undefined);
 });
+
+test("a WSL System32 bash.exe never takes the Git Bash slot", () => {
+  // WSL ships bash.exe in the Windows system directories; running agent
+  // commands through it means Linux PATH, no PATHEXT, silently lost env, and
+  // a service-log tee that turns "C:/..." into a RELATIVE path. It must be
+  // refused even when it is the only bash on PATH, and the resolver must
+  // fall through to PowerShell.
+  const system32Bash = "C:\\Windows\\System32\\bash.exe";
+  const choices = detectShells(win([system32Bash], "C:\\Windows\\System32"));
+  assert.equal(choices.some(choice => choice.label === "Git Bash"), false,
+    "System32 bash.exe is WSL, not Git Bash");
+  assert.equal(autoShell(win([system32Bash], "C:\\Windows\\System32")), "powershell.exe",
+    "without a real bash, the automatic default is PowerShell");
+});

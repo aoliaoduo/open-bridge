@@ -8,6 +8,23 @@ export interface ShellSpec {
 }
 
 /**
+ * The bash on PATH is only Git Bash when it is NOT Windows' own. A WSL
+ * install puts bash.exe in the system directories, and running agent commands
+ * through it means Linux PATH (no node/npm/git as this machine knows them, no
+ * PATHEXT), an env map WSL silently drops without WSLENV, and a service-log
+ * tee that reads "C:/..." as a RELATIVE path — a "C:" directory tree grows in
+ * the workspace while the real log stays empty. Refuse it and let the
+ * resolver fall through to PowerShell, the documented Windows fallback.
+ */
+function findBashOnPath(given: DetectEnv, env: Record<string, string | undefined>): string | undefined {
+  const found = findOnPath("bash", given);
+  if (!found) return undefined;
+  const windowsDir = (env.SystemRoot ?? env.windir ?? "C:\\Windows").replace(/[\\/]+$/, "");
+  if (found.toLowerCase().startsWith(`${windowsDir.toLowerCase()}\\`)) return undefined;
+  return found;
+}
+
+/**
  * Every shell this machine could run commands through, best first.
  *
  * ONE list, used twice: `resolveShell()` walks it to pick the automatic
@@ -28,7 +45,7 @@ export function detectShells(given: DetectEnv = {}): ExecutableChoice[] {
     const gitBash = `${programFiles}\\Git\\bin\\bash.exe`;
     const pwsh7 = `${programFiles}\\PowerShell\\7\\pwsh.exe`;
     return availableChoices([
-      { value: exists(gitBash) ? gitBash : findOnPath("bash", given), label: "Git Bash" },
+      { value: exists(gitBash) ? gitBash : findBashOnPath(given, env), label: "Git Bash" },
       { value: exists(pwsh7) ? pwsh7 : findOnPath("pwsh", given), label: "PowerShell 7" },
       // Windows PowerShell is part of the OS. It is listed by name rather than
       // by probed path because that is how it is always invoked, and because a

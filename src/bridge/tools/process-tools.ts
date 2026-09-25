@@ -330,6 +330,17 @@ export async function readProcessOutput(args: Args): Promise<Record<string, unkn
 
 export async function interactWithProcess(args: Args): Promise<Record<string, unknown>> {
   const s = commandStateOrThrow(args);
+  // A persistent shell session shares this command table, but its stdin is
+  // owned by send_to_shell's FIFO and pendingMarker guard: writing here would
+  // interleave with a running command and bypass the completion sentinel
+  // entirely. docs/tools.md is explicit — full terminal sessions belong to
+  // open_shell / send_to_shell; this tool is for plain pipes.
+  if (s.command.startsWith("[shell:")) {
+    throw new Error(
+      `${s.id} is a persistent shell session. Drive it with send_to_shell — `
+      + "writing here would bypass the shell's completion tracking and interleave with its queue.",
+    );
+  }
   if (s.done) throw new Error(`Process ${s.id} has exited (code ${String(s.exitCode)}). Read its output with read_process_output.`);
   // stdin can close between the liveness check and the write (racy exit, or
   // the process closed its own stdin); fail with an actionable error instead

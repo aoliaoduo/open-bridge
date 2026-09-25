@@ -65,7 +65,13 @@ function ensureDir(dir: string): string {
 
 function readJsonSync(file: string): Record<string, unknown> {
   try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+    // A hand-edited file often carries a UTF-8 BOM (PowerShell 5.1's
+    // `Set-Content -Encoding UTF8`, old Notepad). JSON.parse refuses the
+    // whole file for those three bytes, every setting silently fell back to
+    // its default — auth.enabled included — and the next write published the
+    // defaults over the operator's own values. Strip it before parsing.
+    const text = fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "");
+    const parsed: unknown = JSON.parse(text);
     return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
   } catch (error) {
     // A present-but-unparsable file must not silently become "no settings":
@@ -152,12 +158,25 @@ class SharedJsonStore {
     // file lock), and without the copy a mutation between the call and the
     // write would change what reached the disk.
     const snapshot = cloneJson(value);
+    // Remember what this key held so a REFUSED write can put it back: the
+    // value below lands in memory before the lock is even attempted, and a
+    // caller that sees "not saved" must not have that key silently ride the
+    // next successful write.
+    const previousValue = this.data[key];
+    const hadKey = Object.prototype.hasOwnProperty.call(this.data, key);
     this.data[key] = snapshot;
-    // Serialize on the tail but keep THIS caller's promise rejectable: the tail
-    // itself swallows errors (so one failed write cannot poison later ones),
-    // while the individual caller still learns its update did not land. The
-    // old shape awaited the already-caught tail, so a write that silently gave
-    // up reported success and the key quietly never reached the disk.
+    try {
+      await this.persistLocked(key, snapshot);
+    } catch (error) {
+      if (hadKey) this.data[key] = previousValue;
+      else delete this.data[key];
+      throw error;
+    }
+  }
+
+  /** The locked half of write(): merge with the disk as it exists NOW, then
+   *  publish atomically. Runs on the write tail, inside the file lock. */
+  private async persistLocked(key: string, snapshot: unknown): Promise<void> {
     const next = this.writeTail.then(() => this.withFileLock(async () => {
       // Re-read INSIDE the lock. Merging "just before writing" was not
       // enough: two instances starting together could each read the file
@@ -165,9 +184,16 @@ class SharedJsonStore {
       // good. The lock is what makes read-merge-write actually atomic
       // across processes.
       const onDisk = readJsonSync(this.file);
+      // Disk wins over memory, and the key being written wins over both. The
+      // previous order (memory over disk) made this re-read pointless for
+      // every key this process already held: another instance's committed
+      // value was silently rolled back by our stale copy — the exact "second
+      // instance ate the first's route token" failure this lock exists to
+      // prevent. Keys this process wrote earlier are on disk too, so nothing
+      // of ours is lost; the one legitimate override is the write at hand.
       const merged = {
-        ...(onDisk && typeof onDisk === "object" ? onDisk : {}),
         ...this.data,
+        ...(onDisk && typeof onDisk === "object" ? onDisk : {}),
         [key]: snapshot,
       };
       const temp = `${this.file}.${process.pid}.tmp`;
