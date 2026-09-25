@@ -431,6 +431,19 @@ export async function stopAllServices(args: Args): Promise<unknown> {
     stopped.push(await serializeServiceOp(name, async () => {
       const proc = service.commandId ? state.commands.get(service.commandId) : undefined;
       const result = proc ? await terminateProcess(proc, "stopped") : false;
+      // Same contract as stop: an unconfirmed termination keeps the handle.
+      // Clearing commandId here made service_status say "stopped" while the
+      // survivor still held the port, and the next start spawned a second
+      // instance that then fought it — the orphaning stop_service already
+      // learned to avoid.
+      if (proc && !result) {
+        return {
+          name,
+          command_id: proc.id,
+          stopped: false,
+          hint: `The process did not exit within the termination budget. Retry service stop, or run process_control {action: "terminate", command_id: "${proc.id}"}.`,
+        };
+      }
       service.commandId = undefined;
       return { name, command_id: proc?.id ?? null, stopped: result };
     }));

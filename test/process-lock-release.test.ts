@@ -20,7 +20,7 @@
 import assert from "node:assert/strict";
 import test, { beforeEach } from "node:test";
 import { acquireLocks, lockSnapshot, resetLocks } from "../src/bridge/runtime/resource-locks.js";
-import { cancelPendingRestart, terminateProcess, type CommandState } from "../src/bridge/runtime/processes.js";
+import { cancelPendingRestart, cancelScheduledRestart, terminateProcess, type CommandState } from "../src/bridge/runtime/processes.js";
 
 const FAST = { holdTimeoutMs: 5_000, waitTimeoutMs: 200 };
 
@@ -122,4 +122,55 @@ test("cancelling a command that never held a lease is harmless", () => {
   delete command.releaseResourceLocks;
   assert.doesNotThrow(() => cancelPendingRestart(command));
   assert.equal(command.restartTimer, undefined);
+});
+
+test("the policy toggle's cancel releases the lease without marking the command stopped", async () => {
+  // `set_process_policy {auto_restart: false}` used to bare-clearTimeout the
+  // scheduled restart: the hand-off had already disarmed the hold-timeout
+  // backstop, so the lease stayed with the dead command until the hourly prune
+  // and every later caller declaring the same key waited out the deadline. The
+  // toggle is NOT a stop, though — the command crashed, and the operator only
+  // declined to bring it back — so the marking side of `cancelPendingRestart`
+  // (requestedStop, which rewrites a crash into a requested stop in every
+  // snapshot) must not apply.
+  const release = await acquireLocks({ keys: ["res:port:5174"], mode: "write", label: "start_process · res:port:5174" }, FAST);
+  release.handOff?.();
+  let leaseReleased = false;
+  const command = crashedWithPendingRestart(() => {
+    leaseReleased = true;
+    release();
+  });
+  assert.equal(command.requestedStop, undefined, "nothing marked it before the toggle");
+
+  cancelScheduledRestart(command);
+
+  assert.equal(command.restartTimer, undefined, "the scheduled restart is cancelled");
+  assert.equal(leaseReleased, true, "the cancelled restart's lease is released");
+  assert.equal(command.requestedStop, undefined, "the policy toggle is not a stop");
+  assert.equal(command.lastEvent, "restart_cancelled");
+
+  const started = Date.now();
+  const again = await acquireLocks({ keys: ["res:port:5174"], mode: "write", label: "second caller" }, FAST);
+  again();
+  assert.ok(Date.now() - started < 150, "re-acquiring the key does not wait out the deadline");
+});
+
+test("the policy toggle's cancel is a no-op while the process is still live", async () => {
+  // A live process holding a hand-off lease has no scheduled restart; the
+  // toggle only changes what happens AFTER its eventual exit, so the lease of
+  // a RUNNING process must not be released by the policy write itself.
+  const release = await acquireLocks({ keys: ["res:port:5175"], mode: "write", label: "start_process · res:port:5175" }, FAST);
+  release.handOff?.();
+  let leaseReleased = false;
+  const command = crashedWithPendingRestart(() => {
+    leaseReleased = true;
+    release();
+  });
+  command.done = false;
+  command.restartTimer = undefined;
+
+  cancelScheduledRestart(command);
+
+  assert.equal(leaseReleased, false, "a live process keeps its lease through a policy change");
+  release();
 });

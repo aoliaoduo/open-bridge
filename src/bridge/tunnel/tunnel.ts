@@ -19,12 +19,12 @@ import { isEndpointTakenError, isFatalNgrokError, ngrokFailureSummary } from "..
 import { windowsHideForChild } from "../../process/child-console.js";
 import { CONFIG_DEFAULTS } from "../config/config-defaults.js";
 import { RECONNECT_DELAYS_MS, record, state, redactedPublicUrl } from "../state.js";
-import { nextFreeRounds, shouldClaimDomain, watchIntervalMs } from "./tunnel-watch.js";
+import { createWatchChain, nextFreeRounds, shouldClaimDomain, watchIntervalMs, type WatchChain } from "./tunnel-watch.js";
 import { enqueueLifecycle } from "../lifecycle/lifecycle-queue.js";
 import { publishSelf } from "./peer-registry.js";
 import { detectNgrok } from "./ngrok-locate.js";
 import { probeTailscaleDomain, resolveTailscaleExecutable } from "./tailscale-locate.js";
-import { funnelMountIsOurs, probeFunnelHolder } from "./funnel-ownership.js";
+import { funnelMountIsOurs, probeFunnelHolder, shouldClaimOnStartup } from "./funnel-ownership.js";
 
 /** Consecutive deterministic (DNS/refused/TLS) health failures before aborting startup early. */
 const PUBLIC_HEALTH_DETERMINISTIC_FAILURE_LIMIT = 3;
@@ -214,7 +214,9 @@ function scheduleReconnect(domain: string, generation: number): void {
 async function adoptSharedTunnel(domain: string): Promise<boolean> {
   for (let attempt = 0; attempt < 10; attempt++) {
     if (await healthCheckUrl(`https://${domain}/healthz/${state.routeToken}`, 1_000)) {
-      await watchPublicDomain(domain);
+      // Runs under the watch the blocked path just started; an unretired
+      // generation keeps the round live, and NaN (no chain) retires it.
+      await watchPublicDomain(domain, activeWatchChain?.generation() ?? Number.NaN);
       return true;
     }
     await new Promise<void>(resolve => setTimeout(resolve, 500));
@@ -222,9 +224,20 @@ async function adoptSharedTunnel(domain: string): Promise<boolean> {
   return false;
 }
 
+/**
+ * The live watch chain. A chain is identified by a generation, not by its
+ * timer handle: the handle is spent the moment the timer fires, so a stop
+ * during a round in flight can only be expressed by bumping the generation —
+ * a cleared handle alone left ghost chains that kept claiming free domains
+ * and could restart a deliberately stopped instance.
+ */
+let activeWatchChain: WatchChain | undefined;
+
 export function stopPublicWatch(): void {
-  // clearTimeout works on either kind of handle, and the watch re-arms itself,
-  // so a single cleared handle is enough to end the chain.
+  // Bump first: it is the only part of this that reaches a round already in
+  // flight. The chain also clears its own (already recorded) timer handle.
+  activeWatchChain?.stop();
+  activeWatchChain = undefined;
   if (state.publicWatchTimer) clearTimeout(state.publicWatchTimer);
   state.publicWatchTimer = undefined;
 }
@@ -237,34 +250,46 @@ export function stopPublicWatch(): void {
  */
 function startPublicWatch(domain: string): void {
   stopPublicWatch();
-  let healthy = true;
-  let chained = false;
-  const schedule = (): void => {
-    chained = true;
-    state.publicWatchTimer = setTimeout(() => {
-      // Clear the handle when the timer fires, exactly like reconnectTimer
-      // above: the fired handle is spent, and leaving it in the slot made
-      // "is a watch chain pending?" unanswerable. The old `.finally` test
-      // (`!== undefined`) then read a NEW chain's handle as this chain's,
-      // forked a second chain, and stopPublicWatch() — which clears only the
-      // last-written handle — could no longer reach it. Two chains ran
-      // concurrently, and the orphaned one kept claiming free domains even
-      // after the instance was deliberately stopped.
-      state.publicWatchTimer = undefined;
-      void watchPublicDomain(domain)
-        .then(wasHealthy => { healthy = wasHealthy; })
-        .catch(error => { record("ngrok", "error", String(error)); })
-        .finally(() => { if (chained && state.publicWatchTimer === undefined) { chained = false; schedule(); } });
-    }, watchIntervalMs(healthy));
-  };
-  schedule();
+  const chain = createWatchChain({
+    round: chainGeneration => watchPublicDomain(domain, chainGeneration),
+    intervalMs: watchIntervalMs,
+    // state.publicWatchTimer stays the recorded handle (shutdown paths read
+    // it) while the chain owns the rescheduling decision.
+    setTimer: (fn, ms) => {
+      const handle = setTimeout(fn, ms);
+      state.publicWatchTimer = handle;
+      return handle;
+    },
+    clearTimer: handle => {
+      clearTimeout(handle as ReturnType<typeof setTimeout>);
+      if (state.publicWatchTimer === handle) state.publicWatchTimer = undefined;
+    },
+    onError: error => { record("ngrok", "error", String(error)); },
+  });
+  activeWatchChain = chain;
+  chain.start();
 }
 
-/** One watch round. Returns whether the public endpoint is serving us. */
-async function watchPublicDomain(domain: string): Promise<boolean> {
+/**
+ * One watch round. Returns whether the public endpoint is serving us.
+ *
+ * `chain` is the generation the round was armed under: a stop, a claim taking
+ * over, or a provider switch retires the chain, and a retired round must
+ * neither act (it could claim a domain or restart a stopped instance) nor
+ * reschedule itself.
+ */
+async function watchPublicDomain(domain: string, chain: number): Promise<boolean> {
+  if (chain !== (activeWatchChain?.generation() ?? -1) || state.stopping) return false;
   if (await healthCheckUrl(`https://${domain}/healthz/${state.routeToken}`, 4_000)) {
     state.missingPublicRounds = 0;
     if (state.tunnelRole === "follower") return true;
+    // Only a PEER serving the domain makes this instance a follower. A live
+    // tunnel of our own is US answering: demoting here was the ghost-chain
+    // demotion — a claim's watch survived into ownership and flipped the
+    // owner back to follower every round ("Published through a peer tunnel"
+    // against its own mount), because the health check cannot tell whose
+    // tunnel answered.
+    if (state.tunnel || state.tunnelRole === "owner") return true;
     state.tunnelRole = "follower";
     state.tunnelProvider = domain.endsWith(".ts.net") ? "tailscale" : "ngrok";
     // Routed through a peer tunnel again: a future tunnel exit should start
@@ -291,6 +316,10 @@ async function watchPublicDomain(domain: string): Promise<boolean> {
   const busy = Boolean(state.reconnectTimer || state.tunnel);
   state.missingPublicRounds = busy ? 0 : nextFreeRounds(state.missingPublicRounds, verdict);
   if (!shouldClaimDomain(state.missingPublicRounds, busy)) return false;
+  // Re-check after the probes: the chain may have been retired mid-round (the
+  // instance was stopped, or the provider switched) and a stale round must
+  // never restart a stopped instance onto the domain.
+  if (chain !== (activeWatchChain?.generation() ?? -1) || state.stopping) return false;
   state.missingPublicRounds = 0;
   stopPublicWatch();
   record("ngrok", "progress", "Public domain is free again; this window will claim it.");
@@ -395,8 +424,12 @@ async function startTailscaleFunnel(_generation: number): Promise<void> {
   // this machine must NOT be displaced: the daemon keeps one mount per port, so
   // spawning here would hijack the peer's public endpoint — and the peer's own
   // teardown would then switch off OUR public access. Follow it instead; the
-  // watch promotes this instance the moment the mount is released.
-  if ((await probeFunnelHolder(exe, domain, port)) === "other") {
+  // watch promotes this instance the moment the mount is released. The claim
+  // decision goes through shouldClaimOnStartup so `unknown` follows too — an
+  // unreadable `funnel status` is not evidence of freedom, and claiming on it
+  // was exactly the hijack above with a timeout as the trigger.
+  const holder = await probeFunnelHolder(exe, domain, port);
+  if (!shouldClaimOnStartup(holder)) {
     state.tunnelRole = "blocked";
     startPublicWatch(domain);
     await publishSelf();
@@ -404,9 +437,11 @@ async function startTailscaleFunnel(_generation: number): Promise<void> {
     record(
       "ngrok",
       "completed",
-      adopted && state.tunnelUrl
-        ? `443 由本机另一个实例的 funnel 服务；先经它发布：${redactedPublicUrl(state.tunnelUrl)}`
-        : "443 由本机另一个实例的 funnel 占用；在它开始转发本工作区之前，本实例只在本机可用。",
+      holder === "other"
+        ? (adopted && state.tunnelUrl
+            ? `443 由本机另一个实例的 funnel 服务；先经它发布：${redactedPublicUrl(state.tunnelUrl)}`
+            : "443 由本机另一个实例的 funnel 占用；在它开始转发本工作区之前，本实例只在本机可用。")
+        : "Tailscale did not report who holds 443; watching the domain and adopting or claiming once the daemon answers again (claiming on an unreadable answer could displace another instance's funnel).",
     );
     return;
   }
@@ -741,6 +776,7 @@ export function setInstanceRestart(fn: () => Promise<void>): void {
 
 /** Claim a freed shared domain by restarting this instance onto it. */
 async function claimFreedDomain(): Promise<void> {
+  if (state.stopping) return; // a stopped instance stays stopped
   if (!restartInstance) {
     throw new Error("setInstanceRestart() must run before the domain watch (lifecycle.ts does it at import time).");
   }

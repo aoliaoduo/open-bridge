@@ -14,6 +14,16 @@
 
 ### Fixed
 
+- 一次全仓缺陷扫描（核心热路径精读 + 五路分片审计，逐项复核后修复 16 项）：
+
+- **进程与服务**：`service {action:"stop_all"}` 在终止未确认（进程 5 秒预算内未退）时不再清空 `commandId`，与单个 `stop` 的契约对齐——此前孤儿进程对 service_status 隐身，下一次 start 会起第二个实例抢端口，行内附重试指引。`set_process_policy` 关闭自动重启时同步取消已排期的重启并释放 `resource_keys` 租约（此前只清定时器，锁被死进程占用最长 1 小时，后续声明同键的调用全部等满 `waitTimeoutMs`）；该操作不是停止，进程记录保留退出码与崩溃事件。`process_control {action:"restart"}` 现在把 `teeLogPath` 带给替换进程（与自动重启路径一致），手动重启服务进程后 `read_service_log` 不再静默停在重启前。`close_shell` 的手工收尾补写 `endedAt`：此前已关闭 shell 的记录永远没有结束时刻，`uptime_ms` 随每次轮询无限增长。
+
+- **文件与算法**：`read_files` 的 `max_bytes: 0` 现在如实报 `truncated: true`——此前返回空内容却声称"未截断"且无续读游标，非空文件看起来像"完整读到了空"，极易诱导客户端随后无守卫覆盖写。TUI「变更」页把 staged 重命名显示为新路径（真实 git 的 porcelain -z 是新路径在前；旧实现取第二个 token 显示旧路径，Enter 打开的 diff 把重命名读成"整文件删除"；单测夹具此前把 git 的字段顺序写反，已连同 numstat 连接键一并修正）。`apply_patch`/`edit_block` 的增删统计不再漏计以 `++`/`--` 开头的内容行（渲染成 `+++ foo` 的真实变更曾被当作 diff 头跳过，统计偏小或为 0）。`read_files` 越过唯一一条超长行（无尾随换行、块对齐）时 `lines_total` 不再少计最后一行——此前 `lines_total: 0` 与 `reached_eof: true`、全文件 sha256 同报，自相矛盾。
+
+- **Web 控制台与认证**：任务页「多久前完成」恢复显示（服务端发 `completed_at`、控制台读 `completedAt` 的字段错位，功能自上线以来实际未生效；控制台已对齐线上契约的 snake_case）。OAuth 注册达到 200 上限的 429 文案改为指向真实存在的恢复路径（停止实例后从 `secrets.json` 的 `openBridge.oauth` 记录中删除客户端条目；原文案指的"控制台吊销客户端"能力并不存在），`docs/configuration.md` 补充同样说明。安全页令牌的「创建/过期」时间改用本地时间渲染（此前直接截取 UTC 串，UTC+8 用户看到的有效期差 8 小时）。会话页轮询恢复后清除错误横幅（此前一次短暂 503 的提示永不消失）。
+
+- **隧道与 CLI**：公网域名 watch 链改用代数令牌退休——停止、切换提供商或 claim 让位都能终止"一轮探测在途"的链；owner 的 mount 不再被幽灵链的健康探测降级为 follower（"Published through a peer tunnel" 指向自己的 mount），停机中的实例也不会被链尾的 claim 整体复活重启。CLI 解析器对已知取值旗标（`--home`/`--root`/`--port`/`--label`/`--ttl`/`--pid`/`--out`/`--tail`）的裸旗标直接报用法错误：此前 `token create --ttl` 铸出 1 秒过期的令牌、`stop --pid` 静默改为停当前目录实例、`serve --root` 死于 `path.resolve(true)`。Tailscale 启动路径对 `funnel status` 无从回答（unknown）时改为跟随+等待而非直接 `funnel --bg`——不可读的回答从来不是空闲的证据，此前一次超时就会顶掉活对端的 443 挂载。`pidAlive` 把 EPERM 视为"存在"（仅 ESRCH 判死）：管理员终端启动的实例在普通终端的 `instances`/`stop --pid`/同目录 `serve` 锁判活不再误判，CLI 与隧道 peer 注册表共用同一实现。
+
 - 清除测试夹具中误用的真实 MCP 路由令牌与实例域名，统一改为明显的虚构数据。新增覆盖源码、测试和文档的凭据检查，接入 CI 与 `release:check`，失败信息只列位置、不回显凭据；本地运行数据与敏感文件加入忽略规则。曾公开的令牌必须轮换，仅修改仓库文件不能使其失效。
 
 - 修复 `activity_log` 搜索将 `warning` 审计行误报为 `completed`、按 `warning` 筛选漏掉警告的问题。写入端、审计读取端和 TUI 共用状态词表；未知状态的既有兜底行为不变。

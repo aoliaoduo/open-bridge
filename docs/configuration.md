@@ -109,6 +109,7 @@ The settings page does the same thing. Once on, a client discovers the server at
 - **Refresh tokens rotate once.** A used refresh token is dead immediately, so a replay buys nothing.
 - OAuth exposes metadata, authorize, register, token and revoke endpoints publicly. `/api` and `/console` remain loopback-only, and what the console reads (`/api/oauth`) contains **no secrets or digests**.
 - `oauth.allowedRedirectHosts` (default `[]` = the built-in list) adds extra redirect hosts a dynamically registered client may use.
+- **Registered clients are kept until removed by hand** (200 ceiling; the console shows only counts). `/oauth/revoke` retires a client's tokens, not its registration. When the ceiling is hit, `/oauth/register` refuses with `registration_limit` and names the way out: stop the Bridge, delete the stale entries from the `clients` array of the `openBridge.oauth` record in `secrets.json` in the data directory, and start it again.
 
 ---
 

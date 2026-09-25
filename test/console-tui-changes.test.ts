@@ -15,6 +15,7 @@ import {
   collectWorkspaceChanges,
   countTextLines,
   parseNumstatFiles,
+  parsePorcelainLines,
   parsePorcelainZ,
   summarizeGitStatus,
 } from "../src/console/tui/changes.js";
@@ -44,9 +45,41 @@ test("countTextLines matches git: empty, trailing newline, binary", () => {
 test("parsePorcelainZ expands untracked files and keeps quoted-unsafe paths intact", () => {
   const entries = parsePorcelainZ("?? dir/a.txt\0?? my file.txt\0 M tracked.ts\0");
   assert.deepEqual(entries.map(entry => entry.path), ["dir/a.txt", "my file.txt", "tracked.ts"]);
-  const renamed = parsePorcelainZ("R  old.txt\0new.txt\0");
+  // Real git order, measured: `git status --porcelain -z` emits
+  // `R  <new>\0<old>\0` — the NEW path sits inside the status record and the
+  // ORIGINAL path follows as its own token ("the field order is reversed").
+  // The fixture below used the display-form order, so the parser returned the
+  // old path and the changes page listed a file that no longer exists.
+  const renamed = parsePorcelainZ("R  new.txt\0old.txt\0");
   assert.equal(renamed.length, 1);
-  assert.equal(renamed[0]?.path, "new.txt");
+  assert.equal(renamed[0]?.path, "new.txt", "the listed path is the one on disk");
+});
+
+test("parsePorcelainLines keys a display-form rename by its new path", () => {
+  // Without -z git writes `XY ORIG -> NEW`; the path after the arrow is what
+  // exists on disk.
+  const entries = parsePorcelainLines("R  old.txt -> new.txt\n");
+  assert.deepEqual(entries, [{ xy: "R ", path: "new.txt" }]);
+});
+
+test("a staged rename joins numstat by the new path and lists it under the new path", async () => {
+  // Measured shapes: porcelain -z `R  new\0old\0`, but numstat -z
+  // `N\tM\t\0old\0new\0` — the OPPOSITE order. Both sides must meet on the
+  // new path: the old one is a file that no longer exists, and keying by it
+  // made Enter open `git diff HEAD -- <old>` and read "the whole file was
+  // deleted" for a plain rename.
+  const summary = await summarizeGitStatus({
+    statusOut: "R  src/new.ts\0src/old.ts\0",
+    numstatOut: "2\t1\t\0src/old.ts\0src/new.ts\0",
+    readFile: async () => {
+      throw new Error("rename rows are never read as untracked content");
+    },
+  });
+  assert.ok(summary);
+  const entry = byPath(summary, "src/new.ts");
+  assert.ok(entry, "the rename is listed under the path that exists on disk");
+  assert.equal(entry?.insertions, 2, "the numstat counts join onto the new path");
+  assert.equal(entry?.deletions, 1);
 });
 
 test("parseNumstatFiles ignores binary dashes and still sums text files", () => {

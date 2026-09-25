@@ -108,3 +108,16 @@ describe("SecurityPage: one-time secrets survive an impatient click", () => {
     expect(await screen.findByText("public-authed")).toBeTruthy();
   });
 });
+
+describe("SecurityPage: token timestamps", () => {
+  test("created/expires render in local time, not the UTC string", async () => {
+    // fmtDate used to slice the UTC ISO string, so a UTC+8 operator saw every
+    // token's 创建/过期 eight hours off from the same page's other clocks.
+    statusMock.mockResolvedValue({ exposure: "local" });
+    render(<SecurityPage settings={state()} act={vi.fn()} />);
+    const at = new Date("2026-09-01T10:00:00.000Z");
+    const pad = (value: number): string => String(value).padStart(2, "0");
+    const expected = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
+    expect(await screen.findByText(expected)).toBeTruthy();
+  });
+});

@@ -608,4 +608,9 @@ test("the stored client list has a hard ceiling", async () => {
   }
   assert.equal(last.status, 429, "registration past the ceiling must be refused");
   assert.equal(JSON.parse(last.body).error, "registration_limit");
+  // The recovery the message names must exist. It used to say "revoke unused
+  // clients from the console" — but no console or API can remove a client, so
+  // a full list was a dead end whose only exit was hand-editing secrets.json.
+  assert.match(JSON.parse(last.body).error_description ?? "", /secrets\.json/,
+    "the message must describe the recovery that actually exists");
 });

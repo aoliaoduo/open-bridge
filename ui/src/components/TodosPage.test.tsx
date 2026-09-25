@@ -131,9 +131,12 @@ describe("TodosPage", () => {
 });
 
 test("a completed item shows when it was finished", async () => {
+    // The field is fed exactly as the wire sends it (`completed_at`, the shape
+    // test/api-integration.test.mjs pins): feeding the camelCase spelling here
+    // let the component pass while the live payload never rendered the stamp.
     todosMock.mockResolvedValue(board({
       todos: [
-        { id: "1", title: "定位日志时间戳", status: "completed", completedAt: new Date(Date.now() - 120_000).toISOString() },
+        { id: "1", title: "定位日志时间戳", status: "completed", completed_at: new Date(Date.now() - 120_000).toISOString() },
         { id: "2", title: "实现修复", status: "in_progress" },
       ],
       counts: { total: 2, pending: 0, in_progress: 1, completed: 1 },

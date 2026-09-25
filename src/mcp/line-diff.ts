@@ -87,9 +87,13 @@ export function unifiedDiff(before: string, after: string, contextLines = 3): st
 export function countDiffLines(diff: string): LineDiffStats {
   let additions = 0;
   let deletions = 0;
+  // Every `+`/`-` line counts, with no header exclusion: the only producer
+  // (unifiedDiff above) emits an `@@` header and never `+++`/`---` lines, so
+  // the old exclusion could only ever match CONTENT — an added line `++ foo`
+  // renders as `+++ foo` and vanished from the stats.
   for (const line of diff.split("\n")) {
-    if (line.startsWith("+") && !line.startsWith("+++")) additions += 1;
-    else if (line.startsWith("-") && !line.startsWith("---")) deletions += 1;
+    if (line.startsWith("+")) additions += 1;
+    else if (line.startsWith("-")) deletions += 1;
   }
   return { additions, deletions };
 }

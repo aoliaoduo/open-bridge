@@ -334,6 +334,28 @@ export function cancelPendingRestart(command: CommandState): void {
 }
 
 /**
+ * Cancel a scheduled auto-restart WITHOUT marking the command stopped — the
+ * `set_process_policy {auto_restart: false}` shape. The command crashed and the
+ * operator only declined to bring it back; stamping `requestedStop` here would
+ * rewrite that crash into a requested stop in every snapshot (`exit_code` null,
+ * `termination_reason: "stopped"`). The release half of `cancelPendingRestart`'s
+ * contract still applies in full: the dispatcher's hand-off disarmed the
+ * hold-timeout backstop, so cancelling the restart must release the resource
+ * lease itself, or the lock outlives its process until the hourly prune.
+ *
+ * Guarded on `restartTimer` by the caller: a live process holding a hand-off
+ * lease has no scheduled restart, and this must not release the lease of a
+ * process that is still running.
+ */
+export function cancelScheduledRestart(command: CommandState): void {
+  if (!command.restartTimer) return;
+  clearTimeout(command.restartTimer);
+  command.restartTimer = undefined;
+  command.lastEvent = "restart_cancelled";
+  command.releaseResourceLocks?.();
+}
+
+/**
  * Clear EVERY pending auto-restart timer, including commands that already
  * exited (`done === true`) with a scheduled restart. Bridge stop / workspace
  * switch only terminates live commands; without this sweep a crashed command's

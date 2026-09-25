@@ -72,7 +72,7 @@ function TodoRow({ todo, index }: { todo: TodoItem; index: number }) {
       <span className="todo-index">{index + 1}</span>
       <span className="todo-title">{todo.title}</span>
       <Chip tone={tone(todo.status)}>{STATUS_LABEL[todo.status]?.() ?? todo.status}</Chip>
-      {done && todo.completedAt && <span className="mono muted">{ago(todo.completedAt)}</span>}
+      {done && todo.completed_at && <span className="mono muted">{ago(todo.completed_at)}</span>}
     </li>
   );
 }

@@ -122,8 +122,10 @@ export interface TodoItem {
   id: string;
   title: string;
   status: "pending" | "in_progress" | "completed" | string;
-  /** 桥在条目转为完成时盖的时间戳；任务页据此显示「多久前完成」。 */
-  completedAt?: string;
+  /** 桥在条目转为完成时盖的时间戳；任务页据此显示「多久前完成」。
+   *  Wire shape is snake_case — `/api/todos` emits `completed_at` (see
+   *  test/api-integration.test.mjs), matching every other field on the wire. */
+  completed_at?: string;
 }
 
 /** The last `report_progress` line, when the agent sent one. */

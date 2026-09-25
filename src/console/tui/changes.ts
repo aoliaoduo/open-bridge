@@ -64,9 +64,14 @@ export function parsePorcelainZ(output: string): Array<{ xy: string; path: strin
     const xy = part.slice(0, 2);
     const filePath = part.slice(3);
     if (xy.startsWith("R") || xy.startsWith("C")) {
-      const renamed = parts[i + 1] ?? filePath;
+      // git-status -z reverses the display order: the NEW path sits inside the
+      // status record and the ORIGINAL path follows as its own NUL token.
+      // Keying by the following token displayed the file under the old path —
+      // one that no longer exists on disk — and sent the diff preview after
+      // it. numstat -z keeps the display order (old first, see
+      // parseNumstatFiles), so the NEW path is the join key on both sides.
       i += 1;
-      entries.push({ xy, path: renamed });
+      entries.push({ xy, path: filePath });
     } else {
       entries.push({ xy, path: filePath });
     }
@@ -88,12 +93,13 @@ export function parseNumstatFiles(output: string): Array<{ path: string; inserti
   if (output.includes("\0")) {
     // NUL mode is `git diff --numstat -z`, parsed by the same shared parser the
     // review_changes tool consumes (mcp/review-parse.ts) so both surfaces read
-    // the records identically. parsePorcelainZ keys a rename by the path token
-    // FOLLOWING the status record — git's old path — so the numstat side keys
-    // by previousPath to keep the two tables joinable per file.
+    // the records identically. A numstat -z rename keeps the display order —
+    // OLD path first, NEW path second — while parsePorcelainZ keys its rows by
+    // the NEW path, so both sides meet there and the two tables stay joinable
+    // per file.
     for (const entry of parseNumstat(output)) {
       files.push({
-        path: entry.previousPath ?? entry.path,
+        path: entry.path,
         insertions: entry.additions,
         deletions: entry.deletions,
         binary: entry.binary === true,
@@ -115,11 +121,14 @@ export function parseNumstatFiles(output: string): Array<{ path: string; inserti
   return files;
 }
 
-function parsePorcelainLines(output: string): Array<{ xy: string; path: string }> {
-  return output.split(/\r?\n/).filter(line => line.length > 0).map(line => ({
-    xy: line.slice(0, 2),
-    path: line.slice(3).replace(/^"(.*)"$/, "$1"),
-  }));
+export function parsePorcelainLines(output: string): Array<{ xy: string; path: string }> {
+  return output.split(/\r?\n/).filter(line => line.length > 0).map(line => {
+    // Display-form renames are `XY ORIG -> NEW` (git-status, non -z); the path
+    // after the arrow is the one on disk.
+    const raw = line.slice(3).replace(/^"(.*)"$/, "$1");
+    const arrow = raw.lastIndexOf(" -> ");
+    return { xy: line.slice(0, 2), path: arrow >= 0 ? raw.slice(arrow + 4) : raw };
+  });
 }
 
 export async function summarizeGitStatus(args: {

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, join } from "node:path";
+import { pidAlive } from "../process/pid-alive.js";
 
 /**
  * One live Bridge instance on this machine. The shared file never carries a route token: only its
@@ -28,11 +29,9 @@ export function bridgeTokenFromPath(pathname: string): { kind: "mcp" | "healthz"
   return { kind, token: match[2]!.toLowerCase() };
 }
 
-/** Signal 0 performs the existence check without delivering anything. */
-function isPidAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid < 1) return false;
-  try { process.kill(pid, 0); return true; } catch { return false; }
-}
+/** Signal 0 existence check, shared with the CLI's runtime registry: EPERM
+ *  (an unprobeable but EXISTING process) must not read as a stale record. */
+const isPidAlive = pidAlive;
 
 function isPeerRecord(value: unknown): value is PeerRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;

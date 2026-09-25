@@ -22,7 +22,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  funnelVerdict, parseFunnelBackend, readFunnelConfig, type FunnelBackend,
+  funnelVerdict, parseFunnelBackend, readFunnelConfig, shouldClaimOnStartup, type FunnelBackend,
 } from "../src/bridge/tunnel/funnel-ownership.js";
 
 const DOMAIN = "fixture-machine.tail9999.ts.net";
@@ -68,4 +68,15 @@ test("an unreadable CLI is reported as such, never as a missing config", async (
   const read = await readFunnelConfig("definitely-not-tailscale", DOMAIN, 300);
   assert.equal(read.kind, "unreadable");
   assert.match(read.reason, /failed|ENOENT|not found/i);
+});
+
+test("the startup path claims only on definite freedom or our own mount", () => {
+  // The watch treats `unknown` as "reset the counter"; the startup path used
+  // to treat it as claimable and spawned `funnel --bg` straight over a live
+  // peer's 443 mount whenever `funnel status` timed out — violating this
+  // module's own rule that an unanswered CLI is never evidence of freedom.
+  assert.equal(shouldClaimOnStartup("free"), true);
+  assert.equal(shouldClaimOnStartup("mine"), true, "re-asserting our own mount is a claim");
+  assert.equal(shouldClaimOnStartup("other"), false, "a live peer must not be displaced");
+  assert.equal(shouldClaimOnStartup("unknown"), false, "an unreadable answer must not be displaced into, either");
 });

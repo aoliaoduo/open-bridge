@@ -14,7 +14,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { installNodeHost } from "../src/host/node-host.js";
-import { restartService, stopService } from "../src/bridge/tools/service-tools.js";
+import { restartService, stopAllServices, stopService } from "../src/bridge/tools/service-tools.js";
 import { state, type ServiceDefinition } from "../src/bridge/state.js";
 import type { CommandState } from "../src/bridge/runtime/processes.js";
 
@@ -120,4 +120,34 @@ test("stop_service keeps the handle and reports stopped:false when the process r
     "the service stays running until the process is really gone");
   assert.equal(state.services.get("web")?.commandId, "stuck-1",
     "the command handle must survive so the operator can retry");
+});
+
+test("stop_all keeps the handle when the process refuses to die, like stop does", { timeout: 30_000 }, async () => {
+  // stop_all used to clear commandId unconditionally — the exact orphaning
+  // stop_service's test above pins as fixed. The batch loop must obey the same
+  // contract: an unconfirmed termination keeps the handle, reports stopped:false
+  // for its row, and a later start refuses to spawn a second instance.
+  const command = stuckCommand("stuck-all");
+  state.commands.set("stuck-all", command);
+  state.services.set("web", {
+    command: "node forever.js",
+    cwd: ".",
+    env: {},
+    group: "default",
+    autoRestart: false,
+    maxRestarts: 3,
+    restartDelayMs: 1000,
+    commandId: "stuck-all",
+  } as ServiceDefinition & { commandId: string });
+
+  const rows = await stopAllServices({}) as Array<{ name: string; stopped: boolean }>;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.name, "web");
+  assert.equal(rows[0]?.stopped, false,
+    "an unconfirmed termination must not claim stopped:true");
+  assert.equal(state.services.get("web")?.commandId, "stuck-all",
+    "the command handle must survive so the operator can retry");
+  // The consequence that matters: the still-registered command id means
+  // isServiceRunning stays true, so a start cannot double-spawn.
+  assert.equal(state.services.get("web")?.commandId !== undefined, true);
 });

@@ -57,3 +57,76 @@ export function nextFreeRounds(current: number, verdict: PublicBridgeVerdict): n
 export function shouldClaimDomain(freeRounds: number, busy: boolean): boolean {
   return freeRounds >= CLAIM_FREE_ROUNDS && !busy;
 }
+
+/**
+ * The self-rescheduling watch chain, separated from tunnel.ts so the
+ * retirement rule is unit-testable without a tunnel.
+ *
+ * The rule a bare timer handle cannot express: the handle is SPENT the moment
+ * it fires, so a stop (or a claim taking over the slot) during a round in
+ * flight could not reach the chain — the round's `.finally` re-armed a ghost
+ * chain that kept claiming free domains and could restart a deliberately
+ * stopped instance. Each chain therefore carries a generation: `stop()` bumps
+ * it, and a retired round's finally is a no-op. A round receives its own
+ * generation so its BODY can re-check before any irreversible action (a
+ * claim), not only before the reschedule.
+ */
+export interface WatchChain {
+  /** Run rounds forever (until stop) with the recorded cadence. */
+  start(): void;
+  /** Retire the chain: pending timers are cancelled and an in-flight round
+      will neither act nor reschedule. */
+  stop(): void;
+  /** The chain's current generation; bumped by every stop. */
+  generation(): number;
+}
+
+export function createWatchChain(options: {
+  /** One round. `chain` is this chain's generation at arm time — compare it
+      against `generation()` before acting irreversibly. */
+  round: (chain: number) => Promise<boolean>;
+  /** Wait before the next round; receives the last round's outcome. */
+  intervalMs: (healthy: boolean) => number;
+  setTimer: (fn: () => void, ms: number) => unknown;
+  clearTimer: (handle: unknown) => void;
+  onError: (error: unknown) => void;
+}): WatchChain {
+  let generation = 0;
+  let handle: unknown;
+  let healthy = true;
+  const schedule = (chain: number): void => {
+    handle = options.setTimer(() => {
+      handle = undefined;
+      void options.round(chain)
+        .then(wasHealthy => { healthy = wasHealthy; })
+        .catch(error => options.onError(error))
+        .finally(() => {
+          // Reschedule only while this chain is still current: a newer stop()
+          // owns the slot now, and the spent-handle rule means a cleared
+          // handle alone can never reach an in-flight round.
+          if (chain === generation && handle === undefined) schedule(chain);
+        });
+    }, options.intervalMs(healthy));
+  };
+  const chain: WatchChain = {
+    start() {
+      // Clear a pending round WITHOUT bumping: only an explicit stop() retires
+      // a chain (tunnel.ts always stop()s the previous chain before arming a
+      // new one, so a fresh start carries generation 0).
+      if (handle !== undefined) {
+        options.clearTimer(handle);
+        handle = undefined;
+      }
+      schedule(generation);
+    },
+    stop() {
+      generation += 1;
+      if (handle !== undefined) options.clearTimer(handle);
+      handle = undefined;
+    },
+    generation() {
+      return generation;
+    },
+  };
+  return chain;
+}

@@ -350,6 +350,13 @@ export function streamReadLines(
       if (pending.length > 0 && (!stoppedEarly || stoppedByEndLine)) {
         try { handleLine(pending); }
         catch (e) { if (e instanceof BinaryFileError) { fail(e); return; } throw e; }
+      } else if (pending.length === 0 && discardingLineTail && !stoppedEarly) {
+        // A discarded over-long line BEFORE the range has no number of its own:
+        // it is counted when its newline arrives. A block-aligned tail can leave
+        // pending empty at EOF, and a line that ends the file has no newline —
+        // count it here, or lines_total reads one short while reached_eof and
+        // the whole-file sha256 promise a complete answer.
+        lineNo += 1;
       }
       const fullyRead = !stoppedEarly || stoppedByEndLine;
       settle({
@@ -360,7 +367,11 @@ export function streamReadLines(
         end_line: returnedEnd < 0 ? (end ?? Math.max(lineNo, 1)) : returnedEnd,
         bytes_total: sizeHint,
         bytes_returned: collectedBytes,
-        byte_truncated: stoppedEarly && !stoppedByEndLine && end === null && returnedCount > 0,
+        // An early stop IS a truncation even when nothing was returned: a zero
+        // byte budget collected nothing and used to report byte_truncated:
+        // false, making a non-empty file read as "completely read, empty" —
+        // exactly the answer a caller writes back over the file for.
+        byte_truncated: stoppedEarly && !stoppedByEndLine && end === null,
         sha256: fullyRead ? hash.digest("hex") : null,
         reached_eof: true,
         binary: false,
@@ -381,7 +392,10 @@ export function streamReadLines(
           end_line: returnedEnd < 0 ? (end ?? lineNo) : returnedEnd,
           bytes_total: sizeHint,
           bytes_returned: collectedBytes,
-          byte_truncated: end === null && returnedCount > 0,
+          // Same honest-truncation rule as the EOF settle: stopped early with
+          // an open-ended range means bytes were left unread, whether or not
+          // any line fit the budget.
+          byte_truncated: end === null,
           sha256: null,
           reached_eof: false,
           binary: false,

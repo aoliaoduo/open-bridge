@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { api, type SessionView } from "../api";
 import { errorMessage, idleLabel } from "../format";
 import { t } from "../i18n";
@@ -44,6 +44,10 @@ type View = "all" | "active" | "idle";
 export function SessionsPage({ notify }: { notify?: (text: string, isError?: boolean) => void } = {}) {
   const [sessions, setSessions] = useState<SessionView[] | null>(null);
   const [note, setNote] = useState("");
+  /** Whether `note` currently holds a poll error. The poll's success branch
+      clears only that kind of note; an action's own feedback ("已断开 …")
+      must survive the recovery it shares the field with. */
+  const noteIsPollError = useRef(false);
   const [closingId, setClosingId] = useState("");
   const [query, setQuery] = useState("");
   const [view, setView] = useState<View>("all");
@@ -53,9 +57,22 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
     poll: async fresh => {
       try {
         const snapshot = await api.sessions();
-        if (fresh()) setSessions(snapshot.sessions);
+        // Clear on success too — but only a note the POLL wrote: a recovered
+        // poll must not keep claiming the failure it reported, and it must not
+        // eat an action's own feedback ("已断开 …", set moments before the
+        // manual refresh this branch also serves).
+        if (fresh()) {
+          setSessions(snapshot.sessions);
+          if (noteIsPollError.current) {
+            noteIsPollError.current = false;
+            setNote("");
+          }
+        }
       } catch (error) {
-        if (fresh()) setNote(errorMessage(error));
+        if (fresh()) {
+          noteIsPollError.current = true;
+          setNote(errorMessage(error));
+        }
       }
     },
   });
@@ -82,6 +99,7 @@ export function SessionsPage({ notify }: { notify?: (text: string, isError?: boo
     const session = sessions?.find(row => row.id === id);
     if (closingId || !session || session.stateless || session.closable === false) return;
     setClosingId(id);
+    noteIsPollError.current = false;
     setNote(t(`正在断开 ${id.slice(0, 8)}…`, `Disconnecting ${id.slice(0, 8)}…`));
     try {
       await api.closeSession(id);

@@ -24,7 +24,14 @@ import { setConfigFor } from "./settings/set-config";
 import { Skeleton } from "./Skeleton";
 
 function fmtDate(iso: string | null): string {
-  return iso ? iso.slice(0, 16).replace("T", " ") : "—";
+  // The server sends a UTC ISO instant; slicing it showed the UTC wall clock
+  // while every other clock on this page (and the console) is local — a UTC+8
+  // operator's token expiry read eight hours off. Render the instant itself.
+  if (!iso) return "—";
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "—";
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
 }
 
 interface Props {

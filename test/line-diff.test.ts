@@ -159,3 +159,22 @@ test("creating a file without a trailing newline keeps the git marker", () => {
   assert.match(diff, /^\\ No newline at end of file$/m, "the new file's own termination speaks");
   assert.deepEqual(countDiffLines(diff), { additions: 1, deletions: 0 });
 });
+
+test("content lines that start with ++/-- are counted, never treated as headers", () => {
+  // unifiedDiff emits only an `@@` header, so the old `+++`/`---` exclusions
+  // could never match a header — they matched CONTENT: an added line `++ foo`
+  // renders as `+++ foo` and vanished from the stats, leaving apply_patch and
+  // edit_block reporting additions: 0 for a real change.
+  const added = unifiedDiff("keep\n", "keep\n++ foo\n");
+  assert.ok(added !== undefined);
+  assert.deepEqual(countDiffLines(added), { additions: 1, deletions: 0 });
+
+  const removed = unifiedDiff("keep\n-- bar\n", "keep\n");
+  assert.ok(removed !== undefined);
+  assert.deepEqual(countDiffLines(removed), { additions: 0, deletions: 1 });
+
+  // Ordinary content still counts, unchanged.
+  const mixed = unifiedDiff("a\nb\n", "a\nB\nc\n");
+  assert.ok(mixed !== undefined);
+  assert.deepEqual(countDiffLines(mixed), { additions: 2, deletions: 1 });
+});

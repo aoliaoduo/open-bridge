@@ -21,6 +21,7 @@ import { hasUnreadOutput, resolveReadOffset } from "../../process/output-cursor.
 import type { ProcessOutputBuffer } from "../../process/output-buffer.js";
 import { requireValidOffset, requireValidStream } from "../../mcp/argument-checks.js";
 import {
+  cancelScheduledRestart,
   pruneCommands,
   spawnManaged,
   terminateProcess,
@@ -424,7 +425,11 @@ export async function restartProcess(args: Args): Promise<Record<string, unknown
   }
   const delay = clampMs(args.delay_ms, 0);
   if (delay) await new Promise(resolve => setTimeout(resolve, delay));
-  const replacement = spawnManaged(s.command, s.cwd, s.env, s.id, s.restartCount + 1, policy);
+  // The tee mirror travels with the record, exactly as the auto-restart path
+  // carries it: a manual restart of a service process that stopped mirroring
+  // its output silently froze read_service_log at pre-restart content.
+  const replacement = spawnManaged(s.command, s.cwd, s.env, s.id, s.restartCount + 1, policy,
+    s.teeLogPath ? { teeLogPath: s.teeLogPath } : undefined);
   replacement.releaseResourceLocks = carriedLocks;
   state.commands.set(s.id, replacement);
   // Match start_process: a replacement is not honestly restarted until its
@@ -486,11 +491,12 @@ export function setProcessPolicy(args: Args): Record<string, unknown> {
     s.autoRestart = Boolean(args.auto_restart);
     // Turning auto-restart off must also drop an ALREADY scheduled restart:
     // the timer callback never re-read the policy, so a crashed command still
-    // came back once after the caller had disabled restarts.
-    if (!s.autoRestart && s.restartTimer) {
-      clearTimeout(s.restartTimer);
-      s.restartTimer = undefined;
-    }
+    // came back once after the caller had disabled restarts. Cancelling it
+    // also releases the resource lease the dispatcher handed off — the
+    // hold-timeout backstop is disarmed by then, so a bare clearTimeout left
+    // the lock with the dead command until the hourly prune. Unlike a stop,
+    // this is not a stop: the record keeps its exit code and crash event.
+    if (!s.autoRestart && s.restartTimer) cancelScheduledRestart(s);
   }
   // The same two knobs save_service validates, written here straight onto a LIVE
   // process. `Math.max(0, Number("abc"))` is NaN, not 0 — it does not clamp — and

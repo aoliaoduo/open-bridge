@@ -14,7 +14,7 @@ import { host } from "../../host/host.js";
  */
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { record, state } from "../state.js";
+import { record, state, type CommandState } from "../state.js";
 import { workspacePath } from "../paths.js";
 import { killWindowsProcessFamily, shellSpec, wireSpawnedChild } from "./processes.js";
 import { isBashLikeShell } from "../../process/tee-capture.js";
@@ -343,16 +343,24 @@ export async function closeShell(args: Args): Promise<Record<string, unknown>> {
         }
       }
     }
-    if (!cmd.done) {
-      cmd.done = true;
-      // null, never an invented 0: this branch runs only when the shell never
-      // reported its own exit — nobody knows its exit code, and a fabricated 0
-      // reads as "closed cleanly" in every consumer (get_process_snapshot,
-      // wait, the console) that checks it.
-      cmd.exitCode = cmd.exitCode ?? null;
-      cmd.lastEvent = "shell_closed";
-    }
+    if (!cmd.done) markSessionShellClosed(cmd);
   }
   host().ui.update();
   return { name, closed: true };
+}
+
+/**
+ * Final-state marking for a session shell closeShell had to close itself: the
+ * shell never reported its own exit, so nobody knows the exit code — null,
+ * never a fabricated 0 that reads as "closed cleanly" in every consumer
+ * (get_process_snapshot, wait, the console) that checks it. endedAt is stamped
+ * HERE, not left to the real 'close' event: that event early-returns on done
+ * (wireSpawnedChild), so this is the last chance — without it the finished
+ * shell had no end time and its uptime_ms grew on every snapshot poll.
+ */
+export function markSessionShellClosed(cmd: CommandState): void {
+  cmd.done = true;
+  cmd.exitCode = cmd.exitCode ?? null;
+  cmd.lastEvent = "shell_closed";
+  cmd.endedAt = Date.now();
 }

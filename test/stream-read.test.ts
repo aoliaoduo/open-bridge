@@ -114,6 +114,34 @@ test("binary file (NUL byte) throws BinaryFileError", async () => {
   await assert.rejects(streamReadLines(f, { maxBytes: 1 << 20 }, 7), BinaryFileError);
 });
 
+test("a zero byte budget is an honest early stop, not a full read", async () => {
+  // maxBytes 0 collected nothing and stopped — the result used to claim
+  // byte_truncated: false, so a non-empty file looked "completely read as
+  // empty" and invited an unguarded overwrite of the real content.
+  const body = "real content\n";
+  const f = tmpFile("zero-budget.txt", body);
+  const r = await streamReadLines(f, { maxBytes: 0 }, Buffer.byteLength(body));
+  assert.equal(r.content, "");
+  assert.equal(r.lines_returned, 0);
+  assert.equal(r.byte_truncated, true, "nothing returned for a non-empty file IS a truncation");
+  assert.equal(r.lines_total, null, "EOF was never seen, so no whole-file count");
+});
+
+test("a discarded over-long line that ends the file without a newline is still counted", async () => {
+  // One unterminated line of exactly 10 × 64 KiB chunks (block-aligned, so the
+  // discard loop leaves pending empty), read with start_line past it. The
+  // discarded line's number is only counted when its newline arrives — which
+  // never does at EOF — so lines_total used to read 0 while reached_eof
+  // promised a complete, hash-backed answer.
+  const body = "a".repeat(10 * 64 * 1024);
+  const f = tmpFile("aligned-tail.txt", body);
+  const r = await streamReadLines(f, { startLine: 2, maxBytes: 1 << 19 }, Buffer.byteLength(body));
+  assert.equal(r.lines_total, 1, "the file has one line, discarded or not");
+  assert.equal(r.lines_returned, 0);
+  assert.equal(r.reached_eof, true);
+  assert.notEqual(r.sha256, null);
+});
+
 test("non-UTF-8 file without NUL bytes is reported binary (no silent mojibake)", async () => {
   // "l1\n\xE9\n" — the lone 0xE9 is a legacy single-byte (GBK/Latin-1 style)
   // character, not a NUL, so the old NUL-only test never caught it.

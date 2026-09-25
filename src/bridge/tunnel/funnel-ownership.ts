@@ -100,6 +100,21 @@ export function funnelVerdict(
   return backendServing ? "other" : "free";
 }
 
+/**
+ * The STARTUP path's verdict rule, as a pure function so the truth table is
+ * testable: spawn (claim) only on definite freedom or on our own mount.
+ * `other` follows a live peer, and — the rule this exists to pin — `unknown`
+ * follows too: a CLI that did not answer is never evidence of freedom, and
+ * spawning on it hijacked a live peer's 443 mount whenever `funnel status`
+ * timed out. (The watch path already obeyed this via nextFreeRounds; the
+ * startup path is the one that got it wrong.)
+ */
+export function shouldClaimOnStartup(
+  verdict: "mine" | "other" | "free" | "unknown",
+): boolean {
+  return verdict === "free" || verdict === "mine";
+}
+
 /** The one place the CLI is invoked; both callers want the same arguments. */
 function funnelStatusArgs(): string[] {
   return ["funnel", "status", "--json"];

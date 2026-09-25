@@ -13,7 +13,7 @@ import { test } from "node:test";
 
 import {
   CLAIM_FREE_ROUNDS, WATCH_INTERVAL_HEALTHY_MS, WATCH_INTERVAL_UNHEALTHY_MS,
-  nextFreeRounds, shouldClaimDomain, watchIntervalMs,
+  createWatchChain, nextFreeRounds, shouldClaimDomain, watchIntervalMs,
 } from "../src/bridge/tunnel/tunnel-watch.js";
 
 test("a healthy tunnel is probed lazily, an unhealthy one quickly", () => {
@@ -52,4 +52,90 @@ test("a busy instance never claims, however free the domain looks", () => {
   assert.equal(shouldClaimDomain(5, true), false, "the reconnect chain is the other claimant");
   assert.equal(shouldClaimDomain(2, true), false);
   assert.equal(shouldClaimDomain(2, false), true);
+});
+
+test("a retired chain's in-flight round neither acts again nor reschedules", async () => {
+  // The tunnel watch used to key "should I reschedule?" on the timer handle
+  // alone: the handle is SPENT the moment it fires, so a stop (or a claim
+  // taking over) during a round in flight could not reach the chain — the
+  // round's finally re-armed a ghost chain that kept claiming free domains
+  // and restarted deliberately stopped instances. The chain therefore carries
+  // a generation: stop() bumps it, and a retired round's finally is a no-op.
+  const timers: Array<{ fn: () => void; ms: number; cleared: boolean }> = [];
+  const setTimer = (fn: () => void, ms: number): unknown => {
+    const timer = { fn, ms, cleared: false };
+    timers.push(timer);
+    return timer;
+  };
+  const clearTimer = (handle: unknown): void => {
+    (handle as { cleared: boolean }).cleared = true;
+  };
+  const microtasks = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
+
+  const roundChainIds: number[] = [];
+  const chain = createWatchChain({
+    round: async chainId => {
+      roundChainIds.push(chainId);
+      return true;
+    },
+    intervalMs: () => 10,
+    setTimer,
+    clearTimer,
+    onError: () => assert.fail("no errors expected"),
+  });
+
+  chain.start();
+  assert.equal(timers.length, 1);
+  assert.equal(chain.generation(), 0);
+
+  timers[0]!.fn();          // the round fires and is in flight
+  chain.stop();             // retired mid-round
+  await microtasks();       // the round settles; its finally runs
+
+  assert.equal(roundChainIds.length, 1);
+  assert.equal(timers.length, 1, "the retired round scheduled nothing new");
+  assert.equal(timers[0]!.cleared, false, "nothing left to clear (the handle was spent)");
+});
+
+test("a live chain keeps rescheduling across rounds and reports the generation", async () => {
+  const timers: Array<{ fn: () => void; ms: number }> = [];
+  const setTimer = (fn: () => void, ms: number): unknown => {
+    const timer = { fn, ms };
+    timers.push(timer);
+    return timer;
+  };
+  const clearTimer = (handle: unknown): void => {
+    const index = timers.indexOf(handle as { fn: () => void });
+    if (index >= 0) timers.splice(index, 1);
+  };
+
+  let rounds = 0;
+  const chain = createWatchChain({
+    round: async () => {
+      rounds += 1;
+      return rounds < 3;   // healthy, healthy, unhealthy
+    },
+    intervalMs: healthy => (healthy ? 10 : 20),
+    setTimer,
+    clearTimer,
+    onError: () => assert.fail("no errors expected"),
+  });
+
+  chain.start();
+  for (let round = 0; round < 3; round += 1) {
+    assert.equal(timers.length, 1, "exactly one pending timer per round");
+    const fired = timers.shift()!;   // firing spends the handle
+    fired.fn();
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.equal(rounds, 3, "the chain re-armed itself after every round");
+  const lastInterval = timers.length === 1 ? timers[0]!.ms : -1;
+  assert.equal(lastInterval, 20, "an unhealthy round is checked quickly");
+
+  // A stop clears the pending timer; a start after it begins a new generation.
+  chain.stop();
+  assert.equal(timers.length, 0, "stop cancels the pending round");
+  chain.start();
+  assert.equal(chain.generation(), 1, "start after stop is a new chain generation");
+  chain.stop();
 });

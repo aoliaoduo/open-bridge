@@ -20,6 +20,7 @@ import { t } from "./cli-i18n.js";
 import { WORKSPACE_SUFFIX_PATTERN, workspaceSuffixFor } from "../bridge/paths.js";
 import { ROUTE_TOKEN_KEY } from "../bridge/state.js";
 import type { ParsedArgs } from "./args.js";
+import { pidAlive as processPidAlive } from "../process/pid-alive.js";
 
 // --- runtime registry -------------------------------------------------------
 
@@ -135,7 +136,7 @@ export function holderOfPort(home: string, port: number): RuntimeInfo | undefine
 }
 
 export function pidAlive(pid: number): boolean {
-  try { process.kill(pid, 0); return true; } catch { return false; }
+  return processPidAlive(pid);
 }
 
 /** Console token for talking to a running instance from a second process. */

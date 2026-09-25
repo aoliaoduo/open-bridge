@@ -305,8 +305,16 @@ async function handleRegister(req: IncomingMessage, res: ServerResponse): Promis
     return true;
   }
   if ((await listClients()).length >= MAX_REGISTERED_CLIENTS) {
+    // The message must name a recovery that exists. "Revoke unused clients
+    // from the console" did not: registered clients are kept forever and no
+    // console, API or CLI can remove one, so a full list was a dead end. The
+    // store is re-read from secrets.json on every call, so hand-removing
+    // stale entries from its `openBridge.oauth` record (with the instance
+    // stopped, so no concurrent write lands between reads) is the way out.
     oauthError(res, 429, "registration_limit",
-      "The registered client list is full. Revoke unused clients from the Open Bridge console, then register again.");
+      `The registered client list is full (${MAX_REGISTERED_CLIENTS} clients, never pruned automatically; the console cannot remove them yet). `
+      + "To reclaim a slot: stop this Bridge, delete the stale entries from the \"clients\" array of the \"openBridge.oauth\" record in secrets.json "
+      + "in the data directory (default ~/.open-bridge), and start it again.");
     return true;
   }
   const body = await readBodyText(req, MAX_OAUTH_BODY_BYTES);
