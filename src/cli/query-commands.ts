@@ -104,7 +104,24 @@ export async function cmdStop(parsed: ParsedArgs): Promise<void> {
       // success, not an error), so verify the outcome instead of trusting it.
       if (pidAlive(runtime.pid)) fail(t("进程终止失败。", "Could not kill the process."));
     } else {
-      process.kill(runtime.pid);
+      // The target has a SIGTERM handler that runs the same graceful shutdown
+      // that just failed over HTTP, and its shuttingDown guard makes a second
+      // signal a no-op — so a bare SIGTERM could leave a wedged instance alive
+      // while the message claimed otherwise. Give it a short grace, then
+      // SIGKILL, and verify the outcome the way the Windows branch does.
+      try { process.kill(runtime.pid, "SIGTERM"); } catch { /* already gone */ }
+      const graceDeadline = Date.now() + 2_000;
+      while (pidAlive(runtime.pid) && Date.now() < graceDeadline) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      if (pidAlive(runtime.pid)) {
+        try { process.kill(runtime.pid, "SIGKILL"); } catch { /* already gone */ }
+        const killDeadline = Date.now() + 1_000;
+        while (pidAlive(runtime.pid) && Date.now() < killDeadline) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        if (pidAlive(runtime.pid)) fail(t("进程终止失败。", "Could not kill the process."));
+      }
     }
     console.log(t("进程已终止。", "Process killed."));
   } catch { fail(t("进程终止失败。", "Could not kill the process.")); }

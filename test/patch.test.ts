@@ -494,6 +494,25 @@ test("a unified diff deleting to /dev/null removes the file and keeps later sect
     assert.equal(await readFile(kept, "utf8"), "keep\nchanged\n");
   }));
 
+test("an Add File line missing the '+' prefix is refused, not silently dropped", () =>
+  withSandbox(async (root, ws) => {
+    // Used to truncate: the un-prefixed line was filtered out and the patch
+    // reported applied:true with half the file written.
+    const patch = [
+      "*** Begin Patch",
+      "*** Add File: new.js",
+      "+console.log(\"bye\");",
+      "console.log(\"hi\");",
+      "*** End Patch",
+      "",
+    ].join("\n");
+    await assert.rejects(
+      applyPatch(patch, ws),
+      /missing the '\+' prefix.*console\.log\("hi"\);/s,
+    );
+    assert.equal(existsSync(path.join(root, "new.js")), false, "nothing may be written");
+  }));
+
 test("an Add File section with no content creates an empty file", () =>
   withSandbox(async (root, ws) => {
     await applyPatch("*** Begin Patch\n*** Add File: empty.txt\n*** End Patch", ws);

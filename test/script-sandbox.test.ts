@@ -236,6 +236,25 @@ test("an endless script is stopped by the wall clock (async hang and sync spin)"
   assert.equal(spun.phase, "timeout");
 });
 
+test("a timed-out script keeps the console output it produced", async () => {
+  // The worker's console lines used to exist only in the worker and reached the
+  // parent solely inside the `done` message — which a wall-clock timeout never
+  // sends, so every timed-out run answered `console: []`. The timeout path is
+  // exactly where diagnostics matter most: what the script logged is what it
+  // was doing when it hung.
+  const h = harness();
+  const envelope = await h.run(
+    'console.log("checkpoint before the hang"); await new Promise(() => {});',
+    { timeoutMs: 1_000 },
+  );
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.phase, "timeout");
+  assert.ok(
+    envelope.console.some(line => line.includes("checkpoint before the hang")),
+    `the console must survive the timeout: ${JSON.stringify(envelope.console)}`,
+  );
+});
+
 test("the sandbox itself has no filesystem, network, process or timers", async () => {
   const h = harness();
   const envelope = await h.run(`

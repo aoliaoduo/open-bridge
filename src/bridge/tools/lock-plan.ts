@@ -99,14 +99,11 @@ function editBlockPaths(args: Record<string, unknown>, ctx: LockPlanContext): st
   const out: string[] = [];
   const direct = fileKey(args.path, ctx);
   if (direct) out.push(direct);
-  const edits = args.edits;
-  if (Array.isArray(edits)) {
-    for (const edit of edits) {
-      if (!edit || typeof edit !== "object") continue;
-      const key = fileKey((edit as Record<string, unknown>).path, ctx);
-      if (key) out.push(key);
-    }
-  }
+  // Every hunk applies to args.path (the handler enforces this — it refuses a
+  // stray per-edit path that names a different file). This planner used to
+  // lock edits[].path as well: a phantom lock on a file the call never
+  // touches, while the file actually being edited raced write locks with a
+  // disjoint key.
   return out;
 }
 

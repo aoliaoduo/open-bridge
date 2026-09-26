@@ -45,6 +45,15 @@ test("the four documented scopes are still accepted verbatim", () => {
   assert.equal(probeScope("loopback-and-public"), "loopback-and-public");
 });
 
+test("the schema's client-facing vocabulary maps honestly", () => {
+  // tool-definitions advertises auto/local/public. `local` used to be
+  // unrecognised here and silently widened to the default (loopback AND
+  // public) — the exact opposite of what a schema-following caller asked for.
+  assert.equal(probeScope("auto"), DEFAULT_PROBE_NETWORK_SCOPE, "auto is the documented default");
+  assert.equal(probeScope("local"), "loopback", "'local' must mean loopback only, never public");
+  assert.equal(probeScope("public"), "public");
+});
+
 test("the default actually refuses the address the bug reached", () => {
   // The end-to-end consequence, stated where the classifier decides it: with the
   // default scope, a link-local metadata address and an RFC1918 host are both

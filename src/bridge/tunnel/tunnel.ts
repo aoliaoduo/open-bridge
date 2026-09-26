@@ -464,6 +464,15 @@ async function startTailscaleFunnel(_generation: number): Promise<void> {
     await waitForPublicHealth(`https://${domain}/healthz/${state.routeToken}`);
     state.reconnectAttempt = 0;
     state.tunnelUrl = publishedUrl;
+    // The funnel is daemon-side state and the launcher child exits by design:
+    // nothing self-heals it the way the ngrok owner's child-exit reconnect
+    // does. An owner without a watch kept role "owner" and a dead public URL
+    // forever once the mount vanished later (another instance won the port,
+    // `tailscale funnel off`, a serve config reset) — and the Start-retry
+    // branch only fires for role "none", so it answered "already running" and
+    // the recovery path was closed. Followers always had a watch; arming the
+    // same one here lets the two-consecutive-free rule re-mount the funnel.
+    startPublicWatch(domain);
     host().ui.refresh();
     record("bridge", "completed", `Public through Tailscale Funnel: ${redactedPublicUrl(publishedUrl)}`);
   } catch (error) {

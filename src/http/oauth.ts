@@ -208,6 +208,11 @@ const registerLimiter = new AuthFailureLimiter(20, 5 * 60_000, 10 * 60_000);
  * operator's client list and small enough that the store stays hand-editable.
  */
 const MAX_REGISTERED_CLIENTS = 200;
+/** Shared by the fast pre-check and the authoritative in-store cap: the message must name a recovery that exists. */
+const REGISTRATION_FULL_MESSAGE =
+  `The registered client list is full (${MAX_REGISTERED_CLIENTS} clients, never pruned automatically; the console cannot remove them yet). `
+  + "To reclaim a slot: stop this Bridge, delete the stale entries from the \"clients\" array of the \"openBridge.oauth\" record in secrets.json "
+  + "in the data directory (default ~/.open-bridge), and start it again.";
 
 // ---------------------------------------------------------------------------
 // Small HTTP helpers (kept local: nothing here belongs in the app-shell path)
@@ -305,16 +310,10 @@ async function handleRegister(req: IncomingMessage, res: ServerResponse): Promis
     return true;
   }
   if ((await listClients()).length >= MAX_REGISTERED_CLIENTS) {
-    // The message must name a recovery that exists. "Revoke unused clients
-    // from the console" did not: registered clients are kept forever and no
-    // console, API or CLI can remove one, so a full list was a dead end. The
-    // store is re-read from secrets.json on every call, so hand-removing
-    // stale entries from its `openBridge.oauth` record (with the instance
-    // stopped, so no concurrent write lands between reads) is the way out.
-    oauthError(res, 429, "registration_limit",
-      `The registered client list is full (${MAX_REGISTERED_CLIENTS} clients, never pruned automatically; the console cannot remove them yet). `
-      + "To reclaim a slot: stop this Bridge, delete the stale entries from the \"clients\" array of the \"openBridge.oauth\" record in secrets.json "
-      + "in the data directory (default ~/.open-bridge), and start it again.");
+    // Fast-path refusal with the recovery text; registerClient re-checks the
+    // cap inside the serialized store mutation, so two concurrent
+    // registrations cannot both land past it.
+    oauthError(res, 429, "registration_limit", REGISTRATION_FULL_MESSAGE);
     return true;
   }
   const body = await readBodyText(req, MAX_OAUTH_BODY_BYTES);
@@ -353,7 +352,11 @@ async function handleRegister(req: IncomingMessage, res: ServerResponse): Promis
     token_endpoint_auth_method: "none",
     client_id_issued_at: Math.floor(Date.now() / 1000),
   };
-  await registerClient(client);
+  const registered = await registerClient(client, { maxClients: MAX_REGISTERED_CLIENTS });
+  if (!registered.ok) {
+    oauthError(res, 429, "registration_limit", REGISTRATION_FULL_MESSAGE);
+    return true;
+  }
   // Consumption, not failure: every accepted registration spends the key's
   // budget (a rejection above never reaches this line), so a loop is bounded
   // even though each individual request is legitimate on its own.
@@ -707,15 +710,10 @@ export async function handleOAuthRequest(
   if (!oauthEnabled()) return false;
 
   const method = (req.method ?? "GET").toUpperCase();
-  if (method === "OPTIONS") {
-    res.writeHead(204, {
-      "access-control-allow-origin": "*",
-      "access-control-allow-methods": "GET, POST, OPTIONS",
-      "access-control-allow-headers": "content-type, authorization",
-    });
-    res.end();
-    return true;
-  }
+  // No OPTIONS branch: the listener answers every OPTIONS itself before extra
+  // routes are consulted, so a preflight never reached this module — the old
+  // branch here was unreachable, and its header list had drifted from the
+  // listener's.
 
   // Discovery documents are read-only and unauthenticated by design: a client
   // must be able to find the authorization server before it has a token.

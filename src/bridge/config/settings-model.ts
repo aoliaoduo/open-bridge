@@ -58,10 +58,6 @@ export interface SettingsActionResult {
   secret?: SecretPayload;
   /** Text the console should copy to the clipboard itself. */
   copyText?: string;
-  /** Health-check detail lines, shown under the button that ran it. */
-  healthLines?: string[];
-  /** Health-check verdict; the console colours the report with it. */
-  healthOk?: boolean;
   /**
    * Perform the stop only after this response has been flushed: stopping closes
    * the very socket the response travels over.

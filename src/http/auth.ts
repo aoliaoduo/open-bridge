@@ -38,7 +38,7 @@ import {
   isExpired,
   mergeRecordsWithDisk,
   publicTokenView,
-  remoteKeyOf,
+  forwardedIdentity,
   verifySecret,
   type AuthTokenRecord,
   type DigestIndex,
@@ -379,19 +379,26 @@ export async function authorizeRequest(
   // Rate-limit on the forwarded client identity, NOT the socket address: the
   // ngrok agent runs locally, so every request arrives from 127.0.0.1 and a
   // socket-keyed limiter would let one remote attacker lock the operator out.
-  const key = remoteKeyOf(req.headers, req.socket?.remoteAddress);
-  const lockedFor = limiter.lockoutRemaining(key, now);
+  // Failure accounting applies only to forwarded identities. A direct
+  // connection — the local MCP client, a browser debugging the URL, the
+  // console's own anonymous auth_gate probe — shares one socket key, and
+  // counting its failures let five anonymous health checks in five minutes
+  // answer the operator's own client with 429. A caller already on the machine
+  // can read secrets.json, so the limiter has nothing to offer there; remote
+  // brute force arrives through the tunnel and carries a forwarded identity.
+  const identity = forwardedIdentity(req.headers);
+  const lockedFor = identity ? limiter.lockoutRemaining(identity, now) : 0;
   if (lockedFor > 0) {
     return { ok: false, status: 429, reason: "locked_out", retryAfterMs: lockedFor };
   }
 
   const verdict = verifySecret(records, presented.value, now, index);
   if (!verdict.ok) {
-    limiter.recordFailure(key, now);
+    if (identity) limiter.recordFailure(identity, now);
     return { ok: false, status: 401, reason: verdict.reason, challenge: oauthChallengeHeader };
   }
 
-  limiter.recordSuccess(key);
+  if (identity) limiter.recordSuccess(identity);
   await touchToken(verdict.id, now);
   return { ok: true };
 }

@@ -153,6 +153,24 @@ test("the lockout is per client, so it cannot lock the operator out", async () =
   assert.equal(operator.res.status, 200, "a different client identity is unaffected by another's lockout");
 });
 
+/**
+ * Direct connections share one identity: the operator's local MCP client, a
+ * browser pointed at the MCP URL while debugging, and the console's own
+ * anonymous auth_gate health probe all arrive from the same socket. Counting
+ * their failures against that shared key let five anonymous health checks in
+ * five minutes answer the operator's own client with 429 — the health check
+ * then failed on its own lockout ("返回 429，预期 401"), a self-inflicted
+ * alarm nobody could follow. A caller already on the machine can read
+ * secrets.json, so the limiter has nothing to offer there; remote brute force
+ * arrives through the tunnel and carries a forwarded identity.
+ */
+test("direct (non-forwarded) failures never lock out — local clients cannot self-lock", async () => {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const res = await openSession({ authorization: "Bearer ob_wrong-again" });
+    assert.equal(res.res.status, 401, `direct attempt ${attempt} must be a plain rejection`);
+  }
+});
+
 test("get_auth_status reports the token id and never the secret; get_lock_status stays readable", async () => {
   const { res, sessionId } = await openSession(bearer(issued.secret));
   assert.equal(res.status, 200);

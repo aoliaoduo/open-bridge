@@ -4,6 +4,22 @@
 
 详细的设计过程、根因分析和测试用例请查阅 Git 历史、源码注释与对应文档；本文件只保留面向使用者的发布摘要。
 
+## [Unreleased]
+
+### Fixed
+
+- 一次全仓缺陷扫描（四路分片深审：工具层、HTTP/服务端、核心桥/CLI、UI/TUI，逐项人工复核证据后修复，修复项由用户从选项中选定）：
+
+- **工具与算法**：`connectivity` 的 `scope` 枚举与实现对齐——此前 schema 只承诺 `auto/local/public`，实现只认内部词表，按 schema 传 `local`（想只探测本地）会被静默改写成默认值 `loopback-and-public`（含公网探测，语义正好相反且无任何报错）；现在 `auto`=安全默认、`local`=仅回环、`public`=仅公网端点，内部覆盖值（`loopback`/`loopback-and-public`/`any`）仍在 schema 中如实列出。`apply_patch` 的 Add File 块拒绝不带 `+` 前缀的正文行——此前这类行被静默丢弃且报 `applied:true`，调用方拿到被截断的文件。`start_process` 的 `ready_pattern` 在真实输出上触发求值预算（如灾难性回溯，空串预检无法发现）时，调用照常返回含 `command_id` 的启动结果并附 `ready_error` 说明——此前报错在进程已 spawn 之后才抛出，调用方拿不到句柄，进程只能靠 `get_process_snapshot` 捞。`read_files` 的 `paths` 上限 20 个（schema 同步声明）并以最多 4 路并发执行、行顺序不变——此前数量无上限且全量并行，"读全部图片/日志"类调用可同时驻留数 GB 的 base64 行，OOM 带走的是整个 Bridge 进程。`edit_block` 对 `edits[i].path` 指向其他文件的写法点名拒绝（此前被静默忽略，调用方以为改了那个文件）；锁计划随之只锁真实编辑的目标文件（此前会对从未被触碰的文件上幻影锁）。
+- **进程与脚本**：`set_todos` 强制 schema 承诺的 100 条上限（此前端上不校验，超大列表被持久化、渲染并推送）。`run_script` 超时路径现在带回脚本已产出的 console 输出——此前恒为空数组，而超时恰恰是最需要诊断的路径。
+- **配置与 CLI**：`open-bridge config set` 接入与 MCP、控制台共享的 `validateConfigValue`——此前 CLI 是第三条设置写入路径里唯一只做类型转换的，`port 99999`（之后被端口探针误报"已占用"）、负的并发超时（被静默忽略回落默认值）、`publicHealthTimeoutMs 100`（每次隧道启动必然失败）都能存进配置。`open-bridge stop` 的 POSIX 强杀回退先 SIGTERM 宽限 2 秒、再 SIGKILL 并核实结果——此前裸 SIGTERM 会命中目标实例自己的优雅停机守卫（第二次信号是空操作），进程可能活着而命令已称"进程已终止"。
+- **隧道**：Tailscale funnel 的 owner 成功路径武装公网 watch——funnel 是 daemon 侧状态、启动器子进程注定退出且退出只清句柄，挂载事后消失（同机另一实例抢注、`tailscale funnel off`、serve 配置重置）时，实例此前永远顶着 `owner` 与死 URL，而 Start 重试只认 `role: none`，恢复路径整体封死；现在 owner 与 follower 共用同一套"连续两次 free 即认领"的 watch，自动重挂。
+- **认证与 HTTP**：bearer 门禁只对带转发身份（经隧道、带 `x-forwarded-for`/`x-real-ip`）的请求计失败与锁定——本机直连（本地 MCP 客户端、浏览器调试、控制台体检的匿名探测）共享同一 socket 键，此前开启 auth 后连点 5 次体检就能把本地客户端锁 5 分钟，体检自身也开始报「返回 429，预期 401」的自毒假阳性。`/mcp` 未捕获异常的回答改为固定句子并记入审计（此前把内部 `error.message` 原文回给客户端，该端点公网可达；现代代同样收紧，且补 `skipIfEnded` 防止在 SSE 流开始后追加 JSON 弄脏流）。`/api` 请求体不是合法 JSON 时返回 400（此前 500 加 Node 解析器原文）。OAuth 注册的 200 上限检查移入串行化存储变更内——先读后写的外部检查可被并发注册突破；OAuth 路由内永不可达的 OPTIONS 分支删除（监听器先行应答，两处 CORS 头已经漂移）。
+- **状态与性能**：`state.json` 不再每个 MCP 请求全量写两次——会话票据 `lastUsed` 触摸改为 5 秒尾随防抖、使用统计改为 2 秒尾随防抖（重置与停机仍立即落盘），prune 未移除任何条目时不再无条件持久化。此前高频可丢的计数数据走的是 secrets 级崩溃安全写法（跨进程锁 + 全文重读 + fsync + rename）；共享数据目录时双实例还会在锁上相撞，锁循环耗尽后 persist 尾巴静默吞掉更新。
+- **会话生命周期**：`stopInternal` 的 `stopping` 标志改由 try/finally 复位——中途同步异常（如 `transport.close()` 拒绝）此前会把它永久卡住，之后每次隧道重连调度都是空操作。`openLegacySession` 在 attach 失败时回滚会话与票据注册——此前留下半绑定的僵尸会话，后续请求不断刷新其 `lastUsed`，空闲回收永远收不走，只有 Stop 能清。
+- **Web 控制台**：状态页轮询失败显示错误横幅、恢复即清除——此前两个轮询都吞错，进程死亡或重启期间页面可冻结在「运行中」、顶栏「已连接」，与日志页的「已断开，重连中」同屏矛盾。服务页错误横幅沿用会话页的"仅清除轮询写入的提示"模式（此前一次重启期间的失败提示永不消失，还会覆盖操作反馈）；统计页补齐同一模式，清零动作补 `poll.invalidate()` 守卫（清零后的计数不再被旧轮询复活）。`/api/settings` 首次加载失败自动重试（最多 5 次，每次尝试都会提示，成功即停）——此前一次瞬断就让安全页与设置页永久停在骨架屏，唯一的提示是一条 2.6 秒即逝的 toast。安全页总览的「当前状态」渲染本地化标签（此前直接显示原始枚举 `public-open`）。Bearer 门禁开关补 busy 防抖（连续两次切换不再可能让开关显示与服务端相反）。日志页「暂停」改为缓冲（上限同视图 800 行）并在继续时合并——此前暂停期间写入的行被静默丢弃，与按钮字面义相悖。清除死注释（引用已移除的「刷新本页」按钮）与死字段（`SettingsActionResult.healthLines`/`healthOk`，无产无消）。
+- `docs/tools.md` 同步两处：`read_files` 的单次路径上限与并发行为；`start_process` 就绪检查失败时的 `ready_error` 契约。
+
 ## [1.4.1] — 2026-09-25
 
 ### Fixed

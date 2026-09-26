@@ -20,6 +20,11 @@ import { Skeleton } from "./Skeleton";
 export function ServicesTab({ notify }: { notify?: (text: string, isError?: boolean) => void } = {}) {
   const [services, setServices] = useState<ServiceView[] | null>(null);
   const [note, setNote] = useState("");
+  /** Whether `note` currently holds a poll error — the pattern SessionsPage
+      uses: the poll's success branch clears only that kind of note, so a
+      recovered poll stops claiming its old failure without eating an action's
+      own feedback ("web: 已重启"). */
+  const noteIsPollError = useRef(false);
   const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
   const inFlight = useRef(new Set<string>());
 
@@ -28,9 +33,18 @@ export function ServicesTab({ notify }: { notify?: (text: string, isError?: bool
     poll: async fresh => {
       try {
         const list = await api.services();
-        if (fresh()) setServices(list);
+        if (fresh()) {
+          setServices(list);
+          if (noteIsPollError.current) {
+            noteIsPollError.current = false;
+            setNote("");
+          }
+        }
       } catch (error) {
-        if (fresh()) setNote(errorMessage(error));
+        if (fresh()) {
+          noteIsPollError.current = true;
+          setNote(errorMessage(error));
+        }
       }
     },
   });
@@ -47,9 +61,11 @@ export function ServicesTab({ notify }: { notify?: (text: string, isError?: bool
       // fresh answer (a stopped service looked running until the next tick).
       poll.invalidate();
       setServices(result.services);
+      noteIsPollError.current = false;
       setNote(`${name}: ${action === "start" ? t("已启动", "started")
         : action === "stop" ? t("已停止", "stopped") : t("已重启", "restarted")}`);
     } catch (error) {
+      noteIsPollError.current = false;
       setNote(errorMessage(error));
     } finally {
       inFlight.current.delete(name);

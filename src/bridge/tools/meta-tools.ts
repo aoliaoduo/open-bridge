@@ -368,13 +368,28 @@ export function getTodos(_args?: Args, session?: SessionState): Record<string, u
 }
 
 export async function searchActivityLogTool(args: Args): Promise<Record<string, unknown>> {
+  // A present limit/offset must be a real number. The old
+  // `typeof === "number" ? value : default` silently rewrote a string "10"
+  // into a 50-row page with no signal — the same silent rewrite
+  // activity-log.ts refuses to make for limit:0. Absent values keep the
+  // documented defaults; garbage is refused by name.
+  if (args.limit !== undefined && typeof args.limit !== "number") {
+    throw new Error(
+      `Invalid "limit" value ${JSON.stringify(String(args.limit))} for activity_log search. Expected a number from 1 to 500.`,
+    );
+  }
+  if (args.offset !== undefined && (typeof args.offset !== "number" || !Number.isFinite(args.offset))) {
+    throw new Error(
+      `Invalid "offset" value ${JSON.stringify(String(args.offset))} for activity_log search. Expected a number (0 or more).`,
+    );
+  }
   const result = await searchActivityLog(auditLogPath(), {
     tool: typeof args.tool === "string" ? args.tool : undefined,
     status: typeof args.status === "string" ? args.status : undefined,
     query: typeof args.query === "string" ? args.query : undefined,
     since: args.since !== undefined ? args.since : undefined,
-    limit: typeof args.limit === "number" ? args.limit : 50,
-    offset: typeof args.offset === "number" ? args.offset : 0,
+    limit: args.limit !== undefined ? args.limit : 50,
+    offset: args.offset !== undefined ? args.offset : 0,
   });
   return {
     entries: result.entries,

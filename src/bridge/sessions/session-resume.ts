@@ -119,7 +119,21 @@ export async function openLegacySession(input: {
     rememberSessionTicket(resumeId, session.client);
     await flushSessionTickets();
   }
-  await attachMcp(session);
+  try {
+    await attachMcp(session);
+  } catch (error) {
+    // The session and ticket were registered BEFORE the attach: an attach
+    // failure used to leave a half-bound session with a live ticket in the
+    // table — later requests found it, skipped resume, and kept refreshing its
+    // lastUsed, so the idle prune never collected it and only Stop cleared the
+    // wedge. Undo the registration and let the caller's 500 stand.
+    if (resumeId) {
+      state.sessions.delete(resumeId);
+      forgetSessionTicket(resumeId);
+      void flushSessionTickets();
+    }
+    throw error;
+  }
   return session;
 }
 

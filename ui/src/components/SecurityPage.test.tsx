@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SecurityPage } from "./SecurityPage";
+import { EXPOSURE_META } from "../exposure";
 import type { SettingsState, SettingsTokenRow } from "../api";
 
 const { statusMock } = vi.hoisted(() => ({ statusMock: vi.fn() }));
@@ -98,14 +99,19 @@ describe("SecurityPage: one-time secrets survive an impatient click", () => {
       .mockResolvedValueOnce({ exposure: "public-open" })
       .mockResolvedValueOnce({ exposure: "public-authed" });
     const act = vi.fn().mockResolvedValue({ ok: true });
+    // The overview renders the localized label, not the raw server enum
+    // (the raw value next to localized text on the same card was the drift
+    // the exposure vocabulary exists to prevent). Falls back to the key so a
+    // vocabulary regression reads as its own failure.
+    const labelOf = (key: string): string => EXPOSURE_META[key]?.label() ?? key;
 
     render(<SecurityPage settings={state()} act={act} />);
-    expect(await screen.findByText("public-open")).toBeTruthy();
+    expect(await screen.findByText(labelOf("public-open"))).toBeTruthy();
 
     fireEvent.click(screen.getByLabelText("Bearer 门禁"));
     expect(act).toHaveBeenCalledWith({ command: "setAuthEnabled", enabled: true });
 
-    expect(await screen.findByText("public-authed")).toBeTruthy();
+    expect(await screen.findByText(labelOf("public-authed"))).toBeTruthy();
   });
 });
 

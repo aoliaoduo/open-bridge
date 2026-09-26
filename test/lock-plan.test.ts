@@ -55,13 +55,18 @@ test("pair tools lock both source and destination", async () => {
   assert.deepEqual(plan?.keys, [fk("a.ts"), fk("b.ts")].sort());
 });
 
-test("edit_block locks the primary path plus every edits[] target", async () => {
+test("edit_block locks only the primary path — every hunk applies to it", async () => {
+  // The planner used to lock edits[].path as well, pinning a contract the
+  // handler never had: the handler applies every hunk to args.path and ignores
+  // per-edit paths, so a stray path field produced a phantom lock on a file
+  // the call never touches. The handler now refuses a mismatched per-edit
+  // path, and the planner protects exactly the file that is edited.
   const plan = await deriveLockPlan(
     "edit_block",
     { path: "a.ts", edits: [{ path: "b.ts" }, { path: "c.ts" }] },
     ctx(),
   );
-  assert.deepEqual(plan?.keys, [fk("a.ts"), fk("b.ts"), fk("c.ts")].sort());
+  assert.deepEqual(plan?.keys, [fk("a.ts")]);
 });
 
 test("read_files takes shared read locks; discovery tools take none", async () => {

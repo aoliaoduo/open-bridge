@@ -73,7 +73,7 @@
 
 - 正则语义是 **JavaScript** 的（内置扫描用的就是 `RegExp`）。ripgrep 的默认引擎不支持先行/后顾（`(?=`、`(?!`、`(?<=`、`(?<!`）与反向引用（`\1`），这类查询会由内置扫描回答 —— 结果一致，只是慢一些，不会因此少给或不报错。看到空结果时先确认不是正则写错或 `include` 太窄。
 
-**read_files** — 读一个或多个文件；大文件用 `start_line` / `end_line`（1 基、含两端）读区间。`sha256` 要么是**整个文件**的摘要（可直接作 `expected_sha256` 做乐观写入），要么是 `null` —— 它**永远是一个存在的字段**，绝不会因为读法不同而消失。只有流真正读到文件末尾时才有值：`max_bytes` 截断必为 `null`；区间读（`start_line` / `end_line`）边读边哈希 —— `end_line` 之后剩余字节在哈希预算内时，流会继续读到 EOF 并照常报告**全文件**摘要（`content` 仍只是请求的区间），剩余过大则提前停读、`sha256` 为 `null`（不会为了一个哈希去重读整个文件，那会让「2 GB 日志取 5 行」退化成全量扫描）。需要截断读之后的摘要，用 `get_file_info`。`encoding: "base64"` 读二进制。
+**read_files** — 读一个或多个文件（单次调用最多 `paths` 20 个，超出按名拒绝；请求以最多 4 路并发读取，行结果仍与请求顺序一一对应）；大文件用 `start_line` / `end_line`（1 基、含两端）读区间。`sha256` 要么是**整个文件**的摘要（可直接作 `expected_sha256` 做乐观写入），要么是 `null` —— 它**永远是一个存在的字段**，绝不会因为读法不同而消失。只有流真正读到文件末尾时才有值：`max_bytes` 截断必为 `null`；区间读（`start_line` / `end_line`）边读边哈希 —— `end_line` 之后剩余字节在哈希预算内时，流会继续读到 EOF 并照常报告**全文件**摘要（`content` 仍只是请求的区间），剩余过大则提前停读、`sha256` 为 `null`（不会为了一个哈希去重读整个文件，那会让「2 GB 日志取 5 行」退化成全量扫描）。需要截断读之后的摘要，用 `get_file_info`。`encoding: "base64"` 读二进制。
 
 **get_file_info** — 元数据。≤128 MiB 的文件带 `sha256`；更大的返回 `null`，而不是把整个文件读进内存。
 
@@ -112,7 +112,7 @@
 
 **长任务不要占住一次前台 MCP 请求。** 构建、验证、迁移或任何耗时不确定的命令应传 `background: true`，立即取得 `command_id`，再用 `read_process_output`、`wait` 或 `process_control` 续读、等待或终止；不要因客户端/传输层等待超时就重发原命令——那会并发执行两次有副作用的工作。例：`run_command{command:"npm run verify", background:true, resource_keys:["build:dist"]}`，随后按返回的 `command_id` 读取输出。无论命令是后台还是 `start_process` 启动，只在传入 `ready_pattern` 时 `ready` 才是实际观察到的就绪信号；没有该模式时保留的 `ready:true` 只表示**没有请求就绪检查**，请看 `ready_checked:false` 与 `status` / `exit_code`。
 
-**start_process** — 面向**长驻**进程（服务器、watcher、守护进程）：`ready_pattern` 等启动输出，返回 `command_id` 交给进程工具组。就绪等待由 **`ready_timeout_ms`**（毫秒，默认 **10000**，上限 2147483647）控制：等不到就让调用返回 `ready: false` + `status: "running"`，**不会杀进程**（慢启动的构建要放宽，就调这个值）。这里**没有 `timeout_ms`** —— 那是 `run_command` 的（前台运行才有"完成"可限时）；传了会**点名拒绝**，而不是像以前那样被静默忽略。其类型化启动结果明确携带 `ready`、`ready_checked`、输出截断计数与 `command_id`；`ready_checked:false` 表示没有请求模式检查，而不是已经观察到就绪。
+**start_process** — 面向**长驻**进程（服务器、watcher、守护进程）：`ready_pattern` 等启动输出，返回 `command_id` 交给进程工具组。就绪等待由 **`ready_timeout_ms`**（毫秒，默认 **10000**，上限 2147483647）控制：等不到就让调用返回 `ready: false` + `status: "running"`，**不会杀进程**（慢启动的构建要放宽，就调这个值）。这里**没有 `timeout_ms`** —— 那是 `run_command` 的（前台运行才有"完成"可限时）；传了会**点名拒绝**，而不是像以前那样被静默忽略。其类型化启动结果明确携带 `ready`、`ready_checked`、输出截断计数与 `command_id`；`ready_checked:false` 表示没有请求模式检查，而不是已经观察到就绪。就绪检查自身失败（例如模式对真实输出触发灾难回溯、超出 500ms 求值预算）时，结果仍带 `command_id` 与 `ready_error`——进程已在运行，句柄照常可用，失败原因随结果说明而不是把已启动的进程留在没有句柄的状态。
 
 **read_process_output** — 分页读受监管命令的输出：`offset` / `max_bytes`，`stream` 只读一路，`wait_ms`（最大 60000）阻塞等待**新**输出。默认 128 KiB/次，大输出传更大的 `max_bytes`，用 `next_offset` 翻页，`truncated` 告诉你还有没有。它和 `interact_with_process` 的 `structuredContent` 共用同一份分页契约：`offset` 是本页实际起点（省略入参时从最早仍保留的字节开始；请求已丢弃的早期位置会报错、绝不静默跳过），`next_offset` 是下一页入参，`output_available_bytes` 是当前仍保留的字节，`dropped_bytes` 是已不再可读的早期字节；这四项都按所选 `stream` 计数。`truncated` 的意思是本页未覆盖完整流（可能少了前面、也可能少了后面）；要判断后面是否还有已捕获内容，比较 `next_offset < output_bytes`。
 

@@ -126,6 +126,13 @@ function afterResponse(res: ServerResponse, task: () => void): void {
 }
 
 /**
+ * A request body that is not valid JSON is the CALLER's bug, not a server
+ * fault. It used to fall into the generic catch as a 500 carrying the raw
+ * Node parser message; the tag lets the catch answer 400 instead.
+ */
+class MalformedBodyError extends Error {}
+
+/**
  * The shared cap-and-accumulate reader (see read-body.ts) wrapped in this
  * surface's own contract: an over-cap body THROWS (the router's catch turns
  * that into a 500), and an empty body is `undefined` rather than the empty
@@ -135,7 +142,13 @@ async function readBody(req: IncomingMessage, maxBytes = 64 * 1024): Promise<unk
   const text = await readBodyText(req, maxBytes);
   if (text === undefined) throw new Error("Request body too large.");
   if (!text) return undefined;
-  return JSON.parse(text);
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new MalformedBodyError(
+      `Request body is not valid JSON: ${error instanceof Error ? error.message : String(error)}.`,
+    );
+  }
 }
 
 /**
@@ -574,6 +587,10 @@ export async function apiRouteHandler(
       default: sendJson(res, 404, { error: "Unknown API route." }); return true;
     }
   } catch (error) {
+    if (error instanceof MalformedBodyError) {
+      sendJson(res, 400, { ok: false, error: error.message });
+      return true;
+    }
     sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
     return true;
   }

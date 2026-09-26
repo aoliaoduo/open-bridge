@@ -28,8 +28,15 @@ type Args = JsonArgs;
  * then connected to the cloud-metadata address. An unrecognised value is treated
  * exactly like an absent one: both get the documented default, never `any`.
  * `any` remains available, but only as the explicit opt-in it is documented to be.
+ *
+ * The schema's client-facing vocabulary maps onto the probe layer's names:
+ * `auto` is the documented default, and `local` narrows to loopback only. Both
+ * used to be unrecognised here and silently widened to the default (loopback
+ * AND public) — the opposite of what a schema-following caller asked for.
  */
 export function probeScope(value: unknown): ProbeNetworkScope {
+  if (value === "auto") return DEFAULT_PROBE_NETWORK_SCOPE;
+  if (value === "local") return "loopback";
   const allowed = new Set<string>(["any", "loopback", "public", "loopback-and-public"]);
   return typeof value === "string" && allowed.has(value) ? (value as ProbeNetworkScope) : DEFAULT_PROBE_NETWORK_SCOPE;
 }

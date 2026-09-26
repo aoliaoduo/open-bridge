@@ -10,8 +10,10 @@
  */
 
 import * as fs from "node:fs";
+import * as path from "node:path";
 
 import { CONFIG_DEFAULTS } from "../bridge/config/config-defaults.js";
+import { validateConfigValue } from "../bridge/config/config-values.js";
 import { resolveTailscaleExecutable } from "../bridge/tunnel/tailscale-locate.js";
 import { t } from "./cli-i18n.js";
 import {
@@ -103,7 +105,16 @@ export async function cmdConfig(parsed: ParsedArgs): Promise<void> {
     }
     case "set": {
       if (!key || value === undefined) fail(t("用法: open-bridge config set KEY VALUE", "Usage: open-bridge config set KEY VALUE"));
-      await nodeHost.config.update(key, coerceForKey(key, value));
+      // The third settings write path shares the validator MCP and the console
+      // use: type coercion alone stored port 99999, negative timeouts and other
+      // values their readers then silently ignored or misreported.
+      const checked = validateConfigValue(key, coerceForKey(key, value));
+      if (!checked.ok) fail(checked.error);
+      let next = checked.value;
+      if (key === "allowedDirectories") {
+        next = (next as string[]).map(item => path.resolve(item));
+      }
+      await nodeHost.config.update(key, next);
       console.log(t(`${key} 已保存。`, `${key} saved.`));
       return;
     }

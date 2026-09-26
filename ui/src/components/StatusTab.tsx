@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api, type BridgeStatus } from "../api";
 import type { LockSnapshot } from "../api";
-import { idleLabel } from "../format";
+import { errorMessage, idleLabel } from "../format";
 import { EXPOSURE_META } from "../exposure";
 import { t } from "../i18n";
 import type { RouteId } from "../routes";
@@ -39,14 +39,25 @@ function TunnelRole({ role }: { role?: string }) {
 export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
   const [status, setStatus] = useState<BridgeStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  // The last poll failure, cleared by the next success. Both polls used to
+  // swallow errors silently, so a dead or restarting server froze the page on
+  // its last snapshot — the capsule kept saying 运行中 while the logs page
+  // said 已断开，重连中. For the page whose whole job is "is it up", silence
+  // on failure was the one gap failure-reporting had left.
+  const [pollError, setPollError] = useState("");
 
   const statusPoll = usePolling({
     intervalMs: 2000,
     poll: async fresh => {
       try {
         const next = await api.status();
-        if (fresh()) setStatus(next);
-      } catch { /* server may be mid-restart */ }
+        if (fresh()) {
+          setStatus(next);
+          setPollError("");
+        }
+      } catch (error) {
+        if (fresh()) setPollError(errorMessage(error));
+      }
     },
   });
 
@@ -92,6 +103,11 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
 
   return (
     <>
+      {pollError && (
+        <div className="card section-note" role="alert" style={{ marginBottom: 0 }}>
+          {t(`状态刷新失败：${pollError}`, `Status refresh failed: ${pollError}`)}
+        </div>
+      )}
       {/* The four numbers an operator checks first. 实时状态 below used to carry
           the same values at body-text size among eight other rows. */}
       <div className="stats">

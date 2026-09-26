@@ -65,8 +65,30 @@ function enqueuePersist(): void {
     .catch(() => undefined);
 }
 
+/**
+ * lastUsed stamps are loss-tolerant bookkeeping: they coalesce into one
+ * trailing write instead of a full state.json rewrite per request. Unref'd so
+ * a pending flush never delays shutdown.
+ */
+const TOUCH_FLUSH_MS = 5_000;
+let touchFlushTimer: ReturnType<typeof setTimeout> | undefined;
+
+function scheduleTouchFlush(): void {
+  if (touchFlushTimer) return;
+  touchFlushTimer = setTimeout(() => {
+    touchFlushTimer = undefined;
+    enqueuePersist();
+  }, TOUCH_FLUSH_MS);
+  touchFlushTimer.unref?.();
+}
+
 /** Wait until queued ticket writes have hit the host store. */
 export function flushSessionTickets(): Promise<void> {
+  if (touchFlushTimer) {
+    clearTimeout(touchFlushTimer);
+    touchFlushTimer = undefined;
+    enqueuePersist();
+  }
   return persistTail;
 }
 
@@ -93,6 +115,7 @@ export function touchSessionTicket(id: string, now = Date.now()): void {
   const prev = tickets.get(id);
   if (!prev) return;
   prev.lastUsed = now;
+  scheduleTouchFlush();
 }
 
 export function forgetSessionTicket(id: string): void {
@@ -123,7 +146,10 @@ export function pruneSessionTickets(now = Date.now()): number {
       removed += 1;
     }
   }
+  // Removals change behavior across restarts and persist immediately. The old
+  // unconditional else-branch (flush lastUsed stamps) wrote the whole state
+  // document on EVERY /mcp request; touch schedules its own debounced flush,
+  // so a prune that removed nothing has nothing of its own to save.
   if (removed > 0) enqueuePersist();
-  else enqueuePersist(); // flush lastUsed stamps gathered by touch()
   return removed;
 }

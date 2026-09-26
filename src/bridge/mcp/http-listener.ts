@@ -337,7 +337,7 @@ export async function startHttpInternal(): Promise<void> {
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e);
           record("bridge", "error", `Modern MCP handler failed: ${message}`);
-          respondJson(500, { error: message }, { skipIfEnded: true });
+          respondJson(500, { error: "Internal error while handling the MCP request." }, { skipIfEnded: true });
         } finally {
           state.modernInFlight = Math.max(0, state.modernInFlight - 1);
           state.modernLastUsed = Date.now();
@@ -404,7 +404,13 @@ export async function startHttpInternal(): Promise<void> {
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      respondJson(500, { error: message });
+      record("bridge", "error", `Legacy MCP handler failed: ${message}`);
+      // skipIfEnded like the modern-era catch: once the transport has started
+      // an SSE response, appending JSON would corrupt the stream. The body is
+      // a fixed sentence, not the thrown message — this endpoint answers on
+      // the public tunnel too, and an internal error string (file paths,
+      // transport internals) has no business crossing it.
+      respondJson(500, { error: "Internal error while handling the MCP request." }, { skipIfEnded: true });
     }
     } catch (error) {
       // See the try above: turns "process dies on a stray request" into a 400.

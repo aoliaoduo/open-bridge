@@ -48,8 +48,31 @@ async function row(args: Record<string, unknown>): Promise<Row> {
   return result[0]!;
 }
 
-test("read_files gives binary pages a byte cursor that can recover every byte", async () => {
-  const first = await row({ paths: ["bytes.bin"], encoding: "base64", max_bytes: 4 });
+test("read_files caps the paths fan-out by name instead of OOMing the bridge", async () => {
+  // Each base64 row can buffer ~150 MB (64 MiB buffer + its base64 string).
+  // `paths` used to have no count cap and every row ran at once, so one
+  // "read all the images/logs" prompt could pin multiple GB in the Bridge
+  // process — taking every session and supervised process down with it.
+  const paths = Array.from({ length: 21 }, (_, i) => (i === 0 ? "lines.txt" : `missing-${i}.txt`));
+  await assert.rejects(
+    readFiles({ paths }),
+    /paths must contain at most 20 entries \(received 21\)/,
+  );
+});
+
+test("read_files keeps one row per requested path in request order", async () => {
+  // Pins the bounded worker pool: results still line up with the request.
+  const paths = Array.from({ length: 20 }, (_, i) => `gen-${i}.txt`);
+  paths.forEach((name, i) => writeFileSync(path.join(dir, name), `content-${i}\n`, "utf8"));
+  const rows = await readFiles({ paths }) as Array<{ path: string; content: string }>;
+  assert.equal(rows.length, 20);
+  rows.forEach((r, i) => {
+    assert.equal(r.path, `gen-${i}.txt`);
+    assert.match(r.content, new RegExp(`content-${i}`));
+  });
+});
+
+test("read_files gives binary pages a byte cursor that can recover every byte", async () => {  const first = await row({ paths: ["bytes.bin"], encoding: "base64", max_bytes: 4 });
   assert.equal(first.encoding, "base64");
   assert.equal(Buffer.from(first.content, "base64").toString("utf8"), "0123");
   assert.equal(first.offset, 0);

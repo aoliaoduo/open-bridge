@@ -298,7 +298,8 @@ export function expiryFrom(ttlSeconds: unknown, now: number): number | null {
 }
 
 /**
- * Best-effort client identity for rate limiting.
+ * The forwarded client identity, when the request arrived through the tunnel
+ * agent; undefined for a direct connection.
  *
  * The ngrok agent forwards the tunnel's traffic from loopback, so the socket
  * address is the agent, not the client — and the agent APPENDS the client's IP
@@ -309,7 +310,7 @@ export function expiryFrom(ttlSeconds: unknown, now: number): number | null {
  * entry: a client can still prepend garbage, but the value nearest the trusted
  * local agent is the one that agent saw.
  */
-export function remoteKeyOf(headers: Record<string, unknown>, socketAddress?: string): string {
+export function forwardedIdentity(headers: Record<string, unknown>): string | undefined {
   const raw = headers["x-forwarded-for"];
   const forwarded = Array.isArray(raw) ? raw[0] : raw;
   if (typeof forwarded === "string" && forwarded.trim()) {
@@ -319,7 +320,12 @@ export function remoteKeyOf(headers: Record<string, unknown>, socketAddress?: st
   }
   const real = headers["x-real-ip"];
   if (typeof real === "string" && real.trim()) return real.trim();
-  return socketAddress || "unknown";
+  return undefined;
+}
+
+/** Best-effort client identity for display purposes; falls back to the socket. */
+export function remoteKeyOf(headers: Record<string, unknown>, socketAddress?: string): string {
+  return forwardedIdentity(headers) ?? socketAddress ?? "unknown";
 }
 
 /**

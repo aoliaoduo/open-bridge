@@ -58,6 +58,7 @@ export function SecurityPage({ settings, act, notify }: Props) {
   const [note, setNote] = useState("");
   const [arming, setArming] = useState(false);
   const [rotating, setRotating] = useState(false);
+  const [gateBusy, setGateBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [label, setLabel] = useState("");
   const [ttl, setTtl] = useState(settings.defaultTtlSeconds);
@@ -113,6 +114,9 @@ export function SecurityPage({ settings, act, notify }: Props) {
     try {
       const status = await api.status();
       setReport({ exposure: String(status.exposure ?? "local") });
+      // Recovery clears the note a failed load wrote — the same rule the
+      // sessions page uses. Success used to leave the old failure on screen.
+      setNote("");
     } catch (error) {
       setNote(errorMessage(error));
     }
@@ -129,10 +133,18 @@ export function SecurityPage({ settings, act, notify }: Props) {
     }
   };
 
-  /** The plain gate switch changes the same fact the one-step button does. */
+  /** The plain gate switch changes the same fact the one-step button does.
+      It gets the same busy guard the others have: two overlapping toggles
+      could land out of order and leave the switch contradicting the server. */
   const toggleGate = async (enabled: boolean) => {
-    const result = await act({ command: "setAuthEnabled", enabled });
-    if (result?.ok) await rereadExposure();
+    if (gateBusy) return;
+    setGateBusy(true);
+    try {
+      const result = await act({ command: "setAuthEnabled", enabled });
+      if (result?.ok) await rereadExposure();
+    } finally {
+      setGateBusy(false);
+    }
   };
 
   const rotate = async () => {
@@ -183,7 +195,7 @@ export function SecurityPage({ settings, act, notify }: Props) {
         ) : (
           <PropList
             items={[
-              { label: t("当前状态", "Current state"), value: <Chip tone={exposure?.tone ?? "idle"}>{report.exposure}</Chip> },
+              { label: t("当前状态", "Current state"), value: <Chip tone={exposure?.tone ?? "idle"}>{exposure ? exposure.label() : report.exposure}</Chip> },
               { label: t("含义", "Meaning"), value: exposure?.text() ?? "—" },
               {
                 label: t("地址", "Address"),
@@ -256,6 +268,7 @@ export function SecurityPage({ settings, act, notify }: Props) {
                   type="checkbox"
                   className="switch"
                   checked={settings.authEnabled}
+                  disabled={gateBusy}
                   onChange={e => void toggleGate(e.target.checked)}
                   aria-label={t("Bearer 门禁", "Bearer gate")}
                 />

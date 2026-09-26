@@ -75,10 +75,39 @@ writeState({
 process.exit(0);
 `;
 
+/**
+ * A flippable stand-in for the public endpoint, preloaded into the serve
+ * process via NODE_OPTIONS (the same trick the ngrok suite uses for its edge).
+ * The fixture hostname does not resolve, so the health checks that decide
+ * ownership would otherwise always fail; the flag file lets a test say when
+ * the public endpoint is up. Absent by default, so every pre-existing scenario
+ * (health check fails, instance stays local) runs exactly as before.
+ */
+const HEALTHZ_INTERCEPT = `
+const FLAG = process.env.OB_FAKE_HEALTHZ_FLAG;
+const FIXTURE_HOST = "fixture-machine.tail9999.ts.net";
+const realFetch = globalThis.fetch;
+globalThis.fetch = (input, init) => {
+  let url;
+  try { url = new URL(typeof input === "string" ? input : input.url); } catch {}
+  // DNSName keeps a trailing dot ("…ts.net."), and URL.hostname preserves it.
+  if (url && url.hostname.replace(/\\.$/, "") === FIXTURE_HOST && url.pathname.startsWith("/healthz/")) {
+    let up = false;
+    try { up = require("node:fs").readFileSync(FLAG, "utf8").trim() === "up"; } catch {}
+    return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+      status: up ? 200 : 503,
+      headers: { "content-type": "application/json" },
+    }));
+  }
+  return realFetch(input, init);
+};
+`;
+
 let home;
 let fixture;
 let counterFile;
 let stateFile;
+let healthFlag;
 let child;
 let port;
 let serveLog = "";
@@ -128,6 +157,16 @@ async function until(check, timeoutMs = 20_000) {
   return check();
 }
 
+/** Same, for checks that must await something. */
+async function untilAsync(check, timeoutMs = 20_000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (await check()) return true;
+    await delay(200);
+  }
+  return check();
+}
+
 async function waitForListener(root = fixture, timeoutMs = 20_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
@@ -165,10 +204,12 @@ before(async () => {
   fixture = mkdtempSync(path.join(tmpdir(), "ob-tailscale-fixture-"));
   counterFile = path.join(fixture, "calls.log");
   stateFile = path.join(fixture, "funnel-state.json");
+  healthFlag = path.join(fixture, "healthz-flag.txt");
   // An explicit empty serve config: the daemon answers, and nobody holds 443.
   writeFileSync(stateFile, "{}");
   writeFileSync(path.join(fixture, "status"), FAKE_STATUS);
   writeFileSync(path.join(fixture, "funnel"), FAKE_FUNNEL);
+  writeFileSync(path.join(fixture, "healthz-intercept.cjs"), HEALTHZ_INTERCEPT);
   writeFileSync(path.join(home, "config.json"), JSON.stringify({
     tunnelProvider: "tailscale",
     // The MSI does not put tailscale on PATH; this is the explicit override a
@@ -181,7 +222,13 @@ before(async () => {
   child = spawnServe({
     root: fixture, home, tunnel: true,
     cwd: fixture, // so the stand-in `status` / `funnel` scripts resolve
-    env: { ...process.env, OB_FAKE_TAILSCALE_LOG: counterFile, OB_FAKE_TAILSCALE_STATE: stateFile },
+    env: {
+      ...process.env,
+      OB_FAKE_TAILSCALE_LOG: counterFile,
+      OB_FAKE_TAILSCALE_STATE: stateFile,
+      OB_FAKE_HEALTHZ_FLAG: healthFlag,
+      NODE_OPTIONS: `--require ${path.join(fixture, "healthz-intercept.cjs")}`,
+    },
   });
   child.stdout.on("data", d => { serveLog += d; });
   child.stderr.on("data", d => { serveLog += d; });
@@ -303,4 +350,61 @@ test("stopping does not switch off a mount that belongs to someone else", async 
   assert.equal(callsOf(secondLog, "off"), offBefore,
     `a foreign mount was switched off:\n${logLines(secondLog).join("\n")}`);
   assert.equal(fakeMountPort(), port, "the peer's mount is exactly where it was");
+});
+
+test("an owner whose mount vanished watches the domain and re-mounts the funnel", async () => {
+  // The owner-success path used to arm nothing: the funnel is daemon-side
+  // state and the launcher child exits by design, so when the mount vanished
+  // LATER (another instance won the port, `funnel off`, a serve reset), the
+  // instance kept role "owner" and a dead public URL forever — and Start
+  // answered "already running" because the retry branch only fires for role
+  // "none". Followers always had a watch; the owner needs one too.
+  //
+  // The previous test leaves the provider on "none" and an instance may still
+  // be settling the teardown that change triggered. Each switch re-arms a new
+  // generation, so cycle none->tailscale and only accept ownership from a
+  // settled cycle; the first cycle absorbs any straggler from test six.
+  writeFileSync(healthFlag, "up");
+  let owned = false;
+  for (let cycle = 0; cycle < 2 && !owned; cycle += 1) {
+    await postJson("/api/settings/action", { command: "setConfig", key: "tunnelProvider", value: "none" });
+    await delay(1_500);
+    const back = await postJson("/api/settings/action", { command: "setConfig", key: "tunnelProvider", value: "tailscale" });
+    assert.equal(back.status, 200, await back.text());
+    owned = await untilAsync(
+      async () => fakeMountPort() === port && (await publicUrl()) !== null,
+      45_000,
+    );
+  }
+  assert.ok(owned,
+    `the instance never took ownership; calls:\n${logLines(counterFile).join("\n")}`);
+  // Count from ownership: the provider switches themselves already spent
+  // several --bg calls.
+  const bgAtOwner = funnelCalls();
+
+  // The mount vanishes: the daemon now shows a dead backend on 443 and the
+  // public endpoint stops answering. The watch's two-consecutive-free rule
+  // must claim the endpoint back (a fresh `--bg` with our own port), and the
+  // claim's own health check must see a healthy origin again — flip the flag
+  // up the moment the re-mount is observed (the health check polls every
+  // 750 ms, the observation every 200 ms, so the flip lands in between).
+  writeFakeMount(1);
+  writeFileSync(healthFlag, "down");
+  const remounted = await until(() => {
+    if (funnelCalls() > bgAtOwner && fakeMountPort() === port) {
+      writeFileSync(healthFlag, "up");
+      return true;
+    }
+    return false;
+  }, 60_000);
+  assert.ok(remounted,
+    `the owner never re-mounted the vanished funnel; calls:\n${logLines(counterFile).join("\n")}`);
+  assert.equal(fakeMountPort(), port, "the re-mount is the instance's own backend");
+  assert.ok(await untilAsync(async () => (await publicUrl()) !== null, 10_000),
+    "the re-mounted funnel is advertised again");
+
+  // Leave the suite as the previous test found it: no tunnel wanted, and the
+  // flippable endpoint down.
+  writeFileSync(healthFlag, "down");
+  await postJson("/api/settings/action", { command: "setConfig", key: "tunnelProvider", value: "none" });
 });

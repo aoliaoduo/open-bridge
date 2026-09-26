@@ -20,12 +20,17 @@ function usageStateKey(): string {
 }
 
 /**
- * Persist the cumulative usage counters for the active workspace. Tail-chained
- * like persistServices/persistTodos so bursts of tool calls serialize into
- * ordered state writes. Called from the only mutation sites (dispatcher
- * call counting, lifecycle success/failure recording).
+ * Usage counters are loss-tolerant bookkeeping, but they used to schedule a
+ * full state.json rewrite (lock, re-read, stringify, fsync, rename) on EVERY
+ * counted tool call — two whole-document writes per MCP request once session
+ * tickets were counted. Bursts now coalesce into one trailing write; unref'd
+ * so a pending flush never delays shutdown.
  */
-export function persistUsageStats(): void {
+const USAGE_FLUSH_MS = 2_000;
+let usageFlushTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Write the current counters now, tail-chained like every other state write. */
+function writeUsageStats(): void {
   const key = usageStateKey();
   const snapshot: UsageSnapshot = {
     startedAt: state.usage.startedAt,
@@ -38,6 +43,26 @@ export function persistUsageStats(): void {
   usagePersistTail = usagePersistTail
     .then(() => host().state.update(key, snapshot))
     .catch(() => undefined);
+}
+
+/** Schedule a debounced persist of the cumulative usage counters. */
+export function persistUsageStats(): void {
+  if (usageFlushTimer) return;
+  usageFlushTimer = setTimeout(() => {
+    usageFlushTimer = undefined;
+    writeUsageStats();
+  }, USAGE_FLUSH_MS);
+  usageFlushTimer.unref?.();
+}
+
+/** Write any pending counters now; used by reset and shutdown. */
+export function flushUsageStats(): Promise<void> {
+  if (usageFlushTimer) {
+    clearTimeout(usageFlushTimer);
+    usageFlushTimer = undefined;
+    writeUsageStats();
+  }
+  return usagePersistTail;
 }
 
 function freshUsage(): UsageStats {
@@ -54,7 +79,14 @@ function freshUsage(): UsageStats {
  */
 export function resetUsageStats(): void {
   state.usage = freshUsage();
-  persistUsageStats();
+  // The reset itself must not be debounceable — a stale snapshot surviving in
+  // the timer could resurrect the old totals after a restart — and it must
+  // land even when no flush was pending, so it writes unconditionally.
+  if (usageFlushTimer) {
+    clearTimeout(usageFlushTimer);
+    usageFlushTimer = undefined;
+  }
+  writeUsageStats();
   host().ui.update();
 }
 

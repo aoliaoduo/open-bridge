@@ -201,6 +201,11 @@ const LIST_SKIP_DIRS = new Set([".git", "node_modules", "dist"]);
  */
 const WHOLE_BINARY_READ_CAP = 64 * 1024 * 1024;
 
+/** read_files accepts at most this many paths per call (schema advertises the same bound). */
+const MAX_READ_PATHS = 20;
+/** How many of those paths are read concurrently; each base64 row can pin ~150 MB. */
+const READ_FILES_CONCURRENCY = 4;
+
 /** Stream-hash a file with constant memory; used instead of buffering it whole. */
 async function sha256File(fullPath: string): Promise<string> {
   const hash = createHash("sha256");
@@ -770,6 +775,12 @@ export async function searchFiles(args: Args): Promise<unknown> {
 export async function readFiles(args: Args): Promise<unknown> {
   const paths: unknown[] = Array.isArray(args.paths) ? args.paths : [];
   if (!paths.length) throw new Error("paths must contain at least one workspace file. (expected 'paths': string[])");
+  if (paths.length > MAX_READ_PATHS) {
+    throw new Error(
+      `paths must contain at most ${MAX_READ_PATHS} entries (received ${paths.length}). `
+      + "Split the request: one call cannot fan out into an unbounded number of concurrent reads.",
+    );
+  }
   // An unknown encoding used to fall through to utf8 silently: a client that
   // misspelled "base64" got raw binary decoded as text back, reported as a
   // success. Unknown values get the error vocabulary's word: Invalid.
@@ -785,7 +796,12 @@ export async function readFiles(args: Args): Promise<unknown> {
     throw new Error("encoding=base64 cannot be combined with start_line or end_line.");
   }
   const base64Offset = args.offset === undefined ? 0 : requireValidOffset(Number(args.offset));
-  return Promise.all(paths.map(async (p, index) => {
+  // One call used to run every path at once: with the count uncapped, a
+  // "read all the images" prompt could pin ~150 MB per base64 row (64 MiB
+  // buffer plus its base64 string) times N paths in this process — an OOM that
+  // takes every session and supervised process down with it. The count cap
+  // bounds one dimension here; the small worker pool bounds the other.
+  const readOne = async (p: unknown, index: number): Promise<unknown> => {
     // `String(null)` is "null" and `String("")` resolves to the workspace root:
     // both used to be read as if the caller had named a file that way.
     if (typeof p !== "string" || p.trim() === "") {
@@ -898,7 +914,19 @@ export async function readFiles(args: Args): Promise<unknown> {
       const enriched = enrichFsError(error);
       return { path: p, error: enriched instanceof Error ? enriched.message : String(enriched) };
     }
-  }));
+  };
+  const results: unknown[] = new Array(paths.length);
+  let nextIndex = 0;
+  const worker = async (): Promise<void> => {
+    while (nextIndex < paths.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const p = paths[index];
+      results[index] = await readOne(p, index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(READ_FILES_CONCURRENCY, paths.length) }, () => worker()));
+  return results;
 }
 
 /** How much of an existing file is sampled to learn its line-ending style. */
@@ -1093,7 +1121,15 @@ export async function editBlock(args: Args): Promise<unknown> {
     let content = raw;
     let replacements = 0;
     for (let i = 0; i < edits.length; i++) {
-      const item = edits[i] as { old_text?: unknown; new_text?: unknown };
+      const item = edits[i] as { old_text?: unknown; new_text?: unknown; path?: unknown };
+      // Every hunk applies to "path" (and the lock plan protects exactly that
+      // file). A per-edit path naming a DIFFERENT file used to be silently
+      // ignored — the caller believed it had edited that file. Refuse instead.
+      if (item.path !== undefined && String(item.path) !== String(args.path)) {
+        throw new Error(
+          `Invalid "edits[${i}].path": every hunk applies to "path" (${String(args.path)}); per-edit paths are not supported.`,
+        );
+      }
       const oldText = typeof item.old_text === "string" ? item.old_text : "";
       if (!oldText) {
         throw new Error(`Invalid "edits[${i}].old_text": expected a non-empty string.`);

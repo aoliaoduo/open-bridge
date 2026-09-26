@@ -58,13 +58,23 @@ export function LogsTab({ settings, act, notify }: {
   // True while the note on screen is the one this component wrote about a
   // dropped connection, so reconnecting clears that note and nothing else.
   const autoNoteRef = useRef(false);
+  // Lines that arrived while 暂停 was on. Pausing freezes the VIEW, not the
+  // collection: the lines are buffered up to the pane's own 800-line cap and
+  // merged back on resume. Discarding them made the button lie — an operator
+  // who paused to read came back to a hole and no sign of one.
+  const pausedBufferRef = useRef<string[]>([]);
 
   useEffect(() => {
     const source = new EventSource("/api/logs/stream");
     source.onmessage = event => {
       try {
         const { line } = JSON.parse(event.data) as { line: string };
-        if (pausedRef.current) return;
+        if (pausedRef.current) {
+          const buffer = pausedBufferRef.current;
+          buffer.push(line);
+          if (buffer.length > 800) buffer.splice(0, buffer.length - 800);
+          return;
+        }
         setLines(prev => [...prev.slice(-800), line]);
       } catch { /* malformed frame */ }
     };
@@ -98,6 +108,16 @@ export function LogsTab({ settings, act, notify }: {
     const box = boxRef.current;
     if (box && stickToBottomRef.current) box.scrollTop = box.scrollHeight;
   }, [lines]);
+
+  // Resuming merges what arrived while paused, bounded by the same 800-line
+  // cap the live pane keeps.
+  useEffect(() => {
+    if (paused) return;
+    const buffered = pausedBufferRef.current;
+    if (!buffered.length) return;
+    pausedBufferRef.current = [];
+    setLines(prev => [...prev.slice(-Math.max(0, 800 - buffered.length)), ...buffered]);
+  }, [paused]);
 
   const parsed = useMemo(() => lines.map(parseLine), [lines]);
   const errorCount = parsed.filter(line => line.level === "error").length;

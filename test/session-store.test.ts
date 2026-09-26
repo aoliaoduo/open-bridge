@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { setHost, type Host } from "../src/host/host.js";
 import {
+  flushSessionTickets,
   forgetSessionTicket,
   hasLiveSessionTicket,
   rememberSessionTicket,
@@ -38,6 +39,17 @@ function memoryHost(): Host {
     log: (): void => undefined,
     ui: { update: (): void => undefined, refresh: (): void => undefined },
   };
+}
+
+function countingHost(): { host: Host; writes: () => number } {
+  let writes = 0;
+  const host = memoryHost();
+  const original = host.state.update.bind(host.state);
+  host.state.update = async (key: string, value: unknown): Promise<void> => {
+    writes += 1;
+    await original(key, value);
+  };
+  return { host, writes: () => writes };
 }
 
 setHost(memoryHost());
@@ -89,4 +101,38 @@ test("touch refreshes lastUsed", () => {
   rememberSessionTicket(id, undefined, 10);
   touchSessionTicket(id, 50);
   assert.equal(sessionTicket(id)?.lastUsed, 50);
+});
+
+test("a prune that removed nothing must not write state", async () => {
+  // pruneSessionTickets ran on EVERY /mcp request and used to persist
+  // unconditionally in both branches — a whole state.json rewrite per request
+  // for a stamp flush touch now schedules itself.
+  bag.clear();
+  resetSessionTicketCache();
+  const { host, writes } = countingHost();
+  setHost(host);
+  pruneSessionTickets(Date.now());
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(writes(), 0, "an idle prune has nothing of its own to save");
+  resetSessionTicketCache();
+  setHost(memoryHost());
+});
+
+test("touch alone never writes; the flush carries the pending stamp", async () => {
+  bag.clear();
+  resetSessionTicketCache();
+  const { host, writes } = countingHost();
+  setHost(host);
+  const id = "ee".repeat(16);
+  rememberSessionTicket(id, undefined, 10);
+  await flushSessionTickets();
+  const afterRemember = writes();
+  assert.ok(afterRemember >= 1, "remember persists immediately");
+  touchSessionTicket(id, 99);
+  assert.equal(writes(), afterRemember, "a touch schedules, it does not write");
+  await flushSessionTickets();
+  assert.equal(writes(), afterRemember + 1, "the forced flush lands the pending stamp");
+  assert.equal(sessionTicket(id)?.lastUsed, 99, "the in-memory value was intact all along");
+  resetSessionTicketCache();
+  setHost(memoryHost());
 });

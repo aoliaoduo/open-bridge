@@ -34,6 +34,9 @@ import {
 } from "../runtime/processes.js";
 import type { JsonArgs } from "./json-args.js";
 
+/** set_todos list cap — the same bound the tool schema advertises as maxItems. */
+const MAX_TODOS = 100;
+
 type Args = JsonArgs;
 
 /**
@@ -203,31 +206,41 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
       const readyTimeout = clampMs(args.ready_timeout_ms, 10_000);
       const until = Date.now() + readyTimeout;
       let ready = false;
+      let readyError: string | undefined;
       let inspectedOffset = commandState.output.state().bufferStartOffset;
-      while (!commandState.done && Date.now() < until && !ready) {
-        const current = commandState.output.state();
-        // Scan FORWARD from wherever the previous poll stopped (never only the
-        // trailing 64 KiB): clamping to the tail let an early ready line that
-        // was pushed out of the window by a >= 64 KiB burst between polls go
-        // untested forever, falsely timing out a healthy process.
-        // Each new window re-examines a small tail of the previous one: a
-        // ready line split across the window boundary would otherwise be
-        // tested against a truncated half in window N and be absent from
-        // window N+1 (already advanced), and a healthy server would be
-        // reported ready_timeout. A ready line is short; 4 KiB of overlap is
-        // orders of magnitude beyond one.
-        const start = Math.max(inspectedOffset - READY_PATTERN_OVERLAP_BYTES, current.bufferStartOffset);
-        const window = commandState.output.read(start, READY_PATTERN_WINDOW_BYTES);
-        ready = await testReadyPattern(patternText, window.data.toString("utf8"), READY_PATTERN_TEST_TIMEOUT_MS);
-        // Advance by the bytes actually scanned so a poll that only read part
-        // of a large burst does not skip the rest.
-        inspectedOffset = Math.max(inspectedOffset, window.endOffset);
-        if (!ready) await new Promise(resolve => setTimeout(resolve, 100));
+      try {
+        while (!commandState.done && Date.now() < until && !ready) {
+          const current = commandState.output.state();
+          // Scan FORWARD from wherever the previous poll stopped (never only the
+          // trailing 64 KiB): clamping to the tail let an early ready line that
+          // was pushed out of the window by a >= 64 KiB burst between polls go
+          // untested forever, falsely timing out a healthy process.
+          // Each new window re-examines a small tail of the previous one: a
+          // ready line split across the window boundary would otherwise be
+          // tested against a truncated half in window N and be absent from
+          // window N+1 (already advanced), and a healthy server would be
+          // reported ready_timeout. A ready line is short; 4 KiB of overlap is
+          // orders of magnitude beyond one.
+          const start = Math.max(inspectedOffset - READY_PATTERN_OVERLAP_BYTES, current.bufferStartOffset);
+          const window = commandState.output.read(start, READY_PATTERN_WINDOW_BYTES);
+          ready = await testReadyPattern(patternText, window.data.toString("utf8"), READY_PATTERN_TEST_TIMEOUT_MS);
+          // Advance by the bytes actually scanned so a poll that only read part
+          // of a large burst does not skip the rest.
+          inspectedOffset = Math.max(inspectedOffset, window.endOffset);
+          if (!ready) await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      } catch (error) {
+        // A pattern that explodes on real output (the "" pre-check passed it)
+        // must not strand the caller: the process IS running and registered.
+        // Report the failure in-band, with the handle, instead of erroring the
+        // call into a state where the command can only be found by snapshot.
+        readyError = error instanceof Error ? error.message : String(error);
       }
       if (!ready && !commandState.done) commandState.lastEvent = "ready_timeout";
       return {
         command_id: id, shell: shellSpec().file, cwd,
         status: commandState.done ? "completed" : "running", ready, ready_checked: true,
+        ...(readyError ? { ready_error: readyError } : {}),
         restart_count: commandState.restartCount,
         ...outputFields(commandState, stripArg),
       };
@@ -611,6 +624,12 @@ function validateTodos(value: unknown): Array<{ id: string; title: string; statu
       "todos must be an array. (expected 'todos': object[]) "
       + "set_todos replaces the whole list; use get_todos to read the current one.",
     );
+  }
+  // The schema advertises maxItems 100; the endpoint validates inputs itself,
+  // so the bound is spelled here too — an unbounded list persisted, rendered
+  // and pushed to every watcher on the strength of a schema nobody enforces.
+  if (value.length > MAX_TODOS) {
+    throw new Error(`todos must contain at most ${MAX_TODOS} items (received ${value.length}).`);
   }
   const seen = new Set<string>();
   const todos = value.map((item, index) => {

@@ -48,6 +48,9 @@ before(async () => {
   );
   // Never exits: the force_terminate case.
   writeFileSync(path.join(workspace, "forever.mjs"), 'setInterval(() => {}, 1000);\n', "utf8");
+  // Prints one 60000-character line, then stays alive: the ready_pattern case.
+  writeFileSync(path.join(workspace, "longline.mjs"),
+    'console.log("a".repeat(60000));\nsetInterval(() => {}, 1000);\n', "utf8");
   // Short, but long enough that a timer firing at ~0 ms would beat it.
   writeFileSync(
     path.join(workspace, "quick.mjs"),
@@ -227,6 +230,28 @@ test("ready_timeout_ms is the wait, and a process that misses it is reported, no
   assert.equal(res.status, "running", "the process is left running for the caller to poll");
   assert.ok(typeof res.command_id === "string" && res.command_id.length > 0,
     "a command_id comes back either way");
+  // An endless process is not a nice thing to leave behind on the machine.
+  await callTool("process_control", { action: "terminate", command_id: res.command_id });
+});
+
+test("a ready_pattern that explodes on real output still returns the handle", async () => {
+  // "(a+)+b" compiles fine and answers instantly on the "" pre-check, then hits
+  // its 500 ms evaluation budget against the 60000-a line the process prints.
+  // That error used to escape AFTER the spawn: the call failed with no
+  // command_id while the process kept running — no handle to poll, follow or
+  // terminate, only get_process_snapshot to dig it out with. The envelope is
+  // the contract: a started process is reported, a pattern failure goes
+  // in-band.
+  const res = asObject(await callTool("start_process", {
+    command: "node longline.mjs",
+    ready_pattern: "(a+)+b",
+    ready_timeout_ms: 15_000,
+  }));
+  assert.ok(typeof res.command_id === "string" && res.command_id.length > 0,
+    `the handle comes back: ${JSON.stringify(res).slice(0, 250)}`);
+  assert.equal(res.ready, false, "readiness was not observed");
+  assert.match(String(res.ready_error ?? ""), /ready_pattern/i,
+    "the pattern failure is reported in-band");
   // An endless process is not a nice thing to leave behind on the machine.
   await callTool("process_control", { action: "terminate", command_id: res.command_id });
 });

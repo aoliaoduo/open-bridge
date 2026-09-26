@@ -401,15 +401,24 @@ function applyHunksPreserving(rawCurrent: string, body: string, relative: string
 }
 
 /** Collect the content of an Add File block; blank added lines stay blank. */
-function addedContent(body: string): string {
+function addedContent(body: string, relative: string): string {
   // A bodyless Add block creates an EMPTY file, not a one-newline file (the
   // bare "" line here is the split artifact, not an added blank line).
   if (body === "") return "";
   const lines = body.split(/\r?\n/);
   if (lines.length && lines[lines.length - 1] === "" && body.endsWith("\n")) lines.pop();
-  const contentLines = lines.filter(line => line.startsWith("+") || line === "");
-  if (!contentLines.length) return "";
-  const content = contentLines
+  const unmarked = lines.findIndex(line => line !== "" && !line.startsWith("+"));
+  // An un-prefixed line used to be filtered out silently, so a client that
+  // forgot one `+` got a truncated file back with applied: true — silent data
+  // loss on a write path. Update blocks can at least treat such lines as
+  // context; Add has no context semantics, so refuse by name instead.
+  if (unmarked !== -1) {
+    const badLine = lines[unmarked] ?? "";
+    throw new Error(
+      `Add File: ${relative} line ${unmarked + 1} is missing the '+' prefix: "${badLine}". Every added line must start with '+'.`,
+    );
+  }
+  const content = lines
     .map(line => (line.startsWith("+") ? line.slice(1) : line))
     .join("\n");
   return content.endsWith("\n") ? content : `${content}\n`;
@@ -508,7 +517,7 @@ export async function applyPatch(
         continue;
       }
       if (kind === "Add") {
-        const addContent = addedContent(body);
+        const addContent = addedContent(body, relative);
         interim.set(file, addContent);
         operations.push({ kind: "add", relative, file, content: addContent });
         lastBlockKind.set(file, "add");

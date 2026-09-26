@@ -184,11 +184,22 @@ export async function findClient(clientId: string): Promise<OAuthClient | undefi
   return doc.clients.find(client => client.client_id === clientId);
 }
 
-export async function registerClient(client: OAuthClient): Promise<OAuthClient> {
-  return mutate(doc => ({
-    doc: { ...pruneDocument(doc, Date.now()), clients: [...doc.clients, client] },
-    result: client,
-  }));
+/** One registration attempt: `full` means the cap (when given) was already reached. */
+export type ClientRegistration = { ok: true; client: OAuthClient } | { ok: false; full: true };
+
+export async function registerClient(
+  client: OAuthClient,
+  limits?: { maxClients?: number },
+): Promise<ClientRegistration> {
+  return mutate((doc): { doc: OAuthDocument; result: ClientRegistration } => {
+    const pruned = pruneDocument(doc, Date.now());
+    // The cap is decided INSIDE the serialized mutation: a read-then-append
+    // check outside let two concurrent registrations both land past the cap.
+    if (limits?.maxClients !== undefined && pruned.clients.length >= limits.maxClients) {
+      return { doc: pruned, result: { ok: false, full: true } };
+    }
+    return { doc: { ...pruned, clients: [...pruned.clients, client] }, result: { ok: true, client } };
+  });
 }
 
 /** Persist a freshly minted access/refresh pair, pruning on the way through. */

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api, type ActivityEntry, type UsageStats } from "../api";
 import { errorMessage } from "../format";
 import { t } from "../i18n";
@@ -44,23 +44,46 @@ export function StatsTab() {
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [note, setNote] = useState("");
   const [view, setView] = useState<ActivityView>("all");
+  /** Whether `note` holds a poll error — the SessionsPage pattern, so a
+      recovered poll clears its own failure but not an action's feedback. */
+  const noteIsPollError = useRef(false);
 
-  usePolling({
+  const poll = usePolling({
     intervalMs: 3000,
     poll: async fresh => {
       try {
         const [u, a] = await Promise.all([api.usage(), api.activity()]);
-        if (fresh()) { setUsage(u); setActivity(a); }
-      } catch { /* transient */ }
+        if (fresh()) {
+          setUsage(u);
+          setActivity(a);
+          if (noteIsPollError.current) {
+            noteIsPollError.current = false;
+            setNote("");
+          }
+        }
+      } catch (error) {
+        if (fresh()) {
+          noteIsPollError.current = true;
+          setNote(errorMessage(error));
+        }
+      }
     },
   });
 
   const clearStats = async () => {
     try {
       const result = await api.settingsAction({ command: "clearStats" });
+      // This is action feedback, not a poll error: a later successful poll
+      // must not clear it.
+      noteIsPollError.current = false;
       setNote(result.info ?? t("已清零", "Counters cleared"));
+      // Expire any poll in flight before reading the reset counters — the
+      // same resurrect-the-old-values race StatusTab and ServicesTab
+      // document and guard.
+      poll.invalidate();
       setUsage(await api.usage());
     } catch (error) {
+      noteIsPollError.current = false;
       setNote(errorMessage(error));
     }
   };

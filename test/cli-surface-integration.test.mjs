@@ -16,7 +16,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawn } from "node:child_process";
-import {mkdirSync, mkdtempSync, readdirSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync} from "node:fs";
 import { removeTempDir } from "./tmpdir.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -164,6 +164,47 @@ test("an unknown command fails loudly instead of quietly starting something", as
     assert.notEqual(code, 0, "a typo is an error");
     assert.match(stdout + stderr, /definitely-not-a-command|用法|unknown/i, "and the message mentions what was typed or how to get help");
     assert.deepEqual(readdirSync(home), [], "nothing was launched to find that out");
+  } finally {
+    removeTempDir(home);
+  }
+});
+
+/**
+ * `config set` is the third settings write path. MCP (set_config_value) and
+ * the console both route through validateConfigValue; the CLI used to coerce
+ * by declared type only, so `port 99999` was stored and then reported as a
+ * bogus "port already in use", and a negative holdTimeoutMs was silently
+ * ignored by the dispatcher's clamps — the operator's setting never took
+ * effect and nothing said so.
+ */
+test("config set refuses values the shared validator rejects, naming the rule", async () => {
+  const home = freshHome();
+  try {
+    const port = await runCli(["config", "set", "port", "99999"], home);
+    assert.notEqual(port.code, 0, "an out-of-range port must not be stored");
+    assert.match(port.stderr, /port must be an integer between 0 and 65535/);
+
+    const timeout = await runCli(["config", "set", "publicHealthTimeoutMs", "100"], home);
+    assert.notEqual(timeout.code, 0, "a sub-floor health timeout must not be stored");
+    assert.match(timeout.stderr, /publicHealthTimeoutMs must be an integer between 3000 and 120000/);
+
+    // The host install itself legitimately creates data-dir scaffolding (the
+    // logs directory); what must not exist is a config carrying the value.
+    assert.equal(existsSync(path.join(home, "config.json")), false,
+      "refused values must not reach config.json");
+  } finally {
+    removeTempDir(home);
+  }
+});
+
+test("config set stores a valid value through the same validator", async () => {
+  const home = freshHome();
+  try {
+    const saved = await runCli(["config", "set", "port", "8123"], home);
+    assert.equal(saved.code, 0, saved.stderr);
+    const read = await runCli(["config", "get", "port"], home);
+    assert.equal(read.code, 0, read.stderr);
+    assert.match(read.stdout, /8123/);
   } finally {
     removeTempDir(home);
   }

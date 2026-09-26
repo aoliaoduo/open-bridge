@@ -76,7 +76,6 @@ export function App() {
   const [settings, setSettings] = useState<SettingsState | null>(null);
   const [toast, setToast] = useState<ToastMsg | null>(null);
   const [secret, setSecret] = useState<SecretPayload | null>(null);
-  // Bumped by 刷新本页 so the open page remounts and re-reads its data.
 
   const [collapsed, setCollapsed] = useState<boolean>(() => readCollapsed());
   // Overlay drawer, narrow windows only; harmless (and invisible) on desktop.
@@ -91,15 +90,32 @@ export function App() {
     toastTimer.current = setTimeout(() => setToast(null), 2600);
   }, []);
 
-  const refreshSettings = useCallback(async () => {
+  const refreshSettings = useCallback(async (): Promise<boolean> => {
     try {
       setSettings(await api.settings());
+      return true;
     } catch (error) {
       showToast(errorMessage(error), true);
+      return false;
     }
   }, [showToast]);
 
-  useEffect(() => { void refreshSettings(); }, [refreshSettings]);
+  useEffect(() => {
+    // The first load retries on its own: a 404/timeout while the server is
+    // mid-restart — the console's own documented scenario — used to leave
+    // `settings` null forever, so Security and Settings sat on a skeleton.
+    // Every attempt still surfaces its error (the toast refreshes rather
+    // than stacks), so the operator is told throughout instead of silently.
+    let alive = true;
+    (async () => {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        if (await refreshSettings()) return;
+        if (!alive) return;
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+    })();
+    return () => { alive = false; };
+  }, [refreshSettings]);
 
   // Back/forward buttons must move between pages too, otherwise pushState would
   // leave the address bar and the rendered page disagreeing. Settings
@@ -250,7 +266,7 @@ export function App() {
           <main className="content">
             <PageHeader title={header.title} hint={header.hint} />
             <div className="page" key={route}>
-              {route === "status" && <StatusTab act={act} onRefresh={refreshSettings} notify={showToast} onOpen={open} />}
+              {route === "status" && <StatusTab act={act} onRefresh={async () => { await refreshSettings(); }} notify={showToast} onOpen={open} />}
               {route === "sessions" && <SessionsPage notify={showToast} />}
               {route === "todos" && <TodosPage />}
               {route === "tools" && <ToolsPage notify={showToast} settings={settings} act={act} />}

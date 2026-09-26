@@ -268,6 +268,11 @@ function capture(level) {
     const line = "[" + level + "] " + text;
     consoleBytes += line.length + 1;
     consoleLines.push(line.slice(0, 2000));
+    // Stream the line out as it happens: the parent otherwise sees console
+    // output only inside the done message, which a wall-clock timeout never
+    // sends — every timed-out run reported an empty console precisely when
+    // the log was the best clue to what hung.
+    try { parentPort.postMessage({ type: "console", line: line.slice(0, 2000) }); } catch (error) { void error; }
   };
 }
 
@@ -662,6 +667,13 @@ export async function runScriptInSandbox(options: RunScriptOptions): Promise<Scr
       if (!item || typeof item !== "object") return;
       if (item.type === "tool-call") {
         void handleToolCall(item);
+        return;
+      }
+      if (item.type === "console" && typeof item.line === "string") {
+        // Streamed console output. Only while the run is unsettled: after
+        // finish() the array is the resolved envelope's own, and appending to
+        // it would mutate a result the caller already holds.
+        if (!settled && consoleLines.length < 2000) consoleLines.push(item.line);
         return;
       }
       if (item.type !== "done") return;

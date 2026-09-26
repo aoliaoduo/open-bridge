@@ -23,6 +23,7 @@ import { publishSelf, stopRepublishLoop, withdrawSelf } from "../tunnel/peer-reg
 import { startHttpInternal, stopLocalServer } from "../mcp/http-listener.js";
 import { stopSessionPruneLoop } from "../sessions/session-table.js";
 import { flushSessionTickets } from "../sessions/session-store.js";
+import { flushUsageStats } from "../usage-store.js";
 import { clearNotifyLedger } from "../tools/notify.js";
 
 async function startInternal(): Promise<void> {
@@ -91,6 +92,22 @@ async function startInternal(): Promise<void> {
 
 async function stopInternal(notify = true): Promise<void> {
   state.stopping = true;
+  try {
+    await teardownEverything();
+  } finally {
+    // A synchronous throw mid-teardown (a transport.close() refusing, for one)
+    // used to leave `stopping` stuck true, which permanently disarmed the
+    // tunnel reconnect chain: the process survived with no recovery path.
+    state.stopping = false;
+  }
+  try {
+    host().ui.refresh();
+  } catch { /* a stopped Bridge cannot update a UI */ }
+  record("bridge", "completed", "Stopped.");
+  if (notify) host().notify("info", "Open Bridge stopped.");
+}
+
+async function teardownEverything(): Promise<void> {
   state.tunnelGeneration += 1; // invalidate any pending in-place reconnect timers
   stopPublicWatch();
   stopRepublishLoop();
@@ -135,6 +152,7 @@ async function stopInternal(notify = true): Promise<void> {
   const transportCloses = [...state.sessions.values()].map(session => Promise.resolve(session.transport.close()));
   await Promise.allSettled(transportCloses);
   await flushSessionTickets();
+  await flushUsageStats();
   state.sessions.clear();
   state.latestSession = undefined;
   // Same reset the session table gets: a stopped Bridge must not carry a
@@ -149,12 +167,6 @@ async function stopInternal(notify = true): Promise<void> {
   await stopLocalServer();
   state.tunnelUrl = "";
   state.port = 0;
-  state.stopping = false;
-  try {
-    host().ui.refresh();
-  } catch { /* a stopped Bridge cannot update a UI */ }
-  record("bridge", "completed", "Stopped.");
-  if (notify) host().notify("info", "Open Bridge stopped.");
 }
 
 export async function start(): Promise<void> {
