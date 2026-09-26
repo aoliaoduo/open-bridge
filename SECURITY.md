@@ -50,6 +50,11 @@ someone who forgot the tunnel was on.
 - **Tool behaviour hints** (`readOnlyHint`, `destructiveHint`, ...) are
   information for the client. The bridge does not refuse, filter or add
   confirmation steps based on them.
+- **A `connectivity` probe can reach LAN and cloud-metadata addresses by
+  passing `scope: "any"`** — the caller's explicit opt-out of the SSRF
+  classifier. The default scope (`auto`) refuses link-local, RFC1918/ULA and
+  other guarded ranges and allows only loopback plus public endpoints; `local`
+  narrows to loopback. Unrecognised values get the safe default, never `any`.
 
 ## What is protected
 
@@ -69,6 +74,19 @@ someone who forgot the tunnel was on.
   persisted in recoverable form.** Do not confuse the two or assume
   `secrets.json` contains no usable credentials. Never publish that file or
   a live instance URL.
+- **The bearer gate's lockout counts only forwarded identities.** Remote
+  requests arrive through the tunnel agent carrying `x-forwarded-for` /
+  `x-real-ip`; repeated failures from one identity are rate-limited with
+  `Retry-After` and a 5-minute lockout. A direct connection — the operator's
+  own MCP client, a browser pointed at the URL, the console's anonymous
+  auth-gate health probe — shares one socket key and is deliberately exempt:
+  a caller already on the machine can read `secrets.json`, and counting local
+  failures once let five anonymous health checks answer the operator's own
+  client with 429. Peer-bound requests are proxied before the gate: the peer
+  instance's own host allowlist and (optional) gate govern them, and the proxy
+  rewrites `Host` to the peer's own address so that allowlist can match
+  (forwarding the caller's Host verbatim made local cross-window proxying a
+  guaranteed 403).
 - **Secrets are masked on the way out, not just on the way in.** The Bark
   device key is write-only: `get_config`, the settings view, audit summaries
   and log lines show a shape (`<set:N chars>`), never the value. Audit lines go
