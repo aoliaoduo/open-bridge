@@ -213,7 +213,11 @@ test("the proxy hands a peer request over untouched and streams the reply back",
     assert.equal(text, "data: one\n\ndata: two\n\n");
     assert.ok(chunks.length >= 2, `expected streamed chunks, got ${chunks.length}`);
     assert.equal(seen.url, `/mcp/${TOKEN_A}?id=7`);
-    assert.equal(seen.host, "shared.ngrok-free.dev");
+    // Host is the ONE header the peer's own gate interprets: it arrives
+    // rewritten to the peer's own address (its allowlist would 403 a foreign
+    // Host, which silently broke local cross-window proxying). Everything
+    // else — method, path, query, body, content-type — is untouched.
+    assert.equal(seen.host, `127.0.0.1:${peerPort}`);
     assert.equal(seen.method, "POST");
     assert.equal(seen.body, "hello");
     const miss = await new Promise<{ status: number; body: string }>((resolve, reject) => {

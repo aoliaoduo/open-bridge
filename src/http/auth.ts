@@ -3,9 +3,14 @@
  *
  * OFF by default: `openBridge.auth.enabled` defaults to false and every path in
  * this module short-circuits to "allowed" so existing installs keep working
- * unchanged. When enabled the gate runs after the Host allowlist and before the
- * route-token/peer handling, so an unauthenticated request never reaches the
- * MCP transport, the peer proxy, or the session table.
+ * unchanged. When enabled, the gate covers this instance's own
+ * `/mcp/<route-token>` path, after the Host allowlist and before the transport
+ * — an unauthenticated request never reaches this instance's session table,
+ * event store or tool handlers. Requests bound for a PEER's token are proxied
+ * to that peer BEFORE the gate: the peer stays governed by its own host
+ * allowlist and (optional) gate, so the proxy grants nothing the peer itself
+ * would refuse, but the holder's gate is deliberately not the gate for
+ * peer-bound traffic.
  *
  * Records live in the host secret store (`secrets.json`, chmod 600), hashed at
  * rest. The plaintext secret exists only in the mint/rotate response.

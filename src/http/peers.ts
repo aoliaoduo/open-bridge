@@ -230,6 +230,12 @@ export function proxyToPeer(peer: PeerRecord, req: IncomingMessage, res: ServerR
     for (const [key, value] of Object.entries(req.headers)) {
       if (value !== undefined && !HOP_BY_HOP_HEADERS.has(key.toLowerCase())) headers[key] = value;
     }
+    // The peer's own Host allowlist expects ITS address: forwarding the
+    // caller's Host verbatim made every local cross-window proxy request
+    // answer 403 from the peer's gate ("Host is not allowed."). Tunnel
+    // traffic kept working — both instances publish the same domain — which
+    // is why the break stayed invisible.
+    headers.host = `127.0.0.1:${peer.port}`;
     let settled = false;
     let responseEnded = false; // response fully relayed or deliberately terminated
 
