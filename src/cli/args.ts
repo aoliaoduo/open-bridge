@@ -22,9 +22,19 @@ export class UsageError extends Error {}
  * `path.resolve(true)` with a TypeError that named no flag. `--port` had
  * already been fixed at its own read site; the parser is the one place every
  * reader is protected at once.
+ *
+ * Registration is the single point the drift alarm checks:
+ * test/cli-flags.test.ts fails the build the moment a read site names a flag
+ * that is in neither this set nor BOOLEAN_FLAGS — a new value flag forgotten
+ * here would reintroduce exactly the swallowed-as-boolean class above.
  */
-const VALUE_FLAGS: ReadonlySet<string> = new Set([
+export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "home", "root", "port", "label", "ttl", "pid", "out", "tail",
+]);
+
+/** Flags that are always bare booleans; registered so the drift alarm knows them. */
+export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
+  "help", "h", "no-tunnel", "open", "no-tui", "clear", "follow", "force",
 ]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
