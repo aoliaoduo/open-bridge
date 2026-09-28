@@ -107,7 +107,7 @@ test("wrapped CJK and multiline titles remain complete at the task viewport tail
       snap.todos = [{ title: `开始${"中文长标题".repeat(30)}\r\n第二行\n${"更多内容".repeat(20)}末尾可见`, status: "completed" }];
       const last = frame(snap, 60, 12, Number.MAX_SAFE_INTEGER);
       assertGeometry(last, 60, 12);
-      assert.ok(last.slice(3, -2).join("").replace(/\s/g, "").includes("末尾可见"));
+      assert.ok(last.slice(3, -1).join("").replace(/\s/g, "").includes("末尾可见"));
     } finally {
       setAmbiguousWideForTests(false);
     }
@@ -375,13 +375,19 @@ test("every wrapped title character survives, not only the first and last line",
         const snap = snapshot(1);
         const title = `开头${"完整中文与ASCII".repeat(12)}\n第二行${"保持正文".repeat(12)}末尾可见`;
         snap.todos = [{ title: title.replace(/\\n/g, "\n"), status: "completed" }];
-        const metrics = panelScrollMetrics(snap, { width, height: 6, panelView: "tasks" });
-        assert.equal(metrics.rows, 1);
+        const height = 6;
+        const metrics = panelScrollMetrics(snap, { width, height, panelView: "tasks" });
         const collected: string[] = [];
-        for (let offset = 0; offset < metrics.totalRows; offset += 1) {
-          const lines = frame(snap, width, 6, offset);
-          assertGeometry(lines, width, 6);
-          collected.push((lines[3] ?? "").replace(/^✓ */u, "").trim());
+        let consumed = 0;
+        while (consumed < metrics.totalRows) {
+          const requested = consumed;
+          const first = Math.min(requested, Math.max(0, metrics.totalRows - metrics.rows));
+          const lines = frame(snap, width, height, requested);
+          assertGeometry(lines, width, height);
+          const visible = lines.slice(3, 3 + metrics.rows).map(line => line.replace(/^✓ */u, "").trim());
+          const overlap = Math.max(0, consumed - first);
+          collected.push(...visible.slice(overlap));
+          consumed = Math.min(metrics.totalRows, first + visible.length);
         }
         assert.equal(collected.join(""), snap.todos[0]?.title.replace(/\n/g, ""));
       }
@@ -424,7 +430,6 @@ test("untrusted inline fields cannot add terminal rows, move the cursor, or open
   const hostile = `alpha\nbeta\rrewind\ttab${String.fromCharCode(8)}${esc}[2J${oscLink}`;
   const snap = snapshot(1);
   snap.rootName = hostile;
-  snap.mcpUrl = `http://example.invalid/${hostile}`;
   snap.events = [{ at: new Date(NOW).toISOString(), tool: "probe", status: "completed", message: hostile }];
   snap.runningCommands = [{ id: "synthetic", command: hostile, elapsedMs: 0, capturedBytes: 0, capacityBytes: 1024 }];
   snap.serviceRows = [{ name: hostile, running: true }];

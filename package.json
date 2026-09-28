@@ -1,6 +1,6 @@
 {
   "name": "open-bridge",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Standalone Streamable HTTP MCP bridge for local workspaces. 在本机安全暴露工作区能力的独立 MCP 桥接（CLI + Web 控制台）。",
   "keywords": [
     "mcp",
@@ -12,7 +12,7 @@
     "cli",
     "bridge"
   ],
-  "author": "aoliaoduo <aoliaoduo@126.com>",
+  "author": "aoliaoduo <aoliaoduo@users.noreply.github.com>",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/aoliaoduo/open-bridge.git"

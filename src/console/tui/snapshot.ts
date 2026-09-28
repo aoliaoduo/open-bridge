@@ -248,11 +248,6 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     .filter((event): event is TuiSnapshot["events"][number] => event !== null)
     .reverse();
 
-  const mcpUrl = view.tunnelUrl || `http://127.0.0.1:${view.port}/mcp/${view.routeToken}`;
-  // Operator's call: the full address, token included. The startup banner and
-  // `open-bridge url` both print it in full — a redacted copy was the odd one
-  // out, and unusable for the paste-it-into-a-client job the footer exists for.
-
   const inferredProvider = view.tunnelProvider
     || (view.tunnelUrl.includes(".ts.net") ? "tailscale"
         : (view.tunnelUrl.includes("ngrok") ? "ngrok" : undefined));
@@ -271,7 +266,6 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
           ? "blocked"
           : "local",
     tunnelProvider: inferredProvider,
-    mcpUrl,
     uptimeMs: Math.max(0, now - (options.launchedAt ?? now)),
     calls: view.runtimeUsage.calls,
     successes: view.runtimeUsage.successes,

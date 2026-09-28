@@ -191,7 +191,7 @@ function fixtureView(): TuiStateView {
   });
 }
 
-test("buildSnapshot counts live state and shows the full MCP URL", () => {
+test("buildSnapshot counts live state without carrying connection secrets", () => {
   const snap = buildSnapshot(fixtureView(), {
     version: "1.0.0-rc.2",
     rootName: "open-bridge",
@@ -217,11 +217,7 @@ test("buildSnapshot counts live state and shows the full MCP URL", () => {
   });
   assert.deepEqual(clean.changes, { status: "ready", files: 0, insertions: 0, deletions: 0 }, "a clean tree carries an explicit ready all-zero summary");
   assert.equal(snap.tunnel, "local");
-  // Operator's call: the full address, token included — the startup banner
-  // and `open-bridge url` print it in full; a redacted copy is unusable for
-  // the paste-it-into-the-client job the footer exists for.
-  assert.ok(snap.mcpUrl.includes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), "the full MCP URL, token included");
-  assert.ok(!snap.mcpUrl.includes("<redacted>"));
+  assert.equal("mcpUrl" in snap, false, "the TUI snapshot does not carry the tokenized MCP endpoint");
   // Counters are since-launch, not the persisted usage window.
   assert.equal(snap.calls, 7);
   assert.equal(snap.successes, 6);
@@ -358,7 +354,7 @@ test("renderFrame pins addresses to the bottom of the sidebar in tall workbench 
   assert.equal(charAtColumn(plain[39] ?? "", 24), "│", "sidebar divider extends to the last row");
   const sidebar = plain.slice(2).map(line => line.split("│")[0] ?? "").join("").replace(/\s+/g, "");
   assert.match(sidebar, /控制台http:\/\/127\.0\.0\.1:8123\/console/, "the console entry is pinned in the address area");
-  assert.match(sidebar, /MCPhttp:\/\/127\.0\.0\.1:8123\/mcp\/a{32}/, "wide workbench exposes the full MCP address too");
+  assert.doesNotMatch(sidebar, /MCP|\/mcp\//, "the TUI does not render the tokenized MCP endpoint");
 });
 
 test("renderFrame degrades gracefully on a small window", () => {
@@ -427,12 +423,12 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   assert.doesNotMatch(joined, /\/64/, "the session cap is developer knowledge");
   const sidebarCompact = plain.slice(2).map(line => line.split("│")[0] ?? "").join("").replace(/\s+/g, "");
   assert.match(sidebarCompact, /控制台http:\/\/127\.0\.0\.1:8123\/console/, "the console entry is wrapped in the sidebar");
-  assert.match(sidebarCompact, /MCPhttp:\/\/127\.0\.0\.1:8123\/mcp\/a{32}/, "the MCP address is no longer hidden in wide mode");
+  assert.doesNotMatch(sidebarCompact, /MCP|\/mcp\//, "connection secrets stay out of the workbench sidebar");
   assert.equal(charAtColumn(plain[28] ?? "", sidebarW), "│", "body row 28 keeps the divider column");
   assert.equal(charAtColumn(plain[29] ?? "", sidebarW), "│", "body row 29 keeps the divider column");
 });
 
-test("sidebar wraps both web-console and public MCP addresses without truncating either", () => {
+test("public tunnel state never puts the MCP endpoint into the TUI", () => {
   const snap = buildSnapshot({
     ...fixtureView(),
     tunnelUrl: "https://bridge.example.invalid/mcp/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -449,7 +445,7 @@ test("sidebar wraps both web-console and public MCP addresses without truncating
   const sidebarLines = plain.slice(2, 30).map(l => l.split("│")[0]?.trimEnd() ?? "");
   const sidebarText = sidebarLines.join("").replace(/\s+/g, "");
   assert.match(sidebarText, /控制台http:\/\/127\.0\.0\.1:8123\/console/);
-  assert.match(sidebarText, /MCPhttps:\/\/bridge\.example\.invalid\/mcp\/a{32}/);
+  assert.doesNotMatch(sidebarText, /bridge\.example\.invalid|\/mcp\/|MCP/);
 });
 
 test("sidebar section titles disclose hidden process and service rows", () => {

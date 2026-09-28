@@ -29,7 +29,6 @@ export type TuiSnapshot = {
   port: number;
   tunnel: "public" | "local" | "follower" | "blocked";
   tunnelProvider?: string;
-  mcpUrl: string;
   uptimeMs: number;
   calls: number;
   successes: number;
@@ -311,17 +310,13 @@ export function eventDetailRows(
 
 
 function renderFooter(snap: TuiSnapshot, width: number): string[] {
-  // One fact, one place: the top bar owns identity, port and status; the
-  // sidebar owns the counters and the tunnel; the footer owns the addresses —
-  // the web console entry (the api-router loopback gate only answers the
-  // local Host, so this is always the local address) and the MCP URL.
-  const line1 = padEndVisual(paint("muted", truncateVisual(`控制台 http://127.0.0.1:${snap.port}/console`, width)), width);
-  // One address per row: sharing truncated the MCP URL into "..." on small
-  // screens — the one string an operator copies. The instruction row is gone
-  // entirely; closing the window stops the serve, and the scroll keys surface
-  // in the panel title the moment they matter (while scrolled).
-  const line2 = padEndVisual(paint("muted", truncateVisual(`MCP ${inlineText(snap.mcpUrl)}`, width)), width);
-  return [line1, line2];
+  // The TUI is an observability surface, not a connection-secret surface. The
+  // local Web Console address is safe and useful here; the tokenized MCP URL is
+  // intentionally left to the startup banner and `open-bridge url`.
+  return [padEndVisual(
+    paint("muted", truncateVisual(`控制台 http://127.0.0.1:${snap.port}/console`, width)),
+    width,
+  )];
 }
 
 // --- workbench layout (stage 3): fixed sidebar + scrollable event panel -----
@@ -333,7 +328,7 @@ function renderFooter(snap: TuiSnapshot, width: number): string[] {
 /** Event rows visible in the workbench panel for a terminal size. */
 function workbenchPanelRows(width: number, height: number): number {
   const wide = width >= 76 && height >= 22;
-  return Math.max(1, height - (wide ? 3 : 5)); // wide: top bar + divider (2) + panel title (1); narrow has footer (2)
+  return Math.max(1, height - (wide ? 3 : 4)); // wide: top bar + divider (2) + panel title (1); narrow also has one footer row
 }
 
 /** Largest first-visible index that still shows the oldest event (the bottom). */
@@ -451,10 +446,8 @@ function renderSidebar(snap: TuiSnapshot, width: number, maxRows?: number): stri
     }
   }
 
-  const addrLines = [
-    ...wrapVisual(`控制台 http://127.0.0.1:${snap.port}/console`, width),
-    ...wrapVisual(`MCP ${inlineText(snap.mcpUrl)}`, width),
-  ].map(line => paint("muted", line));
+  const addrLines = wrapVisual(`控制台 http://127.0.0.1:${snap.port}/console`, width)
+    .map(line => paint("muted", line));
 
   if (maxRows !== undefined) {
     if (lines.length + addrLines.length <= maxRows) {
