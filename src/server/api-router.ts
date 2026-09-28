@@ -32,7 +32,8 @@ import { listSkills } from "../bridge/tools/skills.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { state } from "../bridge/state.js";
 import { getBridgeStatus, getUsageStats } from "../bridge/tools/meta-tools.js";
-import { buildSettingsState, buildTunnelView, handleSettingsAction } from "./settings-handler.js";
+import { buildSettingsState, handleSettingsAction } from "./settings-handler.js";
+import { buildTunnelView } from "./settings-tunnel.js";
 import { controlService, listServiceViews } from "../bridge/tools/service-tools.js";
 import { start, stop, webAiPrompt } from "../bridge/lifecycle/lifecycle.js";
 import { buildStaleness } from "../bridge/lifecycle/build-staleness.js";
@@ -48,6 +49,7 @@ import { handleOAuthRequest, oauthConsoleView } from "../http/oauth.js";
 import { sendJson } from "../http/json-response.js";
 import { readBodyText } from "../http/read-body.js";
 import { escapeHtml } from "../http/oauth-protocol.js";
+import { sessionActivityViews } from "../bridge/sessions/session-views.js";
 
 const CONSOLE_HEADER = "x-open-bridge-console";
 
@@ -596,39 +598,24 @@ export async function apiRouteHandler(
   }
 }
 
-/** Live legacy sessions plus one aggregate row for observed stateless traffic. */
+/** Console wire shape adapted from the canonical cross-era session facts. */
 function sessionViews(): Array<Record<string, unknown>> {
-  const now = Date.now();
-  const legacy = [...state.sessions.entries()].map(([id, session]) => ({
-    id,
-    client: session.client ?? "未标识客户端",
-    era: "legacy",
-    stateless: false,
-    closable: true,
-    connected_at: new Date(session.connectedAt ?? session.lastUsed).toISOString(),
-    calls: session.calls ?? 0,
-    last_used: new Date(session.lastUsed).toISOString(),
-    idle_ms: Math.max(0, now - session.lastUsed),
-    active_requests: session.activeRequests,
-    todos: Array.isArray(session.todos) ? session.todos.length : 0,
-  }));
-  // Match listSessions()'s distinction: this is traffic, not a made-up client
-  // or transport. Unknown per-session totals stay unknown rather than zero.
-  const modern = state.modernLastUsed > 0 ? [{
-    id: "modern",
-    client: "Modern MCP (stateless)",
-    era: "modern",
-    stateless: true,
-    closable: false,
-    connected_at: null,
-    first_seen: new Date(state.modernSince || state.modernLastUsed).toISOString(),
-    calls: null,
-    last_used: new Date(state.modernLastUsed).toISOString(),
-    idle_ms: Math.max(0, now - state.modernLastUsed),
-    active_requests: state.modernInFlight,
-    todos: null,
-  }] : [];
-  return [...legacy, ...modern].sort((a, b) => Date.parse(b.last_used) - Date.parse(a.last_used));
+  return sessionActivityViews()
+    .map(row => ({
+      id: row.id,
+      client: row.client,
+      era: row.era,
+      stateless: row.stateless,
+      closable: row.closable,
+      connected_at: row.connectedAt,
+      ...(row.firstSeen ? { first_seen: row.firstSeen } : {}),
+      calls: row.calls,
+      last_used: row.lastUsed,
+      idle_ms: row.idleMs,
+      active_requests: row.inFlight,
+      todos: row.todoCount,
+    }))
+    .sort((a, b) => Date.parse(b.last_used) - Date.parse(a.last_used));
 }
 
 /** A todo as `set_todos` validates it: id, title, and one of three states. */

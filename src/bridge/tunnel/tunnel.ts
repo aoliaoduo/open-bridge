@@ -22,7 +22,7 @@ import { RECONNECT_DELAYS_MS, record, state, redactedPublicUrl } from "../state.
 import { createWatchChain, nextFreeRounds, shouldClaimDomain, watchIntervalMs, type WatchChain } from "./tunnel-watch.js";
 import { enqueueLifecycle } from "../lifecycle/lifecycle-queue.js";
 import { publishSelf } from "./peer-registry.js";
-import { detectNgrok } from "./ngrok-locate.js";
+import { ngrokMissingMessage, ngrokProcessEnvironment } from "./ngrok-runtime.js";
 import { probeTailscaleDomain, resolveTailscaleExecutable } from "./tailscale-locate.js";
 import { funnelMountIsOurs, probeFunnelHolder, shouldClaimOnStartup } from "./funnel-ownership.js";
 
@@ -636,83 +636,6 @@ export async function startTunnelInternal(generation: number): Promise<void> {
       );
     }
   }
-}
-
-/**
- * ngrok Free rejects agents that connect through an HTTP(S) proxy
- * (ERR_NGROK_9009). Inheriting the environment is the long-standing behaviour
- * and keeps working setups untouched; opt-out strips proxy variables so ngrok
- * connects directly.
- */
-function ngrokProcessEnvironment(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  const useProxy = host().config.get<boolean>("ngrokUseHttpProxy", true);
-  if (!useProxy) {
-    for (const key of Object.keys(env)) {
-      if (/^(https?_proxy|all_proxy|no_proxy)$/i.test(key)) delete env[key];
-    }
-  }
-  // An authtoken saved in the console is handed to the agent the way ngrok
-  // documents: NGROK_AUTHTOKEN. It is only applied when the operator has not
-  // already put one in the environment themselves -- someone who exported it
-  // on purpose (CI, a shared shell) should not have it silently overridden by
-  // a value they typed months ago.
-  //
-  // This is NOT a replacement for `ngrok config add-authtoken`. That writes
-  // ngrok's own config file and keeps working; this covers the case the CLI
-  // path does not, which is a first-time user who has the binary but has
-  // never run a terminal command against it.
-  const saved = cachedAuthtoken.trim();
-  if (saved && !String(env.NGROK_AUTHTOKEN ?? "").trim()) env.NGROK_AUTHTOKEN = saved;
-  return env;
-}
-
-/**
- * The authtoken, read once at startup.
- *
- * spawnTunnel is synchronous and the secret store is not, so the value is
- * cached rather than awaited at spawn time. Reconnects reuse the cache; a
- * token saved from the console refreshes it through `setCachedAuthtoken`, so
- * "save then restart the tunnel" works without restarting the process.
- */
-let cachedAuthtoken = "";
-
-export function setCachedAuthtoken(value: string): void {
-  cachedAuthtoken = typeof value === "string" ? value : "";
-}
-
-export async function loadNgrokAuthtoken(): Promise<void> {
-  try {
-    cachedAuthtoken = (await host().secrets.get(NGROK_AUTHTOKEN_KEY)) ?? "";
-  } catch {
-    // A secret store that cannot be read must not stop the bridge from
-    // starting: the tunnel simply falls back to ngrok's own config file.
-    cachedAuthtoken = "";
-  }
-}
-
-/** Account-level, so deliberately NOT suffixed per workspace like the route token. */
-export const NGROK_AUTHTOKEN_KEY = "openBridge.ngrokAuthtoken";
-
-/**
- * What to say when ngrok is not where we looked.
- *
- * The old message named the config key and stopped there, which is only
- * actionable if you already know what value to put in it. Detection knows
- * whether this machine has ngrok at all, and those are two genuinely different
- * problems: "you picked the wrong copy" (say which ones exist) versus "it is
- * not installed" (say where to get it). Both beat naming a key.
- */
-export function ngrokMissingMessage(configured: string): string {
-  const found = detectNgrok();
-  if (found.length) {
-    const list = found.map(choice => `${choice.label}: ${choice.value}`).join(" · ");
-    return `ngrok executable not found (${configured}), but these copies are installed — `
-      + `pick one on the console settings page (设置 → 隧道): ${list}`;
-  }
-  return `ngrok executable not found (${configured}). ngrok does not appear to be installed on this `
-    + "machine: download it from https://ngrok.com/download, then point 设置 → 隧道 → ngrok 可执行文件 "
-    + "at the unpacked file. To run loopback-only instead, set the tunnel provider to none.";
 }
 
 function spawnTunnel(domain: string, generation: number): ChildProcessWithoutNullStreams {

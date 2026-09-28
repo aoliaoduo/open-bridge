@@ -61,6 +61,6 @@ export function loadServices(): void {
       });
     }
   } catch {
-    // Never let stored state break extension activation.
+    // Never let one corrupt saved entry break Bridge startup.
   }
 }

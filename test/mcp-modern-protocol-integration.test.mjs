@@ -339,6 +339,22 @@ test("the legacy era still mints a session and reports errors as isError", async
   }, "legacy and modern calls receive the same typed error contract");
 });
 
+test("bridge_status compatibility counters expose real legacy protocol and alias use", async () => {
+  const initialStatus = await modern("tools/call", { name: "bridge_status", arguments: {} });
+  const baseline = initialStatus.payload.result.structuredContent.compatibility;
+  const { sessionId } = await legacyInitialize();
+  const called = await legacyRpc(sessionId, "tools/call", { name: "get_auth_status", arguments: {} });
+  assert.equal(called.status, 200);
+  assert.equal(called.payload?.result?.isError, undefined, JSON.stringify(called.payload));
+
+  const updatedStatus = await modern("tools/call", { name: "bridge_status", arguments: {} });
+  const compatibility = updatedStatus.payload.result.structuredContent.compatibility;
+  assert.ok(compatibility.legacy_protocol_tool_calls >= baseline.legacy_protocol_tool_calls + 1,
+    "a real 2025-era tools/call increments the protocol counter");
+  assert.ok(compatibility.legacy_tool_alias_calls >= baseline.legacy_tool_alias_calls + 1,
+    "a rewritten legacy tool name increments the alias counter");
+});
+
 test("bridge_status reports a modern caller even though it has no session", async () => {
   // "Who is connected?" has to have one answer for both eras. A modern client
   // mints no session, so the session view used to answer "nobody" while this

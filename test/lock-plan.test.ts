@@ -102,7 +102,7 @@ test("process lifecycle tools serialize per command id", async () => {
 
 test("service lifecycle tools serialize per service, and all_* on the group's concrete services", async () => {
   for (const action of ["start", "stop", "restart", "delete"]) {
-    assert.deepEqual((await deriveLockPlan("service", { action, name: "API" }, ctx()))?.keys, ["svc:api"], action);
+    assert.deepEqual((await deriveLockPlan("service", { action, name: "  API  " }, ctx()))?.keys, ["svc:api"], action);
   }
   // all_* expands to the concrete services it will touch (exact-key matching):
   // a literal "svc:*" never conflicted with "svc:<name>", so a stop-all could
@@ -111,8 +111,8 @@ test("service lifecycle tools serialize per service, and all_* on the group's co
     servicesInGroup: () => ["api", "web"],
   }));
   assert.deepEqual(all?.keys, ["svc:api", "svc:web"]);
-  const web = await deriveLockPlan("service", { action: "stop_all", group: "Web" }, ctx({
-    servicesInGroup: group => (group === "web" ? ["api", "web"] : []),
+  const web = await deriveLockPlan("service", { action: "stop_all", group: "  Web  " }, ctx({
+    servicesInGroup: group => (group === "Web" ? ["API", "web"] : []),
   }));
   assert.deepEqual(web?.keys, ["svc:api", "svc:web"]);
   const empty = await deriveLockPlan("service", { action: "start_all" }, ctx());

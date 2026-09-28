@@ -122,6 +122,30 @@ test("stop_service keeps the handle and reports stopped:false when the process r
     "the command handle must survive so the operator can retry");
 });
 
+test("stop_all operates on its invocation snapshot, not services added while it is awaiting", async () => {
+  const service = (): ServiceDefinition => ({
+    command: "node noop.js",
+    cwd: ".",
+    env: {},
+    group: "default",
+    autoRestart: false,
+    maxRestarts: 3,
+    restartDelayMs: 1000,
+  });
+  state.services.set("early", service());
+
+  const stopping = stopAllServices({});
+  // The target set is captured before any asynchronous stop can expand it. A
+  // live Map iterator would observe this append later; a call-scoped snapshot
+  // must not.
+  state.services.set("late", service());
+
+  const rows = await stopping as Array<{ name: string }>;
+  assert.deepEqual(rows.map(row => row.name), ["early"],
+    "a bulk action must not expand its target set after it has started");
+  assert.equal(state.services.has("late"), true);
+});
+
 test("stop_all keeps the handle when the process refuses to die, like stop does", { timeout: 30_000 }, async () => {
   // stop_all used to clear commandId unconditionally — the exact orphaning
   // stop_service's test above pins as fixed. The batch loop must obey the same

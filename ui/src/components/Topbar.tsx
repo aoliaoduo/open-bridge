@@ -10,6 +10,7 @@ import { Chip } from "./Chip";
 function statusLine(status: SettingsState["status"]): string {
   switch (status.kind) {
     case "connected": return t(`已连接 · ${status.sessions ?? 0} 个会话`, `Connected · ${status.sessions ?? 0} session(s)`);
+    case "active": return t("处理中 · 无状态 MCP", "Active · stateless MCP");
     case "ready": return t("已就绪", "Ready");
     case "offline": return t("离线", "Offline");
     case "stopped": return t("已停止", "Stopped");

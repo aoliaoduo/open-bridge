@@ -4,6 +4,7 @@
  */
 
 import { validateConfigValue } from "./config-values.js";
+import { CONSOLE_CONFIG_KEYS, type ConsoleConfigKey, type SettingsConfigView as CatalogSettingsConfigView } from "./config-spec.js";
 import type { AutoConfigPlan, TunnelFacts } from "../tunnel/tunnel-plan.js";
 // Type-only: the console can use these shared types without importing the
 // executable resolver and its node:fs dependency at runtime.
@@ -67,29 +68,7 @@ export interface SettingsActionResult {
   reloadRequired?: boolean;
 }
 
-export interface SettingsConfigView {
-  unrestrictedFileAccess: boolean;
-  allowedDirectories: string[];
-  tunnelProvider: string;
-  ngrokExecutable: string;
-  shellPath: string;
-  shellArgs: string[];
-  tailscaleDomain: string;
-  tailscaleExecutable: string;
-  port: number;
-  publicHealthTimeoutMs: number;
-  autoReconnect: boolean;
-  ngrokUseHttpProxy: boolean;
-  toolProfile: string;
-  logMaxBytes: number;
-  "sound.enabled": boolean;
-  "sound.fileWaiting": string;
-  "sound.fileFinished": string;
-  /** OAuth 2.1 authorization server, off by default like the bearer gate. */
-  "oauth.enabled": boolean;
-  /** Extra redirect hosts a registered client may use; [] means the built-in list. */
-  "oauth.allowedRedirectHosts": string[];
-}
+export type SettingsConfigView = CatalogSettingsConfigView;
 
 /**
  * What the console shows for phone notifications. The device key itself never
@@ -145,7 +124,7 @@ export interface SettingsState {
   version: string;
   /** The header badge as STRUCTURE, not prose: the console renders it in the
       page's language, which the server does not know. */
-  status: { kind: "connected" | "ready" | "offline" | "stopped" | "error"; sessions?: number };
+  status: { kind: "connected" | "active" | "ready" | "offline" | "stopped" | "error"; sessions?: number };
   /** The MCP URL to show and copy — tunnel when published, otherwise loopback. */
   mcpUrl: string;
   configuredDomain: string;
@@ -191,33 +170,9 @@ export type SettingsAction =
 const COMMANDS_WITH_ID: ReadonlySet<string> = new Set(["rotateToken", "revokeToken", "deleteToken"]);
 const TTL_SET: ReadonlySet<number> = new Set(TTL_CHOICES.map(choice => choice.seconds));
 
-/** Generic console writes allow only these keys; value rules live in config-values.ts. */
-const CONFIG_KEYS = [
-  "unrestrictedFileAccess",
-  "autoReconnect",
-  "ngrokUseHttpProxy",
-  "oauth.enabled",
-  "oauth.allowedRedirectHosts",
-  "tunnelProvider",
-  "toolProfile",
-  "ngrokExecutable",
-  "tailscaleDomain",
-  "tailscaleExecutable",
-  "shellPath",
-  "allowedDirectories",
-  "shellArgs",
-  "port",
-  "publicHealthTimeoutMs",
-  "logMaxBytes",
-  "notify.enabled",
-  "notify.serverUrl",
-  "sound.enabled",
-  "sound.fileWaiting",
-  "sound.fileFinished",
-] as const;
-
-export type SettingsConfigKey = (typeof CONFIG_KEYS)[number];
-const CONFIG_KEY_SET: ReadonlySet<string> = new Set(CONFIG_KEYS);
+/** Generic console writes are derived from the canonical config catalog. */
+export type SettingsConfigKey = ConsoleConfigKey;
+const CONFIG_KEY_SET: ReadonlySet<string> = new Set(CONSOLE_CONFIG_KEYS);
 
 /**
  * Validate an inbound console action against a strict allowlist. Anything

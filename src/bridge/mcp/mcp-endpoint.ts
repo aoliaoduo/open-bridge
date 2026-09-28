@@ -183,7 +183,10 @@ async function runToolCall(
   const startedAt = Date.now();
   const invocationId = createActivityId();
   try {
-    if (session) session.lastUsed = Date.now();
+    if (session) {
+      session.lastUsed = Date.now();
+      state.compatibility.legacyProtocolToolCalls += 1;
+    }
     const result = await invoke(name, args, session, { invocationId });
     state.usage.successes += 1;
     state.runtimeUsage.successes += 1;

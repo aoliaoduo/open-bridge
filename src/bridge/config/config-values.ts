@@ -19,17 +19,19 @@
  *   kept: silently rewriting spawn args or an access allowlist is worse than
  *   refusing it. Over-cap values are rejected with the limit in the message.
  *
- * Deliberately dependency-free — no host, no bridge state, no imports — so
- * `settings-model.ts` (which the React console bundles) can share it. The
+ * Deliberately browser-bundle-safe — no host, bridge state or node-only
+ * imports — so `settings-model.ts` (which the React console bundles) can share it. The
  * callers add their own node-only steps afterwards: `path.resolve` for
  * directories on both write paths. `ngrokDomain` is intentionally absent:
- * both entries reach it through `validateNgrokDomain` (MCP calls it inline,
- * the console through its dedicated `saveDomain` flow — same function).
+ * both entries reach it through `normalizeNgrokDomainSetting` in request-policy
+ * (blank clears; non-blank is a strict hostname).
  *
  * Dedicated flows (auth toggle, concurrency, TTL) keep their own gates: they
  * ask different questions (token usability, TTL allowlist) than "is this
  * value well-formed", and their behavior is pinned by tests.
  */
+
+import { isConfigKey } from "./config-spec.js";
 
 export type ConfigValidation = { ok: true; value: unknown } | { ok: false; error: string };
 
@@ -79,8 +81,8 @@ const LOG_MAX_BYTES_MAX = 1024 * 1024 * 1024;
  * cannot mean what it says. Same family as the Math.max(0, NaN) rule in
  * AGENTS.md: a bad number must be refused, never quietly reinterpreted.
  *
- * This module keeps its own literal on purpose: it must stay dependency-free
- * (see the header), so it cannot import the canonical copy exported by
+ * This module keeps its own literal on purpose: it must stay browser-bundle-safe
+ * (see the header), so it cannot import the node-oriented copy exported by
  * process-tools.ts (MAX_TIMER_MS) — and src/network/safe-probe.ts keeps a
  * third for the mirror-image reason. Change all three together.
  */
@@ -103,6 +105,7 @@ function isAbsoluteConfigPath(value: string): boolean {
 }
 
 export function validateConfigValue(key: string, value: unknown): ConfigValidation {
+  if (!isConfigKey(key)) return { ok: false, error: `Unsupported Open Bridge setting: ${key}` };
   if (value === undefined) return { ok: false, error: SETTING_VALUE_REQUIRED };
 
   if (key === "tunnelProvider" || key === "toolProfile") {
@@ -126,13 +129,39 @@ export function validateConfigValue(key: string, value: unknown): ConfigValidati
     return { ok: true, value: raw };
   }
 
-  if (key === "ngrokExecutable" || key === "shellPath") {
+  if (key === "ngrokExecutable") {
     if (typeof value !== "string" || !value.trim()) {
       return { ok: false, error: `${key} must be a non-empty string. (expected '${key}': string)` };
     }
     const trimmed = value.trim();
     if (trimmed.length > MAX_STRING_CHARS) {
       return { ok: false, error: `${key} must be at most ${MAX_STRING_CHARS} characters.` };
+    }
+    return { ok: true, value: trimmed };
+  }
+
+  if (key === "shellPath") {
+    if (typeof value !== "string") {
+      return { ok: false, error: "shellPath must be a string. (expected 'shellPath': string)" };
+    }
+    const trimmed = value.trim();
+    if (trimmed.length > MAX_STRING_CHARS) {
+      return { ok: false, error: `shellPath must be at most ${MAX_STRING_CHARS} characters.` };
+    }
+    return { ok: true, value: trimmed };
+  }
+
+  if (key === "sharedPeerRegistry") {
+    // This override is intentionally allowed to be relative: the existing runtime
+    // resolves it from the Bridge working directory, which is convenient for
+    // colocated multi-instance development. Preserve that behavior; just reject
+    // non-strings and unbounded garbage like every other path-ish setting.
+    if (typeof value !== "string") {
+      return { ok: false, error: "sharedPeerRegistry must be a path string. (expected 'sharedPeerRegistry': string)" };
+    }
+    const trimmed = value.trim();
+    if (trimmed.length > MAX_PATH_CHARS) {
+      return { ok: false, error: `sharedPeerRegistry must be at most ${MAX_PATH_CHARS} characters.` };
     }
     return { ok: true, value: trimmed };
   }

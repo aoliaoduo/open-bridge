@@ -35,12 +35,20 @@ test("tailscaleDomain trims and lowercases; a blank value clears; garbage is ref
   assert.match(err("tailscaleDomain", "http://x"), /must be a hostname/);
 });
 
-test("plain strings are trimmed, non-empty, and capped", () => {
+test("executable paths trim and cap; shellPath can clear back to auto-detection", () => {
   assert.equal(ok("shellPath", "  /bin/bash  "), "/bin/bash");
-  assert.match(err("shellPath", 42), /must be a non-empty string/);
+  assert.equal(ok("shellPath", "   "), "", "blank clears a custom shell path back to its default");
+  assert.match(err("shellPath", 42), /must be a string/);
   assert.match(err("ngrokExecutable", "   "), /must be a non-empty string/);
   assert.equal((ok("shellPath", "x".repeat(500)) as string).length, 500);
   assert.match(err("shellPath", "x".repeat(501)), /at most 500 characters/);
+});
+
+test("sharedPeerRegistry is writable because get_config and docs expose it as a setting", () => {
+  assert.equal(ok("sharedPeerRegistry", "  ./bridge-peers.json  "), "./bridge-peers.json");
+  assert.equal(ok("sharedPeerRegistry", ""), "");
+  assert.match(err("sharedPeerRegistry", 42), /path string/);
+  assert.match(err("sharedPeerRegistry", "x".repeat(501)), /at most 500 characters/);
 });
 
 test("the tailscale executable is writable through this path, and empty means \"discover\"", () => {

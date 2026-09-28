@@ -8,6 +8,12 @@
 
 ### Fixed
 
+- 配置契约收敛为统一 catalog：key、默认值、JSON schema、控制台可写面与 SettingsState 投影由同一规格派生，`get_config` / `set_config_value` 不再手抄字段列表；修复 `sharedPeerRegistry` 可读不可写，以及 `shellPath`、`ngrokDomain` 配置后无法清回默认值的问题。每个配置 key 的默认值现有写入校验契约测试兜底。
+- `service {action:"stop_all"}` 恢复 schema 承诺的并行语义：默认与 `start_all` 一样并发停止独立服务，`parallel:false` 才串行；两条批量路径共用同一执行器，同时继续使用调用开始时的 service 快照和每服务串行队列。
+- 运行态兼容使用可观测：`bridge_status` 新增进程期 legacy protocol tools/call 与 legacy tool alias 命中计数；CLI 命中旧 `runtime.json` fallback 时明确提示来源，但继续兼容。会话事实、settings tunnel 探测/自动配置、ngrok spawn 凭据环境分别收敛到独立内部模块，减少重复状态映射和大模块耦合。
+- 工程门禁新增 `npm run check:fast`（凭据检查、typecheck、lint、全部源码单测和 UI 测试），完整 `release:check` 仍保留所有真实进程/HTTP/隧道集成测试；full MCP catalog 保留完整 schema/annotations，并增加 72 KiB 体积预算防止无意膨胀。
+- 服务生命周期并发收敛：`start_all` / `stop_all` 在调用开始时冻结目标列表，不再因等待期间新增 service 而扩大本次操作；所有具名 service 操作统一 trim 后的名称语义，避免 `save_service` 能保存而 `start/stop/restart/delete` 因首尾空白找不到同一服务。service 与持久 shell 原先各自维护且永久保留的 Promise FIFO 合并为共享 keyed 串行队列，最后一个任务结束后释放 key，长期动态名称不再造成无界 Map 增长。
+- Web 控制台顶栏新增 modern/stateless 请求进行中的 `active` 状态：仅有 2026-era 无状态请求在执行时不再误显示「已就绪」；legacy 会话计数语义保持不变。仓库同时清除已存在的 mixed line endings，并增加只禁止 `w/mixed`、不强制 LF/CRLF 的回归检查，以兼容 Windows checkout。
 - 一次全仓缺陷扫描（四路分片深审：工具层、HTTP/服务端、核心桥/CLI、UI/TUI，逐项人工复核证据后修复，修复项由用户从选项中选定）：
 
 - **工具与算法**：`connectivity` 的 `scope` 枚举与实现对齐——此前 schema 只承诺 `auto/local/public`，实现只认内部词表，按 schema 传 `local`（想只探测本地）会被静默改写成默认值 `loopback-and-public`（含公网探测，语义正好相反且无任何报错）；现在 `auto`=安全默认、`local`=仅回环、`public`=仅公网端点，内部覆盖值（`loopback`/`loopback-and-public`/`any`）仍在 schema 中如实列出。`apply_patch` 的 Add File 块拒绝不带 `+` 前缀的正文行——此前这类行被静默丢弃且报 `applied:true`，调用方拿到被截断的文件。`start_process` 的 `ready_pattern` 在真实输出上触发求值预算（如灾难性回溯，空串预检无法发现）时，调用照常返回含 `command_id` 的启动结果并附 `ready_error` 说明——此前报错在进程已 spawn 之后才抛出，调用方拿不到句柄，进程只能靠 `get_process_snapshot` 捞。`read_files` 的 `paths` 上限 20 个（schema 同步声明）并以最多 4 路并发执行、行顺序不变——此前数量无上限且全量并行，"读全部图片/日志"类调用可同时驻留数 GB 的 base64 行，OOM 带走的是整个 Bridge 进程。`edit_block` 对 `edits[i].path` 指向其他文件的写法点名拒绝（此前被静默忽略，调用方以为改了那个文件）；锁计划随之只锁真实编辑的目标文件（此前会对从未被触碰的文件上幻影锁）。

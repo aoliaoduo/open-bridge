@@ -30,6 +30,7 @@ import { availableHint } from "../tools/error-hints.js";
 import { maybeStripAnsi } from "../../process/ansi.js";
 import { waitForSpawnSettled, clampMs, DEFAULT_TOOL_TIMEOUT_MS } from "../tools/process-tools.js";
 import type { JsonArgs } from "../tools/json-args.js";
+import { KeyedSerialQueue } from "./keyed-serial-queue.js";
 
 type Args = JsonArgs;
 
@@ -69,12 +70,10 @@ const shellSessions = new Map<string, ShellSession>();
  * sentinel back-to-back, and then each poll read a window containing the OTHER
  * command's output and raw sentinel line.
  */
-const sendTails = new Map<string, Promise<unknown>>();
+const sendQueue = new KeyedSerialQueue();
 
 function enqueueSend(name: string, op: () => Promise<Record<string, unknown>>): Promise<Record<string, unknown>> {
-  const tail = (sendTails.get(name) ?? Promise.resolve()).then(op, op);
-  sendTails.set(name, tail.then(() => undefined, () => undefined));
-  return tail;
+  return sendQueue.run(name, op);
 }
 
 /** Spawn a login shell that reads commands from stdin and keep it registered like a managed command. */

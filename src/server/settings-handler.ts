@@ -10,7 +10,7 @@
  */
 
 import { clientMcpUrl, state } from "../bridge/state.js";
-import { validateNgrokDomain } from "../http/request-policy.js";
+import { normalizeNgrokDomainSetting } from "../http/request-policy.js";
 import {
   authEnabled,
   authStatus,
@@ -30,18 +30,15 @@ import {
   type SecretPayload,
   type SettingsAction,
   type SettingsActionResult,
-  type SettingsConfigView,
   type SettingsDetectedView,
   type SettingsState,
-  type SettingsTunnelView,
   type SettingsTokenRow,
 } from "../bridge/config/settings-model.js";
 import { CONFIG_DEFAULTS } from "../bridge/config/config-defaults.js";
+import { settingsConfigFrom } from "../bridge/config/config-spec.js";
 import { detectShells } from "../shell/shell-provider.js";
 import { detectNgrok } from "../bridge/tunnel/ngrok-locate.js";
-import { detectTunnelFacts, readNgrokConfigAuthtoken } from "../bridge/tunnel/tunnel-detect.js";
-import { planTunnelAutoConfig } from "../bridge/tunnel/tunnel-plan.js";
-import { NGROK_AUTHTOKEN_KEY, setCachedAuthtoken } from "../bridge/tunnel/tunnel.js";
+import { NGROK_AUTHTOKEN_KEY, setCachedAuthtoken } from "../bridge/tunnel/ngrok-runtime.js";
 import { playAlertSound, stopAlertSound } from "../bridge/tools/sound-alert.js";
 import { existsSync } from "node:fs";
 import { maskBarkKey, validateConfigValue } from "../bridge/config/config-values.js";
@@ -53,50 +50,9 @@ import {
   start, rotateRouteToken, webAiPrompt, republishAfterRotate, restartTunnelForProviderChange,
 } from "../bridge/lifecycle/lifecycle.js";
 import { enqueueLifecycle } from "../bridge/lifecycle/lifecycle-queue.js";
+import { autoConfigureTunnel, buildTunnelView } from "./settings-tunnel.js";
 
 type AuthStatusView = { tokens: SettingsTokenRow[] };
-
-/**
- * The config keys the settings page shows, in page order, each with the
- * fallback value both readers share: buildSettingsState passes it to `cfg.get`
- * as the when-unset default, and fallbackState (the view built when the live
- * read fails) starts from it verbatim. Adding a config key to the page means
- * adding one entry here instead of editing two parallel lists.
- */
-const SETTINGS_CONFIG_FALLBACKS = [
-  ["unrestrictedFileAccess", CONFIG_DEFAULTS.unrestrictedFileAccess as boolean],
-  ["allowedDirectories", CONFIG_DEFAULTS.allowedDirectories as string[]],
-  ["tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string],
-  ["ngrokExecutable", CONFIG_DEFAULTS.ngrokExecutable as string],
-  ["logMaxBytes", CONFIG_DEFAULTS.logMaxBytes as number],
-  ["sound.enabled", false],
-  ["sound.fileWaiting", ""],
-  ["sound.fileFinished", ""],
-  ["shellPath", CONFIG_DEFAULTS.shellPath as string],
-  ["shellArgs", CONFIG_DEFAULTS.shellArgs as string[]],
-  ["tailscaleDomain", CONFIG_DEFAULTS.tailscaleDomain as string],
-  ["tailscaleExecutable", CONFIG_DEFAULTS.tailscaleExecutable as string],
-  ["port", CONFIG_DEFAULTS.port as number],
-  ["publicHealthTimeoutMs", CONFIG_DEFAULTS.publicHealthTimeoutMs as number],
-  ["autoReconnect", CONFIG_DEFAULTS.autoReconnect as boolean],
-  ["ngrokUseHttpProxy", CONFIG_DEFAULTS.ngrokUseHttpProxy as boolean],
-  ["toolProfile", CONFIG_DEFAULTS.toolProfile as string],
-  ["oauth.enabled", CONFIG_DEFAULTS["oauth.enabled"] as boolean],
-  ["oauth.allowedRedirectHosts", CONFIG_DEFAULTS["oauth.allowedRedirectHosts"] as string[]],
-] as const;
-
-/**
- * Walk the shared key list once with one reader. `Object.fromEntries` yields
- * an index-signature record TS cannot link back to `SettingsConfigView` (an
- * interface carries no implicit index signature), so the single staged cast
- * the compiler asks for lives here instead of at each call site; the pair
- * list above is what actually pins the keys, their order and the fallbacks.
- */
-function settingsConfigOf(read: (key: string, fallback: unknown) => unknown): SettingsConfigView {
-  return Object.fromEntries(
-    SETTINGS_CONFIG_FALLBACKS.map(([key, fallback]) => [key, read(key, fallback)]),
-  ) as unknown as SettingsConfigView;
-}
 
 /** Assemble the full page state the console renders from. */
 export async function buildSettingsState(): Promise<SettingsState> {
@@ -109,7 +65,11 @@ export async function buildSettingsState(): Promise<SettingsState> {
     running,
     version: host().version(),
     status: running
-      ? (state.sessions.size ? { kind: "connected", sessions: state.sessions.size } : { kind: "ready" })
+      ? state.sessions.size
+        ? { kind: "connected", sessions: state.sessions.size }
+        : state.modernInFlight > 0
+          ? { kind: "active" }
+          : { kind: "ready" }
       : { kind: "offline" },
     mcpUrl: clientMcpUrl(),
     configuredDomain: cfg.get("ngrokDomain", ""),
@@ -126,10 +86,9 @@ export async function buildSettingsState(): Promise<SettingsState> {
       holdTimeoutMs: cfg.get("concurrency.holdTimeoutMs", CONFIG_DEFAULTS["concurrency.holdTimeoutMs"] as number),
       waitTimeoutMs: cfg.get("concurrency.waitTimeoutMs", CONFIG_DEFAULTS["concurrency.waitTimeoutMs"] as number),
     },
-    // One computed object, not a restatement of the key list above: the list
-    // is the single source, so the key order — and with it the JSON the
-    // console receives — is decided in exactly one place.
-    config: settingsConfigOf((key, fallback) => cfg.get(key, fallback)),
+    // The page projection is derived from the canonical config catalog; adding
+    // a generic-console setting changes the type, defaults and read path once.
+    config: settingsConfigFrom((key, fallback) => cfg.get(key, fallback)),
     notify: notifyView(),
     detected: detectedView(),
   };
@@ -150,62 +109,6 @@ function detectedView(): SettingsDetectedView {
   } catch {
     return { shells: [], ngrok: [] };
   }
-}
-
-/**
- * Tunnel facts, cached for a minute.
- *
- * Producing them spawns two tailscale CLI calls and, when a token exists, asks
- * ngrok's API — far too much work for every page read, and none of it goes
- * stale fast enough to matter. The cache is what keeps the tunnel card cheap:
- * the page itself renders from config (no probe), the card fills in from
- * GET /api/tunnel, and only 「重新检测」 and the auto-config click force a fresh
- * probe. A failed probe is cached as its own empty answer rather than retried
- * in a loop — the card says "未检测到" and the free-text fallback still works.
- */
-const TUNNEL_FACTS_TTL_MS = 60_000;
-let tunnelFactsCache: { at: number; facts: Awaited<ReturnType<typeof detectTunnelFacts>> } | null = null;
-
-/** The saved ngrok authtoken, or "". Never returned to the console. */
-async function storedAuthtoken(): Promise<string> {
-  return ((await host().secrets.get(NGROK_AUTHTOKEN_KEY).catch(() => "")) ?? "").trim();
-}
-
-async function tunnelFacts(force = false) {
-  if (!force && tunnelFactsCache && Date.now() - tunnelFactsCache.at < TUNNEL_FACTS_TTL_MS) {
-    return tunnelFactsCache.facts;
-  }
-  const cfg = host().config;
-  const facts = await detectTunnelFacts({
-    ngrokExecutable: String(cfg.get("ngrokExecutable", CONFIG_DEFAULTS.ngrokExecutable as string) ?? ""),
-    tailscaleExecutable: String(cfg.get("tailscaleExecutable", CONFIG_DEFAULTS.tailscaleExecutable as string) ?? ""),
-    storedAuthtoken: await storedAuthtoken(),
-  });
-  tunnelFactsCache = { at: Date.now(), facts };
-  return facts;
-}
-
-/**
- * What `GET /api/tunnel` answers with — and the exact plan the 「自动配置」
- * button executes: one function, so what the page promises before the click and
- * what the server does after it cannot drift apart.
- */
-export async function buildTunnelView(force = false): Promise<SettingsTunnelView> {
-  const cfg = host().config;
-  const facts = await tunnelFacts(force);
-  return {
-    facts,
-    plan: planTunnelAutoConfig({
-      provider: String(cfg.get("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string) ?? ""),
-      current: {
-        ngrokExecutable: String(cfg.get("ngrokExecutable", "") ?? ""),
-        ngrokDomain: String(cfg.get("ngrokDomain", "") ?? ""),
-        tailscaleExecutable: String(cfg.get("tailscaleExecutable", "") ?? ""),
-      },
-      authtokenStored: Boolean(await storedAuthtoken()),
-      facts,
-    }),
-  };
 }
 
 /**
@@ -352,7 +255,7 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       let domain: string;
       try {
         // Clearing is this action's explicit opt-out, not a valid hostname.
-        domain = action.domain === "" ? "" : validateNgrokDomain(action.domain);
+        domain = normalizeNgrokDomainSetting(action.domain);
       } catch {
         return { ok: false, state: await buildSettingsState(), error: "域名格式不对。示例：my-tunnel.ngrok-free.dev（在你的 ngrok 控制台可以找到）。" };
       }
@@ -504,8 +407,12 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       });
     }
 
-    case "autoConfigureTunnel":
-      return autoConfigureTunnelAction();
+    case "autoConfigureTunnel": {
+      const outcome = await autoConfigureTunnel();
+      return outcome.ok
+        ? done({ info: outcome.info })
+        : { ok: false, state: await buildSettingsState(), error: outcome.error };
+    }
 
     case "refreshTunnelDetect": {
       // The operator installed ngrok (or enabled Funnel) and does not want to
@@ -590,48 +497,6 @@ async function armPublicLockAction(
   });
 }
 
-/**
- * The one action that writes several values at once, so it writes exactly
- * what the page showed: buildTunnelView re-reads the LIVE config and the
- * plan only ever fills fields that are still empty, which is what makes
- * the button safe to press for someone who already typed a path.
- */
-async function autoConfigureTunnelAction(): Promise<SettingsActionResult> {
-  const cfg = host().config;
-  const view = await buildTunnelView(true);
-  const written: string[] = [];
-  for (const write of view.plan.writes) {
-    if (write.kind === "secret") {
-      // Imported here rather than carried in the plan: the plan is rendered
-      // in a browser, and an authtoken must not travel to one.
-      const imported = readNgrokConfigAuthtoken()?.token ?? "";
-      if (!imported) continue;
-      await host().secrets.store(NGROK_AUTHTOKEN_KEY, imported);
-      setCachedAuthtoken(imported);
-      written.push(write.label);
-      continue;
-    }
-    await cfg.update(write.key, write.value);
-    written.push(write.label);
-  }
-  // A running tunnel has to pick the new values up now, not at the next
-  // restart — the same rebuild a provider switch performs.
-  if (written.length && state.tunnel) void restartTunnelForProviderChange();
-
-  const detail = [
-    written.length ? `已写入：${written.join("；")}。` : "",
-    view.plan.keep.length ? `保持不变：${view.plan.keep.join("；")}。` : "",
-    ...view.plan.notes,
-  ].filter(Boolean).join(" ");
-  if (!written.length) {
-    // Nothing to write is only a success when there is also nothing to fix.
-    return view.plan.blocked
-      ? { ok: false, state: await buildSettingsState(), error: view.plan.blocked }
-      : successWith({ info: detail || "没有需要写入的值：这一项已经配好了。" });
-  }
-  return successWith({ info: view.plan.blocked ? `${detail} 还差一步：${view.plan.blocked}` : detail });
-}
-
 /** Map a push outcome onto the console's ok/info/error shape. */
 function notifyActionVerdict(result: NotifyOutcome, freshState: SettingsState): SettingsActionResult {
   if (result.delivered) {
@@ -669,7 +534,7 @@ function fallbackState(): SettingsState {
     // Canonical defaults from the shared list, not a restatement: a future
     // default change propagates here instead of silently diverging. Arrays are
     // copied — CONFIG_DEFAULTS must never be aliased into mutable state.
-    config: settingsConfigOf((key, value) => (Array.isArray(value) ? [...value] : value)),
+    config: settingsConfigFrom((_key, value) => (Array.isArray(value) ? [...value] : value)),
     // Detection needs no host — it reads the filesystem, not the config — so
     // the pre-host view can still offer the picker instead of a bare box.
     detected: detectedView(),

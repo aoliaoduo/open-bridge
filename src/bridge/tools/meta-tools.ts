@@ -3,10 +3,11 @@ import * as fs from "node:fs/promises";
 import * as fsSync from "node:fs";
 import * as path from "node:path";
 import { listToolDefinitions } from "./tool-catalog.js";
-import { validateNgrokDomain } from "../../http/request-policy.js";
+import { normalizeNgrokDomainSetting } from "../../http/request-policy.js";
 import { authStatus } from "../../http/auth.js";
 import { lockSnapshot } from "../runtime/resource-locks.js";
 import { CONFIG_DEFAULTS } from "../config/config-defaults.js";
+import { isConfigKey, type ConfigKey } from "../config/config-spec.js";
 import { SETTING_VALUE_REQUIRED, maskBarkKey, validateConfigValue } from "../config/config-values.js";
 import { auditLogPath, clientMcpUrl, localMcpUrl, record, state } from "../state.js";
 import type { JsonArgs } from "./json-args.js";
@@ -65,6 +66,10 @@ export function getBridgeStatus(): Record<string, unknown> {
     modern_last_used: state.modernLastUsed > 0 ? new Date(state.modernLastUsed).toISOString() : null,
     /** Modern requests being served right now — see state.modernInFlight. */
     modern_in_flight: state.modernInFlight,
+    compatibility: {
+      legacy_protocol_tool_calls: state.compatibility.legacyProtocolToolCalls,
+      legacy_tool_alias_calls: state.compatibility.legacyToolAliasCalls,
+    },
     active_commands: [...state.commands.values()].filter(command => !command.done).length,
     tool_profile: host().config.get<string>("toolProfile", "full"),
     // Must report what tools/list actually advertises, which is the catalog
@@ -158,7 +163,7 @@ export function getConfig(): Record<string, unknown> {
  * outside the server's own gates (maskBarkKey lives in config-values where the
  * console shares exactly one rule).
  */
-function echoConfigValue(key: string): unknown {
+function echoConfigValue(key: ConfigKey): unknown {
   if (key === "notify.barkKey") {
     const value = host().config.get(key, CONFIG_DEFAULTS[key]);
     return typeof value === "string" && value ? maskBarkKey(value) : "";
@@ -167,15 +172,17 @@ function echoConfigValue(key: string): unknown {
 }
 
 export async function setConfigValue(args: Args): Promise<unknown> {
-  const key = String(args.key ?? "").replace(/^openBridge\./, "");
+  const rawKey = String(args.key ?? "").replace(/^openBridge\./, "");
+  if (!isConfigKey(rawKey)) throw new Error(`Unsupported Open Bridge setting: ${rawKey}`);
+  const key = rawKey;
   const value = args.value;
   // A missing value would "update" the key to undefined and silently reset it
   // to its default, so refuse instead of wiping a setting the user cares about.
   if (value === undefined) throw new Error(SETTING_VALUE_REQUIRED);
   if (key === "ngrokDomain") {
-    // Node-only branch: shares validateNgrokDomain with the console's
-    // saveDomain flow (same function, so the two cannot drift).
-    const domain = validateNgrokDomain(value);
+    // Shares the optional-domain normalization with the console's saveDomain
+    // flow: blank clears, non-blank must be a valid hostname.
+    const domain = normalizeNgrokDomainSetting(value);
     await host().config.update(key, domain);
     return { key: `openBridge.${key}`, value: echoConfigValue(key) };
   }

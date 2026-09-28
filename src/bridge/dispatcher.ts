@@ -5,6 +5,7 @@ import { deriveLockPlan, type LockPlanContext } from "./tools/lock-plan.js";
 import { acquireLocks, DEFAULT_HOLD_TIMEOUT_MS, DEFAULT_WAIT_TIMEOUT_MS, type LockRelease } from "./runtime/resource-locks.js";
 import { workspaceContext } from "./state.js";
 import { patchTargetPaths } from "../mcp/patch.js";
+import { normalizeServiceGroup } from "./tools/service-name.js";
 
 /** The real-world wiring for the pure lock planner. */
 const LOCK_CONTEXT: LockPlanContext = {
@@ -12,8 +13,8 @@ const LOCK_CONTEXT: LockPlanContext = {
   patchTargets: args => patchTargetPaths(args.patch, args.patch_file, workspaceContext),
   workspaceRoot: () => workspaceContext.root(),
   servicesInGroup: group => [...state.services.entries()]
-    .filter(([, service]) => !group || String(service.group ?? "").trim().toLowerCase() === group)
-    .map(([name]) => name.trim().toLowerCase()),
+    .filter(([, service]) => !group || normalizeServiceGroup(service.group) === group)
+    .map(([name]) => name),
 };
 import {
   listDirectory, findFiles, searchFiles, readFiles, writeFile, editBlock,
@@ -148,6 +149,7 @@ async function dispatchInvocation(
   // catalog advertises today, and everything below — handler lookup, lock plan,
   // activity log — works on canonical names only.
   const call = normalizeToolCall(name, args ?? {});
+  if (call.alias) state.compatibility.legacyToolAliasCalls += 1;
   const tool = call.tool;
   const callArgs = call.args;
   // Any normal tool call means work has resumed. `notify` itself never resets

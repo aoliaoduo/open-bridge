@@ -28,3 +28,9 @@ export function validateNgrokDomain(value: unknown): string {
   }
   return domain;
 }
+
+/** Config semantics: blank clears the optional domain; non-blank stays strict. */
+export function normalizeNgrokDomainSetting(value: unknown): string {
+  if (typeof value === "string" && value.trim() === "") return "";
+  return validateNgrokDomain(value);
+}

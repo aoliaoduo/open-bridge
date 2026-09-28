@@ -460,6 +460,12 @@ describe("App shell", () => {
     expect(screen.getByText("v9.9.9-test")).toBeTruthy();
   });
 
+  test("distinguishes active stateless MCP work from an idle ready bridge", async () => {
+    mocks.settings.mockResolvedValue(settingsState({ status: { kind: "active" } }));
+    render(<App />);
+    expect(await screen.findByText("处理中 · 无状态 MCP")).toBeTruthy();
+  });
+
   test("reloads the console after a rotation invalidates its injected token", async () => {
     // The token is injected into the page server-side, so after a rotation the
     // in-page copy is stale and every later action would 403. Reloading is the

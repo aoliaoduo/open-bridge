@@ -181,6 +181,11 @@ export const state = {
    * own `npm run verify`. Counted per request, decremented on the way out.
    */
   modernInFlight: 0,
+  /** Cumulative compatibility-path usage for this process; no extra persistence or I/O. */
+  compatibility: {
+    legacyProtocolToolCalls: 0,
+    legacyToolAliasCalls: 0,
+  },
   /**
    * Whether the "you are running an older build" note has already gone out.
    *

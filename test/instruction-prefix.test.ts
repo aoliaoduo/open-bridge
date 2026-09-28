@@ -28,6 +28,8 @@ import {
   serverInstructions,
 } from "../src/bridge/mcp/instruction-prefix.js";
 
+const MAX_FULL_CATALOG_BYTES = 72 * 1024;
+
 let dir: string;
 
 /** Config returns the caller's default, so the profile under test is "full". */
@@ -72,6 +74,14 @@ test("the catalog serializes byte-identically across repeated calls", () => {
   assert.equal(second, first, "a second tools/list must not differ by one byte");
   assert.equal(third, first, "nor a third");
   assert.ok(first.length > 0, "the catalog is not empty");
+});
+
+test("the full catalog stays within its deliberate byte budget", () => {
+  const bytes = Buffer.byteLength(JSON.stringify(listToolDefinitions()), "utf8");
+  assert.ok(
+    bytes <= MAX_FULL_CATALOG_BYTES,
+    `full tools/list grew to ${bytes} bytes (budget ${MAX_FULL_CATALOG_BYTES}); keep useful contracts, but justify or deduplicate accidental growth`,
+  );
 });
 
 test("catalog order and length follow the definition literal, not a collection", () => {

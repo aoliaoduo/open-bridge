@@ -31,6 +31,7 @@ beforeEach(() => {
   state.activity = [];
   state.usage = { startedAt: Date.now(), calls: 0, successes: 0, failures: 0, byTool: {} };
   state.runtimeUsage = { calls: 0, successes: 0, failures: 0 };
+  state.compatibility = { legacyProtocolToolCalls: 0, legacyToolAliasCalls: 0 };
 });
 
 function statuses(tool: string): string[] {
@@ -92,6 +93,14 @@ test("a failed run_script child has a terminal error event while the recovery en
   assert.equal(result.ok, false);
   assert.equal(result.calls, 1);
   assertRetired("get_file_info", "error");
+});
+
+test("legacy tool aliases increment compatibility usage without affecting canonical calls", async () => {
+  await invoke("get_bridge_status", {}, undefined, { countUsage: false });
+  assert.equal(state.compatibility.legacyToolAliasCalls, 1);
+  await invoke("bridge_status", {}, undefined, { countUsage: false });
+  assert.equal(state.compatibility.legacyToolAliasCalls, 1,
+    "the counter measures compatibility traffic, not ordinary canonical calls");
 });
 
 test("normal top-level dispatch leaves completion and accounting to the MCP endpoint", async () => {

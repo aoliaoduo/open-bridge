@@ -15,6 +15,8 @@ import { readServiceLogRange } from "../runtime/service-log.js";
 import { requireValidOffset } from "../../mcp/argument-checks.js";
 import { throwIfSpawnFailed, waitForSpawnSettled } from "./process-tools.js";
 import type { JsonArgs } from "./json-args.js";
+import { KeyedSerialQueue } from "../runtime/keyed-serial-queue.js";
+import { normalizeServiceGroup, normalizeServiceName } from "./service-name.js";
 
 type Args = JsonArgs;
 
@@ -111,13 +113,10 @@ async function probeWithTimeout<T>(
  * write-back cannot interleave (TOCTOU: two starts used to spawn two
  * processes, one of them orphaned because only the last id was remembered).
  */
-const serviceOpTails = new Map<string, Promise<unknown>>();
+const serviceOps = new KeyedSerialQueue();
 
 function serializeServiceOp<T>(name: string, op: () => Promise<T>): Promise<T> {
-  const tail = (serviceOpTails.get(name) ?? Promise.resolve()).then(op, op);
-  serviceOpTails.set(name, tail.catch(() => undefined));
-  void tail.catch(() => undefined);
-  return tail;
+  return serviceOps.run(normalizeServiceName(name), op);
 }
 
 /**
@@ -128,17 +127,23 @@ function serializeServiceOp<T>(name: string, op: () => Promise<T>): Promise<T> {
  * and identical hint, so a caller retrying across tools learns one rule.
  */
 function serviceOrThrow(serviceName: string): ServiceDefinition {
-  const service = state.services.get(serviceName);
-  if (!service) throw new Error(`Unknown service: "${serviceName}".${availableHint("Saved services", state.services.keys())}`);
+  const canonical = normalizeServiceName(serviceName);
+  const service = state.services.get(canonical);
+  if (!service) throw new Error(`Unknown service: "${canonical}".${availableHint("Saved services", state.services.keys())}`);
   return service;
 }
 
+function selectedServices(groupValue: unknown): Array<[string, ServiceDefinition]> {
+  const group = normalizeServiceGroup(groupValue);
+  return [...state.services.entries()].filter(([, service]) => !group || normalizeServiceGroup(service.group) === group);
+}
+
 export function saveService(args: Args): Promise<unknown> {
-  return serializeServiceOp(String(args.name ?? ""), () => saveServiceInner(args));
+  return serializeServiceOp(normalizeServiceName(args.name), () => saveServiceInner(args));
 }
 
 async function saveServiceInner(args: Args): Promise<unknown> {
-  const serviceName = String(args.name ?? "").trim();
+  const serviceName = normalizeServiceName(args.name);
   if (!serviceName) throw new Error("Service name is required. (expected 'name': string)");
   const command = typeof args.command === "string" && args.command.trim().length > 0 ? args.command : "";
   if (!command) throw new Error("Service command is required and must be a non-empty string. (expected 'command': string)");
@@ -190,7 +195,7 @@ async function saveServiceInner(args: Args): Promise<unknown> {
     command,
     cwd: String(args.cwd ?? "."),
     env,
-    group: String(args.group ?? "default"),
+    group: normalizeServiceGroup(args.group) || "default",
     port: args.port === undefined ? undefined : Number(args.port),
     healthUrl,
     logFile: typeof args.log_file === "string" && args.log_file.trim() !== "" ? String(args.log_file).trim() : undefined,
@@ -266,11 +271,11 @@ async function launchServiceProcess(service: ServiceDefinition, serviceName: str
 }
 
 export function startService(args: Args): Promise<unknown> {
-  return serializeServiceOp(String(args.name ?? ""), () => startServiceInner(args));
+  return serializeServiceOp(normalizeServiceName(args.name), () => startServiceInner(args));
 }
 
 async function startServiceInner(args: Args): Promise<unknown> {
-  const serviceName = String(args.name ?? "");
+  const serviceName = normalizeServiceName(args.name);
   const service = serviceOrThrow(serviceName);
   if (isServiceRunning(service)) {
     return { name: serviceName, command_id: service.commandId, status: "already_running" };
@@ -281,11 +286,11 @@ async function startServiceInner(args: Args): Promise<unknown> {
 }
 
 export function stopService(args: Args): Promise<unknown> {
-  return serializeServiceOp(String(args.name ?? ""), () => stopServiceInner(args));
+  return serializeServiceOp(normalizeServiceName(args.name), () => stopServiceInner(args));
 }
 
 async function stopServiceInner(args: Args): Promise<unknown> {
-  const serviceName = String(args.name ?? "");
+  const serviceName = normalizeServiceName(args.name);
   const service = serviceOrThrow(serviceName);
   if (!service.commandId) return { name: serviceName, command_id: null, stopped: false, status: "stopped" };
   const commandId = service.commandId;
@@ -298,7 +303,7 @@ async function stopServiceInner(args: Args): Promise<unknown> {
   // process_control terminate can finish the job, and say so honestly.
   if (!stopped) {
     return {
-      name: String(args.name),
+      name: serviceName,
       command_id: commandId,
       stopped: false,
       status: "running",
@@ -306,15 +311,15 @@ async function stopServiceInner(args: Args): Promise<unknown> {
     };
   }
   service.commandId = undefined;
-  return { name: String(args.name), command_id: commandId, stopped, status: "stopped" };
+  return { name: serviceName, command_id: commandId, stopped, status: "stopped" };
 }
 
 export function restartService(args: Args): Promise<unknown> {
-  return serializeServiceOp(String(args.name ?? ""), () => restartServiceInner(args));
+  return serializeServiceOp(normalizeServiceName(args.name), () => restartServiceInner(args));
 }
 
 async function restartServiceInner(args: Args): Promise<unknown> {
-  const serviceName = String(args.name ?? "");
+  const serviceName = normalizeServiceName(args.name);
   const service = serviceOrThrow(serviceName);
   if (service.commandId) {
     const old = state.commands.get(service.commandId);
@@ -338,11 +343,11 @@ async function restartServiceInner(args: Args): Promise<unknown> {
 }
 
 export function deleteService(args: Args): Promise<unknown> {
-  return serializeServiceOp(String(args.name ?? ""), () => deleteServiceInner(args));
+  return serializeServiceOp(normalizeServiceName(args.name), () => deleteServiceInner(args));
 }
 
 async function deleteServiceInner(args: Args): Promise<unknown> {
-  const serviceName = String(args.name ?? "");
+  const serviceName = normalizeServiceName(args.name);
   const service = serviceOrThrow(serviceName);
   const proc = service.commandId ? state.commands.get(service.commandId) : undefined;
   const stopped = proc ? await terminateProcess(proc, "stopped") : false;
@@ -364,12 +369,12 @@ async function deleteServiceInner(args: Args): Promise<unknown> {
 }
 
 export async function serviceStatus(args: Args): Promise<unknown> {
-  const nameFilter = typeof args.name === "string" ? args.name : "";
-  const groupFilter = typeof args.group === "string" ? args.group : "";
+  const nameFilter = normalizeServiceName(args.name);
+  const groupFilter = normalizeServiceGroup(args.group);
   const timeoutMs = serviceStatusTimeoutMs(args.timeout_ms);
   return Promise.all(
     [...state.services.entries()]
-      .filter(([name, service]) => (!nameFilter || name === nameFilter) && (!groupFilter || service.group === groupFilter))
+      .filter(([name, service]) => (!nameFilter || name === nameFilter) && (!groupFilter || normalizeServiceGroup(service.group) === groupFilter))
       .map(async ([name, service]) => {
         const proc = service.commandId ? state.commands.get(service.commandId) : undefined;
         // P1-2: each health check races a per-service timer; a wedged check
@@ -413,9 +418,19 @@ export async function serviceStatus(args: Args): Promise<unknown> {
   );
 }
 
+export async function runServiceBatch<T, R>(
+  entries: readonly T[],
+  parallel: unknown,
+  operation: (entry: T) => Promise<R>,
+): Promise<R[]> {
+  if (parallel !== false) return Promise.all(entries.map(operation));
+  const results: R[] = [];
+  for (const entry of entries) results.push(await operation(entry));
+  return results;
+}
+
 export async function startAllServices(args: Args): Promise<unknown> {
-  const group = typeof args.group === "string" ? args.group : "";
-  const selected = [...state.services.entries()].filter(([, service]) => !group || service.group === group);
+  const selected = selectedServices(args.group);
   // Route through startService so every per-service op chain (TOCTOU guard) applies.
   const startOne = async ([name]: [string, ServiceDefinition]): Promise<unknown> => {
     try {
@@ -424,18 +439,13 @@ export async function startAllServices(args: Args): Promise<unknown> {
       return { name, error: error instanceof Error ? error.message : String(error) };
     }
   };
-  if (args.parallel === false) {
-    return selected.reduce(async (promise, entry) => [...await promise, await startOne(entry)], Promise.resolve([] as unknown[]));
-  }
-  return Promise.all(selected.map(startOne));
+  return runServiceBatch(selected, args.parallel, startOne);
 }
 
 export async function stopAllServices(args: Args): Promise<unknown> {
-  const group = typeof args.group === "string" ? args.group : "";
-  const stopped: unknown[] = [];
-  for (const [name, service] of state.services) {
-    if (group && service.group !== group) continue;
-    stopped.push(await serializeServiceOp(name, async () => {
+  const selected = selectedServices(args.group);
+  const stopOne = ([name, service]: [string, ServiceDefinition]): Promise<unknown> =>
+    serializeServiceOp(name, async () => {
       const proc = service.commandId ? state.commands.get(service.commandId) : undefined;
       const result = proc ? await terminateProcess(proc, "stopped") : false;
       // Same contract as stop: an unconfirmed termination keeps the handle.
@@ -453,13 +463,12 @@ export async function stopAllServices(args: Args): Promise<unknown> {
       }
       service.commandId = undefined;
       return { name, command_id: proc?.id ?? null, stopped: result };
-    }));
-  }
-  return stopped;
+    });
+  return runServiceBatch(selected, args.parallel, stopOne);
 }
 
 export async function readServiceLogTool(args: Args): Promise<Record<string, unknown>> {
-  const serviceName = String(args.name ?? "").trim();
+  const serviceName = normalizeServiceName(args.name);
   const service = serviceOrThrow(serviceName);
   const maxBytesValue = Number(args.max_bytes);
   const maxBytes = Number.isFinite(maxBytesValue) && maxBytesValue > 0 ? Math.floor(maxBytesValue) : MAX_INLINE_OUTPUT;

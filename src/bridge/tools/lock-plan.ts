@@ -19,6 +19,7 @@
  */
 
 import type { LockMode } from "../runtime/resource-locks.js";
+import { normalizeServiceGroup, serviceLockName } from "./service-name.js";
 
 /** Everything this module needs from the outside world. */
 export interface LockPlanContext {
@@ -29,11 +30,11 @@ export interface LockPlanContext {
   /** Workspace root, used as the coarse fallback key. */
   workspaceRoot(): string;
   /**
-   * Lowercased names of saved services in `group` ("" = every group). Consumed
-   * to expand start_all/stop_all into concrete svc:<name> keys — the lock
-   * table matches by exact string, so a literal "svc:*" key never conflicted
-   * with "svc:<name>" and an all-services run could interleave with an
-   * individual service op.
+   * Names of saved services in `group` ("" = every group). Consumed to expand
+   * start_all/stop_all into concrete svc:<name> keys; this planner canonicalizes
+   * those names before the lock table's exact-string match. A literal "svc:*"
+   * never conflicts with "svc:<name>", so an all-services run could otherwise
+   * interleave with an individual service op.
    */
   servicesInGroup(group: string): string[];
 }
@@ -170,17 +171,17 @@ export async function deriveLockPlan(
   } else if (name === "service") {
     const action = typeof args.action === "string" ? args.action.trim() : "";
     if (SERVICE_ACTION_SINGLE.has(action)) {
-      const service = args.name;
-      if (typeof service === "string" && service.trim()) keys.push(`svc:${service.trim().toLowerCase()}`);
+      const service = serviceLockName(args.name);
+      if (service) keys.push(`svc:${service}`);
     } else if (action === "start_all" || action === "stop_all") {
-      const group = typeof args.group === "string" && args.group.trim() ? args.group.trim().toLowerCase() : "";
+      const group = normalizeServiceGroup(args.group);
       // Expand to the concrete services the batch WILL touch: exact-key matching
       // makes a literal "svc:*" or "svc:<group>" disjoint from "svc:<name>", so
       // stop_all could tear a service down while start/restart of that same
-      // service ran next to it. Services saved after this plan was derived are
-      // not covered — the batch iterates the same snapshot, so the exposure is
-      // theoretical.
-      keys.push(...ctx.servicesInGroup(group).map(serviceName => `svc:${serviceName}`));
+      // service ran next to it. The handler also freezes its target list before
+      // the first await; its per-service queue remains the backstop if the service
+      // registry changes between this lock plan and handler execution.
+      keys.push(...ctx.servicesInGroup(group).map(serviceName => `svc:${serviceLockName(serviceName)}`));
     }
     // Any other action is refused by the family handler; planning nothing is
     // better than guessing at a resource the call will never touch.

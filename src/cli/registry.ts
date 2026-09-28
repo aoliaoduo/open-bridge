@@ -27,8 +27,8 @@ import { pidAlive as processPidAlive } from "../process/pid-alive.js";
 /**
  * The two data-dir file names that identify an instance. Built from the same
  * suffix pattern the generators use, so what gets written and what gets
- * recognised cannot drift apart. The runtime group is optional because
- * legacyRuntimePath() writes a plain runtime.json.
+ * recognised cannot drift apart. The runtime group is optional so a plain
+ * runtime.json written by pre-multi-instance builds is still discoverable.
  */
 export const RUNTIME_FILE = new RegExp(`^runtime(-${WORKSPACE_SUFFIX_PATTERN})?\\.json$`);
 export const SERVE_LOCK_FILE = new RegExp(`^serve-(${WORKSPACE_SUFFIX_PATTERN})\\.lock$`);
@@ -75,12 +75,20 @@ export function readOneRuntime(file: string): RuntimeInfo | undefined {
  * still read, and honoured only when it names this root, so an instance started
  * by an older build keeps being found.
  */
-export function readRuntime(home: string, root: string): RuntimeInfo | undefined {
+type RuntimeLookup = { runtime?: RuntimeInfo; source?: "workspace" | "legacy" };
+
+function readRuntimeLookup(home: string, root: string): RuntimeLookup {
   const own = readOneRuntime(runtimePath(home, root));
-  if (own) return own;
+  if (own) return { runtime: own, source: "workspace" };
   const legacy = readOneRuntime(legacyRuntimePath(home));
-  if (legacy && legacy.root && path.resolve(legacy.root) === path.resolve(root)) return legacy;
-  return undefined;
+  if (legacy && legacy.root && path.resolve(legacy.root) === path.resolve(root)) {
+    return { runtime: legacy, source: "legacy" };
+  }
+  return {};
+}
+
+export function readRuntime(home: string, root: string): RuntimeInfo | undefined {
+  return readRuntimeLookup(home, root).runtime;
 }
 
 /** Every live instance sharing this data dir, newest first. */
@@ -111,8 +119,19 @@ export function readAllRuntimes(home: string): RuntimeInfo[] {
  * never an arbitrary pick among several, which would act on another workspace.
  */
 export function resolveInstance(home: string, root: string): { runtime?: RuntimeInfo; note?: string; live: RuntimeInfo[] } {
-  const own = readRuntime(home, root);
-  if (own && pidAlive(own.pid)) return { runtime: own, live: readAllRuntimes(home) };
+  const own = readRuntimeLookup(home, root);
+  if (own.runtime && pidAlive(own.runtime.pid)) {
+    return {
+      runtime: own.runtime,
+      live: readAllRuntimes(home),
+      ...(own.source === "legacy" ? {
+        note: t(
+          "检测到旧版 runtime.json；当前命令继续兼容它，实例重启后会使用按项目隔离的新记录。",
+          "Using a legacy runtime.json record; this command remains compatible, and the next instance restart will use the per-workspace record.",
+        ),
+      } : {}),
+    };
+  }
   const live = readAllRuntimes(home);
   const only = live.length === 1 ? live[0] : undefined;
   if (only) {

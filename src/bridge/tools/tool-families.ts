@@ -31,6 +31,7 @@ import {
 } from "./meta-tools.js";
 import { listShells, openShell } from "../runtime/shell-sessions.js";
 import { FAMILY_ACTIONS, FAMILY_PARAMS, pick } from "./tool-call-shape.js";
+import { normalizeServiceName } from "./service-name.js";
 
 type Args = Record<string, unknown>;
 
@@ -49,7 +50,8 @@ function invalid(family: keyof typeof FAMILY_ACTIONS, value: string): Error {
 
 /** Name required by the single-service operations, before an empty lookup becomes misleading. */
 function namedService(args: Args, action: "start" | "stop" | "restart" | "delete"): Args {
-  if (typeof args.name === "string" && args.name.trim()) return pick(args, ["name"]);
+  const name = normalizeServiceName(args.name);
+  if (name) return { name };
   throw new Error(`Missing "name". service action "${action}" requires a saved service name.`);
 }
 

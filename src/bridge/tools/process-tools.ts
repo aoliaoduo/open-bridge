@@ -33,6 +33,7 @@ import {
   stringEnv,
 } from "../runtime/processes.js";
 import type { JsonArgs } from "./json-args.js";
+import { sessionActivityViews } from "../sessions/session-views.js";
 
 /** set_todos list cap — the same bound the tool schema advertises as maxItems. */
 const MAX_TODOS = 100;
@@ -560,35 +561,27 @@ export function getProcessSnapshot(args: Args): unknown {
  * what the table cannot.
  */
 export function listSessions(): unknown {
-  const legacy = [...state.sessions.entries()].map(([id, s]) => ({
-    session_id: id,
-    era: "legacy",
-    stateless: false,
-    closable: true,
-    connected_at: new Date(s.connectedAt ?? s.lastUsed).toISOString(),
-    last_used: new Date(s.lastUsed).toISOString(),
-    calls: s.calls ?? 0,
-    todo_count: s.todos.length,
-  }));
-  if (state.modernLastUsed <= 0) return legacy;
-  return [...legacy, {
-    session_id: "modern",
-    era: "modern",
-    stateless: true,
-    // Not an action the Bridge can take: there is no transport to drop and no
-    // state to clear, because every modern request stands alone.
-    closable: false,
-    // No handshake happened, so there is none to report — `first_seen` is the
-    // honest half of the pair.
-    connected_at: null,
-    first_seen: new Date(state.modernSince || state.modernLastUsed).toISOString(),
-    last_used: new Date(state.modernLastUsed).toISOString(),
-    // The legacy rows carry their busy count through the console's session
-    // view; the stateless era has no session to hang one on, so it is reported
-    // here — and it is the honest answer to "is this instance working right
-    // now?" for a request that has not finished yet.
-    in_flight: state.modernInFlight,
-  }];
+  return sessionActivityViews().map(row => row.stateless
+    ? {
+        session_id: row.id,
+        era: row.era,
+        stateless: true,
+        closable: false,
+        connected_at: null,
+        first_seen: row.firstSeen,
+        last_used: row.lastUsed,
+        in_flight: row.inFlight,
+      }
+    : {
+        session_id: row.id,
+        era: row.era,
+        stateless: false,
+        closable: true,
+        connected_at: row.connectedAt,
+        last_used: row.lastUsed,
+        calls: row.calls,
+        todo_count: row.todoCount,
+      });
 }
 
 /** Todos live on the MCP session that set them. */

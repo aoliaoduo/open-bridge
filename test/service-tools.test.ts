@@ -21,6 +21,7 @@ import {
   listServices,
   probeScope,
   restartService,
+  runServiceBatch,
   saveService,
   serviceStatus,
   startService,
@@ -157,6 +158,8 @@ test("checkHttpTool answers a loopback endpoint", async () => {
 
 test("saveService validates name, command, port, restart knobs and health_url", async () => {
   await assert.rejects(() => saveService({ name: "  " }), /name is required/);
+  await assert.rejects(() => saveService({ name: 123, command: "x" }), /name is required/,
+    "a non-string name must not be coerced into a different public service name");
   await assert.rejects(() => saveService({ name: "a" }), /command is required/);
   await assert.rejects(() => saveService({ name: "a", command: "x", port: 70000 }), /integer between 1 and 65535/);
   await assert.rejects(() => saveService({ name: "a", command: "x", max_restarts: "abc" }), /max_restarts/);
@@ -175,6 +178,41 @@ test("saveService stores the definition with defaults and persists it", async ()
   await drain();
   const persisted = store.dump().get(`openBridge.services.${workspace}`) as Record<string, unknown>;
   assert.ok(persisted && persisted.web, "the service snapshot reaches the state store");
+});
+
+test("service batches honor the documented parallel default and sequential opt-out", async () => {
+  let releaseParallel!: () => void;
+  const parallelGate = new Promise<void>(resolve => { releaseParallel = resolve; });
+  const parallelStarted: number[] = [];
+  const parallel = runServiceBatch([1, 2], undefined, async value => {
+    parallelStarted.push(value);
+    await parallelGate;
+    return value;
+  });
+  await Promise.resolve();
+  assert.deepEqual(parallelStarted, [1, 2], "default mode starts independent services concurrently");
+  releaseParallel();
+  assert.deepEqual(await parallel, [1, 2]);
+
+  let releaseFirst!: () => void;
+  const firstGate = new Promise<void>(resolve => { releaseFirst = resolve; });
+  const sequentialStarted: number[] = [];
+  const sequential = runServiceBatch([1, 2], false, async value => {
+    sequentialStarted.push(value);
+    if (value === 1) await firstGate;
+    return value;
+  });
+  await Promise.resolve();
+  assert.deepEqual(sequentialStarted, [1], "parallel:false waits for each service before starting the next");
+  releaseFirst();
+  assert.deepEqual(await sequential, [1, 2]);
+});
+
+test("named service operations use the same trimmed name as saveService", async () => {
+  await saveService({ name: "  web  ", command: KEEP_ALIVE });
+  assert.equal(state.services.has("web"), true, "the stored key is canonical");
+  const removed = await deleteService({ name: "  web  " }) as Record<string, unknown>;
+  assert.equal(removed.deleted, true, "later operations resolve the same canonical name");
 });
 
 test("listServices and listServiceViews describe definitions without a live process", async () => {
