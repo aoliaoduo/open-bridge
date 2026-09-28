@@ -7,6 +7,7 @@
  */
 
 import { FAILURE_LINE_PATTERN } from "../../bridge/failure-line.js";
+import { formatActivityHint } from "../../bridge/activity-presentation.js";
 import { visualWidth } from "./text.js";
 
 export type ActivityLike = {
@@ -141,6 +142,7 @@ function hintFromSummary(summary: string | undefined, tool: string): string {
   const op = quotedField(summary, "op");
   const action = quotedField(summary, "action");
   const name = quotedField(summary, "name");
+  const group = quotedField(summary, "group");
   const url = quotedField(summary, "url");
   const port = unquotedField(summary, "port");
   const ms = unquotedField(summary, "ms");
@@ -148,6 +150,7 @@ function hintFromSummary(summary: string | undefined, tool: string): string {
   const key = quotedField(summary, "key");
   const value = quotedField(summary, "value") ?? unquotedField(summary, "value");
   const message = quotedField(summary, "message");
+  const title = quotedField(summary, "title");
   const pattern = quotedField(summary, "pattern");
   const patchFile = quotedField(summary, "patch_file");
   const source = quotedField(summary, "source");
@@ -159,85 +162,11 @@ function hintFromSummary(summary: string | undefined, tool: string): string {
 
   const editsCount = arrayCount(summary, "edits");
 
-  if (tool === "search_files" && (query || pattern)) return (query ?? pattern)!;
-  if (tool === "find_files" && pattern) return path ? `${pattern} (${path})` : pattern;
-  if (tool === "list_directory") return path || ".";
-  if (tool === "get_file_info" && path) return path;
-  if (tool === "edit_block") {
-    if (path && editsCount !== undefined) return `${path} (${editsCount} 处修改)`;
-    if (path) return path;
-  }
-  if (tool === "file_op") {
-    if ((op === "move" || op === "copy") && source && destination) {
-      return `${op} ${source} → ${destination}`;
-    }
-    if (op && path) return `${op} ${path}`;
-    if (op) return op;
-  }
-  if (tool === "service") {
-    const target = name ?? (quotedField(summary, "group") ? `group:${quotedField(summary, "group")}` : undefined);
-    if (action && target) return `${action} ${target}`;
-    if (action) return action;
-    if (target) return target;
-  }
-  if (tool === "save_service" && name) return `保存服务 ${name}`;
-  if (tool === "read_service_log" && name) return `服务日志 ${name}`;
-  if (tool === "process_control") {
-    if (action && cmdId) return `${action} ${cmdId.slice(0, 8)}`;
-    if (action) return action;
-  }
-  if (tool === "read_process_output" && cmdId) return `进程输出 ${cmdId.slice(0, 8)}`;
-  if (tool === "set_process_policy" && cmdId) return `重启策略 ${cmdId.slice(0, 8)}`;
-  if (tool === "connectivity") {
-    if (url) return url;
-    if (port) return `port ${port}`;
-  }
-  if (tool === "send_to_shell") {
-    if (name && command) return `[${name}] ${firstCommand(command)}`;
-    if (command) return firstCommand(command);
-  }
-  if (tool === "open_shell" || tool === "close_shell") {
-    if (name) return name;
-  }
-  if (tool === "wait") {
-    if (ms) return `${ms}ms`;
-    if (cmdId) return `pid ${cmdId.slice(0, 8)}`;
-  }
-  if (tool === "set_todos") {
-    if (todosCount !== undefined) return `${todosCount} 项任务`;
-  }
-  if (tool === "report_progress") {
-    if (message) return message;
-  }
-  if (tool === "batch") {
-    if (callsCount !== undefined) return `${callsCount} calls${mode ? ` (${mode})` : ""}`;
-  }
-  if (tool === "run_script") {
-    const src = quotedField(summary, "source");
-    if (src) return firstCommand(src);
-    return "运行脚本";
-  }
-  if (tool === "set_config_value") {
-    if (key && value !== undefined) return `${key} = ${value}`;
-    if (key) return key;
-  }
-  if (tool === "activity_log" && action) return action;
-  if (tool === "bridge_status" && section) return section;
-  if (tool === "apply_patch") {
-    if (patchFile) return patchFile;
-    return "inline patch";
-  }
-  if (tool === "notify") {
-    const notifyMsg = quotedField(summary, "message") ?? quotedField(summary, "title");
-    if (notifyMsg) return notifyMsg;
-    return "发送通知";
-  }
-
-  if (command) return firstCommand(command);
-  if (query) return query;
-  if (path) return path;
-  if (name) return name;
-  return "";
+  return formatActivityHint(tool, {
+    command, query, path, op, action, name, group, url, port, ms,
+    commandId: cmdId, key, value, message, title, pattern, patchFile, source,
+    destination, mode, section, editsCount, todosCount, callsCount,
+  });
 }
 
 function clip(value: string): string {

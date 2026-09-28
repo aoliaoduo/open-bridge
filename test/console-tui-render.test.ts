@@ -106,7 +106,7 @@ test("ambiguous-width characters follow the CJK locale", () => {
 
 test("geometry holds under the CJK ambiguous regime", () => {
   const snap = buildSnapshot(fixtureView(), {
-    version: "1.0.0-rc.2",
+    version: "test",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
@@ -201,7 +201,7 @@ function fixtureView(): TuiStateView {
 
 test("buildSnapshot counts live state without carrying connection secrets", () => {
   const snap = buildSnapshot(fixtureView(), {
-    version: "1.0.0-rc.2",
+    version: "test",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
@@ -321,7 +321,7 @@ test("process lifecycle rows ride along, dimmed, with their real state", () => {
 
 test("renderFrame fills the exact geometry and shows the dashboard vocabulary", () => {
   const snap = buildSnapshot(fixtureView(), {
-    version: "1.0.0-rc.2",
+    version: "test",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
@@ -348,7 +348,7 @@ test("renderFrame fills the exact geometry and shows the dashboard vocabulary", 
 
 test("renderFrame pins addresses to the bottom of the sidebar in tall workbench window", () => {
   const snap = buildSnapshot(fixtureView(), {
-    version: "1.0.0-rc.2",
+    version: "test",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
@@ -367,7 +367,7 @@ test("renderFrame pins addresses to the bottom of the sidebar in tall workbench 
 
 test("renderFrame degrades gracefully on a small window", () => {
   const snap = buildSnapshot(fixtureView(), {
-    version: "1.0.0-rc.2",
+    version: "test",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
@@ -384,7 +384,7 @@ test("renderFrame degrades gracefully on a small window", () => {
 
 test("workbench layout: exact geometry with a sidebar divider column", () => {
   const snap = buildSnapshot(fixtureView(), {
-    version: "1.0.0-rc.2",
+    version: "test",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
@@ -419,12 +419,12 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   // The row is a permanent resident: clean reads as 干净 and a workspace
   // without git is named — a missing row cannot say which state it is in.
   const cleanSnap = buildSnapshot(fixtureView(), {
-    version: "1.0.0-rc.2", rootName: "open-bridge", logPath: "C:/x/bridge.log", now: 60_000,
+    version: "test", rootName: "open-bridge", logPath: "C:/x/bridge.log", now: 60_000,
     workspaceChanges: { status: "ready", files: 0, insertions: 0, deletions: 0 },
   });
   assert.match(renderFrame(cleanSnap, { width: 110, height: 30, now: 60_000 }).map(stripAnsi).join("\n"), /变更\s+干净/, "a clean tree keeps the row, reading 干净");
   const noGitSnap = buildSnapshot(fixtureView(), {
-    version: "1.0.0-rc.2", rootName: "open-bridge", logPath: "C:/x/bridge.log", now: 60_000,
+    version: "test", rootName: "open-bridge", logPath: "C:/x/bridge.log", now: 60_000,
   });
   assert.match(renderFrame(noGitSnap, { width: 110, height: 30, now: 60_000 }).map(stripAnsi).join("\n"), /变更\s+非 git/, "no git is named honestly, never silently hidden");
   assert.match(joined, /会话\s+2 · 活跃 1/);
@@ -474,14 +474,14 @@ test("sidebar section titles disclose hidden process and service rows", () => {
 test("top bar displays active workspace directory, version, and omits port/name/diamond", () => {
   const view = { ...fixtureView(), activeWorkspaceRoot: "C:/Projects/my-app" };
   const snap = buildSnapshot(view, {
-    version: "1.0.0-rc.2",
+    version: "test",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
   });
   const lines = renderFrame(snap, { width: 110, height: 30, now: 60_000 });
   const topBar = stripAnsi(lines[0] ?? "");
-  assert.match(topBar, /v1\.0\.0-rc\.2/);
+  assert.match(topBar, /vtest/, "the top bar renders the supplied version value");
   assert.doesNotMatch(topBar, /◆/);
   assert.match(topBar, /C:\/Projects\/my-app/);
   assert.match(topBar, /运行中/);
@@ -495,7 +495,7 @@ test("sidebar displays specific tunnel provider (ngrok / tailscale)", () => {
     tunnelUrl: "https://demo.ngrok-free.dev/mcp/token",
   };
   const ngrokSnap = buildSnapshot(ngrokView, {
-    version: "1.0.0-rc.2",
+    version: "test",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
@@ -512,7 +512,7 @@ test("sidebar displays specific tunnel provider (ngrok / tailscale)", () => {
     tunnelUrl: "https://my-node.ts.net/mcp/token",
   };
   const tsSnap = buildSnapshot(tsView, {
-    version: "1.0.0-rc.2",
+    version: "test",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
@@ -546,7 +546,7 @@ test("heading freshness time shares the completion-clock column", () => {
 
 test("task view: Tab swaps the wide panel and shows full titles", () => {
   const snap = buildSnapshot(fixtureView(), {
-    version: "1.0.0-rc.2",
+    version: "test",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
@@ -573,7 +573,7 @@ test("task view: Tab swaps the wide panel and shows full titles", () => {
 
 test("task view shows the latest report_progress context, even with no todos", () => {
   const snap = buildSnapshot({ ...fixtureView(), todos: [] }, {
-    version: "1.4.2",
+    version: "test",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
@@ -599,7 +599,7 @@ test("task view shows the latest report_progress context, even with no todos", (
 test("progress text is terminal-safe and participates in task scrolling", () => {
   const hostile = `开始\n第二行\t内容${String.fromCharCode(27)}[2J${"很长".repeat(80)}末尾`;
   const snap = buildSnapshot({ ...fixtureView(), todos: [] }, {
-    version: "1.4.2",
+    version: "test",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
@@ -632,7 +632,7 @@ test("progress text is terminal-safe and participates in task scrolling", () => 
 
 test("workbench panel follows the tail and reports history when scrolled", () => {
   const snap = buildSnapshot(fixtureView(), {
-    version: "1.0.0-rc.2",
+    version: "test",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
@@ -670,7 +670,7 @@ test("workbench panel follows the tail and reports history when scrolled", () =>
 
 test("activity messages truncate on the row; the Enter detail keeps the tail", () => {
   const snap = buildSnapshot(fixtureView(), {
-    version: "1.0.0-rc.2",
+    version: "test",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,

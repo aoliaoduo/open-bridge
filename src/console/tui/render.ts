@@ -654,6 +654,14 @@ function mainPanelNavigation(view: MainPanelView, count: number): string {
   return `─ ${PANEL_VIEWS.map(candidate => candidate === view ? `[${labels[candidate]} ${count}]` : labels[candidate]).join(" · ")} [Tab] `;
 }
 
+function mainPanelView(view: PanelView): MainPanelView | undefined {
+  return PANEL_VIEWS.includes(view as MainPanelView) ? view as MainPanelView : undefined;
+}
+
+function panelContentRows(view: PanelView, rows: number): number {
+  return mainPanelView(view) !== undefined && rows > 1 ? rows - 1 : rows;
+}
+
 type FrameLayout = {
   width: number;
   height: number;
@@ -695,7 +703,7 @@ export function panelScrollMetrics(
 ): { rows: number; totalRows: number } {
   const layout = frameLayout(snap, options.width, options.height, options.panelView);
   return {
-    rows: layout.panelRows,
+    rows: panelContentRows(options.panelView, layout.panelRows),
     totalRows: options.panelView === "tasks" ? taskPanelRows(snap, layout.panelWidth, options.spinnerFrame ?? 0, options.now ?? Date.now()).length
       : options.panelView === "changes" ? changePanelRows(snap, layout.panelWidth).length
       : options.panelView === "diff" ? diffPanelRows(snap, layout.panelWidth).length
@@ -717,14 +725,15 @@ function renderPanel(
     : diffView ? diffPanelRows(snap, width)
     : eventView ? eventDetailRows(snap, width, detailKey)
     : snap.events.map((event, index) => eventListRow(event, width, spin, now, index === cursor));
-  const requested = Number.isFinite(firstVisible) ? Math.floor(firstVisible) : 0;
-  const first = Math.min(Math.max(0, requested), maxFirstVisible(content.length, rows));
   const count = tasksView ? snap.todosTotal : changesView ? (snap.changes.status === "ready" ? (snap.changes.entries?.length ?? snap.changes.files) : 0)
     : diffView ? (snap.diff?.text ? snap.diff.text.split("\n").length : 0)
     : snap.events.length;
   const label = eventView ? "事件详情" : diffView ? (snap.diff?.kind === "file" ? "文件 diff" : "累计 diff") : `${tasksView ? "任务" : changesView ? "变更" : "活动"} (${count})`;
   const plainTitle = `─ ${label} `;
-  const mainView = !eventView && !diffView ? (tasksView ? "tasks" : changesView ? "changes" : "activity") : undefined;
+  const mainView = mainPanelView(view);
+  const contentRows = panelContentRows(view, rows);
+  const requested = Number.isFinite(firstVisible) ? Math.floor(firstVisible) : 0;
+  const first = Math.min(Math.max(0, requested), maxFirstVisible(content.length, contentRows));
   let title = mainView === undefined ? plainTitle : mainPanelNavigation(mainView, count);
   const listView = tasksView || changesView || diffView;
   let hint = "";
@@ -732,8 +741,8 @@ function renderPanel(
   if (tasksView && snap.todosTotal > 0) {
     const completed = snap.todos.filter(t => t.status === "completed").length;
     const pct = Math.round((completed / snap.todosTotal) * 100);
-    const scrollInfo = content.length > rows ? `${first + 1}-${Math.min(first + rows, content.length)}/${content.length} 行` : "";
-    if (content.length > rows) {
+    const scrollInfo = content.length > contentRows ? `${first + 1}-${Math.min(first + contentRows, content.length)}/${content.length} 行` : "";
+    if (content.length > contentRows) {
       hint = `${completed}/${snap.todosTotal} · ${scrollInfo}`;
       if (visualWidth(title) + visualWidth(hint) > width) hint = scrollInfo;
     } else {
@@ -758,7 +767,7 @@ function renderPanel(
       }
     }
   } else if (listView) {
-    const scroll = content.length > rows ? `${first + 1}-${Math.min(first + rows, content.length)}/${content.length} 行` : "";
+    const scroll = content.length > contentRows ? `${first + 1}-${Math.min(first + contentRows, content.length)}/${content.length} 行` : "";
     // 变更页与活动页共享光标/Enter 心智；d 继续保留累计审阅预览。
     hint = diffView ? "Esc 返回变更" : changesView
       ? (snap.changes.status === "ready" && (snap.changes.entries?.length ?? 0) > 0 ? "↑↓ 选择 · Enter 文件 diff · d 累计" : "d 累计 diff")
@@ -769,7 +778,7 @@ function renderPanel(
     // 与 diff 预览同一约定：Esc 是唯一出口，靠标题提示被发现。
     hint = "Esc 返回活动";
   } else {
-    const scroll = first > 0 ? `↑${first} 行` : content.length > rows ? `↓${content.length - rows} 行` : "";
+    const scroll = first > 0 ? `↑${first} 行` : content.length > contentRows ? `↓${content.length - contentRows} 行` : "";
     // 光标选择是新交互，靠标题提示被发现；宽度不够时由下方统一丢弃。
     hint = scroll === "" ? "↑↓ 选择 · Enter 展开" : `Enter 展开 · ${scroll}`;
   }
@@ -778,7 +787,8 @@ function renderPanel(
   if (visualWidth(title) + visualWidth(hint) > width) title = `${label} `;
   const titleWidth = Math.max(1, width - visualWidth(hint));
   const heading = `${padEndVisual(paint("dim", truncateVisual(title, titleWidth)), titleWidth)}${hint === "" ? "" : paint(hintTone, hint)}`;
-  const panel = [heading, ...visibleEvents(content, first, rows)];
+  const spacer = mainView !== undefined && rows > 1 ? [""] : [];
+  const panel = [heading, ...spacer, ...visibleEvents(content, first, contentRows)];
   while (panel.length < rows + 1) panel.push("");
   return panel;
 }

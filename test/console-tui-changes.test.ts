@@ -179,7 +179,7 @@ test("summarizeGitStatus: a timeout is 读取失败, not 非 git", async () => {
 
 test("the sidebar names 读取失败 without dropping the resident 变更 row", () => {
   const snap = buildSnapshot(fixtureView(), {
-    version: "1.0.0-rc.2",
+    version: "test",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
@@ -211,7 +211,7 @@ test("Tab cycles activity → tasks → changes", () => {
 
 test("the changes panel lists each path with its own +/- and keeps the sidebar summary", () => {
   const snap = buildSnapshot(fixtureView(), {
-    version: "1.0.0-rc.2",
+    version: "test",
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,

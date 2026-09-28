@@ -47,8 +47,6 @@ function snapshot(count = 100): TuiSnapshot {
 }
 
 function frame(snap: TuiSnapshot, width: number, height: number, taskFirstVisible = 0): string[] {
-  // Before the implementation exists the old renderer simply ignores this
-  // option, so the regressions fail on observable content, not on a missing import.
   const options = { width, height, taskFirstVisible, panelView: "tasks" as const, now: NOW, spinnerFrame: 0 };
   return renderFrame(snap, options).map(stripAnsi);
 }
@@ -60,6 +58,27 @@ function assertGeometry(lines: string[], width: number, height: number): void {
     assert.doesNotMatch(line, /[\r\n]/, "a logical row cannot smuggle in physical newlines");
   }
 }
+
+function panelCell(line: string): string {
+  return line.split("│").at(-1) ?? line;
+}
+
+function mainPanelContent(lines: string[], rows: number, label: string): string[] {
+  const heading = lines.findIndex(line => panelCell(line).includes(label));
+  assert.ok(heading >= 0, `${label} panel heading is visible`);
+  return lines.slice(heading + 2, heading + 2 + rows).map(panelCell);
+}
+
+test("main panel navigation keeps one breathing row before its content", () => {
+  const snap = snapshot(3);
+  for (const panelView of ["activity", "tasks", "changes"] as const) {
+    const lines = renderFrame(snap, { width: 110, height: 24, panelView, now: NOW }).map(stripAnsi);
+    const heading = lines.findIndex(line => line.includes("[Tab]"));
+    assert.ok(heading >= 0, `${panelView} navigation heading is visible`);
+    const belowHeading = (lines[heading + 1] ?? "").split("│").at(-1)?.trim() ?? "";
+    assert.equal(belowHeading, "", `${panelView} keeps one empty panel row below navigation`);
+  }
+});
 
 test("task snapshot preserves the complete tool-supported list, not only its first sixteen", () => {
   const view = fixtureView();
@@ -107,7 +126,7 @@ test("wrapped CJK and multiline titles remain complete at the task viewport tail
       snap.todos = [{ title: `开始${"中文长标题".repeat(30)}\r\n第二行\n${"更多内容".repeat(20)}末尾可见`, status: "completed" }];
       const last = frame(snap, 60, 12, Number.MAX_SAFE_INTEGER);
       assertGeometry(last, 60, 12);
-      assert.ok(last.slice(3, -1).join("").replace(/\s/g, "").includes("末尾可见"));
+      assert.ok(last.join("").replace(/\s/g, "").includes("末尾可见"));
     } finally {
       setAmbiguousWideForTests(false);
     }
@@ -352,8 +371,8 @@ test("real driver clamps task scroll after resize and list shrink without resurr
 });
 
 
-// Additional coverage for the new viewport contract; these are not claimed
-// as separately reproduced defects on the old implementation.
+// Viewport invariants: verify reachability and text preservation without
+// depending on fixed physical row numbers.
 test("paging the task viewport can visit every one of the hundred tasks", () => {
   const snap = snapshot();
   const dimensions = { width: 76, height: 22, panelView: "tasks" as const };
@@ -384,7 +403,8 @@ test("every wrapped title character survives, not only the first and last line",
           const first = Math.min(requested, Math.max(0, metrics.totalRows - metrics.rows));
           const lines = frame(snap, width, height, requested);
           assertGeometry(lines, width, height);
-          const visible = lines.slice(3, 3 + metrics.rows).map(line => line.replace(/^✓ */u, "").trim());
+          const visible = mainPanelContent(lines, metrics.rows, "任务")
+            .map(line => line.replace(/^\s*✓ */u, "").trim());
           const overlap = Math.max(0, consumed - first);
           collected.push(...visible.slice(overlap));
           consumed = Math.min(metrics.totalRows, first + visible.length);

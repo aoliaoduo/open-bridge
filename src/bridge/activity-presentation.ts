@@ -38,34 +38,40 @@ function firstCommand(value: string): string {
   return (value.split(/\s+&&\s+/)[0] ?? value).trim();
 }
 
-export function buildActivityHint(
-  tool: string,
-  args: Record<string, unknown>,
-  redact: (text: string) => string = text => text,
-): string {
-  const command = firstString(args.command ?? args.cmd, redact);
-  const query = textValue(args.query, redact);
-  const path = firstString(args.path ?? args.paths, redact);
-  const op = textValue(args.op, redact);
-  const action = textValue(args.action, redact);
-  const name = textValue(args.name, redact);
-  const group = textValue(args.group, redact);
-  const url = textValue(args.url, redact);
-  const port = scalarValue(args.port, redact);
-  const ms = scalarValue(args.ms, redact);
-  const cmdId = scalarValue(args.command_id, redact);
-  const key = textValue(args.key, redact);
-  const value = scalarValue(args.value, redact);
-  const message = textValue(args.message, redact);
-  const pattern = textValue(args.pattern, redact);
-  const patchFile = textValue(args.patch_file, redact);
-  const source = textValue(args.source, redact);
-  const destination = textValue(args.destination, redact);
-  const mode = textValue(args.mode, redact);
-  const section = textValue(args.section, redact);
-  const editsCount = Array.isArray(args.edits) ? args.edits.length : undefined;
-  const todosCount = Array.isArray(args.todos) ? args.todos.length : undefined;
-  const callsCount = Array.isArray(args.calls) ? args.calls.length : undefined;
+export type ActivityHintFields = {
+  command?: string;
+  query?: string;
+  path?: string;
+  op?: string;
+  action?: string;
+  name?: string;
+  group?: string;
+  url?: string;
+  port?: string;
+  ms?: string;
+  commandId?: string;
+  key?: string;
+  value?: string;
+  message?: string;
+  title?: string;
+  pattern?: string;
+  patchFile?: string;
+  source?: string;
+  destination?: string;
+  mode?: string;
+  section?: string;
+  editsCount?: number;
+  todosCount?: number;
+  callsCount?: number;
+};
+
+/** One semantic formatter shared by live structured args and legacy summaries. */
+export function formatActivityHint(tool: string, fields: ActivityHintFields): string {
+  const {
+    command, query, path, op, action, name, group, url, port, ms, commandId,
+    key, value, message, title, pattern, patchFile, source, destination, mode,
+    section, editsCount, todosCount, callsCount,
+  } = fields;
 
   if (tool === "search_files" && (query || pattern)) return query ?? pattern ?? "";
   if (tool === "find_files" && pattern) return path ? `${pattern} (${path})` : pattern;
@@ -88,11 +94,11 @@ export function buildActivityHint(
   if (tool === "save_service" && name) return `保存服务 ${name}`;
   if (tool === "read_service_log" && name) return `服务日志 ${name}`;
   if (tool === "process_control") {
-    if (action && cmdId) return `${action} ${cmdId.slice(0, 8)}`;
+    if (action && commandId) return `${action} ${commandId.slice(0, 8)}`;
     if (action) return action;
   }
-  if (tool === "read_process_output" && cmdId) return `进程输出 ${cmdId.slice(0, 8)}`;
-  if (tool === "set_process_policy" && cmdId) return `重启策略 ${cmdId.slice(0, 8)}`;
+  if (tool === "read_process_output" && commandId) return `进程输出 ${commandId.slice(0, 8)}`;
+  if (tool === "set_process_policy" && commandId) return `重启策略 ${commandId.slice(0, 8)}`;
   if (tool === "connectivity") {
     if (url) return url;
     if (port) return `port ${port}`;
@@ -104,7 +110,7 @@ export function buildActivityHint(
   if ((tool === "open_shell" || tool === "close_shell") && name) return name;
   if (tool === "wait") {
     if (ms) return `${ms}ms`;
-    if (cmdId) return `pid ${cmdId.slice(0, 8)}`;
+    if (commandId) return `pid ${commandId.slice(0, 8)}`;
   }
   if (tool === "set_todos" && todosCount !== undefined) return `${todosCount} 项任务`;
   if (tool === "report_progress" && message) return message;
@@ -117,16 +123,50 @@ export function buildActivityHint(
   if (tool === "activity_log" && action) return action;
   if (tool === "bridge_status" && section) return section;
   if (tool === "apply_patch") return patchFile || "inline patch";
-  if (tool === "notify") {
-    const notifyText = message ?? textValue(args.title, redact);
-    return notifyText || "发送通知";
-  }
+  if (tool === "notify") return message ?? title ?? "发送通知";
 
   if (command) return firstCommand(command);
   if (query) return query;
   if (path) return path;
   if (name) return name;
   return "";
+}
+
+export function buildActivityHint(
+  tool: string,
+  args: Record<string, unknown>,
+  redact: (text: string) => string = text => text,
+): string {
+  const command = firstString(args.command ?? args.cmd, redact);
+  const query = textValue(args.query, redact);
+  const path = firstString(args.path ?? args.paths, redact);
+  const op = textValue(args.op, redact);
+  const action = textValue(args.action, redact);
+  const name = textValue(args.name, redact);
+  const group = textValue(args.group, redact);
+  const url = textValue(args.url, redact);
+  const port = scalarValue(args.port, redact);
+  const ms = scalarValue(args.ms, redact);
+  const commandId = scalarValue(args.command_id, redact);
+  const key = textValue(args.key, redact);
+  const value = scalarValue(args.value, redact);
+  const message = textValue(args.message, redact);
+  const title = textValue(args.title, redact);
+  const pattern = textValue(args.pattern, redact);
+  const patchFile = textValue(args.patch_file, redact);
+  const source = textValue(args.source, redact);
+  const destination = textValue(args.destination, redact);
+  const mode = textValue(args.mode, redact);
+  const section = textValue(args.section, redact);
+  const editsCount = Array.isArray(args.edits) ? args.edits.length : undefined;
+  const todosCount = Array.isArray(args.todos) ? args.todos.length : undefined;
+  const callsCount = Array.isArray(args.calls) ? args.calls.length : undefined;
+
+  return formatActivityHint(tool, {
+    command, query, path, op, action, name, group, url, port, ms, commandId,
+    key, value, message, title, pattern, patchFile, source, destination, mode,
+    section, editsCount, todosCount, callsCount,
+  });
 }
 
 export function rememberActivityHint(invocationId: string | undefined, hint: string): void {
