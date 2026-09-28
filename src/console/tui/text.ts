@@ -133,6 +133,37 @@ export function truncateVisual(text: string, max: number): string {
   return `${hardCut(text, max - 3)}...`;
 }
 
+/** Keep the end of a path-like value when the basename is more useful than its prefix. */
+export function truncateVisualTail(text: string, max: number): string {
+  if (max <= 0) return "";
+  if (visualWidth(text) <= max) return text;
+  if (max < 4) {
+    const chars = [...text];
+    let result = "";
+    let used = 0;
+    for (let i = chars.length - 1; i >= 0; i -= 1) {
+      const ch = chars[i] ?? "";
+      const w = charWidth(ch.codePointAt(0) ?? 0);
+      if (used + w > max) break;
+      result = ch + result;
+      used += w;
+    }
+    return result;
+  }
+  const budget = max - 3;
+  const chars = [...text];
+  let result = "";
+  let used = 0;
+  for (let i = chars.length - 1; i >= 0; i -= 1) {
+    const ch = chars[i] ?? "";
+    const w = charWidth(ch.codePointAt(0) ?? 0);
+    if (used + w > budget) break;
+    result = ch + result;
+    used += w;
+  }
+  return `...${result}`;
+}
+
 /** Pad with trailing spaces to exactly `width` columns (no-op when over). */
 export function padEndVisual(text: string, width: number): string {
   const missing = width - visualWidth(text);

@@ -639,7 +639,7 @@ test("workbench panel follows the tail and reports history when scrolled", () =>
   });
   const tail = renderFrame(snap, { width: 110, height: 30, now: 60_000 });
   const tailText = tail.map(stripAnsi).join("\n");
-  assert.match(tailText, /send_to_shell/, "the newest event is visible in tail mode");
+  assert.match(tailText, /Shell\s+probe/, "the newest event is visible as an operator-facing action in tail mode");
   assert.doesNotMatch(tailText, /Home 回顶/, "no history indicator while following the head");
 
   // 30 events, 25 visible rows: the history below the head starts five rows
@@ -666,6 +666,58 @@ test("workbench panel follows the tail and reports history when scrolled", () =>
   assert.match(scrollText, /Enter 展开 · ↑2 行/, "scrolled view shows rows-above and the selection affordance");
   assert.match(scrollText, /tool_27 /, "the view starts at the requested event");
   assert.doesNotMatch(scrollText, /tool_29 /, "events above the view are not shown");
+});
+
+test("activity rows use the real terminal width instead of a fixed 56-column pre-cap", () => {
+  const marker = "VISIBLE-BEYOND-OLD-CAP";
+  const subject = `npm run release:check -- --workspace packages/open-bridge --flag ${marker}`;
+  const row = stripAnsi(eventListRow({
+    at: new Date(60_000).toISOString(),
+    tool: "run_command",
+    action: "命令",
+    subject,
+    subjectKind: "command",
+    status: "completed",
+    message: subject,
+    durationMs: 42,
+  }, 140, 0, 60_000));
+  assert.match(row, new RegExp(marker), "wide terminals keep useful content that used to be discarded at 56 columns");
+  assert.equal(visualWidth(row), 140);
+});
+
+test("activity path subjects preserve the basename when width is tight", () => {
+  const row = stripAnsi(eventListRow({
+    at: new Date(60_000).toISOString(),
+    tool: "read_files",
+    action: "读取",
+    subject: "src/bridge/tools/very/deep/nested/console/tui/activity/render.ts",
+    qualifier: "250–325",
+    subjectKind: "path",
+    status: "completed",
+    message: "unused",
+    durationMs: 4,
+  }, 60, 0, 60_000));
+  assert.match(row, /render\.ts/, "path-tail truncation keeps the file name visible");
+  assert.equal(visualWidth(row), 60);
+});
+
+test("activity failure rows promote root cause over ordinary arguments", () => {
+  const row = stripAnsi(eventListRow({
+    at: new Date(60_000).toISOString(),
+    tool: "search_files",
+    action: "搜索",
+    subject: "MESSAGE_CAP|tuiActivityMessage(",
+    qualifier: "src test",
+    failure: "ENOENT: 路径不存在",
+    subjectKind: "query",
+    qualifierKind: "path",
+    status: "error",
+    message: "unused",
+    durationMs: 58,
+  }, 62, 0, 60_000));
+  assert.match(row, /搜索/);
+  assert.match(row, /ENOENT/, "failure reason survives before optional scope/details");
+  assert.equal(visualWidth(row), 62);
 });
 
 test("activity messages truncate on the row; the Enter detail keeps the tail", () => {

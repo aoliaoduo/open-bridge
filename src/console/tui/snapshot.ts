@@ -11,7 +11,7 @@ import { isActivityStatus } from "../../mcp/activity-status.js";
 import { MAX_CAPTURED_OUTPUT } from "../../bridge/state.js";
 import { activityHint } from "../../bridge/activity-presentation.js";
 import type { TodoProgressEntry } from "../../bridge/todo-store.js";
-import { PROCESS_STARTED, tuiActivityDetail, tuiActivityMessage } from "./activity-copy.js";
+import { PROCESS_STARTED, tuiActivityDetail, tuiActivityMessage, tuiActivityPresentation, type ActivityPresentation } from "./activity-copy.js";
 import type { WorkspaceChangeState } from "./changes.js";
 import type { TuiEventStatus, TuiSnapshot } from "./render.js";
 
@@ -93,6 +93,17 @@ function toEventStatus(status: string): TuiEventStatus {
     : "progress";
 }
 
+function presentationFields(presentation: ActivityPresentation): Partial<TuiSnapshot["events"][number]> {
+  return {
+    action: presentation.action,
+    subject: presentation.subject,
+    ...(presentation.qualifier ? { qualifier: presentation.qualifier } : {}),
+    ...(presentation.failure ? { failure: presentation.failure } : {}),
+    subjectKind: presentation.subjectKind,
+    ...(presentation.qualifierKind ? { qualifierKind: presentation.qualifierKind } : {}),
+  };
+}
+
 export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): TuiSnapshot {
   const now = options.now ?? Date.now();
 
@@ -164,6 +175,8 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     const rowSubtle = entry.tool === "mcp" || entry.tool === "process";
     const operatorHint = activityHint(entry.invocation_id);
     const presentedEntry = operatorHint ? { ...entry, operator_hint: operatorHint } : entry;
+    const rowPresentation = tuiActivityPresentation(presentedEntry);
+    const rowPresentationFields = presentationFields(rowPresentation);
     const rowDetail = tuiActivityDetail(presentedEntry);
     const ts = entry.ts ?? Date.parse(entry.at);
     const message = tuiActivityMessage(presentedEntry);
@@ -177,6 +190,7 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
         // Pruned from the table: the fact stays, the animation does not.
         collected.push({
         ...(entry.id ? { id: entry.id } : {}), at: entry.at, tool: entry.tool, status: "progress", message,
+        ...rowPresentationFields,
         ...(rowSubtle ? { subtle: true } : {}), ...(rowDetail !== "" ? { detail: rowDetail } : {}),
       });
       } else if (command.done) {
@@ -186,6 +200,7 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
           tool: entry.tool,
           status: "completed",
           message,
+          ...rowPresentationFields,
           ...(rowSubtle ? { subtle: true } : {}), ...(rowDetail !== "" ? { detail: rowDetail } : {}),
           ...(command.endedAt !== undefined && Number.isFinite(command.endedAt) && command.endedAt >= command.startedAt
             ? { durationMs: command.endedAt - command.startedAt }
@@ -194,6 +209,7 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
       } else {
         collected.push({
           ...(entry.id ? { id: entry.id } : {}), at: entry.at, tool: entry.tool, status: "running", message,
+          ...rowPresentationFields,
           ...(rowSubtle ? { subtle: true } : {}), ...(rowDetail !== "" ? { detail: rowDetail } : {}),
         });
       }
@@ -212,7 +228,7 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
       }
       openByTool.set(entry.tool, queue);
       const eventId = entry.invocation_id ?? entry.id;
-      collected.push({ ...(eventId ? { id: eventId } : {}), at: entry.at, tool: entry.tool, status: "running", message });
+      collected.push({ ...(eventId ? { id: eventId } : {}), at: entry.at, tool: entry.tool, status: "running", message, ...rowPresentationFields });
       continue;
     }
     const queue = openByTool.get(entry.tool);
@@ -236,6 +252,7 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
       args_summary: entry.args_summary ?? pending?.args_summary,
       ...(mergedHint ? { operator_hint: mergedHint } : {}),
     };
+    const mergedPresentation = tuiActivityPresentation(merged);
     const mergedDetail = tuiActivityDetail(merged);
     const eventId = invocationId ?? entry.id;
     collected.push({
@@ -244,6 +261,7 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
       tool: entry.tool,
       status: toEventStatus(entry.status),
       message: tuiActivityMessage(merged),
+      ...presentationFields(mergedPresentation),
       ...(rowSubtle ? { subtle: true } : {}),
       ...(mergedDetail !== "" ? { detail: mergedDetail } : {}),
       ...(pending !== undefined && Number.isFinite(ts) && ts >= pending.startedAt

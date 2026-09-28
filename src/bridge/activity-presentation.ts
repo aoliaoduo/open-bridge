@@ -7,7 +7,18 @@
  */
 
 const HINT_CACHE_LIMIT = 256;
-const hints = new Map<string, string>();
+
+export type ActivitySubjectKind = "command" | "path" | "query" | "message" | "generic";
+
+export type ActivityHint = {
+  action?: string;
+  subject: string;
+  qualifier?: string;
+  subjectKind: ActivitySubjectKind;
+  qualifierKind?: ActivitySubjectKind;
+};
+
+const hints = new Map<string, ActivityHint>();
 
 function textValue(value: unknown, redact: (text: string) => string): string | undefined {
   if (typeof value === "string") {
@@ -38,6 +49,12 @@ function firstCommand(value: string): string {
   return (value.split(/\s+&&\s+/)[0] ?? value).trim();
 }
 
+function lineRange(startLine?: string, endLine?: string): string | undefined {
+  if (!startLine && !endLine) return undefined;
+  if (startLine && endLine) return startLine === endLine ? startLine : `${startLine}–${endLine}`;
+  return startLine ?? endLine;
+}
+
 export type ActivityHintFields = {
   command?: string;
   query?: string;
@@ -60,83 +77,139 @@ export type ActivityHintFields = {
   destination?: string;
   mode?: string;
   section?: string;
+  startLine?: string;
+  endLine?: string;
   editsCount?: number;
   todosCount?: number;
   callsCount?: number;
 };
 
 /** One semantic formatter shared by live structured args and legacy summaries. */
-export function formatActivityHint(tool: string, fields: ActivityHintFields): string {
+export function activityHintFromFields(tool: string, fields: ActivityHintFields): ActivityHint | undefined {
   const {
     command, query, path, op, action, name, group, url, port, ms, commandId,
     key, value, message, title, pattern, patchFile, source, destination, mode,
-    section, editsCount, todosCount, callsCount,
+    section, startLine, endLine, editsCount, todosCount, callsCount,
   } = fields;
 
-  if (tool === "search_files" && (query || pattern)) return query ?? pattern ?? "";
-  if (tool === "find_files" && pattern) return path ? `${pattern} (${path})` : pattern;
-  if (tool === "list_directory") return path || ".";
-  if (tool === "get_file_info" && path) return path;
-  if (tool === "edit_block") {
-    if (path && editsCount !== undefined) return `${path} (${editsCount} 处修改)`;
-    if (path) return path;
+  if (tool === "run_command" && command) {
+    return { action: "命令", subject: firstCommand(command), subjectKind: "command" };
+  }
+  if (tool === "search_files" && (query || pattern)) {
+    return {
+      action: "搜索",
+      subject: query ?? pattern ?? "",
+      ...(path ? { qualifier: path, qualifierKind: "path" as const } : {}),
+      subjectKind: "query",
+    };
+  }
+  if (tool === "find_files" && pattern) {
+    return {
+      action: "查找",
+      subject: pattern,
+      ...(path ? { qualifier: path, qualifierKind: "path" as const } : {}),
+      subjectKind: "query",
+    };
+  }
+  if (tool === "read_files" && path) {
+    const range = lineRange(startLine, endLine);
+    return {
+      action: "读取",
+      subject: path,
+      ...(range ? { qualifier: range } : {}),
+      subjectKind: "path",
+    };
+  }
+  if (tool === "write_file" && path) return { action: "写入", subject: path, subjectKind: "path" };
+  if (tool === "list_directory") return { action: "目录", subject: path || ".", subjectKind: "path" };
+  if (tool === "get_file_info" && path) return { action: "信息", subject: path, subjectKind: "path" };
+  if (tool === "edit_block" && path) {
+    return {
+      action: "修改",
+      subject: path,
+      ...(editsCount !== undefined ? { qualifier: `${editsCount} 处修改` } : {}),
+      subjectKind: "path",
+    };
   }
   if (tool === "file_op") {
-    if ((op === "move" || op === "copy") && source && destination) return `${op} ${source} → ${destination}`;
-    if (op && path) return `${op} ${path}`;
-    if (op) return op;
+    if ((op === "move" || op === "copy") && source && destination) {
+      return {
+        action: op === "move" ? "移动" : "复制",
+        subject: source,
+        qualifier: destination,
+        subjectKind: "path",
+        qualifierKind: "path",
+      };
+    }
+    if (op && path) {
+      const label = op === "delete" ? "删除" : op === "mkdir" ? "建目录" : "文件";
+      return { action: label, subject: path, subjectKind: "path" };
+    }
+    if (op) return { action: "文件", subject: op, subjectKind: "generic" };
   }
   if (tool === "service") {
     const target = name ?? (group ? `group:${group}` : undefined);
-    if (action && target) return `${action} ${target}`;
-    return action ?? target ?? "";
+    if (target) return { action: "服务", subject: target, ...(action ? { qualifier: action } : {}), subjectKind: "generic" };
+    if (action) return { action: "服务", subject: action, subjectKind: "generic" };
   }
-  if (tool === "save_service" && name) return `保存服务 ${name}`;
-  if (tool === "read_service_log" && name) return `服务日志 ${name}`;
+  if (tool === "save_service" && name) return { action: "服务", subject: name, qualifier: "保存", subjectKind: "generic" };
+  if (tool === "read_service_log" && name) return { action: "日志", subject: name, subjectKind: "generic" };
   if (tool === "process_control") {
-    if (action && commandId) return `${action} ${commandId.slice(0, 8)}`;
-    if (action) return action;
+    const subject = commandId ? commandId.slice(0, 8) : action;
+    if (subject) return { action: "进程", subject, ...(action && commandId ? { qualifier: action } : {}), subjectKind: "generic" };
   }
-  if (tool === "read_process_output" && commandId) return `进程输出 ${commandId.slice(0, 8)}`;
-  if (tool === "set_process_policy" && commandId) return `重启策略 ${commandId.slice(0, 8)}`;
+  if (tool === "read_process_output" && commandId) return { action: "输出", subject: commandId.slice(0, 8), subjectKind: "generic" };
+  if (tool === "set_process_policy" && commandId) return { action: "策略", subject: commandId.slice(0, 8), subjectKind: "generic" };
   if (tool === "connectivity") {
-    if (url) return url;
-    if (port) return `port ${port}`;
+    if (url) return { action: "网络", subject: url, subjectKind: "generic" };
+    if (port) return { action: "网络", subject: `port ${port}`, subjectKind: "generic" };
   }
-  if (tool === "send_to_shell") {
-    if (name && command) return `[${name}] ${firstCommand(command)}`;
-    if (command) return firstCommand(command);
+  if (tool === "send_to_shell" && command) {
+    return {
+      action: "Shell",
+      subject: firstCommand(command),
+      ...(name ? { qualifier: name } : {}),
+      subjectKind: "command",
+    };
   }
-  if ((tool === "open_shell" || tool === "close_shell") && name) return name;
+  if ((tool === "open_shell" || tool === "close_shell") && name) {
+    return { action: "Shell", subject: name, qualifier: tool === "open_shell" ? "打开" : "关闭", subjectKind: "generic" };
+  }
   if (tool === "wait") {
-    if (ms) return `${ms}ms`;
-    if (commandId) return `pid ${commandId.slice(0, 8)}`;
+    if (ms) return { action: "等待", subject: `${ms}ms`, subjectKind: "generic" };
+    if (commandId) return { action: "等待", subject: commandId.slice(0, 8), qualifier: "进程", subjectKind: "generic" };
   }
-  if (tool === "set_todos" && todosCount !== undefined) return `${todosCount} 项任务`;
-  if (tool === "report_progress" && message) return message;
-  if (tool === "batch" && callsCount !== undefined) return `${callsCount} calls${mode ? ` (${mode})` : ""}`;
-  if (tool === "run_script") return source ? firstCommand(source) : "运行脚本";
+  if (tool === "set_todos" && todosCount !== undefined) return { action: "任务", subject: `${todosCount} 项`, qualifier: "更新", subjectKind: "generic" };
+  if (tool === "report_progress" && message) return { action: "进度", subject: message, subjectKind: "message" };
+  if (tool === "batch" && callsCount !== undefined) {
+    return {
+      action: mode === "parallel" ? "并行" : "批量",
+      subject: `${callsCount} 项`,
+      ...(mode && mode !== "parallel" ? { qualifier: mode } : {}),
+      subjectKind: "generic",
+    };
+  }
+  if (tool === "run_script") return { action: "脚本", subject: source ? firstCommand(source) : "运行脚本", subjectKind: "command" };
   if (tool === "set_config_value") {
-    if (key && value !== undefined) return `${key} = ${value}`;
-    if (key) return key;
+    if (key) return { action: "配置", subject: key, ...(value !== undefined ? { qualifier: value } : {}), subjectKind: "generic" };
   }
-  if (tool === "activity_log" && action) return action;
-  if (tool === "bridge_status" && section) return section;
-  if (tool === "apply_patch") return patchFile || "inline patch";
-  if (tool === "notify") return message ?? title ?? "发送通知";
+  if (tool === "activity_log" && action) return { action: "活动", subject: action, subjectKind: "generic" };
+  if (tool === "bridge_status" && section) return { action: "状态", subject: section, subjectKind: "generic" };
+  if (tool === "apply_patch") return { action: "补丁", subject: patchFile || "inline patch", subjectKind: patchFile ? "path" : "generic" };
+  if (tool === "notify") return { action: "通知", subject: message ?? title ?? "发送通知", subjectKind: "message" };
 
-  if (command) return firstCommand(command);
-  if (query) return query;
-  if (path) return path;
-  if (name) return name;
-  return "";
+  if (command) return { subject: firstCommand(command), subjectKind: "command" };
+  if (query) return { subject: query, subjectKind: "query" };
+  if (path) return { subject: path, subjectKind: "path" };
+  if (name) return { subject: name, subjectKind: "generic" };
+  return undefined;
 }
 
-export function buildActivityHint(
+export function buildActivityPresentationHint(
   tool: string,
   args: Record<string, unknown>,
   redact: (text: string) => string = text => text,
-): string {
+): ActivityHint | undefined {
   const command = firstString(args.command ?? args.cmd, redact);
   const query = textValue(args.query, redact);
   const path = firstString(args.path ?? args.paths, redact);
@@ -158,21 +231,23 @@ export function buildActivityHint(
   const destination = textValue(args.destination, redact);
   const mode = textValue(args.mode, redact);
   const section = textValue(args.section, redact);
+  const startLine = scalarValue(args.start_line, redact);
+  const endLine = scalarValue(args.end_line, redact);
   const editsCount = Array.isArray(args.edits) ? args.edits.length : undefined;
   const todosCount = Array.isArray(args.todos) ? args.todos.length : undefined;
   const callsCount = Array.isArray(args.calls) ? args.calls.length : undefined;
 
-  return formatActivityHint(tool, {
+  return activityHintFromFields(tool, {
     command, query, path, op, action, name, group, url, port, ms, commandId,
     key, value, message, title, pattern, patchFile, source, destination, mode,
-    section, editsCount, todosCount, callsCount,
+    section, startLine, endLine, editsCount, todosCount, callsCount,
   });
 }
 
-export function rememberActivityHint(invocationId: string | undefined, hint: string): void {
-  if (!invocationId || !hint) return;
+export function rememberActivityHint(invocationId: string | undefined, hint: ActivityHint | undefined): void {
+  if (!invocationId || !hint?.subject) return;
   if (hints.has(invocationId)) hints.delete(invocationId);
-  hints.set(invocationId, hint);
+  hints.set(invocationId, { ...hint });
   while (hints.size > HINT_CACHE_LIMIT) {
     const oldest = hints.keys().next().value as string | undefined;
     if (oldest === undefined) break;
@@ -180,8 +255,9 @@ export function rememberActivityHint(invocationId: string | undefined, hint: str
   }
 }
 
-export function activityHint(invocationId: string | undefined): string | undefined {
-  return invocationId ? hints.get(invocationId) : undefined;
+export function activityHint(invocationId: string | undefined): ActivityHint | undefined {
+  const hint = invocationId ? hints.get(invocationId) : undefined;
+  return hint ? { ...hint } : undefined;
 }
 
 export function clearActivityHints(): void {

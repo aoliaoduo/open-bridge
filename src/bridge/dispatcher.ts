@@ -28,7 +28,7 @@ import { saveService, readServiceLogTool } from "./tools/service-tools.js";
 import { batchTool } from "./tools/batch.js";
 import { runScript } from "./tools/script-tools.js";
 import { buildArgsSummary } from "./tools/args-summary.js";
-import { buildActivityHint, rememberActivityHint } from "./activity-presentation.js";
+import { buildActivityPresentationHint, rememberActivityHint } from "./activity-presentation.js";
 import { reviewChanges } from "./tools/review.js";
 import {
   getConfig, setConfigValue, getUsageStats,
@@ -193,7 +193,7 @@ async function dispatchInvocation(
       }
     : callArgs;
   const argsSummary = buildArgsSummary(presentationArgs, redactSensitiveText);
-  rememberActivityHint(options?.invocationId, buildActivityHint(tool, presentationArgs, redactSensitiveText));
+  rememberActivityHint(options?.invocationId, buildActivityPresentationHint(tool, presentationArgs, redactSensitiveText));
   // The audit log keeps the name the caller used (that is the fact worth
   // recording) and states what a legacy name resolved to, so a client still
   // speaking the old vocabulary is visible instead of invisible.
