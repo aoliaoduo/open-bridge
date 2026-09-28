@@ -18,10 +18,18 @@
 import * as readline from "node:readline";
 import type { ReadStream } from "node:tty";
 import { state } from "../../bridge/state.js";
-import { collectFileDiffPreview, collectReviewDiffPreview, collectWorkspaceChanges, type ChangeFile, type FileDiffPreview, type ReviewDiffPreview, type WorkspaceChangeState } from "./changes.js";
+import { collectFileDiffPreview, collectReviewDiffPreview, collectWorkspaceChanges, type FileDiffPreview, type ReviewDiffPreview, type WorkspaceChangeState } from "./changes.js";
 import { todoFreshness } from "../../bridge/todo-store.js";
 import { buildSnapshot } from "./snapshot.js";
-import { renderFrame, panelScrollMetrics, maxFirstVisible, advanceScroll, nextPanelView, eventKeyOf, type PanelView, type ScrollKey } from "./render.js";
+import { renderFrame, panelScrollMetrics, type ScrollKey } from "./render.js";
+import {
+  controllerRenderOptions,
+  createTuiControllerState,
+  reduceTuiController,
+  syncTuiControllerFrame,
+  type DiffTarget,
+  type TuiControllerAction,
+} from "./controller.js";
 
 export interface ConsoleTuiOptions {
   version: string;
@@ -38,7 +46,6 @@ const KEY_MAP: Record<string, ScrollKey> = {
   pagedown: "pagedown",
   home: "home",
   end: "end",
-  escape: "home", // Esc snaps back to the newest events, like Home
 };
 
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -48,39 +55,17 @@ let frameIndex = 0;
 let active = false;
 /** Invalidates async Git work that outlives a stopped/restarted TUI session. */
 let sessionGeneration = 0;
-/** Panel scroll position; negative = locked to the head (the newest event). */
-let scrollFirst = -1;
-/** Which view owns the wide panel: activity, tasks, or the per-file 变更 list. */
-let panelView: PanelView = "activity";
-/** Task scroll is independent of the activity view and counts wrapped rows. */
-let taskScrollFirst = 0;
-/** Change-list scroll is independent of the other two views. */
-let changeScrollFirst = 0;
-/** 变更光标：一个下标对应一个文件；Enter 打开该文件的工作树 diff。 */
-let changeCursor = 0;
-let activityMetrics = { rows: 1, totalRows: 0 };
-let taskMetrics = { rows: 1, totalRows: 0 };
-let changeMetrics = { rows: 1, totalRows: 0 };
+/** All panel/cursor/scroll state lives behind one pure controller. */
+let controller = createTuiControllerState();
 /** Cached workspace-change probe; loading is explicit until the first Git result. */
 let workspaceChanges: WorkspaceChangeState = { status: "loading" };
 let changesTimer: ReturnType<typeof setInterval> | undefined;
-type DiffTarget = { kind: "cumulative" } | { kind: "file"; file: ChangeFile };
 type LoadedDiff =
   | { kind: "cumulative"; result: ReviewDiffPreview }
   | { kind: "file"; result: FileDiffPreview };
-/** d 打开累计 review diff；Enter 打开当前文件的工作树 diff。 */
-let diffTarget: DiffTarget = { kind: "cumulative" };
 let diffState: LoadedDiff | undefined;
 let diffLoading = false;
-let diffScrollFirst = 0;
-let diffMetrics = { rows: 1, totalRows: 0 };
-/** 活动光标：单行模式下事件下标 == 行下标；↑↓ 移动，Enter 展开。 */
-let activityCursor = 0;
-/** Enter 打开的事件（at|tool 键）；滚出环形日志后详情页显示占位。 */
-let eventDetailKey: string | undefined;
-let expandScrollFirst = 0;
-let expandMetrics = { rows: 1, totalRows: 0 };
-/** 最近一帧快照：按键处理要从里面取光标行的事件。 */
+/** 最近一帧快照：controller 的 Enter/reanchor 只依赖这一份只读事实。 */
 let lastSnapshot: ReturnType<typeof buildSnapshot> | undefined;
 
 export function consoleTuiActive(): boolean {
@@ -107,27 +92,13 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
   if (active) return true;
   const session = ++sessionGeneration;
   active = true;
-  panelView = "activity";
-  scrollFirst = -1;
-  taskScrollFirst = 0;
-  changeScrollFirst = 0;
-  changeCursor = 0;
+  controller = createTuiControllerState();
   workspaceChanges = { status: "loading" };
-  diffTarget = { kind: "cumulative" };
   diffState = undefined;
   diffLoading = false;
-  diffScrollFirst = 0;
-  activityCursor = 0;
-  eventDetailKey = undefined;
-  expandScrollFirst = 0;
-  // 上一次会话的帧快照与量度不能带进新会话：回车取的是「当前帧的光标行」，
-  // 旧快照会让 Enter 打开一条早已不存在的事件（键撞上同时刻新事件时更隐蔽）。
+  // 上一次会话的帧快照不能带进新会话：Enter 与历史事件 reanchor
+  // 都必须基于这一轮真实画过的帧。
   lastSnapshot = undefined;
-  activityMetrics = { rows: 1, totalRows: 0 };
-  taskMetrics = { rows: 1, totalRows: 0 };
-  changeMetrics = { rows: 1, totalRows: 0 };
-  diffMetrics = { rows: 1, totalRows: 0 };
-  expandMetrics = { rows: 1, totalRows: 0 };
   // THIS process's start: 「运行」 must not read the persisted stats window
   // (a freshly restarted Bridge used to claim 50 hours of uptime).
   const launchedAt = Date.now();
@@ -166,8 +137,8 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
 
   let diffGen = 0;
   const diffSnapshotInput = () => {
-    const target = diffTarget.kind === "file"
-      ? { kind: "file" as const, path: diffTarget.file.path }
+    const target = controller.diff.target.kind === "file"
+      ? { kind: "file" as const, path: controller.diff.target.file.path }
       : { kind: "cumulative" as const };
     if (diffLoading) return { ...target, loading: true, ok: false, text: "", truncated: false, since: "", checkpoint: "", reason: "" };
     if (diffState === undefined) return undefined;
@@ -181,14 +152,12 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
     return { ...target, loading: false, ok: true, text: result.text, truncated: result.truncated, since: "", checkpoint: "", reason: "" };
   };
   // The diff is IO (git), fetched on demand with a generation token so a slow
-  // read cannot overwrite a newer request — same contract as refreshChanges.
+  // read cannot overwrite a newer request. Navigation already moved to diff;
+  // this effect only owns loading/result state.
   const loadDiff = (target: DiffTarget): void => {
     const gen = ++diffGen;
-    diffTarget = target;
     diffState = undefined;
     diffLoading = true;
-    diffScrollFirst = 0;
-    panelView = "diff";
     paint();
     const finish = (loaded: LoadedDiff): void => {
       if (session !== sessionGeneration || gen !== diffGen) return;
@@ -217,62 +186,21 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
     // The dashboard is an observer of the work, never part of it: any
     // rendering failure is swallowed and the next tick tries again.
     try {
-      // Once the operator moves off the live head, anchor the cursor by event
-      // identity. New rows are prepended; retaining only the array index would
-      // silently move Enter to a different call on every repaint.
-      const selectedEventKey = activityCursor > 0
-        ? lastSnapshot?.events[activityCursor] && eventKeyOf(lastSnapshot.events[activityCursor]!)
-        : undefined;
       const snapshot = buildSnapshot(state, { ...options, launchedAt, workspaceChanges, diff: diffSnapshotInput(), todosUpdatedAt: todoFreshness() });
-      if (selectedEventKey !== undefined) {
-        const nextCursor = snapshot.events.findIndex(event => eventKeyOf(event) === selectedEventKey);
-        if (nextCursor >= 0) {
-          const shift = nextCursor - activityCursor;
-          activityCursor = nextCursor;
-          if (scrollFirst >= 0) scrollFirst += shift;
-        }
-      }
-      lastSnapshot = snapshot;
       const dimensions = { width: out.columns ?? 80, height: out.rows ?? 24 };
-      // Only materialize rows for the visible panel. Previously every 500ms
-      // frame built tasks, changes, diff and event-detail rows even while they
-      // were hidden, then renderFrame built the visible one again.
-      const currentMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView, eventDetailKey });
-      if (panelView === "tasks") {
-        taskMetrics = currentMetrics;
-        taskScrollFirst = Math.min(taskScrollFirst, maxFirstVisible(currentMetrics.totalRows, currentMetrics.rows));
-      } else if (panelView === "changes") {
-        changeMetrics = currentMetrics;
-        changeScrollFirst = Math.min(changeScrollFirst, maxFirstVisible(currentMetrics.totalRows, currentMetrics.rows));
-      } else if (panelView === "diff") {
-        diffMetrics = currentMetrics;
-        diffScrollFirst = Math.min(diffScrollFirst, maxFirstVisible(currentMetrics.totalRows, currentMetrics.rows));
-      } else if (panelView === "event") {
-        expandMetrics = currentMetrics;
-        expandScrollFirst = Math.min(expandScrollFirst, maxFirstVisible(currentMetrics.totalRows, currentMetrics.rows));
-      } else {
-        activityMetrics = currentMetrics;
-        scrollFirst = Math.min(scrollFirst, maxFirstVisible(currentMetrics.totalRows, currentMetrics.rows));
-      }
-      activityCursor = Math.max(0, Math.min(activityCursor, Math.max(0, snapshot.events.length - 1)));
-      const changeEntries = snapshot.changes.status === "ready" ? (snapshot.changes.entries ?? []) : [];
-      changeCursor = Math.max(0, Math.min(changeCursor, Math.max(0, changeEntries.length - 1)));
-      if (panelView === "changes") {
-        if (changeCursor < changeScrollFirst) changeScrollFirst = changeCursor;
-        else if (changeCursor >= changeScrollFirst + changeMetrics.rows) changeScrollFirst = changeCursor - changeMetrics.rows + 1;
-      }
+      // Only materialize rows for the visible panel. The controller reconciles
+      // cursor identity, shrinking lists and that view's independent viewport.
+      const currentMetrics = panelScrollMetrics(snapshot, {
+        ...dimensions,
+        panelView: controller.panelView,
+        eventDetailKey: controller.event.detailKey,
+      });
+      controller = syncTuiControllerFrame(controller, lastSnapshot, snapshot, currentMetrics);
+      lastSnapshot = snapshot;
       const lines = renderFrame(snapshot, {
         ...dimensions,
         spinnerFrame: frameIndex++,
-        firstVisible: scrollFirst,
-        taskFirstVisible: taskScrollFirst,
-        changeFirstVisible: changeScrollFirst,
-        diffFirstVisible: diffScrollFirst,
-        expandFirstVisible: expandScrollFirst,
-        activityCursor,
-        changeCursor,
-        eventDetailKey,
-        panelView,
+        ...controllerRenderOptions(controller),
       });
       // A full-width write leaves the cursor on the last cell (wrap pending).
       // Erasing there eats that cell — or the last half of a wide character.
@@ -300,95 +228,24 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
             process.kill(process.pid, "SIGINT");
             return;
           }
-          if (ch === "\t" || key?.name === "tab") {
-            // The one navigation key: cycle the wide panel views. Inside the
-            // diff preview Tab is inert by contract — d opens the preview,
-            // Esc is the one way out, and Tab must not fling the operator
-            // elsewhere while they are reading the diff.
-            // 详情页与 diff 预览同一契约：Tab 失效，Esc 是唯一出口。
-            if (panelView !== "diff" && panelView !== "event") panelView = nextPanelView(panelView);
-            paint();
-            return;
+          let action: TuiControllerAction | undefined;
+          if (ch === "\t" || key?.name === "tab") action = { type: "tab" };
+          else if (ch === "d" && (controller.panelView === "changes" || controller.panelView === "diff")) action = { type: "diff" };
+          else if (key?.name === "return" || key?.name === "enter") action = { type: "enter" };
+          else if (key?.name === "escape") action = { type: "escape" };
+          else {
+            const mapped = KEY_MAP[key?.name ?? ""];
+            if (mapped !== undefined) action = { type: "scroll", key: mapped };
           }
-          if (panelView === "changes" && ch === "d") {
-            // 累计 diff 预览：review_changes 的只读面。
-            loadDiff({ kind: "cumulative" });
-            return;
-          }
-          if (panelView === "diff") {
-            if (ch === "d") { loadDiff(diffTarget); return; }
-            // Esc 是预览的唯一出口（回到变更页）；滚动键仍归 KEY_MAP。
-            if (key?.name === "escape") { panelView = "changes"; paint(); return; }
-          }
-          if (panelView === "event") {
-            // Esc 是详情的唯一出口（回到活动页）；滚动键仍归 KEY_MAP。
-            if (key?.name === "escape") { panelView = "activity"; paint(); return; }
-          }
-          if (panelView === "activity" && (key?.name === "return" || key?.name === "enter")) {
-            // 光标行展开全文：详情页自带滚动，Esc 返回。首帧靠定时器，开屏
-            // 立刻回车时还没有任何快照 —— 先同步画一帧再取事件，别静默失效。
-            if (lastSnapshot === undefined) paint();
-            const selected = lastSnapshot?.events[activityCursor];
-            if (selected !== undefined) {
-              eventDetailKey = eventKeyOf(selected);
-              expandScrollFirst = 0;
-              panelView = "event";
-              paint();
-            }
-            return;
-          }
-          if (panelView === "changes" && (key?.name === "return" || key?.name === "enter")) {
-            if (lastSnapshot === undefined) paint();
-            const selected = lastSnapshot?.changes.status === "ready" ? lastSnapshot.changes.entries?.[changeCursor] : undefined;
-            if (selected !== undefined) loadDiff({ kind: "file", file: selected });
-            return;
-          }
-          const mapped = KEY_MAP[key?.name ?? ""];
-          if (mapped === undefined) return;
-          if (panelView === "tasks") {
-            taskScrollFirst = advanceScroll(mapped, taskScrollFirst, taskMetrics.totalRows, taskMetrics.rows);
-          } else if (panelView === "changes") {
-            const total = lastSnapshot?.changes.status === "ready" ? (lastSnapshot.changes.entries?.length ?? 0) : 0;
-            if (total > 0) {
-              const page = Math.max(1, changeMetrics.rows - 1);
-              const delta = mapped === "up" ? -1 : mapped === "down" ? 1
-                : mapped === "pageup" ? -page : mapped === "pagedown" ? page
-                : mapped === "home" ? -Infinity : Infinity;
-              changeCursor = Math.max(0, Math.min(total - 1, changeCursor + delta));
-              if (mapped === "pageup" || mapped === "pagedown" || mapped === "home" || mapped === "end") {
-                changeScrollFirst = changeCursor;
-              } else if (changeCursor < changeScrollFirst) {
-                changeScrollFirst = changeCursor;
-              } else if (changeCursor >= changeScrollFirst + changeMetrics.rows) {
-                changeScrollFirst = changeCursor - changeMetrics.rows + 1;
-              }
-            }
-          } else if (panelView === "diff") {
-            diffScrollFirst = advanceScroll(mapped, diffScrollFirst, diffMetrics.totalRows, diffMetrics.rows);
-          } else if (panelView === "event") {
-            // 详情页自带滚动：内容超过面板时翻页看全，Esc 返回；此视图里
-            // 绝不动活动光标 —— 隐藏视图的位置不能被顺手改掉。
-            expandScrollFirst = advanceScroll(mapped, expandScrollFirst, expandMetrics.totalRows, expandMetrics.rows);
-          } else {
-            // 单行活动列表：滚动键移动光标，视口跟随光标。翻页键让光标锚定
-            // 新窗口顶部（与旧的整页滚动窗口一致），单步键做最小跟随。
-            const total = activityMetrics.totalRows;
-            if (total > 0) {
-              const page = Math.max(1, activityMetrics.rows - 1); // 与旧整页滚动同窗
-              const delta = mapped === "up" ? -1 : mapped === "down" ? 1
-                : mapped === "pageup" ? -page : mapped === "pagedown" ? page
-                : mapped === "home" ? -Infinity : Infinity; // end
-              activityCursor = Math.max(0, Math.min(total - 1, activityCursor + delta));
-              if (mapped === "pageup" || mapped === "pagedown" || mapped === "home" || mapped === "end") {
-                scrollFirst = activityCursor;
-              } else {
-                const first = Math.max(0, scrollFirst);
-                if (activityCursor < first) scrollFirst = activityCursor;
-                else if (activityCursor >= first + activityMetrics.rows) scrollFirst = activityCursor - activityMetrics.rows + 1;
-              }
-            }
-          }
-          paint();
+          if (action === undefined) return;
+
+          // Enter on the first instant after startup needs a real frame to
+          // select from; all later transitions consume the last painted snapshot.
+          if (action.type === "enter" && lastSnapshot === undefined) paint();
+          const transition = reduceTuiController(controller, action, lastSnapshot);
+          controller = transition.state;
+          if (transition.effect?.type === "load_diff") loadDiff(transition.effect.target);
+          else if (transition.effect?.type === "paint") paint();
         } catch { /* a key must never crash the bridge */ }
       };
       stdin.on("keypress", keyListener);

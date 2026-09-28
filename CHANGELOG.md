@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- TUI controller 收敛为纯状态机：panel、cursor、各视图 scroll/metrics、diff target 与 event detail identity 统一进入 `TuiControllerState`，按键由 reducer 产生 paint/load-diff effect，driver 只保留终端与 Git/diff IO；历史活动 reanchor、列表 shrink/clamp、Tab/Esc/Enter/diff 路径都有独立纯测试，不再靠一组平行 module globals 维持隐式一致性。
 - TUI 主工作区可发现性提升：活动/任务/变更标题直接显示三页导航与 `[Tab]` 提示，detail/diff 仍保持 Esc 单一退出语义；宽屏侧栏底部同时固定显示 Web Console 与 MCP 地址，不再只有窄屏能看到 MCP；进程/服务超过侧栏展示上限时 section 标题用 `+N` 明确还有隐藏条目。
 - TUI 状态与热路径收敛：modern/stateless MCP 请求不再被会话概览和 busy 动画漏掉；workspace changes 首帧明确显示“读取中”而不是误报“非 git”；5 秒 Git 刷新改为 single-flight/coalescing，慢仓库不再叠加探测进程；未跟踪文件的 2 MiB 预算现在会在读盘前生效，预算耗尽或单文件超限后不再读取内容；500 ms repaint 只构造当前可见 panel 的滚动内容，不再同时重建隐藏的 tasks/changes/diff/event 视图。
 - 配置契约收敛为统一 catalog：key、默认值、JSON schema、控制台可写面与 SettingsState 投影由同一规格派生，`get_config` / `set_config_value` 不再手抄字段列表；修复 `sharedPeerRegistry` 可读不可写，以及 `shellPath`、`ngrokDomain` 配置后无法清回默认值的问题。每个配置 key 的默认值现有写入校验契约测试兜底。
