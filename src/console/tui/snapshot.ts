@@ -9,6 +9,7 @@
 
 import { isActivityStatus } from "../../mcp/activity-status.js";
 import { MAX_CAPTURED_OUTPUT } from "../../bridge/state.js";
+import { activityHint } from "../../bridge/activity-presentation.js";
 import type { TodoProgressEntry } from "../../bridge/todo-store.js";
 import { PROCESS_STARTED, tuiActivityDetail, tuiActivityMessage } from "./activity-copy.js";
 import type { WorkspaceChangeState } from "./changes.js";
@@ -161,9 +162,11 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     // 「全部显示」：mcp/process 不再被过滤，渲染层以 subtle 弱化着色 ——
     // 操作者要的是「没有哪次调用没记录」的确定感。
     const rowSubtle = entry.tool === "mcp" || entry.tool === "process";
-    const rowDetail = tuiActivityDetail(entry);
+    const operatorHint = activityHint(entry.invocation_id);
+    const presentedEntry = operatorHint ? { ...entry, operator_hint: operatorHint } : entry;
+    const rowDetail = tuiActivityDetail(presentedEntry);
     const ts = entry.ts ?? Date.parse(entry.at);
-    const message = tuiActivityMessage(entry);
+    const message = tuiActivityMessage(presentedEntry);
 
     if (entry.tool === "process" && entry.status === "running") {
       // Group 1 is the command id — see PROCESS_STARTED in activity-copy.ts
@@ -226,9 +229,15 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
       if (legacyIndex >= 0) pending = queue?.splice(legacyIndex, 1)[0];
     }
     if (pending !== undefined) collected[pending.idx] = null;
-    const merged = { ...entry, args_summary: entry.args_summary ?? pending?.args_summary };
+    const invocationId = entry.invocation_id ?? pending?.invocationId;
+    const mergedHint = activityHint(invocationId);
+    const merged = {
+      ...entry,
+      args_summary: entry.args_summary ?? pending?.args_summary,
+      ...(mergedHint ? { operator_hint: mergedHint } : {}),
+    };
     const mergedDetail = tuiActivityDetail(merged);
-    const eventId = entry.invocation_id ?? pending?.invocationId ?? entry.id;
+    const eventId = invocationId ?? entry.id;
     collected.push({
       ...(eventId ? { id: eventId } : {}),
       at: entry.at,

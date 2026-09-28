@@ -15,6 +15,7 @@ import { notifyLogging } from "../state.js";
 import type { SessionState } from "../state.js";
 import { root, allowedRoots, currentWorkspaceRoot } from "../paths.js";
 import { persistProgress, loadTodoStore } from "../todo-store.js";
+import { clearActivityHints } from "../activity-presentation.js";
 import { normalizeCategory, normalizeLevel, normalizePhase } from "./progress-vocabulary.js";
 import { searchActivityLog } from "../../mcp/activity-log.js";
 import { shellSpec } from "../runtime/processes.js";
@@ -411,6 +412,7 @@ export async function clearActivityLogTool(): Promise<Record<string, unknown>> {
   // done inline, so the MCP path never touches a UI surface.
   // Each step is best-effort; the result reports what actually landed.
   const cleared = state.activity.splice(0, state.activity.length).length;
+  clearActivityHints();
   const logPath = auditLogPath();
   let liveTruncated = false;
   let rotatedRemoved = false;

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildArgsSummary } from "../src/bridge/tools/args-summary.js";
+import { clearActivityHints, rememberActivityHint } from "../src/bridge/activity-presentation.js";
 import { tuiActivityDetail, tuiActivityMessage } from "../src/console/tui/activity-copy.js";
 import { buildSnapshot, type TuiStateView } from "../src/console/tui/snapshot.js";
 import { renderFrame } from "../src/console/tui/render.js";
@@ -52,7 +53,7 @@ test("operator copy is the action, not the protocol or the JSON dump", () => {
   assert.equal(tuiActivityMessage({
     tool: "run_command",
     status: "running",
-    message: "Request received · command: git push origin main && git status -sb · cwd: C:/Users/aolia/Desktop/open-bridge",
+    message: "Request received · command: git push origin main && git status -sb · cwd: C:/workspace/open-bridge",
   }), "git push origin main");
   assert.equal(tuiActivityMessage({
     tool: "read_files",
@@ -82,6 +83,29 @@ test("operator copy is the action, not the protocol or the JSON dump", () => {
     status: "completed",
     message: "Completed in 4 ms.",
   }), "");
+});
+
+test("snapshot prefers the private structured hint for a correlated terminal row", () => {
+  clearActivityHints();
+  rememberActivityHint("call-1", "src/from-structured.ts");
+  try {
+    const snap = buildSnapshot(fixtureView([
+      {
+        id: "done-1",
+        invocation_id: "call-1",
+        at: "1970-01-01T00:00:03.000Z",
+        ts: 3000,
+        tool: "read_files",
+        status: "completed",
+        message: "Completed in 4 ms.",
+        args_summary: buildArgsSummary({ paths: ["src/from-serialized.ts"] }),
+      },
+    ]), { version: "v", rootName: "r", logPath: "l", now: NOW });
+    assert.equal(snap.events[0]?.message, "src/from-structured.ts");
+    assert.equal(snap.events[0]?.detail, "src/from-structured.ts");
+  } finally {
+    clearActivityHints();
+  }
 });
 
 test("mcp/process traces ride along dimmed; argv never reaches the rows", () => {

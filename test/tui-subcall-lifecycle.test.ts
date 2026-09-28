@@ -6,6 +6,7 @@ import { invoke } from "../src/bridge/dispatcher.js";
 import { batchTool } from "../src/bridge/tools/batch.js";
 import { runScript } from "../src/bridge/tools/script-tools.js";
 import { buildArgsSummary } from "../src/bridge/tools/args-summary.js";
+import { clearActivityHints } from "../src/bridge/activity-presentation.js";
 import { buildSnapshot } from "../src/console/tui/snapshot.js";
 
 const memoryHost: Host = {
@@ -29,6 +30,7 @@ const memoryHost: Host = {
 beforeEach(() => {
   setHost(memoryHost);
   state.activity = [];
+  clearActivityHints();
   state.usage = { startedAt: Date.now(), calls: 0, successes: 0, failures: 0, byTool: {} };
   state.runtimeUsage = { calls: 0, successes: 0, failures: 0 };
   state.compatibility = { legacyProtocolToolCalls: 0, legacyToolAliasCalls: 0 };
@@ -43,6 +45,8 @@ function assertRetired(tool: string, outcome: "completed" | "error"): void {
   const pair = state.activity.filter(entry => entry.tool === tool);
   assert.ok(pair[0]?.invocation_id, "the invocation has a correlation id");
   assert.equal(pair[0]?.invocation_id, pair[1]?.invocation_id, "start and outcome share that id");
+  assert.equal(pair.some(entry => Object.hasOwn(entry, "operator_hint")), false,
+    "TUI-only hints never change the public Activity/audit object shape");
   const snap = buildSnapshot(state, { version: "test", rootName: "fixture", logPath: "unused", now: Date.now() + 15 * 60_000 });
   const events = snap.events.filter(entry => entry.tool === tool);
   assert.equal(events.length, 1, "the result replaces its invoke row in the TUI");

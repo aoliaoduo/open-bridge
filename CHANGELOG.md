@@ -10,6 +10,11 @@
 
 - TUI「任务」页显示最近一次 `report_progress`：阶段、类别、百分比、时间与消息作为任务清单的上下文一起进入同一滚动视口；进度从 todo store 的按 workspace 内存快照读取，500 ms repaint 不增加持久化 IO，重启后的最近记录也会恢复显示。
 
+### Fixed
+
+- TUI 恢复历史进度时补全跨日时间语义：同日保持 `HH:MM:SS`，跨日显示月日，跨年显示完整日期，避免重启后把旧进度误看成今天刚发生。
+- 新 activity 的操作者文案由结构化参数直接生成并只保存在有界的进程内 TUI hint 缓存，不再依赖 `args_summary` 字符串反向解析；旧活动仍保留 parser 兜底，`Activity`、`activity_log`、`/api/activity` 与 audit.log 的公共结构不变。
+
 ## [1.4.2] — 2026-09-28
 
 ### Fixed

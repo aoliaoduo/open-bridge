@@ -108,6 +108,24 @@ export function formatClock(iso: string): string {
   return [d.getHours(), d.getMinutes(), d.getSeconds()].map(x => String(x).padStart(2, "0")).join(":");
 }
 
+/**
+ * A persisted event from a previous day must not look like it happened today.
+ * Keep today's rows compact; add an explicit local date across day/year bounds.
+ */
+export function formatDatedClock(iso: string, now: number): string {
+  const d = new Date(iso);
+  const n = new Date(now);
+  if (Number.isNaN(d.getTime()) || Number.isNaN(n.getTime())) return "--:--:--";
+  const clock = formatClock(iso);
+  const sameDay = d.getFullYear() === n.getFullYear()
+    && d.getMonth() === n.getMonth()
+    && d.getDate() === n.getDate();
+  if (sameDay) return clock;
+  const mmdd = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const hhmm = clock.slice(0, 5);
+  return d.getFullYear() === n.getFullYear() ? `${mmdd} ${hhmm}` : `${d.getFullYear()}-${mmdd} ${hhmm}`;
+}
+
 // --- vocabulary (ported from ainovel-cli's theme.go status tables) ---
 
 const CAPSULE: Record<TuiSnapshot["bridgeState"], { icon: string; label: string; color: ColorName }> = {
@@ -486,7 +504,7 @@ const PROGRESS_CATEGORY_LABELS = {
   other: "其他",
 } as const;
 
-function progressPanelRows(snap: TuiSnapshot, width: number): string[] {
+function progressPanelRows(snap: TuiSnapshot, width: number, now: number): string[] {
   const progress = snap.progress;
   if (progress === undefined) return [];
   const tone: ColorName = progress.level === "error" ? "error"
@@ -500,7 +518,7 @@ function progressPanelRows(snap: TuiSnapshot, width: number): string[] {
     progress.phase ? PROGRESS_PHASE_LABELS[progress.phase] : undefined,
     progress.category ? PROGRESS_CATEGORY_LABELS[progress.category] : undefined,
     percent,
-    formatClock(String(progress.at ?? "")),
+    formatDatedClock(String(progress.at ?? ""), now),
   ].filter((part): part is string => part !== undefined);
   const label = "◆ 最新进度";
   const labelWidth = Math.min(width, visualWidth(label));
@@ -521,8 +539,8 @@ function progressPanelRows(snap: TuiSnapshot, width: number): string[] {
 }
 
 /** Task titles wrap with a measured icon gutter, including in CJK terminals. */
-function taskPanelRows(snap: TuiSnapshot, width: number, spin: number): string[] {
-  const rows = progressPanelRows(snap, width);
+function taskPanelRows(snap: TuiSnapshot, width: number, spin: number, now: number): string[] {
+  const rows = progressPanelRows(snap, width, now);
   if (snap.todos.length === 0) {
     rows.push(paint("dim", "暂无任务"));
     return rows;
@@ -678,7 +696,7 @@ export function panelScrollMetrics(
   const layout = frameLayout(snap, options.width, options.height, options.panelView);
   return {
     rows: layout.panelRows,
-    totalRows: options.panelView === "tasks" ? taskPanelRows(snap, layout.panelWidth, options.spinnerFrame ?? 0).length
+    totalRows: options.panelView === "tasks" ? taskPanelRows(snap, layout.panelWidth, options.spinnerFrame ?? 0, options.now ?? Date.now()).length
       : options.panelView === "changes" ? changePanelRows(snap, layout.panelWidth).length
       : options.panelView === "diff" ? diffPanelRows(snap, layout.panelWidth).length
       : options.panelView === "event" ? eventDetailRows(snap, layout.panelWidth, options.eventDetailKey).length
@@ -694,7 +712,7 @@ function renderPanel(
   const changesView = view === "changes";
   const diffView = view === "diff";
   const eventView = view === "event";
-  const content = tasksView ? taskPanelRows(snap, width, spin)
+  const content = tasksView ? taskPanelRows(snap, width, spin, now)
     : changesView ? changePanelRows(snap, width, changeCursor)
     : diffView ? diffPanelRows(snap, width)
     : eventView ? eventDetailRows(snap, width, detailKey)

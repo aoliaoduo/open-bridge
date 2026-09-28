@@ -10,7 +10,7 @@ import { test } from "node:test";
 
 import { charAtColumn, fillVisualWidth, setAmbiguousWideForTests, stripAnsi, visualWidth, truncateVisual, padEndVisual } from "../src/console/tui/text.js";
 import { healthColor, paint } from "../src/console/tui/theme.js";
-import { advanceScroll, eventKeyOf, eventListRow, formatClock, formatDuration, formatBytes, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
+import { advanceScroll, eventKeyOf, eventListRow, formatClock, formatDatedClock, formatDuration, formatBytes, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
 import { tuiView } from "./lib/tui-view.js";
 
 test("activity rows are single-line: the message truncates instead of wrapping", () => {
@@ -139,6 +139,14 @@ test("formatters are stable and unit-friendly", () => {
   assert.equal(formatDuration(3_723_000), "1h02m");
   assert.equal(formatBytes(45 * 1024), "45KB");
   assert.equal(formatBytes(512), "512B");
+
+  const today = new Date(2026, 8, 28, 12, 0, 0);
+  const sameDay = new Date(2026, 8, 28, 7, 5, 6).toISOString();
+  const yesterday = new Date(2026, 8, 27, 23, 5, 6).toISOString();
+  const lastYear = new Date(2025, 11, 31, 23, 5, 6).toISOString();
+  assert.equal(formatDatedClock(sameDay, today.getTime()), "07:05:06");
+  assert.equal(formatDatedClock(yesterday, today.getTime()), "09-27 23:05");
+  assert.equal(formatDatedClock(lastYear, today.getTime()), "2025-12-31 23:05");
 });
 
 function fixtureView(): TuiStateView {

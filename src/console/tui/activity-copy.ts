@@ -14,6 +14,8 @@ export type ActivityLike = {
   status: string;
   message: string;
   args_summary?: string;
+  /** Process-local TUI hint; never part of the public Activity/audit contract. */
+  operator_hint?: string;
 };
 
 /**
@@ -62,6 +64,8 @@ export function tuiActivityDetail(entry: ActivityLike): string {
   }
 
   if (BRIDGE_STARTED.test(raw)) return "Started";
+
+  if (entry.operator_hint) return full(entry.operator_hint);
 
   const fromArgs = hintFromSummary(entry.args_summary, entry.tool);
   if (fromArgs) return full(fromArgs);
