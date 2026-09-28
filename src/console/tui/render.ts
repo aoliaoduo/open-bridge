@@ -15,6 +15,7 @@
 
 import { paint, healthColor, spinnerFrame, type ColorName } from "./theme.js";
 import { fillVisualWidth, stripAnsi, inlineText, truncateVisual, padEndVisual, padStartVisual, visualWidth, wrapVisual, wrapVisualSoft } from "./text.js";
+import type { WorkspaceChangeState } from "./changes.js";
 
 export type { ActivityStatus as TuiEventStatus } from "../../mcp/activity-status.js";
 import type { ActivityStatus as TuiEventStatus } from "../../mcp/activity-status.js";
@@ -35,20 +36,17 @@ export type TuiSnapshot = {
   failures: number;
   sessions: number;
   sessionsActive: number;
+  /** Stateless modern MCP activity lives beside legacy transport sessions. */
+  modernSeen: boolean;
+  modernInFlight: number;
   /** Complete current task list; the viewport, not the snapshot, limits rows. */
   todos: Array<{ title: string; status: string; completedAt?: string }>;
   /** 任务文档最近一次写入/加载的时刻；标题栏新鲜度与卡住预警用。 */
   todosUpdatedAt?: string;
   /** Total task count shared by both layouts. */
   todosTotal: number;
-  /** Workspace changes since the last commit; absent = 非 git; unavailable = 读取失败. */
-  changes?: {
-    files: number;
-    insertions: number;
-    deletions: number;
-    unavailable?: boolean;
-    entries?: Array<{ path: string; insertions: number; deletions: number; untracked?: boolean; binary?: boolean }>;
-  };
+  /** Workspace changes since the last commit, including probe lifecycle state. */
+  changes: WorkspaceChangeState;
   /** 累计 review diff，或变更页当前文件的工作树 diff。 */
   diff?: {
     loading: boolean;
@@ -190,7 +188,7 @@ function renderOverviewRows(snap: TuiSnapshot, width: number): string[] {
   const segments: Array<{ text: string; color: ColorName }> = [
     { text: `运行 ${formatDuration(snap.uptimeMs)}`, color: "text" },
     { text: `调用 ${formatCount(snap.calls)}（✓ ${formatCount(snap.successes)} ✕ ${formatCount(snap.failures)}）`, color: snap.failures > 0 ? "review" : "text" },
-    { text: `会话 ${snap.sessions}${snap.sessionsActive > 0 ? ` · 活跃 ${snap.sessionsActive}` : ""}`, color: "text" },
+    { text: `会话 ${snap.sessions}${snap.sessionsActive > 0 ? ` · 活跃 ${snap.sessionsActive}` : ""}${snap.modernSeen ? (snap.modernInFlight > 0 ? ` · 无状态 ${snap.modernInFlight} 活跃` : " · 无状态") : ""}`, color: snap.modernInFlight > 0 ? "accent" : "text" },
     { text: `进程 ${snap.runningCommands.length}`, color: "text" },
   ];
   if (snap.todosTotal > 0) {
@@ -390,7 +388,7 @@ function renderSidebar(snap: TuiSnapshot, width: number, maxRows?: number): stri
   sidebarField(lines, width, "调用", `${formatCount(snap.calls)} · ✓ ${formatCount(snap.successes)} ✕ ${formatCount(snap.failures)}`, snap.failures > 0 ? "review" : "text");
   // No /64 cap: the session ceiling is developer knowledge; the operator
   // only needs to know how many clients are connected right now.
-  sidebarField(lines, width, "会话", `${snap.sessions}${snap.sessionsActive > 0 ? ` · 活跃 ${snap.sessionsActive}` : ""}`);
+  sidebarField(lines, width, "会话", `${snap.sessions}${snap.sessionsActive > 0 ? ` · 活跃 ${snap.sessionsActive}` : ""}${snap.modernSeen ? (snap.modernInFlight > 0 ? ` · 无状态 ${snap.modernInFlight} 活跃` : " · 无状态") : ""}`, snap.modernInFlight > 0 ? "accent" : "text");
   sidebarField(lines, width, "进程", `${snap.runningCommands.length}`);
   if (snap.serviceRows.length > 0) {
     sidebarField(lines, width, "服务", `${snap.serviceRows.filter(s => s.running).length}/${snap.serviceRows.length}`);
@@ -399,9 +397,11 @@ function renderSidebar(snap: TuiSnapshot, width: number, maxRows?: number): stri
   // missing row cannot say whether that means clean or not-watching. Clean
   // reads as 干净; a workspace without git is named honestly, not faked;
   // a timeout or a failed read of a real repo is 读取失败, never 非 git.
-  if (snap.changes === undefined) {
+  if (snap.changes.status === "loading") {
+    sidebarField(lines, width, "变更", "读取中…", "dim");
+  } else if (snap.changes.status === "not-git") {
     sidebarField(lines, width, "变更", "非 git", "dim");
-  } else if (snap.changes.unavailable) {
+  } else if (snap.changes.status === "unavailable") {
     sidebarField(lines, width, "变更", "读取失败", "dim");
   } else if (snap.changes.files === 0 && snap.changes.insertions === 0 && snap.changes.deletions === 0) {
     sidebarField(lines, width, "变更", "干净", "dim");
@@ -505,8 +505,9 @@ function taskPanelRows(snap: TuiSnapshot, width: number, spin: number): string[]
 
 /** Per-file +/- list for the Tab 「变更」 page: one selectable file per row. */
 function changePanelRows(snap: TuiSnapshot, width: number, cursor = 0): string[] {
-  if (snap.changes === undefined) return [paint("dim", "非 git")];
-  if (snap.changes.unavailable) return [paint("dim", "读取失败")];
+  if (snap.changes.status === "loading") return [paint("dim", "正在读取变更…")];
+  if (snap.changes.status === "not-git") return [paint("dim", "非 git")];
+  if (snap.changes.status === "unavailable") return [paint("dim", "读取失败")];
   const entries = snap.changes.entries ?? [];
   if (entries.length === 0) return [paint("dim", "暂无变更")];
 
@@ -629,7 +630,7 @@ function renderPanel(
     : snap.events.map((event, index) => eventListRow(event, width, spin, now, index === cursor));
   const requested = Number.isFinite(firstVisible) ? Math.floor(firstVisible) : 0;
   const first = Math.min(Math.max(0, requested), maxFirstVisible(content.length, rows));
-  const count = tasksView ? snap.todosTotal : changesView ? (snap.changes?.entries?.length ?? snap.changes?.files ?? 0)
+  const count = tasksView ? snap.todosTotal : changesView ? (snap.changes.status === "ready" ? (snap.changes.entries?.length ?? snap.changes.files) : 0)
     : diffView ? (snap.diff?.text ? snap.diff.text.split("\n").length : 0)
     : snap.events.length;
   const label = eventView ? "事件详情" : diffView ? (snap.diff?.kind === "file" ? "文件 diff" : "累计 diff") : `${tasksView ? "任务" : changesView ? "变更" : "活动"} (${count})`;
@@ -671,7 +672,7 @@ function renderPanel(
     const scroll = content.length > rows ? `${first + 1}-${Math.min(first + rows, content.length)}/${content.length} 行` : "";
     // 变更页与活动页共享光标/Enter 心智；d 继续保留累计审阅预览。
     hint = diffView ? "Esc 返回变更" : changesView
-      ? ((snap.changes?.entries?.length ?? 0) > 0 ? "↑↓ 选择 · Enter 文件 diff · d 累计" : "d 累计 diff")
+      ? (snap.changes.status === "ready" && (snap.changes.entries?.length ?? 0) > 0 ? "↑↓ 选择 · Enter 文件 diff · d 累计" : "d 累计 diff")
       : "";
     if (hint !== "" && scroll !== "") hint = `${hint} · ${scroll}`;
     else if (hint === "") hint = scroll;
@@ -741,7 +742,7 @@ export function renderFrame(
   const { width, height, panelRows } = layout;
   const spin = options.spinnerFrame ?? 0;
   const now = options.now ?? Date.now();
-  const busy = snap.sessionsActive > 0 || snap.runningCommands.length > 0;
+  const busy = snap.sessionsActive > 0 || snap.modernInFlight > 0 || snap.runningCommands.length > 0;
   const firstVisible = options.firstVisible ?? -1;
   const taskFirstVisible = options.taskFirstVisible ?? 0;
   const changeFirstVisible = options.changeFirstVisible ?? 0;

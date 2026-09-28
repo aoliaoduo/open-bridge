@@ -18,6 +18,7 @@ import {
   parsePorcelainLines,
   parsePorcelainZ,
   summarizeGitStatus,
+  type WorkspaceChangeState,
 } from "../src/console/tui/changes.js";
 
 const NOW = 1_700_000_000_000;
@@ -32,6 +33,12 @@ function fixtureView(): TuiStateView {
 
 function byPath(summary: { entries?: Array<{ path: string; insertions: number; deletions: number; untracked?: boolean; binary?: boolean }> }, rel: string) {
   return summary.entries?.find(entry => entry.path.replaceAll("\\", "/") === rel);
+}
+
+function requireReady(state: WorkspaceChangeState) {
+  assert.equal(state.status, "ready");
+  if (state.status !== "ready") throw new Error(`expected ready changes, got ${state.status}`);
+  return state;
 }
 
 test("countTextLines matches git: empty, trailing newline, binary", () => {
@@ -136,6 +143,25 @@ test("summarizeGitStatus: untracked directory listing is not collapsed", async (
   assert.equal(summary?.entries?.map(entry => entry.path).join(","), "nested/a.txt,nested/b.txt");
 });
 
+test("untracked read budget prevents content IO once exhausted", async () => {
+  const names = ["a.txt", "b.txt", "c.txt", "d.txt", "after-budget.txt"];
+  const sizes = new Map(names.map((name, index) => [name, index < 4 ? 512 * 1024 : 1]));
+  const reads: string[] = [];
+  const summary = await summarizeGitStatus({
+    statusOut: names.map(name => `?? ${name}`).join("\n"),
+    numstatOut: "",
+    statFile: async rel => ({ size: sizes.get(rel) ?? 0 }),
+    readFile: async (rel, maxBytes) => {
+      reads.push(rel);
+      const size = sizes.get(rel) ?? 0;
+      return Buffer.alloc(Math.min(size, maxBytes ?? size), 0x61);
+    },
+  });
+  assert.equal(summary?.files, 5);
+  assert.deepEqual(reads, names.slice(0, 4), "the fifth file is listed from git status but never read after the 2 MiB budget is spent");
+  assert.equal(byPath(summary ?? {}, "after-budget.txt")?.insertions, 0);
+});
+
 test("summarizeGitStatus: a timeout is 读取失败, not 非 git", async () => {
   const missing = await summarizeGitStatus({
     statusError: { code: 128, message: "fatal: not a git repository (or any of the parent directories): .git" },
@@ -157,7 +183,7 @@ test("the sidebar names 读取失败 without dropping the resident 变更 row", 
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
-    workspaceChanges: { files: 0, insertions: 0, deletions: 0, unavailable: true },
+    workspaceChanges: { status: "unavailable" },
   });
   const joined = renderFrame(snap, { width: 110, height: 30, now: 60_000 }).map(stripAnsi).join("\n");
   assert.match(joined, /变更\s+读取失败/, "a failed read is named, never silently turned into 非 git");
@@ -170,7 +196,7 @@ test("dirty and clean rows keep their red/green signs", () => {
     rootName: "r",
     logPath: "l",
     now: 60_000,
-    workspaceChanges: { files: 2, insertions: 53, deletions: 18 },
+    workspaceChanges: { status: "ready", files: 2, insertions: 53, deletions: 18 },
   });
   const raw = renderFrame(dirty, { width: 110, height: 30, now: 60_000 }).join("\n");
   assert.ok(raw.includes(paint("success", "+53")), "insertions stay green");
@@ -190,6 +216,7 @@ test("the changes panel lists each path with its own +/- and keeps the sidebar s
     logPath: "C:/x/bridge.log",
     now: 60_000,
     workspaceChanges: {
+      status: "ready",
       files: 3,
       insertions: 6,
       deletions: 1,
@@ -223,7 +250,7 @@ test("the changes panel is a one-file-per-row cursor list", () => {
   const snap = buildSnapshot(fixtureView(), {
     version: "v", rootName: "r", logPath: "l", now: 60_000,
     workspaceChanges: {
-      files: 2, insertions: 3, deletions: 1,
+      status: "ready", files: 2, insertions: 3, deletions: 1,
       entries: [
         { path: longPath, insertions: 2, deletions: 1 },
         { path: "selected.ts", insertions: 1, deletions: 0 },
@@ -248,6 +275,7 @@ test("a narrow changes view owns the body the way the task view does", () => {
     logPath: "l",
     now: 60_000,
     workspaceChanges: {
+      status: "ready",
       files: 2,
       insertions: 2,
       deletions: 0,
@@ -267,7 +295,7 @@ test("a narrow changes view owns the body the way the task view does", () => {
 test("clean / missing git / failed read have named empty states on the changes page", () => {
   const clean = buildSnapshot(fixtureView(), {
     version: "v", rootName: "r", logPath: "l", now: 60_000,
-    workspaceChanges: { files: 0, insertions: 0, deletions: 0, entries: [] },
+    workspaceChanges: { status: "ready", files: 0, insertions: 0, deletions: 0, entries: [] },
   });
   assert.match(renderFrame(clean, { width: 110, height: 30, now: 60_000, panelView: "changes" }).map(stripAnsi).join("\n"), /暂无变更/);
 
@@ -278,9 +306,17 @@ test("clean / missing git / failed read have named empty states on the changes p
 
   const failed = buildSnapshot(fixtureView(), {
     version: "v", rootName: "r", logPath: "l", now: 60_000,
-    workspaceChanges: { files: 0, insertions: 0, deletions: 0, unavailable: true },
+    workspaceChanges: { status: "unavailable" },
   });
   assert.match(renderFrame(failed, { width: 110, height: 30, now: 60_000, panelView: "changes" }).map(stripAnsi).join("\n"), /读取失败/);
+
+  const loading = buildSnapshot(fixtureView(), {
+    version: "v", rootName: "r", logPath: "l", now: 60_000,
+    workspaceChanges: { status: "loading" },
+  });
+  const loadingText = renderFrame(loading, { width: 110, height: 30, now: 60_000, panelView: "changes" }).map(stripAnsi).join("\n");
+  assert.match(loadingText, /正在读取变更/);
+  assert.doesNotMatch(loadingText, /非 git/, "the first probe no longer lies about repository state");
 });
 
 test("collectWorkspaceChanges against an isolated git repository", async (t) => {
@@ -308,9 +344,7 @@ test("collectWorkspaceChanges against an isolated git repository", async (t) => 
   writeFileSync(path.join(dir, "my file.txt"), "x\ny\n");
   writeFileSync(path.join(dir, "pic.bin"), Buffer.from([0x00, 0x01, 0x02, 0xff]));
 
-  const summary = await collectWorkspaceChanges(dir);
-  assert.ok(summary, "a real repository is never reported as 非 git");
-  assert.equal(summary.unavailable, undefined);
+  const summary = requireReady(await collectWorkspaceChanges(dir));
   // Three tracked modifications + nested/a + nested/b + empty + tail + "my file.txt" + pic.bin
   assert.equal(summary.files, 9, "untracked directory must expand; space path and empty file each count");
   // Each tracked file is +1; untracked: a=1, b=1, empty=0, tail=1, my file=2, binary=0.
@@ -369,10 +403,10 @@ test("collectWorkspaceChanges against an isolated git repository", async (t) => 
   git(cleanDir, ["add", "ok.txt"]);
   git(cleanDir, ["commit", "-m", "clean"]);
   const clean = await collectWorkspaceChanges(cleanDir);
-  assert.deepEqual(clean, { files: 0, insertions: 0, deletions: 0, entries: [] });
+  assert.deepEqual(clean, { status: "ready", files: 0, insertions: 0, deletions: 0, entries: [] });
 
   const plain = mkdtempSync(path.join(tmpdir(), "ob-tui-nongit-"));
   writeFileSync(path.join(plain, "x.txt"), "x\n");
   const missing = await collectWorkspaceChanges(plain);
-  assert.equal(missing, undefined, "a folder without .git is 非 git");
+  assert.deepEqual(missing, { status: "not-git" }, "a folder without .git is explicitly 非 git");
 });

@@ -10,6 +10,7 @@
 import { isActivityStatus } from "../../mcp/activity-status.js";
 import { MAX_CAPTURED_OUTPUT } from "../../bridge/state.js";
 import { PROCESS_STARTED, tuiActivityDetail, tuiActivityMessage } from "./activity-copy.js";
+import type { WorkspaceChangeState } from "./changes.js";
 import type { TuiEventStatus, TuiSnapshot } from "./render.js";
 
 export interface TuiStateView {
@@ -21,6 +22,10 @@ export interface TuiStateView {
   stopping: boolean;
   activeWorkspaceRoot?: string;
   sessions: Map<unknown, { activeRequests: number; calls: number; lastUsed: number }>;
+  /** Modern MCP is stateless, so it must be modeled beside — not inside — the legacy session table. */
+  modernLastUsed: number;
+  modernSince: number;
+  modernInFlight: number;
   commands: Map<unknown, {
     id: string;
     command: string;
@@ -60,19 +65,8 @@ export interface SnapshotOptions {
    *  「运行」 is process uptime, never the persisted stats window — a freshly
    *  restarted Bridge used to claim 50 hours. */
   launchedAt?: number;
-  /**
-   * Workspace changes since the last commit (files/insertions/deletions).
-   * The driver refreshes this asynchronously every few seconds.
-   * undefined = not a git repository (非 git); all-zero = clean (干净);
-   * unavailable = a failed read of a real repo (读取失败).
-   */
-  workspaceChanges?: {
-    files: number;
-    insertions: number;
-    deletions: number;
-    unavailable?: boolean;
-    entries?: Array<{ path: string; insertions: number; deletions: number; untracked?: boolean; binary?: boolean }>;
-  };
+  /** Cached workspace-change probe. The driver passes loading before the first Git result. */
+  workspaceChanges?: WorkspaceChangeState;
   /** 累计 review diff，或变更页当前文件的工作树 diff。 */
   diff?: {
     loading: boolean;
@@ -284,9 +278,11 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     failures: view.runtimeUsage.failures,
     sessions,
     sessionsActive,
+    modernSeen: view.modernSince > 0 || view.modernLastUsed > 0 || view.modernInFlight > 0,
+    modernInFlight: Math.max(0, Math.floor(view.modernInFlight)),
     todos: view.todos.map(todo => ({ title: todo.title, status: todo.status, ...(todo.completedAt !== undefined ? { completedAt: todo.completedAt } : {}) })),
     todosTotal: view.todos.length,
-    ...(options.workspaceChanges !== undefined ? { changes: options.workspaceChanges } : {}),
+    changes: options.workspaceChanges ?? { status: "not-git" },
     ...(options.diff !== undefined ? { diff: options.diff } : {}),
     ...(options.todosUpdatedAt !== undefined ? { todosUpdatedAt: options.todosUpdatedAt } : {}),
     runningCommands,

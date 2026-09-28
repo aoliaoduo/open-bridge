@@ -27,6 +27,12 @@ export type ChangeFile = {
 };
 export type ChangeCounts = { files: number; insertions: number; deletions: number };
 export type ChangeSummary = ChangeCounts & { unavailable?: boolean; entries?: ChangeFile[] };
+/** Cached TUI-facing probe state. Loading and non-git are different facts. */
+export type WorkspaceChangeState =
+  | { status: "loading" }
+  | { status: "not-git" }
+  | { status: "unavailable" }
+  | ({ status: "ready" } & ChangeCounts & { entries?: ChangeFile[] });
 
 const STATUS_TIMEOUT_MS = 5000;
 const NUMSTAT_TIMEOUT_MS = 5000;
@@ -136,7 +142,10 @@ export async function summarizeGitStatus(args: {
   statusOut?: string | null;
   numstatError?: GitLikeError | null;
   numstatOut?: string | null;
-  readFile: (rel: string) => Promise<Buffer>;
+  /** Optional size probe lets production skip large/exhausted files before reading them. */
+  statFile?: (rel: string) => Promise<{ size: number }>;
+  /** maxBytes is a hard read ceiling when the implementation supports it. */
+  readFile: (rel: string, maxBytes?: number) => Promise<Buffer>;
 }): Promise<ChangeSummary | undefined> {
   if (args.statusError) {
     return classifyGitError(args.statusError) === "no-git"
@@ -168,14 +177,23 @@ export async function summarizeGitStatus(args: {
       let add = 0;
       let binary = false;
       try {
-        const buf = await args.readFile(entry.path);
-        if (buf.includes(0)) binary = true;
-        else if (buf.byteLength <= UNTRACKED_FILE_CAP && budget > 0) {
-          budget -= buf.byteLength;
-          add = countTextLines(buf) ?? 0;
+        const size = args.statFile ? Math.max(0, (await args.statFile(entry.path)).size) : undefined;
+        const ceiling = Math.min(UNTRACKED_FILE_CAP, budget);
+        // Counting requires the whole file. Once the budget is exhausted, or a
+        // file is individually too large, do no content read at all — the old
+        // code read the entire file first and only then decided not to count it.
+        if (ceiling > 0 && (size === undefined || size <= ceiling)) {
+          const readLimit = size === undefined ? ceiling : Math.min(size, ceiling);
+          const buf = await args.readFile(entry.path, readLimit);
+          const complete = size === undefined ? buf.byteLength <= ceiling : buf.byteLength === size;
+          if (buf.includes(0)) binary = true;
+          else if (complete && buf.byteLength <= ceiling) {
+            budget -= buf.byteLength;
+            add = countTextLines(buf) ?? 0;
+          }
         }
       } catch {
-        // Deleted between status and read — still listed.
+        // Deleted between status/stat/read — still listed.
       }
       entries.push({ path: entry.path, insertions: add, deletions: 0, untracked: true, ...(binary ? { binary: true } : {}) });
       insertions += add;
@@ -225,23 +243,45 @@ async function gitOutput(
   }
 }
 
-/** Probe a workspace: undefined means 非 git; unavailable is a failed read of a repo. */
-export async function collectWorkspaceChanges(root: string): Promise<ChangeSummary | undefined> {
+async function readFilePrefix(filePath: string, maxBytes: number): Promise<Buffer> {
+  if (maxBytes <= 0) return Buffer.alloc(0);
+  const handle = await fs.open(filePath, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(maxBytes);
+    const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Probe a workspace into an explicit cached state for the TUI. */
+export async function collectWorkspaceChanges(root: string): Promise<WorkspaceChangeState> {
   const status = await gitOutput(root, ["status", "--porcelain=v1", "-z", "-uall"], STATUS_TIMEOUT_MS);
   if (!status.ok) {
     return classifyGitError(status.error) === "no-git"
-      ? undefined
-      : { files: 0, insertions: 0, deletions: 0, unavailable: true };
+      ? { status: "not-git" }
+      : { status: "unavailable" };
   }
   const numstat = await gitOutput(root, ["diff", "--numstat", "-z", "HEAD"], NUMSTAT_TIMEOUT_MS);
   if (!numstat.ok && classifyGitError(numstat.error) === "unavailable") {
-    return { files: 0, insertions: 0, deletions: 0, unavailable: true };
+    return { status: "unavailable" };
   }
-  return summarizeGitStatus({
+  const summary = await summarizeGitStatus({
     statusOut: status.stdout,
     numstatOut: numstat.ok ? numstat.stdout : "",
-    readFile: rel => fs.readFile(path.join(root, rel)),
+    statFile: rel => fs.stat(path.join(root, rel)),
+    readFile: (rel, maxBytes = UNTRACKED_FILE_CAP) => readFilePrefix(path.join(root, rel), maxBytes),
   });
+  if (summary === undefined) return { status: "not-git" };
+  if (summary.unavailable) return { status: "unavailable" };
+  return {
+    status: "ready",
+    files: summary.files,
+    insertions: summary.insertions,
+    deletions: summary.deletions,
+    ...(summary.entries !== undefined ? { entries: summary.entries } : {}),
+  };
 }
 
 export type ReviewDiffPreview =

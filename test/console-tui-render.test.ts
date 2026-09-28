@@ -210,12 +210,12 @@ test("buildSnapshot counts live state and shows the full MCP URL", () => {
   assert.equal(snap.todos.length, 4, "the task list rides along for the panel");
   assert.equal(snap.todos[1]?.title, "接入任务列表");
   assert.equal(snap.todosTotal, 4, "the count stays honest beyond the render cap");
-  assert.equal(snap.changes, undefined, "no workspace changes passed — the renderer names it 非 git");
+  assert.deepEqual(snap.changes, { status: "not-git" }, "no workspace probe passed — the snapshot names it explicitly 非 git");
   const clean = buildSnapshot(fixtureView(), {
     version: "v", rootName: "r", logPath: "l", now: 60_000,
-    workspaceChanges: { files: 0, insertions: 0, deletions: 0 },
+    workspaceChanges: { status: "ready", files: 0, insertions: 0, deletions: 0 },
   });
-  assert.deepEqual(clean.changes, { files: 0, insertions: 0, deletions: 0 }, "a clean tree carries an all-zero summary, not absence");
+  assert.deepEqual(clean.changes, { status: "ready", files: 0, insertions: 0, deletions: 0 }, "a clean tree carries an explicit ready all-zero summary");
   assert.equal(snap.tunnel, "local");
   // Operator's call: the full address, token included — the startup banner
   // and `open-bridge url` print it in full; a redacted copy is unusable for
@@ -226,6 +226,22 @@ test("buildSnapshot counts live state and shows the full MCP URL", () => {
   assert.equal(snap.calls, 7);
   assert.equal(snap.successes, 6);
   assert.equal(snap.failures, 1);
+});
+
+test("modern stateless MCP is visible and makes an otherwise-idle TUI busy", () => {
+  const snap = buildSnapshot(tuiView({
+    port: 8123,
+    modernSince: 50_000,
+    modernLastUsed: 59_000,
+    modernInFlight: 2,
+  }), { version: "v", rootName: "r", logPath: "l", now: 60_000 });
+  assert.equal(snap.sessions, 0, "stateless traffic is not forged into the legacy session table");
+  assert.equal(snap.modernSeen, true);
+  assert.equal(snap.modernInFlight, 2);
+  const first = renderFrame(snap, { width: 110, height: 30, now: 60_000, spinnerFrame: 0 }).map(stripAnsi);
+  const second = renderFrame(snap, { width: 110, height: 30, now: 60_000, spinnerFrame: 1 }).map(stripAnsi);
+  assert.match(first.join("\n"), /会话\s+0 · 无状态 2 活跃/, "the sidebar names modern activity beside legacy sessions");
+  assert.notEqual(first[0], second[0], "an in-flight modern request drives the top-bar busy spinner");
 });
 
 test("running commands are ordered longest-running first", () => {
@@ -369,7 +385,7 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
     rootName: "open-bridge",
     logPath: "C:/x/bridge.log",
     now: 60_000,
-    workspaceChanges: { files: 2, insertions: 53, deletions: 18 },
+    workspaceChanges: { status: "ready", files: 2, insertions: 53, deletions: 18 },
   });
   const lines = renderFrame(snap, { width: 110, height: 30, now: 60_000 });
   assert.equal(lines.length, 30, "a 30-row window gets a full-height workbench");
@@ -402,7 +418,7 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   // without git is named — a missing row cannot say which state it is in.
   const cleanSnap = buildSnapshot(fixtureView(), {
     version: "1.0.0-rc.2", rootName: "open-bridge", logPath: "C:/x/bridge.log", now: 60_000,
-    workspaceChanges: { files: 0, insertions: 0, deletions: 0 },
+    workspaceChanges: { status: "ready", files: 0, insertions: 0, deletions: 0 },
   });
   assert.match(renderFrame(cleanSnap, { width: 110, height: 30, now: 60_000 }).map(stripAnsi).join("\n"), /变更\s+干净/, "a clean tree keeps the row, reading 干净");
   const noGitSnap = buildSnapshot(fixtureView(), {
@@ -685,7 +701,7 @@ test("the duration column keeps a fixed width so rows stop flickering", () => {
 test("the changes panel advertises cursor/Enter plus cumulative d, and preview advertises Esc", () => {
   const changesSnap = buildSnapshot(fixtureView(), {
     version: "1.0.0", rootName: "r", logPath: "l",
-    workspaceChanges: { files: 1, insertions: 1, deletions: 0, entries: [{ path: "src/a.ts", insertions: 1, deletions: 0 }] },
+    workspaceChanges: { status: "ready", files: 1, insertions: 1, deletions: 0, entries: [{ path: "src/a.ts", insertions: 1, deletions: 0 }] },
   });
   const changes = renderFrame(changesSnap, { width: 100, height: 30, panelView: "changes" }).join("\n");
   assert.ok(stripAnsi(changes).includes("↑↓ 选择"), "the changes title hints cursor movement");

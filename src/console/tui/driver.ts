@@ -18,7 +18,7 @@
 import * as readline from "node:readline";
 import type { ReadStream } from "node:tty";
 import { state } from "../../bridge/state.js";
-import { collectFileDiffPreview, collectReviewDiffPreview, collectWorkspaceChanges, type ChangeFile, type ChangeSummary, type FileDiffPreview, type ReviewDiffPreview } from "./changes.js";
+import { collectFileDiffPreview, collectReviewDiffPreview, collectWorkspaceChanges, type ChangeFile, type FileDiffPreview, type ReviewDiffPreview, type WorkspaceChangeState } from "./changes.js";
 import { todoFreshness } from "../../bridge/todo-store.js";
 import { buildSnapshot } from "./snapshot.js";
 import { renderFrame, panelScrollMetrics, maxFirstVisible, advanceScroll, nextPanelView, eventKeyOf, type PanelView, type ScrollKey } from "./render.js";
@@ -61,8 +61,8 @@ let changeCursor = 0;
 let activityMetrics = { rows: 1, totalRows: 0 };
 let taskMetrics = { rows: 1, totalRows: 0 };
 let changeMetrics = { rows: 1, totalRows: 0 };
-/** Workspace changes since the last commit; undefined = 非 git. */
-let workspaceChanges: ChangeSummary | undefined;
+/** Cached workspace-change probe; loading is explicit until the first Git result. */
+let workspaceChanges: WorkspaceChangeState = { status: "loading" };
 let changesTimer: ReturnType<typeof setInterval> | undefined;
 type DiffTarget = { kind: "cumulative" } | { kind: "file"; file: ChangeFile };
 type LoadedDiff =
@@ -112,7 +112,7 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
   taskScrollFirst = 0;
   changeScrollFirst = 0;
   changeCursor = 0;
-  workspaceChanges = undefined;
+  workspaceChanges = { status: "loading" };
   diffTarget = { kind: "cumulative" };
   diffState = undefined;
   diffLoading = false;
@@ -133,20 +133,35 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
   const launchedAt = Date.now();
 
   // Workspace changes since the last commit — the dirty-tree summary,
-  // dashboard style. It is IO (git + file reads), so it refreshes on its own
-  // slow cadence; the 500ms render tick only reads the cached value.
-  // Generation token: a slow probe must not overwrite a newer one.
-  let changesGen = 0;
+  // dashboard style. Git/file IO refreshes on a slow cadence; the 500ms paint
+  // tick only reads the cache. One probe at a time: if a 5s tick arrives while
+  // Git is still busy, coalesce it into exactly one follow-up instead of
+  // stacking more child processes behind the slow repository.
+  let changesRefreshing = false;
+  let changesQueued = false;
   const refreshChanges = (): void => {
-    const gen = ++changesGen;
-    void collectWorkspaceChanges(options.rootPath).then(summary => {
-      if (session !== sessionGeneration || gen !== changesGen) return;
-      workspaceChanges = summary;
-    }).catch(() => {
-      if (session !== sessionGeneration || gen !== changesGen) return;
-      // A thrown probe is a failed read of *something* — never impersonate 非 git.
-      workspaceChanges = { files: 0, insertions: 0, deletions: 0, unavailable: true };
-    });
+    if (changesRefreshing) {
+      changesQueued = true;
+      return;
+    }
+    changesRefreshing = true;
+    void collectWorkspaceChanges(options.rootPath)
+      .then(summary => {
+        if (session !== sessionGeneration) return;
+        workspaceChanges = summary;
+        paint();
+      })
+      .catch(() => {
+        if (session !== sessionGeneration) return;
+        workspaceChanges = { status: "unavailable" };
+        paint();
+      })
+      .finally(() => {
+        changesRefreshing = false;
+        if (session !== sessionGeneration || !changesQueued) return;
+        changesQueued = false;
+        refreshChanges();
+      });
   };
 
   let diffGen = 0;
@@ -219,22 +234,33 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
       }
       lastSnapshot = snapshot;
       const dimensions = { width: out.columns ?? 80, height: out.rows ?? 24 };
-      activityMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "activity" });
-      taskMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "tasks" });
-      changeMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "changes" });
-      diffMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "diff" });
-      expandMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView: "event", eventDetailKey });
-      // Clamp stored positions too: a list shrink must not leave a hidden stale
-      // offset that reappears when tasks grow again. Keep the activity sentinel.
-      scrollFirst = Math.min(scrollFirst, maxFirstVisible(activityMetrics.totalRows, activityMetrics.rows));
-      taskScrollFirst = Math.min(taskScrollFirst, maxFirstVisible(taskMetrics.totalRows, taskMetrics.rows));
-      changeScrollFirst = Math.min(changeScrollFirst, maxFirstVisible(changeMetrics.totalRows, changeMetrics.rows));
-      diffScrollFirst = Math.min(diffScrollFirst, maxFirstVisible(diffMetrics.totalRows, diffMetrics.rows));
-      expandScrollFirst = Math.min(expandScrollFirst, maxFirstVisible(expandMetrics.totalRows, expandMetrics.rows));
-      activityCursor = Math.max(0, Math.min(activityCursor, Math.max(0, activityMetrics.totalRows - 1)));
-      changeCursor = Math.max(0, Math.min(changeCursor, Math.max(0, (snapshot.changes?.entries?.length ?? 0) - 1)));
-      if (changeCursor < changeScrollFirst) changeScrollFirst = changeCursor;
-      else if (changeCursor >= changeScrollFirst + changeMetrics.rows) changeScrollFirst = changeCursor - changeMetrics.rows + 1;
+      // Only materialize rows for the visible panel. Previously every 500ms
+      // frame built tasks, changes, diff and event-detail rows even while they
+      // were hidden, then renderFrame built the visible one again.
+      const currentMetrics = panelScrollMetrics(snapshot, { ...dimensions, panelView, eventDetailKey });
+      if (panelView === "tasks") {
+        taskMetrics = currentMetrics;
+        taskScrollFirst = Math.min(taskScrollFirst, maxFirstVisible(currentMetrics.totalRows, currentMetrics.rows));
+      } else if (panelView === "changes") {
+        changeMetrics = currentMetrics;
+        changeScrollFirst = Math.min(changeScrollFirst, maxFirstVisible(currentMetrics.totalRows, currentMetrics.rows));
+      } else if (panelView === "diff") {
+        diffMetrics = currentMetrics;
+        diffScrollFirst = Math.min(diffScrollFirst, maxFirstVisible(currentMetrics.totalRows, currentMetrics.rows));
+      } else if (panelView === "event") {
+        expandMetrics = currentMetrics;
+        expandScrollFirst = Math.min(expandScrollFirst, maxFirstVisible(currentMetrics.totalRows, currentMetrics.rows));
+      } else {
+        activityMetrics = currentMetrics;
+        scrollFirst = Math.min(scrollFirst, maxFirstVisible(currentMetrics.totalRows, currentMetrics.rows));
+      }
+      activityCursor = Math.max(0, Math.min(activityCursor, Math.max(0, snapshot.events.length - 1)));
+      const changeEntries = snapshot.changes.status === "ready" ? (snapshot.changes.entries ?? []) : [];
+      changeCursor = Math.max(0, Math.min(changeCursor, Math.max(0, changeEntries.length - 1)));
+      if (panelView === "changes") {
+        if (changeCursor < changeScrollFirst) changeScrollFirst = changeCursor;
+        else if (changeCursor >= changeScrollFirst + changeMetrics.rows) changeScrollFirst = changeCursor - changeMetrics.rows + 1;
+      }
       const lines = renderFrame(snapshot, {
         ...dimensions,
         spinnerFrame: frameIndex++,
@@ -313,7 +339,7 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
           }
           if (panelView === "changes" && (key?.name === "return" || key?.name === "enter")) {
             if (lastSnapshot === undefined) paint();
-            const selected = lastSnapshot?.changes?.entries?.[changeCursor];
+            const selected = lastSnapshot?.changes.status === "ready" ? lastSnapshot.changes.entries?.[changeCursor] : undefined;
             if (selected !== undefined) loadDiff({ kind: "file", file: selected });
             return;
           }
@@ -322,7 +348,7 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
           if (panelView === "tasks") {
             taskScrollFirst = advanceScroll(mapped, taskScrollFirst, taskMetrics.totalRows, taskMetrics.rows);
           } else if (panelView === "changes") {
-            const total = lastSnapshot?.changes?.entries?.length ?? 0;
+            const total = lastSnapshot?.changes.status === "ready" ? (lastSnapshot.changes.entries?.length ?? 0) : 0;
             if (total > 0) {
               const page = Math.max(1, changeMetrics.rows - 1);
               const delta = mapped === "up" ? -1 : mapped === "down" ? 1

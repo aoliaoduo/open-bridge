@@ -42,7 +42,7 @@ function fixtureView(count = 100): TuiStateView {
 function snapshot(count = 100): TuiSnapshot {
   return buildSnapshot(fixtureView(count), {
     version: "test", rootName: "navigation-fixture", logPath: "synthetic.log",
-    now: NOW, launchedAt: NOW, workspaceChanges: { files: 0, insertions: 0, deletions: 0 },
+    now: NOW, launchedAt: NOW, workspaceChanges: { status: "ready", files: 0, insertions: 0, deletions: 0 },
   });
 }
 
