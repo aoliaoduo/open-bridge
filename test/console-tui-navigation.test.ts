@@ -95,7 +95,7 @@ test("task selection survives narrow and short layouts, including both workbench
     assert.match(first.join("\n"), /TASK_001/, `${width}x${height} shows the selected task view`);
     assert.match(last.join("\n"), /TASK_100/, `${width}x${height} can reach the final task`);
     assert.doesNotMatch(first.join("\n"), /EVENT_/);
-    assert.doesNotMatch(first.join("\n"), /Tab 任务|Tab 变更|Tab 返回活动|Tab 活动/, "the title row does not advertise the Tab cycle");
+    if (width >= 60) assert.match(first.join("\n"), /活动 · \[任务 100\] · 变更 \[Tab\]/, "normal-width task views expose the Tab cycle");
   }
 });
 
@@ -119,7 +119,7 @@ test("empty tasks are explicit and remain safe after an old long-list scroll off
     const lines = frame(snapshot(0), width, height, Number.MAX_SAFE_INTEGER);
     assertGeometry(lines, width, height);
     assert.match(lines.join("\n"), /暂无任务/);
-    assert.doesNotMatch(lines.join("\n"), /Tab 任务|Tab 变更|Tab 返回活动|Tab 活动/);
+    assert.match(lines.join("\n"), /\[任务 0\]/, "even an empty task page names the selected main view");
     assert.doesNotMatch(lines.join("\n"), /EVENT_/);
   }
 });
@@ -275,7 +275,7 @@ test("the real driver selects change files with arrows, opens Enter detail, and 
     assert.match(second, /Esc 返回变更/);
 
     const back = press("escape");
-    assert.match(back, /变更 \(2\)/);
+    assert.match(back, /活动 · 任务 · \[变更 2\] \[Tab\]/);
     assert.match(back, /Enter 文件 diff/);
     assert.doesNotMatch(back, /文件 diff · b\.txt/);
 

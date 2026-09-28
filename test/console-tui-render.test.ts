@@ -356,10 +356,9 @@ test("renderFrame pins addresses to the bottom of the sidebar in tall workbench 
   }
   const plain = lines.map(stripAnsi);
   assert.equal(charAtColumn(plain[39] ?? "", 24), "│", "sidebar divider extends to the last row");
-  assert.match(plain[38] ?? "", /控制台 http/, "the console entry is pinned to the bottom of the sidebar");
-  assert.match(plain[39] ?? "", /8123\/console/, "console URL continuation on the last line");
-  assert.doesNotMatch(plain[39] ?? "", /console\//, "no trailing slash");
-  assert.doesNotMatch(plain.join("\n"), /MCP http/, "MCP address is removed from the sidebar");
+  const sidebar = plain.slice(2).map(line => line.split("│")[0] ?? "").join("").replace(/\s+/g, "");
+  assert.match(sidebar, /控制台http:\/\/127\.0\.0\.1:8123\/console/, "the console entry is pinned in the address area");
+  assert.match(sidebar, /MCPhttp:\/\/127\.0\.0\.1:8123\/mcp\/a{32}/, "wide workbench exposes the full MCP address too");
 });
 
 test("renderFrame degrades gracefully on a small window", () => {
@@ -405,10 +404,9 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   assert.match(joined, /─ 服务/);
   assert.doesNotMatch(joined, /状态/, "the top-bar capsule owns the status; the sidebar does not repeat it");
   assert.match(joined, /仅本机/, "tunnel wording reads 隧道 · 仅本机, not 隧道 隧道 ●");
-  assert.match(joined, /活动 \(\d+\)/);
+  assert.match(joined, /\[活动 \d+\] · 任务 · 变更 \[Tab\]/, "the workbench makes the three main pages discoverable");
   assert.doesNotMatch(joined, /─ 任务/, "titles no longer cram into the narrow sidebar");
   assert.match(joined, /任务\s+1\/4（25%）/, "a one-line progress summary replaces the truncated section");
-  assert.doesNotMatch(joined, /Tab 任务|Tab 变更|Tab 返回活动|Tab 活动/, "the title row does not advertise the Tab cycle");
   assert.match(joined, /\+53 -18 · 2 文件/, "workspace changes since the last commit");
   // Additions green, deletions red — the diff convention every tool shares.
   const rawChangeRow = lines.find(line => stripAnsi(line).includes("+53")) ?? "";
@@ -427,13 +425,14 @@ test("workbench layout: exact geometry with a sidebar divider column", () => {
   assert.match(renderFrame(noGitSnap, { width: 110, height: 30, now: 60_000 }).map(stripAnsi).join("\n"), /变更\s+非 git/, "no git is named honestly, never silently hidden");
   assert.match(joined, /会话\s+2 · 活跃 1/);
   assert.doesNotMatch(joined, /\/64/, "the session cap is developer knowledge");
-  assert.match(plain[28] ?? "", /控制台 http/, "the console entry is wrapped in the sidebar");
-  assert.doesNotMatch(joined, /MCP http/, "MCP address is removed from the sidebar");
-  assert.equal(charAtColumn(plain[28] ?? "", sidebarW), "│", "body row 28 has the divider column, not a full-width footer");
-  assert.equal(charAtColumn(plain[29] ?? "", sidebarW), "│", "body row 29 has the divider column, not a full-width footer");
+  const sidebarCompact = plain.slice(2).map(line => line.split("│")[0] ?? "").join("").replace(/\s+/g, "");
+  assert.match(sidebarCompact, /控制台http:\/\/127\.0\.0\.1:8123\/console/, "the console entry is wrapped in the sidebar");
+  assert.match(sidebarCompact, /MCPhttp:\/\/127\.0\.0\.1:8123\/mcp\/a{32}/, "the MCP address is no longer hidden in wide mode");
+  assert.equal(charAtColumn(plain[28] ?? "", sidebarW), "│", "body row 28 keeps the divider column");
+  assert.equal(charAtColumn(plain[29] ?? "", sidebarW), "│", "body row 29 keeps the divider column");
 });
 
-test("sidebar wraps web console URL within narrow sidebar width and omits MCP address", () => {
+test("sidebar wraps both web-console and public MCP addresses without truncating either", () => {
   const snap = buildSnapshot({
     ...fixtureView(),
     tunnelUrl: "https://bridge.example.invalid/mcp/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -448,10 +447,24 @@ test("sidebar wraps web console URL within narrow sidebar width and omits MCP ad
   const lines = renderFrame(snap, { width: 110, height: 30, now: 60_000 });
   const plain = lines.map(stripAnsi);
   const sidebarLines = plain.slice(2, 30).map(l => l.split("│")[0]?.trimEnd() ?? "");
-  const sidebarText = sidebarLines.join("\n");
-  assert.match(sidebarText, /控制台 http:\/\/127\.0\.0\.1:8123\/cons\nole/);
-  assert.doesNotMatch(sidebarText, /console\//);
-  assert.doesNotMatch(sidebarText, /MCP https:/);
+  const sidebarText = sidebarLines.join("").replace(/\s+/g, "");
+  assert.match(sidebarText, /控制台http:\/\/127\.0\.0\.1:8123\/console/);
+  assert.match(sidebarText, /MCPhttps:\/\/bridge\.example\.invalid\/mcp\/a{32}/);
+});
+
+test("sidebar section titles disclose hidden process and service rows", () => {
+  const snap = buildSnapshot(fixtureView(), {
+    version: "1.0.0", rootName: "r", logPath: "l", now: 60_000,
+  });
+  snap.runningCommands = Array.from({ length: 8 }, (_, index) => ({
+    id: `proc-${index}`, command: `command-${index}`, elapsedMs: 1000, capturedBytes: 0, capacityBytes: 1024,
+  }));
+  snap.serviceRows = Array.from({ length: 10 }, (_, index) => ({ name: `service-${index}`, running: index < 3 }));
+  snap.servicesTotal = 10;
+  snap.servicesRunning = 3;
+  const text = renderFrame(snap, { width: 110, height: 42, now: 60_000 }).map(stripAnsi).join("\n");
+  assert.match(text, /─ 进程 · \+2/, "six shown process rows disclose the two hidden rows");
+  assert.match(text, /─ 服务 · \+2/, "eight shown service rows disclose the two hidden rows");
 });
 
 test("top bar displays active workspace directory, version, and omits port/name/diamond", () => {
@@ -520,9 +533,11 @@ test("heading freshness time shares the completion-clock column", () => {
   const heading = frame.find(l => l.includes(`更新 ${headingClock}`)) ?? "";
   const task = frame.find(l => l.includes("写补丁")) ?? "";
   assert.ok(heading.includes(headingClock) && task.includes(taskClock), `${heading} | ${task}`);
-  const a = heading.indexOf(headingClock);
-  const b = task.indexOf(taskClock);
-  assert.equal(b, a, `task clock column ${b} must match heading time column ${a}`);
+  const headingIndex = heading.indexOf(headingClock);
+  const taskIndex = task.indexOf(taskClock);
+  const a = visualWidth(heading.slice(0, headingIndex));
+  const b = visualWidth(task.slice(0, taskIndex));
+  assert.equal(b, a, `task clock visual column ${b} must match heading time visual column ${a}`);
 });
 
 test("task view: Tab swaps the wide panel and shows full titles", () => {
@@ -538,8 +553,7 @@ test("task view: Tab swaps the wide panel and shows full titles", () => {
     assert.equal(visualWidth(line), 110, `task line ${i} must be exactly 110 columns`);
   }
   const text = lines.map(stripAnsi).join("\n");
-  assert.match(text, /─ 任务 \(4\)/, "the wide panel belongs to the tasks");
-  assert.doesNotMatch(text, /Tab 任务|Tab 变更|Tab 返回活动|Tab 活动/, "the title row does not advertise the Tab cycle");
+  assert.match(text, /活动 · \[任务 4\] · 变更 \[Tab\]/, "the task panel exposes the main-page Tab navigation");
   assert.match(text, /25% · 1\/4 完成/, "heading displays completion percentage and count");
   assert.doesNotMatch(text, /进行中/, "heading omits the redundant in-progress segment");
   assert.ok(lines.some(line => line.includes("\x1b[1m") && line.includes("接入任务列表")), "in-progress task is painted bold");

@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- TUI 主工作区可发现性提升：活动/任务/变更标题直接显示三页导航与 `[Tab]` 提示，detail/diff 仍保持 Esc 单一退出语义；宽屏侧栏底部同时固定显示 Web Console 与 MCP 地址，不再只有窄屏能看到 MCP；进程/服务超过侧栏展示上限时 section 标题用 `+N` 明确还有隐藏条目。
 - TUI 状态与热路径收敛：modern/stateless MCP 请求不再被会话概览和 busy 动画漏掉；workspace changes 首帧明确显示“读取中”而不是误报“非 git”；5 秒 Git 刷新改为 single-flight/coalescing，慢仓库不再叠加探测进程；未跟踪文件的 2 MiB 预算现在会在读盘前生效，预算耗尽或单文件超限后不再读取内容；500 ms repaint 只构造当前可见 panel 的滚动内容，不再同时重建隐藏的 tasks/changes/diff/event 视图。
 - 配置契约收敛为统一 catalog：key、默认值、JSON schema、控制台可写面与 SettingsState 投影由同一规格派生，`get_config` / `set_config_value` 不再手抄字段列表；修复 `sharedPeerRegistry` 可读不可写，以及 `shellPath`、`ngrokDomain` 配置后无法清回默认值的问题。每个配置 key 的默认值现有写入校验契约测试兜底。
 - `service {action:"stop_all"}` 恢复 schema 承诺的并行语义：默认与 `start_all` 一样并发停止独立服务，`parallel:false` 才串行；两条批量路径共用同一执行器，同时继续使用调用开始时的 service 快照和每服务串行队列。

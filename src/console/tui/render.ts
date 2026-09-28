@@ -430,8 +430,10 @@ function renderSidebar(snap: TuiSnapshot, width: number, maxRows?: number): stri
 
   if (snap.runningCommands.length > 0) {
     // No empty placeholder section: the 概览 counter already says 进程 0.
-    section("进程");
-    for (const command of snap.runningCommands.slice(0, 6)) {
+    const shown = Math.min(6, snap.runningCommands.length);
+    const hidden = snap.runningCommands.length - shown;
+    section(hidden > 0 ? `进程 · +${hidden}` : "进程");
+    for (const command of snap.runningCommands.slice(0, shown)) {
       const pct = command.capacityBytes > 0 ? Math.min(100, (command.capturedBytes / command.capacityBytes) * 100) : 0;
       const right = `${Math.round(pct)}%`;
       const left = truncateVisual(`▸ ${inlineText(command.id).slice(0, 8)} ${inlineText(command.command)}`, Math.max(6, width - visualWidth(right) - 1));
@@ -440,15 +442,19 @@ function renderSidebar(snap: TuiSnapshot, width: number, maxRows?: number): stri
   }
 
   if (snap.serviceRows.length > 0) {
-    section("服务");
-    for (const service of snap.serviceRows.slice(0, 8)) {
+    const shown = Math.min(8, snap.serviceRows.length);
+    const hidden = snap.serviceRows.length - shown;
+    section(hidden > 0 ? `服务 · +${hidden}` : "服务");
+    for (const service of snap.serviceRows.slice(0, shown)) {
       const mark = service.running ? paint("success", "●") : paint("dim", "○");
       lines.push(`${mark} ${paint(service.running ? "text" : "dim", truncateVisual(inlineText(service.name), Math.max(4, width - 3)))}`);
     }
   }
 
-  const addrLines = wrapVisual(`控制台 http://127.0.0.1:${snap.port}/console`, width)
-    .map(line => paint("muted", line));
+  const addrLines = [
+    ...wrapVisual(`控制台 http://127.0.0.1:${snap.port}/console`, width),
+    ...wrapVisual(`MCP ${inlineText(snap.mcpUrl)}`, width),
+  ].map(line => paint("muted", line));
 
   if (maxRows !== undefined) {
     if (lines.length + addrLines.length <= maxRows) {
@@ -559,10 +565,16 @@ function diffPanelRows(snap: TuiSnapshot, width: number): string[] {
 }
 
 export type PanelView = "activity" | "tasks" | "changes" | "diff" | "event";
-export const PANEL_VIEWS: readonly PanelView[] = ["activity", "tasks", "changes"];
+export const PANEL_VIEWS = ["activity", "tasks", "changes"] as const;
+type MainPanelView = typeof PANEL_VIEWS[number];
 export function nextPanelView(view: PanelView): PanelView {
-  const index = PANEL_VIEWS.indexOf(view);
+  const index = PANEL_VIEWS.indexOf(view as MainPanelView);
   return PANEL_VIEWS[(index + 1) % PANEL_VIEWS.length] ?? "activity";
+}
+
+function mainPanelNavigation(view: MainPanelView, count: number): string {
+  const labels: Record<MainPanelView, string> = { activity: "活动", tasks: "任务", changes: "变更" };
+  return `─ ${PANEL_VIEWS.map(candidate => candidate === view ? `[${labels[candidate]} ${count}]` : labels[candidate]).join(" · ")} [Tab] `;
 }
 
 type FrameLayout = {
@@ -634,10 +646,10 @@ function renderPanel(
     : diffView ? (snap.diff?.text ? snap.diff.text.split("\n").length : 0)
     : snap.events.length;
   const label = eventView ? "事件详情" : diffView ? (snap.diff?.kind === "file" ? "文件 diff" : "累计 diff") : `${tasksView ? "任务" : changesView ? "变更" : "活动"} (${count})`;
-  let title = `─ ${label} `;
+  const plainTitle = `─ ${label} `;
+  const mainView = !eventView && !diffView ? (tasksView ? "tasks" : changesView ? "changes" : "activity") : undefined;
+  let title = mainView === undefined ? plainTitle : mainPanelNavigation(mainView, count);
   const listView = tasksView || changesView || diffView;
-  // Scroll position only: Tab still cycles the views, but the title no longer
-  // advertises the next page (「Tab 任务」 read as the current view).
   let hint = "";
   let hintTone: "accent" | "review" = "accent";
   if (tasksView && snap.todosTotal > 0) {
@@ -685,6 +697,7 @@ function renderPanel(
     hint = scroll === "" ? "↑↓ 选择 · Enter 展开" : `Enter 展开 · ${scroll}`;
   }
   if (visualWidth(title) + visualWidth(hint) > width) hint = "";
+  if (visualWidth(title) > width && mainView !== undefined) title = plainTitle;
   if (visualWidth(title) + visualWidth(hint) > width) title = `${label} `;
   const titleWidth = Math.max(1, width - visualWidth(hint));
   const heading = `${padEndVisual(paint("dim", truncateVisual(title, titleWidth)), titleWidth)}${hint === "" ? "" : paint(hintTone, hint)}`;
