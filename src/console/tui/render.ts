@@ -42,6 +42,15 @@ export type TuiSnapshot = {
   todos: Array<{ title: string; status: string; completedAt?: string }>;
   /** 任务文档最近一次写入/加载的时刻；标题栏新鲜度与卡住预警用。 */
   todosUpdatedAt?: string;
+  /** Latest persisted report_progress. It is historical evidence, not a live-session claim. */
+  progress?: {
+    message: string;
+    phase?: "queued" | "preparing" | "running" | "verifying" | "done";
+    category?: "read" | "edit" | "command" | "test" | "build" | "other";
+    percent?: number;
+    level: "debug" | "info" | "notice" | "warning" | "error";
+    at: string;
+  };
   /** Total task count shared by both layouts. */
   todosTotal: number;
   /** Workspace changes since the last commit, including probe lifecycle state. */
@@ -461,10 +470,64 @@ function renderSidebar(snap: TuiSnapshot, width: number, maxRows?: number): stri
   return [...lines, ...addrLines];
 }
 
+const PROGRESS_PHASE_LABELS = {
+  queued: "排队",
+  preparing: "准备",
+  running: "进行",
+  verifying: "验证",
+  done: "完成",
+} as const;
+const PROGRESS_CATEGORY_LABELS = {
+  read: "读取",
+  edit: "编辑",
+  command: "命令",
+  test: "测试",
+  build: "构建",
+  other: "其他",
+} as const;
+
+function progressPanelRows(snap: TuiSnapshot, width: number): string[] {
+  const progress = snap.progress;
+  if (progress === undefined) return [];
+  const tone: ColorName = progress.level === "error" ? "error"
+    : progress.level === "warning" ? "review"
+    : progress.phase === "done" ? "success"
+    : "accent";
+  const percent = typeof progress.percent === "number" && Number.isFinite(progress.percent)
+    ? `${Math.round(progress.percent * 10) / 10}%`
+    : undefined;
+  const meta = [
+    progress.phase ? PROGRESS_PHASE_LABELS[progress.phase] : undefined,
+    progress.category ? PROGRESS_CATEGORY_LABELS[progress.category] : undefined,
+    percent,
+    formatClock(String(progress.at ?? "")),
+  ].filter((part): part is string => part !== undefined);
+  const label = "◆ 最新进度";
+  const labelWidth = Math.min(width, visualWidth(label));
+  const heading = `${paint(tone, truncateVisual(label, labelWidth), { bold: true })}${
+    width > labelWidth && meta.length
+      ? paint("dim", truncateVisual(` · ${meta.join(" · ")}`, width - labelWidth))
+      : ""
+  }`;
+  const rows = [heading];
+  const bodyWidth = Math.max(1, width - 2);
+  const messageRows = stripAnsi(String(progress.message ?? "")).replace(/\r\n?/g, "\n").split("\n")
+    .flatMap(line => wrapVisual(inlineText(line.replace(/\t/g, "    ")), bodyWidth));
+  for (const line of messageRows.length ? messageRows : [""]) {
+    rows.push(`${paint("dim", "  ")}${paint("text", line)}`);
+  }
+  rows.push("");
+  return rows;
+}
+
 /** Task titles wrap with a measured icon gutter, including in CJK terminals. */
 function taskPanelRows(snap: TuiSnapshot, width: number, spin: number): string[] {
-  if (snap.todos.length === 0) return [paint("dim", "暂无任务")];
-  const rows: string[] = [];
+  const rows = progressPanelRows(snap, width);
+  if (snap.todos.length === 0) {
+    rows.push(paint("dim", "暂无任务"));
+    return rows;
+  }
+  const hasProgress = rows.length > 0;
   const gutter = Math.max(visualWidth("✓"), visualWidth("·"), visualWidth(spinnerFrame(spin))) + 1;
   for (const todo of snap.todos) {
     const isCurrent = todo.status === "in_progress";
@@ -498,6 +561,9 @@ function taskPanelRows(snap: TuiSnapshot, width: number, spin: number): string[]
     rows.push("");
   }
   rows.pop(); // no trailing spacer: End must land on the final task's text
+  // progressPanelRows already contributes one separator. Keep exactly that one
+  // so the latest report reads as context for the list, not as another todo.
+  if (hasProgress && rows[rows.length - 1] === "") rows.pop();
   return rows;
 }
 

@@ -19,7 +19,7 @@ import * as readline from "node:readline";
 import type { ReadStream } from "node:tty";
 import { state } from "../../bridge/state.js";
 import { collectFileDiffPreview, collectReviewDiffPreview, collectWorkspaceChanges, type FileDiffPreview, type ReviewDiffPreview, type WorkspaceChangeState } from "./changes.js";
-import { todoFreshness } from "../../bridge/todo-store.js";
+import { todoFreshness, todoProgress } from "../../bridge/todo-store.js";
 import { buildSnapshot } from "./snapshot.js";
 import { renderFrame, panelScrollMetrics, type ScrollKey } from "./render.js";
 import {
@@ -186,7 +186,14 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
     // The dashboard is an observer of the work, never part of it: any
     // rendering failure is swallowed and the next tick tries again.
     try {
-      const snapshot = buildSnapshot(state, { ...options, launchedAt, workspaceChanges, diff: diffSnapshotInput(), todosUpdatedAt: todoFreshness() });
+      const snapshot = buildSnapshot(state, {
+        ...options,
+        launchedAt,
+        workspaceChanges,
+        diff: diffSnapshotInput(),
+        todosUpdatedAt: todoFreshness(),
+        todoProgress: todoProgress(),
+      });
       const dimensions = { width: out.columns ?? 80, height: out.rows ?? 24 };
       // Only materialize rows for the visible panel. The controller reconciles
       // cursor identity, shrinking lists and that view's independent viewport.

@@ -44,11 +44,40 @@ export interface TodoStoreSnapshot {
 }
 
 let persistTail: Promise<void> = Promise.resolve();
-/** 任务文档最近一次写入/加载的时刻（TUI 标题栏新鲜度）；undefined = 本次运行还没碰过。 */
-let lastWriteAt: string | undefined;
-/** The TUI title bar reads this instead of re-reading the store every 500 ms tick. */
+/**
+ * One in-memory copy for the ACTIVE workspace. The TUI repaints every 500 ms,
+ * so reading the persisted state store on each frame would turn a presentation
+ * concern into continuous IO. The cache is replaced after a successful write
+ * and whenever loadTodoStore() establishes a new active-workspace snapshot.
+ */
+let cachedStore: { key: string; snapshot: TodoStoreSnapshot } | undefined;
+
+function cloneProgress(progress: TodoProgressEntry | null): TodoProgressEntry | null {
+  return progress === null ? null : { ...progress };
+}
+
+function cacheStore(key: string, snapshot: TodoStoreSnapshot): void {
+  cachedStore = {
+    key,
+    snapshot: {
+      todos: cloneTodos(snapshot.todos),
+      lastProgress: cloneProgress(snapshot.lastProgress),
+      updatedAt: snapshot.updatedAt,
+      ...(snapshot.sessionId ? { sessionId: snapshot.sessionId } : {}),
+    },
+  };
+}
+
+/** The TUI reads this instead of re-reading the store every 500 ms tick. */
 export function todoFreshness(): string | undefined {
-  return lastWriteAt;
+  const key = todoStoreKey();
+  return cachedStore?.key === key ? cachedStore.snapshot.updatedAt : undefined;
+}
+
+/** Latest persisted report_progress for the active workspace, with no IO. */
+export function todoProgress(): TodoProgressEntry | null {
+  const key = todoStoreKey();
+  return cachedStore?.key === key ? cloneProgress(cachedStore.snapshot.lastProgress) : null;
 }
 
 function todoStoreKey(): string {
@@ -81,7 +110,7 @@ function enqueueTodoWrite(build: (current: TodoStoreSnapshot) => TodoStoreSnapsh
       const current = loadRawStore(key);
       const built = build(current);
       await host().state.update(key, built);
-      lastWriteAt = built.updatedAt;
+      cacheStore(key, built);
     })
     .catch(() => undefined);
 }
@@ -178,9 +207,10 @@ function loadRawStore(key?: string): TodoStoreSnapshot {
 }
 
 export function loadTodoStore(): TodoStoreSnapshot {
-  const snapshot = loadRawStore();
-  // 启动加载把文档里的历史 updatedAt 接进新鲜度：重启后标题栏仍然知道
-  // 这份清单是多久之前写下的，而不是装作刚刚发生。
-  lastWriteAt = snapshot.updatedAt ?? lastWriteAt;
+  const key = todoStoreKey();
+  const snapshot = loadRawStore(key);
+  // 启动加载把文档里的历史 updatedAt / lastProgress 接进内存视图：重启后
+  // TUI 仍然知道这份清单和最近一次进度是什么时候写下的。
+  cacheStore(key, snapshot);
   return snapshot;
 }

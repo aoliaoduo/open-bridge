@@ -563,6 +563,65 @@ test("task view: Tab swaps the wide panel and shows full titles", () => {
   assert.match(text, /部完成待提交推送/, "the wrap keeps the tail — part two");
 });
 
+test("task view shows the latest report_progress context, even with no todos", () => {
+  const snap = buildSnapshot({ ...fixtureView(), todos: [] }, {
+    version: "1.4.2",
+    rootName: "open-bridge",
+    logPath: "C:/x/bridge.log",
+    now: 60_000,
+    todoProgress: {
+      message: "正在执行完整验证",
+      phase: "verifying",
+      category: "test",
+      percent: 64,
+      level: "notice",
+      at: "2026-09-28T07:00:00.000Z",
+    },
+  });
+  const lines = renderFrame(snap, { width: 76, height: 22, now: 60_000, panelView: "tasks" });
+  const text = lines.map(stripAnsi).join("\n");
+  assert.match(text, /\[任务 0\]/, "progress context does not invent a todo");
+  assert.match(text, /◆ 最新进度/);
+  assert.match(text, /验证 · 测试 · 64%/);
+  assert.match(text, /正在执行完整验证/);
+  assert.match(text, /暂无任务/, "the plan is still explicitly empty");
+  for (const line of lines) assert.equal(visualWidth(line), 76);
+});
+
+test("progress text is terminal-safe and participates in task scrolling", () => {
+  const hostile = `开始\n第二行\t内容${String.fromCharCode(27)}[2J${"很长".repeat(80)}末尾`;
+  const snap = buildSnapshot({ ...fixtureView(), todos: [] }, {
+    version: "1.4.2",
+    rootName: "open-bridge",
+    logPath: "C:/x/bridge.log",
+    now: 60_000,
+    todoProgress: {
+      message: hostile,
+      phase: "running",
+      category: "build",
+      level: "warning",
+      at: "2026-09-28T07:00:00.000Z",
+    },
+  });
+  const metrics = panelScrollMetrics(snap, { width: 40, height: 10, panelView: "tasks" });
+  assert.ok(metrics.totalRows > metrics.rows, "long progress wraps into the normal task viewport");
+  const tail = renderFrame(snap, {
+    width: 40,
+    height: 10,
+    now: 60_000,
+    panelView: "tasks",
+    taskFirstVisible: Number.MAX_SAFE_INTEGER,
+  });
+  const plain = tail.map(stripAnsi).join("\n");
+  assert.match(plain, /末尾/, "the wrapped progress tail remains reachable");
+  assert.equal(tail.join("").includes(`${String.fromCharCode(27)}[2J`), false,
+    "an embedded clear-screen sequence never survives as payload");
+  for (const line of tail) {
+    assert.equal(visualWidth(line), 40);
+    assert.doesNotMatch(stripAnsi(line), /[\r\n]/);
+  }
+});
+
 test("workbench panel follows the tail and reports history when scrolled", () => {
   const snap = buildSnapshot(fixtureView(), {
     version: "1.0.0-rc.2",

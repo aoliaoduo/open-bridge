@@ -9,7 +9,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { setHost, type Host, type StateStore } from "../src/host/host.js";
-import { applyCompletionTimes, persistTodos, persistProgress } from "../src/bridge/todo-store.js";
+import { applyCompletionTimes, loadTodoStore, persistTodos, persistProgress, todoFreshness, todoProgress } from "../src/bridge/todo-store.js";
 import { state, type SessionState } from "../src/bridge/state.js";
 
 function memoryStateStore(): StateStore & { dump(): Map<string, unknown> } {
@@ -96,6 +96,39 @@ test("report_progress merges into the same document without clobbering todos", a
   assert.equal(progress.percent, 50);
   assert.equal(progress.sessionId, "sess-1");
   assert.equal(typeof progress.at, "string");
+});
+
+test("the TUI progress cache follows successful writes, is copied, and is workspace-scoped", async () => {
+  persistProgress({ message: "working", phase: "verifying", category: "test", percent: 64, level: "notice" });
+  await drain();
+
+  const first = todoProgress();
+  assert.ok(first);
+  assert.equal(first.message, "working");
+  assert.equal(first.phase, "verifying");
+  assert.equal(first.category, "test");
+  assert.equal(first.percent, 64);
+  assert.equal(typeof todoFreshness(), "string");
+
+  first.message = "caller mutation";
+  assert.equal(todoProgress()?.message, "working", "the renderer cannot mutate the cached store object");
+
+  state.activeWorkspaceRoot = `${workspace}-other`;
+  assert.equal(todoProgress(), null, "a cache entry for one workspace cannot bleed into another");
+  assert.equal(todoFreshness(), undefined);
+});
+
+test("loadTodoStore primes the TUI cache from persisted progress after restart", async () => {
+  const key = `openBridge.todos.${workspace}`;
+  await store.update(key, {
+    todos: [],
+    lastProgress: { message: "restored", phase: "running", level: "info", at: "2026-09-28T07:00:00.000Z" },
+    updatedAt: "2026-09-28T07:00:01.000Z",
+  });
+  const loaded = loadTodoStore();
+  assert.equal((loaded.lastProgress as { message: string }).message, "restored");
+  assert.equal(todoProgress()?.message, "restored");
+  assert.equal(todoFreshness(), "2026-09-28T07:00:01.000Z");
 });
 
 test("an out-of-vocabulary phase is dropped instead of persisted", async () => {

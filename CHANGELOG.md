@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- TUI「任务」页显示最近一次 `report_progress`：阶段、类别、百分比、时间与消息作为任务清单的上下文一起进入同一滚动视口；进度从 todo store 的按 workspace 内存快照读取，500 ms repaint 不增加持久化 IO，重启后的最近记录也会恢复显示。
+
 ## [1.4.2] — 2026-09-28
 
 ### Fixed

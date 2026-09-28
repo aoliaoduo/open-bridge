@@ -9,6 +9,7 @@
 
 import { isActivityStatus } from "../../mcp/activity-status.js";
 import { MAX_CAPTURED_OUTPUT } from "../../bridge/state.js";
+import type { TodoProgressEntry } from "../../bridge/todo-store.js";
 import { PROCESS_STARTED, tuiActivityDetail, tuiActivityMessage } from "./activity-copy.js";
 import type { WorkspaceChangeState } from "./changes.js";
 import type { TuiEventStatus, TuiSnapshot } from "./render.js";
@@ -55,6 +56,8 @@ export interface TuiStateView {
 export interface SnapshotOptions {
   /** 任务文档最近一次写入/加载的时刻（todoFreshness）；标题栏新鲜度与卡住预警用。 */
   todosUpdatedAt?: string;
+  /** In-memory cached last progress; null/absent means there is no report to show. */
+  todoProgress?: TodoProgressEntry | null;
   version: string;
   rootName: string;
   rootPath?: string;
@@ -275,6 +278,16 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
     modernSeen: view.modernSince > 0 || view.modernLastUsed > 0 || view.modernInFlight > 0,
     modernInFlight: Math.max(0, Math.floor(view.modernInFlight)),
     todos: view.todos.map(todo => ({ title: todo.title, status: todo.status, ...(todo.completedAt !== undefined ? { completedAt: todo.completedAt } : {}) })),
+    ...(options.todoProgress ? {
+      progress: {
+        message: options.todoProgress.message,
+        ...(options.todoProgress.phase ? { phase: options.todoProgress.phase } : {}),
+        ...(options.todoProgress.category ? { category: options.todoProgress.category } : {}),
+        ...(typeof options.todoProgress.percent === "number" ? { percent: options.todoProgress.percent } : {}),
+        level: options.todoProgress.level,
+        at: options.todoProgress.at,
+      },
+    } : {}),
     todosTotal: view.todos.length,
     changes: options.workspaceChanges ?? { status: "not-git" },
     ...(options.diff !== undefined ? { diff: options.diff } : {}),
