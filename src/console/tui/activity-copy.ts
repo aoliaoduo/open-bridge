@@ -29,6 +29,7 @@ export type ActivityPresentation = {
   subjectKind: ActivitySubjectKind;
   qualifierKind?: ActivitySubjectKind;
   failure?: string;
+  durationMs?: number;
 };
 
 /**
@@ -95,6 +96,44 @@ function failureReason(entry: ActivityLike, raw: string): string | undefined {
   return raw;
 }
 
+const MCP_METHOD_LABELS: Record<string, string> = {
+  initialize: "初始化",
+  "server/discover": "服务发现",
+  "tools/list": "工具列表",
+  "tools/call": "工具调用",
+  ping: "Ping",
+  "notifications/initialized": "初始化通知",
+  other: "其他请求",
+};
+
+function mcpPresentation(entry: ActivityLike, raw: string): ActivityPresentation | undefined {
+  const parts = raw.split(" · ").map(part => part.trim()).filter(Boolean);
+  const route = /^([^/]+)\/(.+)$/.exec(parts[0] ?? "");
+  if (!route) return undefined;
+  const method = route[2] ?? "other";
+  const httpPart = parts.find(part => /^HTTP \d{3}$/.test(part));
+  const httpStatus = httpPart ? Number.parseInt(httpPart.slice(5), 10) : undefined;
+  const durationPart = parts.find(part => /^\d+(?:\.\d+)?ms$/.test(part));
+  const durationMs = durationPart ? Number.parseFloat(durationPart.slice(0, -2)) : undefined;
+  const format = parts.find(part => part === "json" || part === "sse" || part === "no-body");
+  const formatLabel = format === "json" ? "JSON" : format === "sse" ? "SSE" : format === "no-body" ? "无正文" : undefined;
+  const aborted = parts.includes("client-aborted");
+  const qualifier = [httpPart, formatLabel].filter(Boolean).join(" · ") || undefined;
+  const failure = aborted ? "客户端中断"
+    : httpStatus !== undefined && httpStatus >= 400 ? `HTTP ${httpStatus}`
+    : entry.status === "warning" ? "传输警告"
+    : entry.status === "error" ? "传输失败"
+    : undefined;
+  return {
+    action: "MCP",
+    subject: MCP_METHOD_LABELS[method] ?? method,
+    ...(qualifier ? { qualifier } : {}),
+    subjectKind: "generic",
+    ...(failure ? { failure } : {}),
+    ...(durationMs !== undefined && Number.isFinite(durationMs) ? { durationMs } : {}),
+  };
+}
+
 function fromHint(tool: string, hint: ActivityHint, failure?: string): ActivityPresentation {
   return {
     action: actionFor(tool, hint),
@@ -109,6 +148,10 @@ function fromHint(tool: string, hint: ActivityHint, failure?: string): ActivityP
 /** Semantic headline model; width policy belongs only to renderer.ts. */
 export function tuiActivityPresentation(entry: ActivityLike): ActivityPresentation {
   const raw = full(entry.message);
+  if (entry.tool === "mcp") {
+    const parsed = mcpPresentation(entry, raw);
+    if (parsed) return parsed;
+  }
   const failure = failureReason(entry, raw);
 
   if (entry.tool === "process") {
@@ -162,6 +205,7 @@ export function tuiActivityDetail(entry: ActivityLike): string {
   const parts: string[] = [];
   if (main) parts.push(main);
   if (entry.args_summary) parts.push(`参数 ${entry.args_summary}`);
+  if (entry.tool === "mcp" && entry.message && entry.message !== main) parts.push(`传输 ${full(entry.message)}`);
   if (presentation.failure) parts.push(presentation.failure);
   return parts.join("\n\n");
 }

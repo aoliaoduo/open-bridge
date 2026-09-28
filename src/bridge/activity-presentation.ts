@@ -194,7 +194,10 @@ export function activityHintFromFields(tool: string, fields: ActivityHintFields)
     if (key) return { action: "配置", subject: key, ...(value !== undefined ? { qualifier: value } : {}), subjectKind: "generic" };
   }
   if (tool === "activity_log" && action) return { action: "活动", subject: action, subjectKind: "generic" };
-  if (tool === "bridge_status" && section) return { action: "状态", subject: section, subjectKind: "generic" };
+  if (tool === "bridge_status" && section) {
+    const label = ({ overview: "概览", auth: "认证", locks: "锁", sessions: "会话" } as Record<string, string>)[section] ?? section;
+    return { action: "状态", subject: label, subjectKind: "generic" };
+  }
   if (tool === "apply_patch") return { action: "补丁", subject: patchFile || "inline patch", subjectKind: patchFile ? "path" : "generic" };
   if (tool === "notify") return { action: "通知", subject: message ?? title ?? "发送通知", subjectKind: "message" };
 

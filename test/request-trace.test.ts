@@ -7,6 +7,7 @@ import {
   errorSummary,
   exchangeLine,
   isNoteworthy,
+  traceActivityStatus,
   traceId,
   tracedFormat,
   tracedHttpMethod,
@@ -118,6 +119,13 @@ test("response format is derived from the content type, defaulting to none", () 
   assert.equal(tracedFormat("text/html"), "none");
   assert.equal(tracedFormat(undefined), "none");
   assert.equal(tracedFormat(123), "none");
+});
+
+test("completed MCP exchanges are terminal activity rows", () => {
+  assert.equal(traceActivityStatus(base), "completed");
+  assert.equal(traceActivityStatus({ ...base, httpStatus: 500 }), "error");
+  assert.equal(traceActivityStatus({ ...base, errorFingerprint: "abc" }), "error");
+  assert.equal(traceActivityStatus({ ...base, aborted: true }), "warning", "client abort wins over status code");
 });
 
 test("ordinary chatter is not logged, but failures and aborts always are", () => {

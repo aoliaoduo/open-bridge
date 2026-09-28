@@ -159,6 +159,13 @@ export interface ExchangeOutcome {
   errorSummary?: string;
 }
 
+/** Completed transport exchanges are terminal activity rows, never "progress". */
+export function traceActivityStatus(outcome: ExchangeOutcome): "completed" | "warning" | "error" {
+  if (outcome.aborted) return "warning";
+  if (outcome.httpStatus >= 400 || outcome.errorFingerprint) return "error";
+  return "completed";
+}
+
 /**
  * Render an outcome as the single audit line.
  *

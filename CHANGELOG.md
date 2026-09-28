@@ -12,6 +12,7 @@
 
 ### Fixed
 
+- TUI MCP transport 活动不再以未结束的 `◆ progress` 和原始 trace 字符串抢占主视图：response-close 后按真实结果映射为 completed/error/warning，列表显示 `MCP + 人类可读方法 + HTTP/格式`，耗时进入统一右侧 duration 列；Enter 仍保留 era/HTTP verb/session/tool hash 等脱敏诊断 trace。`bridge_status` 的 section 同时改为本地化标签（如 `概览`）。
 - TUI 活动流改为单行语义 headline：常见工具显示短动作（命令 / 读取 / 搜索 / 修改等），对象与 scope/range 分字段保留；列表不再预先固定裁到 56 列，而是按真实终端宽度最终裁剪，命令保留前缀、路径优先保留文件名，失败/警告优先保留 root cause；Enter 详情继续展示未截断上下文，公开 Activity/audit/API 契约不变。
 - TUI 主面板导航（活动 / 任务 / 变更）与内容之间保留一行留白，并同步收紧可滚动内容高度，避免视觉拥挤同时保持末尾内容可达。
 - TUI 恢复历史进度时补全跨日时间语义：同日保持 `HH:MM:SS`，跨日显示月日，跨年显示完整日期，避免重启后把旧进度误看成今天刚发生。

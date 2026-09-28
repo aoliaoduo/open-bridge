@@ -101,6 +101,7 @@ function presentationFields(presentation: ActivityPresentation): Partial<TuiSnap
     ...(presentation.failure ? { failure: presentation.failure } : {}),
     subjectKind: presentation.subjectKind,
     ...(presentation.qualifierKind ? { qualifierKind: presentation.qualifierKind } : {}),
+    ...(presentation.durationMs !== undefined ? { durationMs: presentation.durationMs } : {}),
   };
 }
 

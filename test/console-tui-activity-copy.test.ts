@@ -21,12 +21,20 @@ function fixtureView(activity: TuiStateView["activity"]): TuiStateView {
 
 test("mcp/process ride along dimmed instead of being filtered away", () => {
   const view = fixtureView([
-    { at: new Date(NOW).toISOString(), ts: NOW, tool: "mcp", status: "progress", message: "modern/other · HTTP 200 · 3808ms · sse · session abc · tool def" },
+    { at: new Date(NOW).toISOString(), ts: NOW, tool: "mcp", status: "completed", message: "modern/tools/call · POST · HTTP 200 · 74ms · json · tool 4e816176161d" },
     { at: new Date(NOW + 1).toISOString(), ts: NOW + 1, tool: "process", status: "running", message: "Started f7e5f178ae04a9fe: git status -sb (cwd: C:/x)" },
   ]);
   const snap = buildSnapshot(view, { version: "1.0.0", rootName: "r", logPath: "l", now: NOW + 5_000 });
   assert.equal(snap.events.length, 2, "nothing is filtered: what was logged is shown");
   assert.equal(snap.events.every(event => event.subtle === true), true, "both ride with the subtle flag");
+  const mcp = snap.events.find(event => event.tool === "mcp");
+  assert.equal(mcp?.status, "completed", "a response-close trace is terminal, not an in-progress spinner");
+  assert.equal(mcp?.action, "MCP");
+  assert.equal(mcp?.subject, "工具调用");
+  assert.equal(mcp?.qualifier, "HTTP 200 · JSON");
+  assert.equal(mcp?.durationMs, 74, "transport duration moves into the shared right-hand duration column");
+  assert.match(mcp?.detail ?? "", /modern\/tools\/call/);
+  assert.match(mcp?.detail ?? "", /tool 4e816176161d/, "Enter keeps the hashed diagnostic trace");
 });
 
 test("activity copy stays uncapped until the renderer owns the terminal width", () => {
@@ -63,6 +71,18 @@ test("operator copy is the action, not the protocol or the JSON dump", () => {
     message: "Completed in 4 ms.",
     args_summary: buildArgsSummary({ paths: ["src/console/tui/activity-copy.ts"] }),
   }), "src/console/tui/activity-copy.ts");
+  assert.equal(tuiActivityMessage({
+    tool: "bridge_status",
+    status: "completed",
+    message: "Completed in 18 ms.",
+    args_summary: buildArgsSummary({ section: "overview" }),
+  }), "概览");
+  assert.equal(tuiActivityPresentation({
+    tool: "bridge_status",
+    status: "completed",
+    message: "Completed in 18 ms.",
+    args_summary: buildArgsSummary({ section: "overview" }),
+  }).action, "状态");
   assert.equal(tuiActivityMessage({
     tool: "list_directory",
     status: "completed",
