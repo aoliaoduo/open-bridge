@@ -61,7 +61,7 @@ further defined and clarified by project maintainers.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported privately to the project maintainer at
-[aoliaoduo@126.com](mailto:aoliaoduo@126.com) (the maintainer contact published in `package.json`).
+[aoliaoduo@users.noreply.github.com](mailto:aoliaoduo@users.noreply.github.com) (the maintainer contact published in `package.json`).
 Do not post incident details in public issues.
 All complaints will be reviewed and investigated promptly and fairly.
 

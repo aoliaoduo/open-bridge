@@ -3,13 +3,13 @@ import test from "node:test";
 import { isEndpointTakenError, isFatalNgrokError, ngrokFailureSummary } from "../src/network/ngrok-failure.js";
 
 /**
- * Captured verbatim from a real run: a reserved subdomain the free account may
+ * Sanitized from a real failure shape: a reserved subdomain the free account may
  * not serve. This is the shape the classifier has to recognise — ngrok's own
  * structured code, buried in a structured log line and repeated in `ERROR:`
  * lines, with the human-readable reason split across several lines.
  */
 const REFUSED_DOMAIN = [
-  't=2026-09-11T03:57:59+0800 lvl=eror msg="terminating with error" obj=app err="failed to start tunnel: Only paid plans may create endpoints with custom subdomains.\\nFailed to create an endpoint with the custom subdomain \'ngrok-free.dev\' for the account \'aoliaoduo\'.\\nThis account is on the \'Free\' plan.\\n\\nUpgrade to a paid plan at: https://dashboard.ngrok.com/billing/choose-a-plan\\r\\n\\r\\nERR_NGROK_313\\r\\n"',
+  't=2026-09-11T03:57:59+0800 lvl=eror msg="terminating with error" obj=app err="failed to start tunnel: Only paid plans may create endpoints with custom subdomains.\\nFailed to create an endpoint with the custom subdomain \'ngrok-free.dev\' for the account \'example-account\'.\\nThis account is on the \'Free\' plan.\\n\\nUpgrade to a paid plan at: https://dashboard.ngrok.com/billing/choose-a-plan\\r\\n\\r\\nERR_NGROK_313\\r\\n"',
   '[2026-09-10T19:57:59.747Z] [ngrok] t=2026-09-11T03:57:59+0800 lvl=crit msg="command failed" err="failed to start tunnel: Only paid plans may create endpoints with custom subdomains."',
   "[2026-09-10T19:57:59.747Z] [ngrok] ERROR:  failed to start tunnel: Only paid plans may create endpoints with custom subdomains.",
   "[2026-09-10T19:57:59.747Z] [ngrok] ERROR:  ERR_NGROK_313",

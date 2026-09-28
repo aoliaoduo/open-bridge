@@ -110,7 +110,7 @@ test("rejectSymlinkChain stops at the root even when a non-canonical entry is co
  *
  * Reproduced through the tool surface before this was fixed: `apply_patch` with
  * `*** Add File: ../../ob-escape.txt` created
- * `C:\Users\aolia\Desktop\ob-escape.txt` -- a level above the workspace,
+ * `C:\Users\example\workspace-parent\ob-escape.txt` -- a level above the workspace,
  * outside every root the policy knows about. The file was created, the call
  * reported success, and nothing anywhere said the path had left the workspace.
  *
