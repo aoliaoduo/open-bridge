@@ -51,7 +51,7 @@ open-bridge serve                     # a second instance, serving project-b, in
 | `open-bridge status` | State, workspace, MCP URL, exposure |
 | `open-bridge health` | Full check: listener, workspace, tunnel role, exposure level, tool count, build freshness — and one real request over the public URL |
 | `open-bridge url` | Print the current MCP URL |
-| `open-bridge prompt` | Print the connection prompt to paste into an AI client |
+| `open-bridge prompt` | Print operating instructions for an already-connected AI client; does not include the MCP URL |
 | `open-bridge logs [--tail N] [--follow] [--clear]` | Read, follow or clear the log |
 | `open-bridge stop [--pid N]` | Stop the instance for the current directory — or, with `--pid`, exactly the instance that pid names, from any directory |
 | `open-bridge config list / get KEY / set KEY VALUE / path` | Read and write configuration |
@@ -83,7 +83,7 @@ The frontend router owns these paths (`ui/src/routes.ts`); the server returns th
 ### Security boundaries
 
 - `/api` and `/console` **answer loopback hosts only** (`127.0.0.1`, `localhost`). Reaching them through a public tunnel gets a 403. Tokenized MCP and health routes are public; enabling OAuth also exposes its authorization/discovery endpoints.
-- **CORS headers go to `/mcp`, `/oauth` and `/.well-known` only** — never to `/api`, `/console` or `/healthz`. The console is same-origin and never needed CORS, while three read-only `/api` endpoints return this instance's MCP address, **route token included** (`settings` in `state.mcpUrl`, `prompt` in its text, and `status`). One `Access-Control-Allow-Origin: *` would let any page open in your browser read it locally — the loopback check cannot stop a page inside the same browser, and private-network rules are vendor policy rather than specification.
+- **CORS headers go to `/mcp`, `/oauth` and `/.well-known` only** — never to `/api`, `/console` or `/healthz`. The console is same-origin and never needed CORS. Read-only `settings` (`state.mcpUrl`) and `status` return this instance's MCP address with the **route token included**; `/api/prompt` intentionally contains only operating instructions and no URL. One `Access-Control-Allow-Origin: *` on the admin surface would still let any page open in your browser read sensitive local state — the loopback check cannot stop a page inside the same browser, and private-network rules are vendor policy rather than specification.
 - Every write requires an `X-Open-Bridge-Console` header matching the route token. The server injects it into the page; a cross-site page can neither read nor send it.
 - **The bearer gate is off by default** to preserve URL-only client access. Enable individually issued credentials from the Security page: issue a token and flip the switch, or use **"issue a token and enable the gate"** to do both at once (an existing token is reused; the plaintext is shown once). With the gate on and no valid token, it **fails closed**. The local console can always turn it back off, so you cannot lock yourself out.
 - Issued tokens are permanent unless a lifetime is configured: `auth.tokenTtlSeconds` (default `0` = never expire, ceiling 2^31) applies to newly minted tokens.

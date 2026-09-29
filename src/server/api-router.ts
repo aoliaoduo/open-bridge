@@ -15,13 +15,12 @@
  *    SEND the header without a preflight we never answer — CSRF is dead by
  *    construction. The console HTML (loopback-only) has the token injected
  *    server-side.
- *  - GET endpoints are loopback-gated only, and they are NOT free of secrets:
- *    /api/settings (`state.mcpUrl`), /api/prompt and /api/status all carry the route
- *    token in their bodies. Same-origin + no CORS grant is what keeps those readable
- *    only by the console; adding CORS here would hand the token to whatever page the
- *    operator has open, since a cross-origin request to 127.0.0.1 passes the Host
- *    gate. The console's own page (served below) has the token injected
- *    server-side.
+ *  - GET endpoints are loopback-gated only. Some are NOT free of secrets:
+ *    /api/settings (`state.mcpUrl`) and /api/status carry the route token in their
+ *    bodies; /api/prompt deliberately contains only operating instructions and no
+ *    endpoint. Same-origin + no CORS grant keeps the admin surface private; adding
+ *    CORS here would expose sensitive local state to whatever page the operator has
+ *    open, since a cross-origin request to 127.0.0.1 passes the Host gate.
  */
 
 import * as fs from "node:fs/promises";

@@ -73,10 +73,11 @@ notifications, the data directory — is in
 ## Connecting a client
 
 ```bash
-open-bridge prompt      # prints a ready-made connection message
+open-bridge prompt      # prints operating instructions; no MCP URL inside
 ```
 
-Paste that where your client accepts it, or just give it the MCP URL. For
+Configure the MCP URL separately (use the console's “Copy URL” or `open-bridge url`),
+then paste the prompt into the connected client. For
 clients that only accept a standard authorization flow, OAuth 2.1 with PKCE is
 available and off by default — see
 [docs/configuration.md](docs/configuration.md#web-console).

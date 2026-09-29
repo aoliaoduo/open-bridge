@@ -47,8 +47,9 @@ import * as path from "node:path";
 import { resetUsageStats } from "../bridge/usage-store.js";
 import { host } from "../host/host.js";
 import {
-  start, rotateRouteToken, webAiPrompt, republishAfterRotate, restartTunnelForProviderChange,
+  start, rotateRouteToken, republishAfterRotate, restartTunnelForProviderChange,
 } from "../bridge/lifecycle/lifecycle.js";
+import { buildWebAiPrompt } from "../bridge/onboarding.js";
 import { enqueueLifecycle } from "../bridge/lifecycle/lifecycle-queue.js";
 import { autoConfigureTunnel, buildTunnelView } from "./settings-tunnel.js";
 
@@ -179,17 +180,12 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
       return done({ info: "调用统计已清零（累计调用数与按工具明细）。" });
     }
     case "copyPrompt": {
-      // Onboarding: hand the client a ready-made opening message carrying the
-      // URL (and, when the bearer gate is on, how to authenticate), instead of
-      // leaving the user to write one from scratch. The toast repeats the
-      // prompt's own caveat when the URL is loopback-only: the text and the
-      // toast must never disagree about whether the address is reachable.
+      // The endpoint has a dedicated copy control beside this button. Keep the
+      // setup prompt to operating instructions only, so copying it does not also
+      // copy the route-token capability URL into a chat transcript.
       return done({
-        info: state.tunnelUrl
-          ? "接入提示词已复制，粘贴给 AI 客户端即可。"
-          : "接入提示词已复制 —— 但当前未开启隧道，里面的地址只有本机能访问；"
-            + "外部客户端请先在「设置」页填写 ngrokDomain 并开启隧道，再重新复制。",
-        copyText: webAiPrompt(),
+        info: "接入提示词已复制，粘贴给已连接该 MCP 的 AI 客户端即可。",
+        copyText: buildWebAiPrompt(),
       });
     }
 

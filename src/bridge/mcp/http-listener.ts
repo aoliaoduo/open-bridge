@@ -147,9 +147,9 @@ export async function startHttpInternal(): Promise<void> {
     // (a web client must be able to run discovery → register → token itself).
     //
     // It is deliberately NOT granted on /api, /console or /healthz, because a
-    // `Access-Control-Allow-Origin: *` on those handed the route token to any page
-    // the operator happened to have open. Three loopback reads carry it: /api/settings
-    // (`state.mcpUrl`), /api/prompt (the ready-made connection text) and /api/status.
+    // `Access-Control-Allow-Origin: *` on the admin surface exposes sensitive local
+    // state to any page the operator happened to have open. /api/settings and
+    // /api/status carry the route token; /api/prompt deliberately does not.
     // The loopback-Host gate does not protect against that — the cross-origin page is
     // running ON this machine, and its request to 127.0.0.1 satisfies the gate
     // perfectly; private-network rules are browser policy, not a spec this server may

@@ -91,7 +91,7 @@ const HELP = (): string => t(`open-bridge ${VERSION} — standalone MCP bridge f
   instances 列出共用同一数据目录的所有实例（一个目录一个实例；别名 list）
   logs      读取/跟踪/清空日志文件（~/.open-bridge/logs/bridge.log）
   health    对运行中的实例做一次体检：监听、隧道、暴露、工具数
-  prompt    打印给 AI 客户端的接入提示词（含 MCP URL，可直接粘贴）
+  prompt    打印给已连接 MCP 的 AI 客户端使用的接入提示词（不含 URL）
   config    配置文件位于 ~/.open-bridge/config.json（OPEN_BRIDGE_HOME 可改）
   token     管理 Bearer 令牌；明文只在 create/rotate 时显示一次
   diagnostics
@@ -125,7 +125,7 @@ Commands:
   instances List every instance sharing this data directory (one per directory; alias: list)
   logs      Read, follow or clear the log file (~/.open-bridge/logs/bridge.log)
   health    Check a running instance: listener, tunnel, exposure, tool count
-  prompt    Print the onboarding prompt for an AI client (MCP URL included)
+  prompt    Print the onboarding prompt for an already-connected AI client (no URL)
   config    The config file lives at ~/.open-bridge/config.json (OPEN_BRIDGE_HOME moves it)
   token     Manage Bearer tokens; the plaintext is shown once, at create/rotate
   diagnostics

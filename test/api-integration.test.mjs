@@ -106,7 +106,11 @@ test("CORS is granted only where a browser must reach us — never on the admin 
     const text = await res.text();
     assert.equal(res.headers.get("access-control-allow-origin"), null,
       `${route} must not be cross-origin readable either`);
-    assert.ok(text.includes(routeToken), `${route} carries the token in its body — the grant below is the only thing keeping it private`);
+    if (route === "/api/status") {
+      assert.ok(text.includes(routeToken), "/api/status carries the token in its body");
+    } else {
+      assert.ok(!text.includes(routeToken), "/api/prompt must not carry the route token");
+    }
   }
 
   for (const pathname of [`/console/`, `/console/status`, `/healthz/${routeToken}`]) {
@@ -658,22 +662,18 @@ test("rotation swaps the token without interrupting the listener", async () => {
   );
 });
 
-test("the onboarding prompt admits when its URL is local-only", async () => {
-  // Regression: the console card said "仅本机可访问" while the copied prompt
-  // handed over a 127.0.0.1 URL with no caveat — and the prompt is the one thing
-  // whose entire purpose is to be pasted into a client that is often NOT this
-  // machine. This suite runs with --no-tunnel, so the honest answer here is the
-  // loopback one. (The public variant is covered by test/onboarding.test.ts.)
+test("every onboarding prompt surface omits the endpoint", async () => {
+  // /api/prompt backs the CLI command, so this pins the same no-credential
+  // contract for both HTTP and `open-bridge prompt`.
   const served = await (await fetch(`${base()}/api/prompt`)).json();
-  assert.match(served.prompt, /127\.0\.0\.1/);
-  assert.match(served.prompt, /未开启隧道/);
-  assert.match(served.prompt, /只有本机能访问/);
+  assert.match(served.prompt, /^连接这个 MCP，/);
+  assert.doesNotMatch(served.prompt, /127\.0\.0\.1|https?:\/\/|\/mcp\/|未开启隧道|只有本机能访问|Bearer/);
 
   const res = await postAction({ command: "copyPrompt" });
   assert.equal(res.status, 200);
   const action = await res.json();
-  assert.match(action.copyText, /未开启隧道/, "the copied text carries the caveat");
-  assert.match(action.info, /只有本机能访问/, "the toast agrees with the text");
+  assert.equal(action.copyText, served.prompt, "console copy and /api/prompt use one prompt contract");
+  assert.match(action.info, /已连接该 MCP/);
 });
 
 test("services are listed and driven through the console API", async () => {

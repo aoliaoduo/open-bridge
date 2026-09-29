@@ -11,7 +11,6 @@
  */
 import { host } from "../../host/host.js";
 import { randomBytes } from "node:crypto";
-import { authEnabled } from "../../http/auth.js";
 import { CONFIG_DEFAULTS } from "../config/config-defaults.js";
 import { ROUTE_TOKEN_KEY, clientMcpUrl, record, state, redactedPublicUrl } from "../state.js";
 import { buildWebAiPrompt } from "../onboarding.js";
@@ -270,16 +269,11 @@ export async function republishAfterRotate(): Promise<void> {
 }
 
 /**
- * The onboarding prompt for the current instance, with its locality stated.
- *
- * `state.tunnelUrl` is the signal: it is set only while a tunnel is actually
- * published (see the public_url semantics fixed earlier), so when it is empty
- * the prompt must admit that the URL it carries is loopback-only.
+ * The onboarding prompt for an already-connected AI client.
+ * Connection credentials are intentionally separate (`open-bridge url` / console copy URL).
  */
 export function webAiPrompt(): string {
-  const url = clientMcpUrl();
-  if (!url) throw new Error("Start Bridge before copying the web AI prompt.");
-  return buildWebAiPrompt({ url, isPublic: Boolean(state.tunnelUrl), authEnabled: authEnabled() });
+  return buildWebAiPrompt();
 }
 
 /**

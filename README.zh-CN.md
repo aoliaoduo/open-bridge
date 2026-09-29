@@ -56,10 +56,10 @@ Windows 下有 `scripts/start-open-bridge.cmd`：双击后输入要用的目录�
 ## 接入客户端
 
 ```bash
-open-bridge prompt      # 打印一段现成的接入提示词
+open-bridge prompt      # 打印接入后的工作提示词；其中不含 MCP URL
 ```
 
-粘给客户端即可，或者直接给它 MCP URL。只认标准授权流程的客户端，可以用 OAuth 2.1 + PKCE（默认关闭），见 [docs/configuration.md](docs/configuration.md#web-console)。
+MCP URL 单独配置（控制台点「复制 URL」，或运行 `open-bridge url`），连接后再把这段提示词粘给客户端。只认标准授权流程的客户端，可以用 OAuth 2.1 + PKCE（默认关闭），见 [docs/configuration.md](docs/configuration.md#web-console)。
 
 ## 一段话讲清安全
 

@@ -189,9 +189,9 @@ export async function cmdUrl(parsed: ParsedArgs): Promise<void> {
  * The console has always been able to hand this out, but until now nothing
  * outside the browser could: the standalone build exported webAiPrompt() and
  * never called it, so the onboarding text the VS Code extension offered was
- * unreachable. This is the terminal's way to it — paste the output straight
- * into ChatGPT/Claude/Cursor and the client has the URL (and the bearer note
- * when that gate is on).
+ * unreachable. This is the terminal's way to it — configure the MCP endpoint
+ * separately (for example with `open-bridge url`), then paste this operating
+ * guidance into the connected ChatGPT/Claude/Cursor client.
  */
 export async function cmdPrompt(parsed: ParsedArgs): Promise<void> {
   const home = resolveHome(parsed);

@@ -6,8 +6,8 @@
 
 ## 1. 先核对事实
 
-- MCP URL 由操作者提供，或在 Bridge 主机用 `open-bridge url` / `open-bridge prompt`
-  获取。共享示例只写 `<MCP_URL>`，不要保存实例凭据、个人路径或临时调试脚本。
+- MCP URL 由操作者提供，或在 Bridge 主机用 `open-bridge url` 获取；`open-bridge prompt`
+  只输出接入后的工作指令，不包含 URL。共享示例只写 `<MCP_URL>`，不要保存实例凭据、个人路径或临时调试脚本。
 - 使用 Streamable HTTP；客户端/SDK 负责协议协商、JSON/SSE 和有效会话。
   ngrok 请求可附 `ngrok-skip-browser-warning: 1`，认证按实例配置提供。
   状态型客户端先握手，收到会话过期后重新握手，不猜测或重用失效 id。

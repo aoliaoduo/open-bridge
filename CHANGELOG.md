@@ -10,6 +10,10 @@
 
 - TUI「任务」页显示最近一次 `report_progress`：阶段、类别、百分比、时间与消息作为任务清单的上下文一起进入同一滚动视口；进度从 todo store 的按 workspace 内存快照读取，500 ms repaint 不增加持久化 IO，重启后的最近记录也会恢复显示。
 
+### Changed
+
+- 所有「接入提示词」统一只保留 Agent 工作约定，不再嵌入 MCP URL、路由令牌、本地/公网可达性或 Bearer 连接说明；连接地址由控制台「复制 URL」或 `open-bridge url` 单独提供，避免把能力地址随提示词复制进聊天记录。
+
 ### Fixed
 
 - TUI MCP transport 活动不再以未结束的 `◆ progress` 和原始 trace 字符串抢占主视图：response-close 后按真实结果映射为 completed/error/warning，列表显示 `MCP + 人类可读方法 + HTTP/格式`，耗时进入统一右侧 duration 列；Enter 仍保留 era/HTTP verb/session/tool hash 等脱敏诊断 trace。`bridge_status` 的 section 同时改为本地化标签（如 `概览`）。
