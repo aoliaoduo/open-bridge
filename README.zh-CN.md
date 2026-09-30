@@ -49,7 +49,15 @@ Web 控制台:   http://127.0.0.1:18080/console/
 
 **关掉终端就停。** 那个窗口掌握着实例 —— 这也是控制台没有启动/停止按钮的原因。
 
-Windows 下有 `scripts/start-open-bridge.cmd`：双击后输入要用的目录。若要固定启动**本项目**，请双击 `scripts/start-open-bridge-project.cmd`：它始终用本项目作工作区、每次构建后提供控制台（不自动打开浏览器），并固定使用 **8123** 端口。
+Windows 推荐直接安装资源管理器右键菜单：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/install-context-menu.ps1
+```
+
+安装后，在文件夹本身或文件夹空白处右键 **Open Bridge Here**，会在新终端执行 `open-bridge launch --root <该目录>`：未运行就启动 TUI，已经运行则复用该实例、不重复启动。Windows 11 可能把这个经典 shell 菜单放在「显示更多选项」里。卸载运行 `scripts/windows/uninstall-context-menu.ps1`；脚本只写当前用户的 `HKCU\Software\Classes`，不需要管理员权限。
+
+仓库里原有的 `scripts/start-open-bridge.cmd` 仍可双击后手工输入目录；`scripts/start-open-bridge-project.cmd` 则固定启动**本项目**，每次构建后提供控制台（不自动打开浏览器），并固定使用 **8123** 端口。
 
 其余的 —— 每条命令、每项设置、控制台各页、隧道、通知、数据目录 —— 都在 **[docs/configuration.md](docs/configuration.md)**。
 

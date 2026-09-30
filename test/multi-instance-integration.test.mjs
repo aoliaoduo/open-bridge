@@ -183,6 +183,16 @@ test("a second serve in the same directory is refused with a clear message", asy
   assert.match(again.stderr + (again.stdout ?? ""), /该目录已有实例在运行/, `expected the per-directory refusal, got: ${again.stderr}`);
 });
 
+test("launch reuses an already-running workspace instead of treating it as an error", async () => {
+  const beforeLaunch = await statusFor("B");
+  const launched = await run(process.execPath, [CLI_BIN, "launch", "--no-tunnel", "--port", "0", "--root", dirB, "--home", home], { cwd: dirA });
+  assert.match(launched.stdout, /该目录已有实例在运行/);
+  assert.match(launched.stdout, /控制台:/);
+  const afterLaunch = await statusFor("B");
+  assert.equal(afterLaunch.runtime.pid, beforeLaunch.runtime.pid, "launch must reuse the existing process, not create a duplicate");
+  assert.equal(afterLaunch.runtime.port, beforeLaunch.runtime.port);
+});
+
 /** An unused loopback port, so the suite can name the port it refills. */
 async function freePort() {
   return await new Promise((resolve, reject) => {

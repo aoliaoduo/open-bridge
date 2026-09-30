@@ -141,6 +141,20 @@ test("serve -h is the same promise as --help", async () => {
   }
 });
 
+test("launch --help describes reuse semantics and starts nothing", async () => {
+  const home = freshHome();
+  try {
+    const { code, stdout, stderr } = await runCli(["launch", "--help"], home);
+    assert.equal(code, 0);
+    assert.match(stdout, /open-bridge launch/);
+    assert.match(stdout, /已有实例|already running/i);
+    assert.deepEqual(readdirSync(home), [], "launch help must not claim a workspace or write runtime state");
+    assert.equal(stderr, "");
+  } finally {
+    removeTempDir(home);
+  }
+});
+
 test("the global help still describes every command it advertises", async () => {
   const home = freshHome();
   try {
@@ -148,7 +162,7 @@ test("the global help still describes every command it advertises", async () => 
     assert.equal(code, 0);
     // The usage groups several commands per line (`open-bridge stop | status | …`),
     // so the assertion is about the name being present at all.
-    for (const command of ["serve", "stop", "status", "instances", "logs", "health", "prompt", "config", "token", "doctor", "version"]) {
+    for (const command of ["serve", "launch", "stop", "status", "instances", "logs", "health", "prompt", "config", "token", "doctor", "version"]) {
       assert.ok(stdout.includes(command), `${command} is listed`);
     }
     assert.deepEqual(readdirSync(home), [], "help is a read-only command");

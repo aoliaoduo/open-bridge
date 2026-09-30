@@ -22,6 +22,9 @@ export const requiredPackagePaths = [
   "docs/configuration.md",
   "docs/tools.md",
   "package.json",
+  "scripts/windows/context-menu-launch.ps1",
+  "scripts/windows/install-context-menu.ps1",
+  "scripts/windows/uninstall-context-menu.ps1",
   // The vendored ripgrep: package.json publishes vendor/ whole, but this is
   // the file search defaults depend on, so it is pinned by name.
   "vendor/rg.exe",

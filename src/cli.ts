@@ -3,6 +3,7 @@
  *
  * Commands:
  *   serve     start the Bridge (HTTP + MCP + console), stays in the foreground
+ *   launch    start this workspace, or reuse it when it is already running
  *   stop      stop a running instance (via its local shutdown endpoint)
  *   status    show the running instance's state
  *   url       print the active MCP URL
@@ -74,6 +75,7 @@ const HELP = (): string => t(`open-bridge ${VERSION} — standalone MCP bridge f
 
 用法:
   open-bridge serve [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]
+  open-bridge launch [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]
   open-bridge stop [--pid N] | status | url | instances | health | prompt
   open-bridge logs [--tail N] [--follow] [--clear]
   open-bridge config [list] [get KEY] [set KEY VALUE] [path]
@@ -84,6 +86,7 @@ const HELP = (): string => t(`open-bridge ${VERSION} — standalone MCP bridge f
 
 说明:
   serve     前台启动 Bridge；控制台地址打印在终端（别名 start）
+  launch    启动目标工作区；如果该目录已有实例则复用并成功返回（适合资源管理器右键菜单）
   stop      停止「当前目录」那个实例（没有则按唯一运行中的实例；--pid N 指定别的实例）
             由该实例自己启动的命令（例如走它的 MCP 工具执行）会被拒绝——那等于立刻断掉
             自己正在用的连接；要真停，由人在终端里加 --force
@@ -107,6 +110,7 @@ const HELP = (): string => t(`open-bridge ${VERSION} — standalone MCP bridge f
 
 Usage:
   open-bridge serve [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]
+  open-bridge launch [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]
   open-bridge stop [--pid N] | status | url | instances | health | prompt
   open-bridge logs [--tail N] [--follow] [--clear]
   open-bridge config [list] [get KEY] [set KEY VALUE] [path]
@@ -117,6 +121,7 @@ Usage:
 
 Commands:
   serve     Start the Bridge in the foreground; the console URL is printed here (alias: start)
+  launch    Start the target workspace, or reuse it successfully when already running (Explorer-friendly)
   stop      Stop the instance for THIS directory (or the only running one); --pid N picks another
             Commands the instance itself started (through its own MCP tools) are
             refused: that would cut the connection being used to ask. To really
@@ -182,6 +187,26 @@ Behaviour:
     from the workspace, so the same directory keeps the same address.
 `);
 
+const LAUNCH_HELP = (): string => t(`open-bridge launch — 启动或复用一个工作区实例
+
+用法:
+  open-bridge launch [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]
+
+行为:
+  * 目标目录没有实例：与 serve 相同，前台启动 Bridge/TUI。
+  * 目标目录已有实例：打印现有 pid、端口和控制台地址，成功返回，不重复启动。
+  * 设计给资源管理器右键菜单等外部入口使用；工作区仍然是进程级边界，不做热切换。
+`, `open-bridge launch — start or reuse one workspace instance
+
+Usage:
+  open-bridge launch [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]
+
+Behaviour:
+  * No instance for the target: starts the Bridge/TUI in the foreground, like serve.
+  * Target already running: prints its pid, port and console URL and exits successfully without a duplicate.
+  * Intended for Explorer-style external launchers; the workspace remains a process-level boundary, not a hot-switched setting.
+`);
+
 // --- serve ------------------------------------------------------------------
 
 async function cmdServe(parsed: ParsedArgs): Promise<void> {
@@ -193,7 +218,7 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   // Note the second half: parseArgs only treats `--`-prefixed arguments as flags,
   // so a single-dash `-h` arrives as a positional and has to be looked for.
   if (parsed.flags.has("help") || parsed.flags.has("h") || parsed.rest.includes("-h")) {
-    console.log(SERVE_HELP());
+    console.log(parsed.command === "launch" ? LAUNCH_HELP() : SERVE_HELP());
     return;
   }
   const home = parsed.flags.get("home") as string | undefined;
@@ -236,11 +261,17 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   if (existing && pidAlive(existing.pid)) {
     // A double-clicked launcher lands here while an instance is already up,
     // so hand out the console address instead of only refusing.
-    fail(t(
-      `该目录已有实例在运行 (pid ${existing.pid}, 端口 ${existing.port})。它的控制台: http://127.0.0.1:${existing.port}/console/`
-        + " ；先 open-bridge stop，或换一个目录/端口再用。",
-      `This directory already has an instance running (pid ${existing.pid}, port ${existing.port}). Its console: http://127.0.0.1:${existing.port}/console/`
-        + " . Run open-bridge stop first, or use a different directory or port.",
+    const message = t(
+      `该目录已有实例在运行 (pid ${existing.pid}, 端口 ${existing.port})。控制台: http://127.0.0.1:${existing.port}/console/`,
+      `This directory already has an instance running (pid ${existing.pid}, port ${existing.port}). Console: http://127.0.0.1:${existing.port}/console/`,
+    );
+    if (parsed.command === "launch") {
+      console.log(message);
+      return;
+    }
+    fail(message + t(
+      " ；先 open-bridge stop，或换一个目录/端口再用。",
+      " . Run open-bridge stop first, or use a different directory or port.",
     ));
   }
 
@@ -457,7 +488,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
   setHostInstaller(installNodeHost, localUtcOffset);
   const parsed = parseArgs(argv);
   switch (parsed.command) {
-    case "serve": case "start": return cmdServe(parsed);
+    case "serve": case "start": case "launch": return cmdServe(parsed);
     case "stop": return cmdStop(parsed);
     case "status": return cmdStatus(parsed);
     case "url": return cmdUrl(parsed);

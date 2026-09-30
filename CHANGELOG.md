@@ -8,6 +8,7 @@
 
 ### Added
 
+- 新增 `open-bridge launch --root DIR`：目标目录未运行时前台启动 TUI，已运行时复用现有实例并成功返回，作为 Explorer/Finder 等外部入口的稳定 workspace 启动语义。
 - TUI 新增全局快捷键：`u` 一键复制当前 MCP URL，`p` 一键复制接入提示词；URL 不在面板正文回显，复制成功/失败只显示短暂状态，并使用系统原生剪贴板命令而不引入额外依赖。
 
 ### Fixed

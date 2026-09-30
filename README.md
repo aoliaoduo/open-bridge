@@ -61,10 +61,23 @@ free port, so the URL changes each start. `--port 18080` keeps it stable.
 **Closing the terminal stops the bridge.** That window owns the instance —
 which is also why the console has no start/stop buttons.
 
-On Windows, `scripts/start-open-bridge.cmd` asks which folder to serve. For this
-repository itself, double-click `scripts/start-open-bridge-project.cmd`: it always uses
-this project as the workspace, rebuilds it, and serves the console on fixed
-port **8123** (without opening a browser).
+On Windows, the preferred launcher is an Explorer context menu:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/install-context-menu.ps1
+```
+
+Then right-click a folder, or the background inside it, and choose **Open Bridge Here**.
+It opens a new terminal and runs `open-bridge launch --root <that-folder>`: a missing
+instance starts its TUI, while an existing one is reused rather than duplicated.
+Windows 11 may put this classic shell verb under **Show more options**. Remove it with
+`scripts/windows/uninstall-context-menu.ps1`; registration is per-user under
+`HKCU\Software\Classes`, so no administrator rights are needed.
+
+The older `scripts/start-open-bridge.cmd` still asks for a folder manually. For this
+repository itself, `scripts/start-open-bridge-project.cmd` always uses this project as
+the workspace, rebuilds it, and serves the console on fixed port **8123** (without
+opening a browser).
 
 Everything else — every command, every setting, the console tour, the tunnel,
 notifications, the data directory — is in
