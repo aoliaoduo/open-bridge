@@ -52,7 +52,8 @@ if ($null -ne $terminal) {
       $bridgeJs,
       "launch",
       "--root",
-      $workspace
+      $workspace,
+      "--open-existing"
     )
     & $terminal.Source @terminalArgs
     if ($LASTEXITCODE -ne 0) {
@@ -66,6 +67,6 @@ if ($PSCmdlet.ShouldProcess($workspace, "Open a console and launch Open Bridge")
   # Start-Process opens console executables in a new window by default on
   # Windows. Quote the two path arguments explicitly because ArgumentList is
   # joined into one native command line by Windows PowerShell 5.1.
-  $nodeArgs = '"' + $bridgeJs + '" launch --root "' + $workspace + '"'
+  $nodeArgs = '"' + $bridgeJs + '" launch --root "' + $workspace + '" --open-existing'
   Start-Process -FilePath $node.Source -WorkingDirectory $workspace -ArgumentList $nodeArgs | Out-Null
 }

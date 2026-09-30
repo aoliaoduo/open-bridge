@@ -37,7 +37,7 @@ open-bridge serve                     # a second instance, serving project-b, in
 - `open-bridge instances` lists every instance with pid, port and workspace, and marks which one matches the current directory.
 - `stop` / `status` / `url` / `prompt` / `health` **default to the instance for the current directory**. With no instance here but exactly one running machine-wide, that one is used and the output says so. With several running and none here, you are asked to pick with `instances` — it never guesses.
 - `--root DIR` overrides the default; `--home DIR` changes the data directory.
-- `open-bridge launch --root DIR` is the idempotent external-launcher form: it starts the workspace when absent and exits successfully with the existing console address when that workspace is already running. The Windows Explorer integration uses this rather than duplicating instance-detection logic in shell scripts.
+- `open-bridge launch --root DIR` is the idempotent external-launcher form: it starts the workspace when absent and exits successfully with the existing console address when that workspace is already running. Add `--open-existing` when an external launcher should open that already-running instance's Web console, without opening a browser for a newly started TUI. The Windows Explorer integration uses this rather than duplicating instance-detection logic in shell scripts.
 
 > **Ports**: without `--port` the default is `0`, a random free port each start, so the address changes. Pass `--port 18080` to pin it. An explicitly requested port that is busy is an error with a suggested alternative; a port **from the config file** that is busy falls back to a free one with a notice. Starting twice in the same directory is refused, naming the pid that holds it.
 
@@ -48,7 +48,7 @@ open-bridge serve                     # a second instance, serving project-b, in
 | Command | Purpose |
 | --- | --- |
 | `open-bridge serve [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]` | Run the bridge in the foreground; workspace = current directory |
-| `open-bridge launch [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]` | Start that workspace, or reuse its already-running instance successfully; intended for Explorer/Finder-style launchers |
+| `open-bridge launch [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open] [--open-existing]` | Start that workspace, or reuse its already-running instance successfully; `--open-existing` opens the reused Web console only |
 | `open-bridge instances` | List every instance sharing this data directory (alias `list`) |
 | `open-bridge status` | State, workspace, MCP URL, exposure |
 | `open-bridge health` | Full check: listener, workspace, tunnel role, exposure level, tool count, build freshness — and one real request over the public URL |

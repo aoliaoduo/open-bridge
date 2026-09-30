@@ -6,19 +6,28 @@
 
 ## [Unreleased]
 
+## [1.4.4] — 2026-09-30
+
 ### Added
 
 - 新增 `open-bridge launch --root DIR`：目标目录未运行时前台启动 TUI，已运行时复用现有实例并成功返回，作为 Explorer/Finder 等外部入口的稳定 workspace 启动语义。
 - TUI 新增全局快捷键：`u` 一键复制当前 MCP URL，`p` 一键复制接入提示词；URL 不在面板正文回显，复制成功/失败只显示短暂状态，并使用系统原生剪贴板命令而不引入额外依赖。
+- 「安全」页新增显式的工作区安全预设：保持现有兼容默认不变，用户确认后一次开启 Bearer 门禁并关闭 `unrestrictedFileAccess`，文件访问收紧到当前 workspace 与已有 `allowedDirectories`；门禁已开启但有效令牌为零时，一步启用也会补发可用令牌。
 
 ### Fixed
 
+- `apply_patch` 在 hunk 上下文已过期时会明确指出目标文件/行、可能的 stale-context 原因，并要求重新读取目标范围后重建 patch，不再只返回笼统的 “Patch context not found”。
 - Windows Explorer 右键启动改用无控制台的 `wscript.exe` 薄中继，再隐藏启动 PowerShell launcher；点击“在此启动 Open Bridge”时不再先闪出短命的 PowerShell 窗口，同时仍保持 Windows Terminal 直接承载 Node/Open Bridge。
 - Windows Explorer 启动器不再用中间 PowerShell 包住 `open-bridge launch`；Windows Terminal 现在直接以 Node/Open Bridge 作为标签页根进程，关闭 TUI 标签页时不会留下孤儿 Bridge，之后再次右键可以正常重新启动。
 - Windows Explorer 右键入口默认改为“在此启动 Open Bridge”，并通过 `SeparatorBefore` 与粘贴类系统命令分组；安装脚本保持 ASCII 源码，用 Unicode 码点生成中文名称以兼容 Windows PowerShell 5.1，同时不再强制 `Position=Top`。
 - Windows 下 MSYS/Git Bash 进程树终止的宿主保护改为单次进程表快照，并恢复原子的 `taskkill /T /F` 可见树清理；完整测试高负载时不再因保护检查耗尽预算而留下持有 stdio 的孤儿进程。
 - Windows 进程族终止现在保护调用者自身及其 Windows 祖先进程，集成测试里的 fixture Bridge 也使用独立 process group；从正在承载 MCP 会话的 Bridge 内执行完整自检时，破坏性进程清理不再有机会误伤宿主实例。
 - TUI 活动流改为「一次调用，一条主行」：主行直接显示真实 tool id 与语义目标；成功的 `tools/call` transport trace 折叠进 Enter 详情；前台 `run_command` 的底层 process start/exit 也不再重复占行，只有超时后转为受管进程、后台任务、服务、Shell 与 HTTP/中断等 transport 异常继续单独提升显示。审计日志与 `/api/activity` 仍保留底层事实，明文工具名只存在于有界的进程内显示映射。
+- shutdown 的 ngrok/Tailscale teardown 不再用同步外部命令阻塞 Node event loop；已有的 shutdown deadline 现在能在隧道清理卡住时真正触发，停止流程不会无限挂住。
+- service 定义、todo/progress 与 session ticket 的关键持久化不再吞掉写盘失败后继续报成功：失败会返回给调用者，service/todo 的内存状态会回滚，同时持久化队列仍可在下一次写入恢复。
+- 隧道提供商、可执行文件或 ngrok authtoken 改变后会立即失效 detection cache，控制台在保存成功后主动重新检测，不再最长显示 60 秒的旧状态。
+- Settings/Security 在 Bridge 重启时间超过原先约 7.5 秒重试窗口时不再永久停在 skeleton；页面会以有界退避继续后台恢复，并只在首次失败时提示错误。
+- Windows Explorer 对已运行 workspace 再次右键启动时会直接打开现有 Web 控制台，而不是新开一个很快退出、看起来像“什么都没发生”的终端。
 
 ## [1.4.3] — 2026-09-30
 

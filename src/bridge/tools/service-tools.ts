@@ -187,9 +187,20 @@ async function saveServiceInner(args: Args): Promise<unknown> {
   // resurrect the OLD command after the re-save (terminateProcess clears
   // scheduled restarts even for an already-exited process).
   const existing = state.services.get(serviceName);
+  let rollbackDefinition: ServiceDefinition | undefined;
   if (existing?.commandId) {
     const proc = state.commands.get(existing.commandId);
-    if (proc) await terminateProcess(proc, "stopped");
+    if (proc) {
+      const stopped = await terminateProcess(proc, "stopped");
+      if (!stopped) {
+        throw new Error(
+          `Service "${serviceName}" did not stop within the termination budget; refusing to replace its definition because that would orphan the running process.`,
+        );
+      }
+    }
+    rollbackDefinition = { ...existing, env: { ...existing.env }, commandId: undefined };
+  } else if (existing) {
+    rollbackDefinition = { ...existing, env: { ...existing.env }, commandId: undefined };
   }
   state.services.set(serviceName, {
     command,
@@ -203,7 +214,16 @@ async function saveServiceInner(args: Args): Promise<unknown> {
     maxRestarts: maxRestarts ?? 3,
     restartDelayMs: restartDelayMs ?? 1000,
   });
-  persistServices();
+  try {
+    await persistServices();
+  } catch (error) {
+    if (rollbackDefinition) state.services.set(serviceName, rollbackDefinition);
+    else state.services.delete(serviceName);
+    host().ui.refresh();
+    throw new Error(
+      `Service "${serviceName}" was not saved: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   host().ui.refresh();
   return { name: serviceName, saved: true };
 }
@@ -362,8 +382,17 @@ async function deleteServiceInner(args: Args): Promise<unknown> {
     };
   }
   service.commandId = undefined;
+  const rollbackDefinition: ServiceDefinition = { ...service, env: { ...service.env }, commandId: undefined };
   state.services.delete(serviceName);
-  persistServices();
+  try {
+    await persistServices();
+  } catch (error) {
+    state.services.set(serviceName, rollbackDefinition);
+    host().ui.refresh();
+    throw new Error(
+      `Service "${serviceName}" was not deleted from persistent state: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   host().ui.refresh();
   return { name: serviceName, deleted: true, stopped };
 }

@@ -1,15 +1,12 @@
-import { host } from "../../host/host.js";
 import { randomBytes } from "node:crypto";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { testReadyPattern, validateReadyPattern } from "../../mcp/regex-worker.js";
-import { applyCompletionTimes, persistTodos } from "../todo-store.js";
 import {
   MAX_INLINE_OUTPUT,
   READY_PATTERN_WINDOW_BYTES,
   READY_PATTERN_TEST_TIMEOUT_MS,
   state,
   type CommandState,
-  type SessionState,
 } from "../state.js";
 
 /** Bytes of the previous ready-scan window re-examined by the next one (boundary split protection). */
@@ -33,10 +30,6 @@ import {
   stringEnv,
 } from "../runtime/processes.js";
 import type { JsonArgs } from "./json-args.js";
-import { sessionActivityViews } from "../sessions/session-views.js";
-
-/** set_todos list cap — the same bound the tool schema advertises as maxItems. */
-const MAX_TODOS = 100;
 
 type Args = JsonArgs;
 
@@ -552,108 +545,4 @@ export function getProcessSnapshot(args: Args): unknown {
   if (id) return processSnapshot(commandStateOrThrow(args));
   pruneCommands();
   return [...state.commands.values()].map(processSnapshot);
-}
-
-/**
- * "Who is connected?" — both eras, in one answer.
- *
- * The legacy rows are the real thing: a session id, a transport, a call count,
- * and something `close_session` can act on. The modern era has none of that, so
- * it gets one row that is explicitly not a session — because the alternative
- * (leaving it out) was a lie of omission the server had already told once: an
- * agent asking this question while driving the Bridge over the stateless path got
- * an empty list, and the empty list is what a *dead* Bridge looks like.
- *
- * The session TABLE is untouched by this: `state.sessions` must not grow entries
- * that own no transport (see its own comment in state.ts). Only the view says
- * what the table cannot.
- */
-export function listSessions(): unknown {
-  return sessionActivityViews().map(row => row.stateless
-    ? {
-        session_id: row.id,
-        era: row.era,
-        stateless: true,
-        closable: false,
-        connected_at: null,
-        first_seen: row.firstSeen,
-        last_used: row.lastUsed,
-        in_flight: row.inFlight,
-      }
-    : {
-        session_id: row.id,
-        era: row.era,
-        stateless: false,
-        closable: true,
-        connected_at: row.connectedAt,
-        last_used: row.lastUsed,
-        calls: row.calls,
-        todo_count: row.todoCount,
-      });
-}
-
-/** Todos live on the MCP session that set them. */
-export function setTodos(args: Args, session?: SessionState): unknown[] {
-  const next = validateTodos(args.todos);
-  // 完成时间戳只在这一处盖：state.todos（TUI）、session.todos（控制台）
-  // 与持久文档收到的是同一份 enriched，三路显示不会各说各话。
-  const enriched = applyCompletionTimes(state.todos, next);
-  if (session) {
-    session.todos = enriched;
-    state.latestSession = session;
-  }
-  persistTodos(enriched);
-  state.todos = [...enriched]; // the TUI sidebar reads this live copy
-  host().ui.update();
-  return next;
-}
-
-/**
- * Strict todo validation for the set_todos write path: malformed input is
- * rejected with a message the caller can fix. Reads are passed through instead —
- * `loadTodoStore` replaces a non-array `todos` with `[]` and then hands every
- * entry on untouched, so there is no entry-dropping reader to look for.
- */
-function validateTodos(value: unknown): Array<{ id: string; title: string; status: string }> {
-  if (!Array.isArray(value)) {
-    // Name the read tool as well as the parameter. `set_todos` is write-only,
-    // so the commonest way to get here is reaching for it to READ the list
-    // (`{action:"list"}` was a real attempt) — at which point "todos must be an
-    // array" is a true statement that answers the wrong question. get_todos is
-    // right there; the guard costs one clause and saves a round trip.
-    throw new Error(
-      "todos must be an array. (expected 'todos': object[]) "
-      + "set_todos replaces the whole list; use get_todos to read the current one.",
-    );
-  }
-  // The schema advertises maxItems 100; the endpoint validates inputs itself,
-  // so the bound is spelled here too — an unbounded list persisted, rendered
-  // and pushed to every watcher on the strength of a schema nobody enforces.
-  if (value.length > MAX_TODOS) {
-    throw new Error(`todos must contain at most ${MAX_TODOS} items (received ${value.length}).`);
-  }
-  const seen = new Set<string>();
-  const todos = value.map((item, index) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`Todo ${index + 1} must be an object.`);
-    const todo = item as Record<string, unknown>;
-    const id = String(todo.id ?? "").trim();
-    const title = String(todo.title ?? "").trim();
-    const status = String(todo.status ?? "");
-    if (!id || !title || !["pending", "in_progress", "completed"].includes(status)) {
-      // Say which field is missing. "requires id, title, and a valid status"
-      // made the caller re-read all three against their payload to find the one
-      // that was wrong — and status is the one with a closed vocabulary, so an
-      // invalid value there is both the likeliest error and the one a bare
-      // field list cannot explain.
-      const missing = [!id && "id", !title && "title"].filter(Boolean).join(", ");
-      const detail = missing
-        ? `missing ${missing}`
-        : `status must be pending, in_progress or completed (got ${JSON.stringify(status)})`;
-      throw new Error(`Todo ${index + 1}: ${detail}. (expected 'todos[i]': object)`);
-    }
-    if (seen.has(id)) throw new Error(`Duplicate todo id: ${id}`);
-    seen.add(id);
-    return { id, title, status };
-  });
-  return todos;
 }

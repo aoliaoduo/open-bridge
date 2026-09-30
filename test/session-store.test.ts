@@ -136,3 +136,23 @@ test("touch alone never writes; the flush carries the pending stamp", async () =
   resetSessionTicketCache();
   setHost(memoryHost());
 });
+
+test("flush surfaces a failed ticket write, and a later write can recover", async () => {
+  bag.clear();
+  resetSessionTicketCache();
+  const broken = memoryHost();
+  broken.state.update = async (): Promise<void> => {
+    throw new Error("ticket store unavailable");
+  };
+  setHost(broken);
+
+  rememberSessionTicket("ff".repeat(16));
+  await assert.rejects(flushSessionTickets(), /ticket store unavailable/);
+
+  setHost(memoryHost());
+  rememberSessionTicket("11".repeat(16));
+  await flushSessionTickets();
+  resetSessionTicketCache();
+  assert.equal(hasLiveSessionTicket("11".repeat(16)), true, "the persistence queue recovers after one failed write");
+  setHost(memoryHost());
+});

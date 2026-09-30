@@ -315,7 +315,7 @@ export async function workspaceBrief(): Promise<Record<string, unknown>> {
   return brief;
 }
 
-export function reportProgress(args: Args, session?: SessionState): Record<string, unknown> {
+export async function reportProgress(args: Args, session?: SessionState): Promise<Record<string, unknown>> {
   // `message` is required by the schema, and `?? ""` turned a dropped field into
   // a successful no-op: an empty audit entry plus an empty logging notification,
   // with nothing telling the caller the report never happened. Only ABSENCE is
@@ -343,14 +343,20 @@ export function reportProgress(args: Args, session?: SessionState): Record<strin
   // Push to the calling client as a standard MCP logging notification (best-effort;
   // request/response-only clients simply ignore it).
   notifyLogging(session, level, message);
-  persistProgress({
-    message,
-    // Only ever a member of the closed vocabulary, or absent.
-    ...(phase ? { phase } : {}),
-    ...(category ? { category } : {}),
-    percent: args.percent,
-    level,
-  });
+  try {
+    await persistProgress({
+      message,
+      // Only ever a member of the closed vocabulary, or absent.
+      ...(phase ? { phase } : {}),
+      ...(category ? { category } : {}),
+      percent: args.percent,
+      level,
+    });
+  } catch (error) {
+    throw new Error(
+      `Progress was delivered live but could not be persisted: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   return {
     received: true,
     message: args.message,

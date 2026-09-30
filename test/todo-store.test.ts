@@ -155,6 +155,22 @@ test("an unbound workspace persists under the literal unbound key", async () => 
   assert.ok(store.dump().has("openBridge.todos.unbound"));
 });
 
+test("todo persistence exposes a failed write without poisoning the queue", async () => {
+  const good = store.update.bind(store);
+  store.update = async (): Promise<void> => {
+    throw new Error("todo store unavailable");
+  };
+  await assert.rejects(
+    persistTodos([{ id: "bad", title: "not saved", status: "pending" }]),
+    /todo store unavailable/,
+  );
+  assert.equal(todoProgress(), null, "a failed write must not advance the cached persisted view");
+
+  store.update = good;
+  await persistTodos([{ id: "good", title: "saved", status: "pending" }]);
+  assert.deepEqual(doc().todos, [{ id: "good", title: "saved", status: "pending" }]);
+});
+
 test("applyCompletionTimes stamps new completions, keeps stamps, clears on reopen", () => {
   const first = applyCompletionTimes([], [
     { id: "a", title: "x", status: "completed" },

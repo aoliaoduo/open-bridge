@@ -6,14 +6,83 @@ import { NGROK_AUTHTOKEN_KEY, setCachedAuthtoken } from "../bridge/tunnel/ngrok-
 import { restartTunnelForProviderChange } from "../bridge/lifecycle/lifecycle.js";
 import { state } from "../bridge/state.js";
 import { host } from "../host/host.js";
+import { normalizeNgrokDomainSetting } from "../http/request-policy.js";
+import { maskBarkKey } from "../bridge/config/config-values.js";
 
 const TUNNEL_FACTS_TTL_MS = 60_000;
 let tunnelFactsCache: { at: number; facts: Awaited<ReturnType<typeof detectTunnelFacts>> } | null = null;
+
+/** Drop machine/provider reconnaissance after a setting or credential changes. */
+export function invalidateTunnelFactsCache(): void {
+  tunnelFactsCache = null;
+}
 
 export interface TunnelConfigureOutcome {
   ok: boolean;
   info?: string;
   error?: string;
+}
+
+export type TunnelDetectionSettingKey = "tunnelProvider" | "ngrokExecutable" | "tailscaleExecutable";
+
+/** Save a setting that changes provider reconnaissance and invalidate its cache. */
+export async function saveTunnelDetectionSetting(
+  key: TunnelDetectionSettingKey,
+  value: string,
+): Promise<TunnelConfigureOutcome> {
+  const cfg = host().config;
+  const previousProvider = String(cfg.get("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string));
+  await cfg.update(key, value);
+  invalidateTunnelFactsCache();
+  if (key === "tunnelProvider" && value !== previousProvider) {
+    void restartTunnelForProviderChange();
+    return { ok: true, info: `隧道提供商已切换为 ${value}，正在按新渠道重建隧道。` };
+  }
+  return { ok: true, info: "已保存。" };
+}
+
+/** Validate and store the ngrok domain without restarting a live tunnel. */
+export async function saveTunnelDomain(raw: string): Promise<TunnelConfigureOutcome> {
+  let domain: string;
+  try {
+    domain = normalizeNgrokDomainSetting(raw);
+  } catch {
+    return {
+      ok: false,
+      error: "域名格式不对。示例：my-tunnel.ngrok-free.dev（在你的 ngrok 控制台可以找到）。",
+    };
+  }
+  await host().config.update("ngrokDomain", domain);
+  return {
+    ok: true,
+    info: domain
+      ? "ngrok 域名已保存。"
+      : "ngrok 域名已清除；未配置域名时仅本机可用。此操作不停止当前隧道。",
+  };
+}
+
+/** Store or clear the write-only ngrok account credential. */
+export async function saveNgrokAuthtoken(rawValue: string): Promise<TunnelConfigureOutcome> {
+  const raw = rawValue.trim();
+  if (!raw) {
+    await host().secrets.store(NGROK_AUTHTOKEN_KEY, "");
+    setCachedAuthtoken("");
+    invalidateTunnelFactsCache();
+    return { ok: true, info: "Authtoken 已清除。ngrok 会改用它自己配置文件里的凭据（如果配过）。" };
+  }
+  if (raw.length < 20 || /\s/.test(raw)) {
+    return {
+      ok: false,
+      error: "这不像一个 ngrok authtoken：应该是一长串不含空格的字符，在 ngrok 控制台的 Your Authtoken 页面复制。",
+    };
+  }
+  await host().secrets.store(NGROK_AUTHTOKEN_KEY, raw);
+  setCachedAuthtoken(raw);
+  invalidateTunnelFactsCache();
+  return {
+    ok: true,
+    info: `Authtoken 已保存（${maskBarkKey(raw)}）。下次启动隧道时生效：关掉承载本实例的终端窗口再重新启动（一键启动脚本双击一次即可）。`,
+  };
 }
 
 /** The saved ngrok authtoken, or "". Never returned to the console. */
@@ -88,6 +157,7 @@ export async function autoConfigureTunnel(): Promise<TunnelConfigureOutcome> {
     await cfg.update(write.key, write.value);
     written.push(write.label);
   }
+  if (written.length) invalidateTunnelFactsCache();
 
   // Pick the new values up immediately without changing the operator-facing
   // convenience of a live tunnel.

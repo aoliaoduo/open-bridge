@@ -142,6 +142,13 @@ export function TunnelSection({ settings, act }: {
   })();
 
   const setConfig = setConfigFor(act);
+  const setTunnelConfig = async (key: "tunnelProvider" | "ngrokExecutable" | "tailscaleExecutable", value: string): Promise<void> => {
+    const result = await act({ command: "setConfig", key, value });
+    if (result?.ok) {
+      setReach(null);
+      await reloadTunnel();
+    }
+  };
 
   /** One explicit domain write, shared by the dropdown and manual save. */
   const saveDomain = async (raw: string): Promise<void> => {
@@ -191,9 +198,7 @@ export function TunnelSection({ settings, act }: {
           )}
         >
           <select value={cfg.tunnelProvider} onChange={e => {
-            setConfig("tunnelProvider", e.target.value);
-            setReach(null);
-            void reloadTunnel();
+            void setTunnelConfig("tunnelProvider", e.target.value);
           }}>
             <option value="ngrok">ngrok</option>
             <option value="tailscale">Tailscale Funnel</option>
@@ -399,7 +404,7 @@ export function TunnelSection({ settings, act }: {
               autoValues={["", "ngrok"]}
               autoLabel={autoNgrokLabel}
               placeholder={t("ngrok 可执行文件的完整路径", "Full path to the ngrok executable")}
-              onCommit={next => setConfig("ngrokExecutable", next)}
+              onCommit={next => { void setTunnelConfig("ngrokExecutable", next); }}
             />
           ) : (
             <ExecutablePicker
@@ -408,7 +413,7 @@ export function TunnelSection({ settings, act }: {
               autoValues={[""]}
               autoLabel={resolvedTailscaleExe ?? t("按 PATH 与默认安装目录查找", "PATH, then the default install directory")}
               placeholder={t("tailscale 可执行文件的完整路径", "Full path to the tailscale executable")}
-              onCommit={next => setConfig("tailscaleExecutable", next)}
+              onCommit={next => { void setTunnelConfig("tailscaleExecutable", next); }}
             />
           )}
         </Field>

@@ -23,7 +23,8 @@ import {
   checkHttpTool, checkPortTool, deleteService, listServices, restartService,
   serviceStatus, startAllServices, startService, stopService, stopAllServices,
 } from "./service-tools.js";
-import { forceTerminate, listSessions, restartProcess, waitProcess, waitTool } from "./process-tools.js";
+import { forceTerminate, restartProcess, waitProcess, waitTool } from "./process-tools.js";
+import { listSessions } from "./session-tools.js";
 import { copyFile, createDirectory, deleteFile, moveFile } from "./file-tools.js";
 import {
   clearActivityLogTool, getAuthStatus, getBridgeStatus, getLockStatus,

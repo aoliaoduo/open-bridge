@@ -493,6 +493,53 @@ test("one step arms the second lock: mint, enable, and /mcp really refuses", asy
   assert.notEqual(anonymousAgain.status, 401, "lock off: the endpoint answers again");
 });
 
+test("workspace hardening keeps compatibility defaults opt-in but applies both protections together", async () => {
+  // Make the starting point explicit: public-open style auth and unrestricted
+  // file access, with no token available for the preset to reuse.
+  await postAction({ command: "setAuthEnabled", enabled: false });
+  await postAction({ command: "revokeAll" });
+  await postAction({ command: "setConfig", key: "unrestrictedFileAccess", value: true });
+
+  try {
+    const hardened = await postAction({ command: "hardenWorkspace" });
+    assert.equal(hardened.status, 200);
+    const body = await hardened.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.state.authEnabled, true, "the preset enables the Bearer gate");
+    assert.equal(body.state.config.unrestrictedFileAccess, false, "the preset restricts file access");
+    assert.ok(body.secret?.secret.startsWith("ob_"), "a zero-token workspace receives the one-time Bearer secret");
+
+    const anonymous = await fetch(`${base()}/mcp/${routeToken}`);
+    assert.equal(anonymous.status, 401, "the preset's auth half is effective, not just persisted");
+  } finally {
+    await postAction({ command: "setAuthEnabled", enabled: false });
+    await postAction({ command: "setConfig", key: "unrestrictedFileAccess", value: true });
+    await postAction({ command: "revokeAll" });
+  }
+});
+
+test("arming repairs an already-enabled gate that has zero usable tokens", async () => {
+  await postAction({ command: "setAuthEnabled", enabled: false });
+  await postAction({ command: "revokeAll" });
+  const seed = await postAction({ command: "armPublicLock", label: "repair-seed", ttlSeconds: 3_600 });
+  assert.equal(seed.status, 200);
+  await postAction({ command: "revokeAll" });
+
+  try {
+    const repaired = await postAction({ command: "armPublicLock", label: "repair", ttlSeconds: 3_600 });
+    assert.equal(repaired.status, 200);
+    const body = await repaired.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.state.authEnabled, true);
+    assert.equal(body.state.usableCount, 1);
+    assert.ok(body.secret?.secret.startsWith("ob_"), "the repair path mints the missing usable token");
+    assert.match(body.info ?? "", /没有有效令牌/);
+  } finally {
+    await postAction({ command: "setAuthEnabled", enabled: false });
+    await postAction({ command: "revokeAll" });
+  }
+});
+
 test("console setConfig shares MCP validation: garbage refused, valid saved", async () => {
   // The drift this unification fixes: garbage booleans used to be stored as
   // `false`, relative directories kept as-is. Both are refused now, with the

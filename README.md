@@ -68,8 +68,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/install-cont
 ```
 
 Then right-click a folder, or the background inside it, and choose **在此启动 Open Bridge**.
-It opens a new terminal and runs `open-bridge launch --root <that-folder>`: a missing
-instance starts its TUI, while an existing one is reused rather than duplicated.
+It opens a new terminal and runs `open-bridge launch --root <that-folder> --open-existing`:
+a missing instance starts its TUI, while an existing one is reused rather than duplicated
+and its Web console opens directly.
 With Windows Terminal, Open Bridge is the tab's root process, so closing that TUI tab
 also ends the workspace instance and a later context-menu launch starts cleanly again.
 The entry is separated from Explorer's paste commands and is not forced to the top.

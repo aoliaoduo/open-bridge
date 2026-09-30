@@ -90,28 +90,33 @@ export function App() {
     toastTimer.current = setTimeout(() => setToast(null), 2600);
   }, []);
 
-  const refreshSettings = useCallback(async (): Promise<boolean> => {
+  const refreshSettings = useCallback(async (quiet = false): Promise<boolean> => {
     try {
       setSettings(await api.settings());
       return true;
     } catch (error) {
-      showToast(errorMessage(error), true);
+      if (!quiet) showToast(errorMessage(error), true);
       return false;
     }
   }, [showToast]);
 
   useEffect(() => {
-    // The first load retries on its own: a 404/timeout while the server is
-    // mid-restart — the console's own documented scenario — used to leave
-    // `settings` null forever, so Security and Settings sat on a skeleton.
-    // Every attempt still surfaces its error (the toast refreshes rather
-    // than stacks), so the operator is told throughout instead of silently.
+    // Keep recovering for as long as this page exists. A Bridge restart can
+    // legitimately take longer than the old 5 x 1.5 s window (tunnel teardown,
+    // package rebuild, a loaded machine). After that window the old code simply
+    // gave up and Settings/Security stayed on skeletons until F5.
+    //
+    // Surface the first failure, then retry quietly with bounded backoff: a
+    // ten-second outage must not create a ten-second stream of identical toasts.
     let alive = true;
     (async () => {
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        if (await refreshSettings()) return;
+      let attempt = 0;
+      while (alive) {
+        if (await refreshSettings(attempt > 0)) return;
         if (!alive) return;
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        const delayMs = attempt < 4 ? 1500 : attempt < 6 ? 5000 : 10_000;
+        attempt += 1;
+        await new Promise(resolve => setTimeout(resolve, delayMs));
       }
     })();
     return () => { alive = false; };

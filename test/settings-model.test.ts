@@ -13,7 +13,7 @@ test("normalize passes through every command the page can send", () => {
     "copyPrompt", "start", "stop", "rotateEndpoint", "purgeTokens", "revokeAll",
     // The tunnel card's two buttons: one writes what detection found into the
     // fields that are still empty, the other re-runs the reconnaissance.
-    "autoConfigureTunnel", "refreshTunnelDetect",
+    "autoConfigureTunnel", "refreshTunnelDetect", "hardenWorkspace",
   ];
   for (const command of simple) {
     assert.deepEqual(normalizeSettingsMessage({ command }), { command }, command);

@@ -11,7 +11,7 @@
  * dependency runs one way: lifecycle -> tunnel.
  */
 import { host } from "../../host/host.js";
-import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { healthCheckUrl, probePublicBridge, type PublicBridgeVerdict } from "../../http/peers.js";
 import { validateNgrokDomain } from "../../http/request-policy.js";
 import { isDeterministicNetworkFailure } from "../../network/net-failure.js";
@@ -29,16 +29,28 @@ import { funnelMountIsOurs, probeFunnelHolder, shouldClaimOnStartup } from "./fu
 /** Consecutive deterministic (DNS/refused/TLS) health failures before aborting startup early. */
 const PUBLIC_HEALTH_DETERMINISTIC_FAILURE_LIMIT = 3;
 
-/** Kill the tunnel and everything it spawned; a bare kill() leaves orphans holding the domain on Windows. */
-export function killTunnelTree(child: ChildProcessWithoutNullStreams | undefined): void {
+function execFileQuiet(file: string, args: string[], timeout: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { timeout, windowsHide: true }, error => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+/**
+ * Kill the tunnel and everything it spawned; a bare kill() leaves orphans
+ * holding the domain on Windows.
+ *
+ * This must stay asynchronous: shutdown's deadline is a timer on this same
+ * event loop, so a synchronous taskkill would prevent the watchdog itself from
+ * firing while the OS command is wedged.
+ */
+export async function killTunnelTree(child: ChildProcessWithoutNullStreams | undefined): Promise<void> {
   if (!child) return;
   if (process.platform === "win32" && child.pid) {
     try {
-      execFileSync("taskkill.exe", ["/pid", String(child.pid), "/T", "/F"], {
-        stdio: "ignore",
-        timeout: 3_000,
-        windowsHide: true,
-      });
+      await execFileQuiet("taskkill.exe", ["/pid", String(child.pid), "/T", "/F"], 3_000);
       return;
     } catch {
       // taskkill can refuse on an already-dead pid; fall through to kill().
@@ -498,12 +510,12 @@ async function startTailscaleFunnel(_generation: number): Promise<void> {
  * a peer's access, and the cost of doing nothing is a stale mount that the next
  * instance's claim replaces anyway.
  */
-export function teardownTailscaleFunnel(): void {
+export async function teardownTailscaleFunnel(): Promise<void> {
   if (process.platform !== "win32" && process.platform !== "darwin" && process.platform !== "linux") return;
   try {
     const exe = configuredTailscaleExecutable();
-    if (!funnelMountIsOurs(exe, state.port)) return;
-    execFileSync(exe, ["funnel", "--https=443", "off"], { stdio: "ignore", timeout: 5_000, windowsHide: true });
+    if (!await funnelMountIsOurs(exe, state.port)) return;
+    await execFileQuiet(exe, ["funnel", "--https=443", "off"], 5_000);
   } catch {
     // Nothing to take down, or the daemon is not running: either way done.
   }
@@ -583,7 +595,7 @@ export async function startTunnelInternal(generation: number): Promise<void> {
         // "won't retry" error and park the instance local-only for good, while
         // the working tunnel sat right next to it.)
         state.tunnelRole = "blocked";
-        killTunnelTree(state.tunnel);
+        await killTunnelTree(state.tunnel);
         state.tunnel = undefined;
         revertToLocalUrl();
         stopReconnectChain();
@@ -601,7 +613,7 @@ export async function startTunnelInternal(generation: number): Promise<void> {
       // succeed — the old wrap turned that guard into dead code and produced
       // an endless 60 s spawn-retry loop.
       state.tunnelRole = "none";
-      killTunnelTree(state.tunnel);
+      await killTunnelTree(state.tunnel);
       state.tunnel = undefined;
       revertToLocalUrl();
       // The process exit that produced this error also arms a reconnect (the exit
@@ -622,7 +634,7 @@ export async function startTunnelInternal(generation: number): Promise<void> {
       record("ngrok", "progress", "Domain was claimed mid-start; staying local and watching for a route.");
     } else {
       state.tunnelRole = "none";
-      killTunnelTree(state.tunnel);
+      await killTunnelTree(state.tunnel);
       state.tunnel = undefined;
       // Revert the optimistic https URL (the panel must not advertise an
       // endpoint no tunnel answers) and DO NOT bump tunnelGeneration: the old

@@ -57,6 +57,7 @@ export function SecurityPage({ settings, act, notify }: Props) {
   const [report, setReport] = useState<{ exposure: string } | null>(null);
   const [note, setNote] = useState("");
   const [arming, setArming] = useState(false);
+  const [hardening, setHardening] = useState(false);
   const [rotating, setRotating] = useState(false);
   const [gateBusy, setGateBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -130,6 +131,17 @@ export function SecurityPage({ settings, act, notify }: Props) {
       if (result?.ok) await rereadExposure();
     } finally {
       setArming(false);
+    }
+  };
+
+  const hardenWorkspace = async () => {
+    if (hardening) return;
+    setHardening(true);
+    try {
+      const result = await act({ command: "hardenWorkspace" });
+      if (result?.ok) await rereadExposure();
+    } finally {
+      setHardening(false);
     }
   };
 
@@ -293,6 +305,34 @@ export function SecurityPage({ settings, act, notify }: Props) {
             </span>
             <span className="field-hint">
               {t("已有可用令牌时会复用，不多发；明文只显示一次。", "Reuses a usable token if there is one; the plaintext is shown once.")}
+            </span>
+          </div>
+        </div>
+      </Card>
+
+      <Card
+        title={t("安全预设", "Security preset")}
+        desc={t(
+          "兼容默认保持不变；需要收紧时，一次启用 Bearer 门禁，并把文件访问限制到当前工作区和显式允许目录。",
+          "Compatibility defaults stay unchanged. When you want a tighter setup, one action enables the Bearer gate and restricts file access to this workspace plus explicitly allowed directories.",
+        )}
+      >
+        <div className="form-grid">
+          <div className="field span2">
+            <span className="field-label">{t("工作区收紧", "Harden workspace")}</span>
+            <span className="field-control">
+              <ConfirmButton
+                className="primary"
+                disabled={hardening}
+                label={hardening ? t("应用中…", "Applying…") : t("应用安全预设", "Apply security preset")}
+                onConfirm={() => void hardenWorkspace()}
+              />
+            </span>
+            <span className="field-hint">
+              {t(
+                "不会改变默认配置；只在你确认后开启门禁并关闭 unrestrictedFileAccess。已有 allowedDirectories 继续有效。",
+                "Does not change defaults. Only after confirmation it enables the gate and turns off unrestrictedFileAccess; existing allowedDirectories remain valid.",
+              )}
             </span>
           </div>
         </div>

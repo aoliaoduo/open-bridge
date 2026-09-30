@@ -22,8 +22,9 @@ import {
 } from "./tools/file-tools.js";
 import {
   runOrStartProcess, readProcessOutput, interactWithProcess,
-  setProcessPolicy, getProcessSnapshot, setTodos,
+  setProcessPolicy, getProcessSnapshot,
 } from "./tools/process-tools.js";
+import { setTodos } from "./tools/todo-tools.js";
 import { saveService, readServiceLogTool } from "./tools/service-tools.js";
 import { batchTool } from "./tools/batch.js";
 import { runScript } from "./tools/script-tools.js";

@@ -75,7 +75,7 @@ const HELP = (): string => t(`open-bridge ${VERSION} — standalone MCP bridge f
 
 用法:
   open-bridge serve [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]
-  open-bridge launch [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]
+  open-bridge launch [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open] [--open-existing]
   open-bridge stop [--pid N] | status | url | instances | health | prompt
   open-bridge logs [--tail N] [--follow] [--clear]
   open-bridge config [list] [get KEY] [set KEY VALUE] [path]
@@ -110,7 +110,7 @@ const HELP = (): string => t(`open-bridge ${VERSION} — standalone MCP bridge f
 
 Usage:
   open-bridge serve [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]
-  open-bridge launch [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]
+  open-bridge launch [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open] [--open-existing]
   open-bridge stop [--pid N] | status | url | instances | health | prompt
   open-bridge logs [--tail N] [--follow] [--clear]
   open-bridge config [list] [get KEY] [set KEY VALUE] [path]
@@ -190,22 +190,31 @@ Behaviour:
 const LAUNCH_HELP = (): string => t(`open-bridge launch — 启动或复用一个工作区实例
 
 用法:
-  open-bridge launch [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]
+  open-bridge launch [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open] [--open-existing]
 
 行为:
   * 目标目录没有实例：与 serve 相同，前台启动 Bridge/TUI。
   * 目标目录已有实例：打印现有 pid、端口和控制台地址，成功返回，不重复启动。
+  * --open-existing 只在复用已有实例时打开它的 Web 控制台；新实例仍只启动 TUI。
   * 设计给资源管理器右键菜单等外部入口使用；工作区仍然是进程级边界，不做热切换。
 `, `open-bridge launch — start or reuse one workspace instance
 
 Usage:
-  open-bridge launch [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open]
+  open-bridge launch [--port N] [--root DIR] [--home DIR] [--no-tunnel] [--open] [--open-existing]
 
 Behaviour:
   * No instance for the target: starts the Bridge/TUI in the foreground, like serve.
   * Target already running: prints its pid, port and console URL and exits successfully without a duplicate.
+  * --open-existing opens the existing instance's Web console only when reusing it; a new instance stays TUI-only.
   * Intended for Explorer-style external launchers; the workspace remains a process-level boundary, not a hot-switched setting.
 `);
+
+async function openConsoleUrl(url: string): Promise<void> {
+  const { spawn } = await import("node:child_process");
+  const cmd = process.platform === "win32" ? "cmd" : "xdg-open";
+  const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
+  spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
+}
 
 // --- serve ------------------------------------------------------------------
 
@@ -226,6 +235,7 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   const portFlag = parsed.flags.get("port");
   const noTunnel = parsed.flags.has("no-tunnel");
   const openConsole = parsed.flags.has("open");
+  const openExisting = parsed.flags.has("open-existing");
 
   // `let`: a configured (non-explicit) port that is already taken is replaced
   // by an ephemeral one below, which the config facade picked up a few lines on.
@@ -267,6 +277,7 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
     );
     if (parsed.command === "launch") {
       console.log(message);
+      if (openExisting) await openConsoleUrl(`http://127.0.0.1:${existing.port}/console/`);
       return;
     }
     fail(message + t(
@@ -465,10 +476,7 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
   }
 
   if (openConsole) {
-    const { spawn } = await import("node:child_process");
-    const cmd = process.platform === "win32" ? "cmd" : "xdg-open";
-    const args = process.platform === "win32" ? ["/c", "start", "", consoleUrl] : [consoleUrl];
-    spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
+    await openConsoleUrl(consoleUrl);
   }
 }
 

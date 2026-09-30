@@ -32,6 +32,7 @@ test("Explorer integration stays per-user and delegates workspace semantics to l
   assert.match(relay, /-WindowStyle Hidden/i);
   assert.match(relay, /context-menu-launch\.ps1/);
   assert.match(launcher, /launch --root/);
+  assert.match(launcher, /--open-existing/, "reusing an Explorer workspace should open its existing console instead of disappearing silently");
   assert.match(launcher, /--startingDirectory/, "Windows Terminal should start directly in the selected workspace");
   assert.match(launcher, /\$node\.Source/, "the terminal tab should run Node/Open Bridge directly");
   assert.doesNotMatch(launcher, /EncodedCommand/, "the terminal tab must not wrap Open Bridge in an intermediate PowerShell process");

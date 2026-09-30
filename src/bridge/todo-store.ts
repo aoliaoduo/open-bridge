@@ -103,16 +103,18 @@ function currentSessionId(): string | undefined {
  * values. Reading inside the serialized tail makes every write merge with the
  * latest persisted state instead.
  */
-function enqueueTodoWrite(build: (current: TodoStoreSnapshot) => TodoStoreSnapshot): void {
+function enqueueTodoWrite(build: (current: TodoStoreSnapshot) => TodoStoreSnapshot): Promise<void> {
   const key = todoStoreKey();
-  persistTail = persistTail
-    .then(async () => {
+  const write = persistTail.then(async () => {
       const current = loadRawStore(key);
       const built = build(current);
       await host().state.update(key, built);
       cacheStore(key, built);
-    })
-    .catch(() => undefined);
+    });
+  // Keep the queue usable after a failed write, while still exposing the
+  // current write's rejection to set_todos/report_progress.
+  persistTail = write.catch(() => undefined);
+  return write;
 }
 
 /**
@@ -148,8 +150,8 @@ export function applyCompletionTimes(
   });
 }
 
-export function persistTodos(todos: unknown[]): void {
-  enqueueTodoWrite(current => ({
+export function persistTodos(todos: unknown[]): Promise<void> {
+  return enqueueTodoWrite(current => ({
     todos: cloneTodos(todos),
     lastProgress: current.lastProgress ?? null,
     updatedAt: new Date().toISOString(),
@@ -163,8 +165,8 @@ export function persistProgress(entry: {
   category?: ProgressCategory;
   percent?: number;
   level?: ProgressLevel;
-}): void {
-  enqueueTodoWrite(current => ({
+}): Promise<void> {
+  return enqueueTodoWrite(current => ({
     todos: current.todos ?? [],
     lastProgress: {
       message: String(entry.message ?? ""),

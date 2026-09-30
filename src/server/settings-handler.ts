@@ -10,7 +10,6 @@
  */
 
 import { clientMcpUrl, state } from "../bridge/state.js";
-import { normalizeNgrokDomainSetting } from "../http/request-policy.js";
 import {
   authEnabled,
   authStatus,
@@ -38,7 +37,7 @@ import { CONFIG_DEFAULTS } from "../bridge/config/config-defaults.js";
 import { settingsConfigFrom } from "../bridge/config/config-spec.js";
 import { detectShells } from "../shell/shell-provider.js";
 import { detectNgrok } from "../bridge/tunnel/ngrok-locate.js";
-import { NGROK_AUTHTOKEN_KEY, setCachedAuthtoken } from "../bridge/tunnel/ngrok-runtime.js";
+import { NGROK_AUTHTOKEN_KEY } from "../bridge/tunnel/ngrok-runtime.js";
 import { playAlertSound, stopAlertSound } from "../bridge/tools/sound-alert.js";
 import { existsSync } from "node:fs";
 import { maskBarkKey, validateConfigValue } from "../bridge/config/config-values.js";
@@ -46,12 +45,16 @@ import { NOTIFY_DEFAULT_TITLE, pushNotification, resolveNotifySettings, type Not
 import * as path from "node:path";
 import { resetUsageStats } from "../bridge/usage-store.js";
 import { host } from "../host/host.js";
-import {
-  start, rotateRouteToken, republishAfterRotate, restartTunnelForProviderChange,
-} from "../bridge/lifecycle/lifecycle.js";
+import { start, rotateRouteToken, republishAfterRotate } from "../bridge/lifecycle/lifecycle.js";
 import { buildWebAiPrompt } from "../bridge/onboarding.js";
 import { enqueueLifecycle } from "../bridge/lifecycle/lifecycle-queue.js";
-import { autoConfigureTunnel, buildTunnelView } from "./settings-tunnel.js";
+import {
+  autoConfigureTunnel,
+  buildTunnelView,
+  saveNgrokAuthtoken,
+  saveTunnelDetectionSetting,
+  saveTunnelDomain,
+} from "./settings-tunnel.js";
 
 type AuthStatusView = { tokens: SettingsTokenRow[] };
 
@@ -233,30 +236,22 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
         action.key === "allowedDirectories" && Array.isArray(action.value)
           ? (action.value as string[]).map(item => path.resolve(item))
           : action.value;
-      const previousProvider = String(cfg.get("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string));
-      await cfg.update(action.key, value);
-      // A provider switch must take effect on the RUNNING tunnel, not just on
-      // the next restart: the old behavior left ngrok serving after a switch
-      // to tailscale (and vice versa), with status advertising the URL of a
-      // provider the operator had already left. The new provider was already
-      // persisted above, so the rebuild reads it back.
-      if (action.key === "tunnelProvider" && typeof value === "string" && value !== previousProvider) {
-        void restartTunnelForProviderChange();
-        return done({ info: `隧道提供商已切换为 ${value}，正在按新渠道重建隧道。` });
+      if (
+        (action.key === "tunnelProvider" || action.key === "ngrokExecutable" || action.key === "tailscaleExecutable")
+        && typeof value === "string"
+      ) {
+        const outcome = await saveTunnelDetectionSetting(action.key, value);
+        return done({ info: outcome.info });
       }
+      await cfg.update(action.key, value);
       return done({ info: "已保存。" });
     }
 
     case "saveDomain": {
-      let domain: string;
-      try {
-        // Clearing is this action's explicit opt-out, not a valid hostname.
-        domain = normalizeNgrokDomainSetting(action.domain);
-      } catch {
-        return { ok: false, state: await buildSettingsState(), error: "域名格式不对。示例：my-tunnel.ngrok-free.dev（在你的 ngrok 控制台可以找到）。" };
-      }
-      await cfg.update("ngrokDomain", domain);
-      return done({ info: domain ? "ngrok 域名已保存。" : "ngrok 域名已清除；未配置域名时仅本机可用。此操作不停止当前隧道。" });
+      const outcome = await saveTunnelDomain(action.domain);
+      return outcome.ok
+        ? done({ info: outcome.info })
+        : { ok: false, state: await buildSettingsState(), error: outcome.error };
     }
 
     case "setAuthEnabled": {
@@ -284,6 +279,9 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
 
     case "armPublicLock":
       return armPublicLockAction(action);
+
+    case "hardenWorkspace":
+      return hardenWorkspaceAction();
 
     case "rotateToken": {
       const rotated = await rotateToken(action.id);
@@ -372,35 +370,10 @@ async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
     }
 
     case "saveNgrokAuthtoken": {
-      // Stored in the secret store, never in config.json: this is an account
-      // credential, and config.json is plain text the operator may well paste
-      // into an issue when asking for help.
-      const raw = typeof action.token === "string" ? action.token.trim() : "";
-      if (!raw) {
-        await host().secrets.store(NGROK_AUTHTOKEN_KEY, "");
-        setCachedAuthtoken("");
-        return done({ info: "Authtoken 已清除。ngrok 会改用它自己配置文件里的凭据（如果配过）。" });
-      }
-      // ngrok tokens are base64-ish with an underscore separating the two
-      // halves. Checking the shape turns "the tunnel will not start" into
-      // "that does not look like an authtoken", which is the difference
-      // between a five-minute and a five-hour debugging session.
-      if (raw.length < 20 || /\s/.test(raw)) {
-        return {
-          ok: false,
-          state: await buildSettingsState(),
-          error: "这不像一个 ngrok authtoken：应该是一长串不含空格的字符，在 ngrok 控制台的 Your Authtoken 页面复制。",
-        };
-      }
-      await host().secrets.store(NGROK_AUTHTOKEN_KEY, raw);
-      setCachedAuthtoken(raw);
-      return done({
-        // Deliberately not naming a console button: the status page explains
-        // why there is no start/stop/restart there (stopping would take the
-        // page down with it). The instance is owned by its terminal window,
-        // so that is the honest instruction.
-        info: `Authtoken 已保存（${maskBarkKey(raw)}）。下次启动隧道时生效：关掉承载本实例的终端窗口再重新启动（一键启动脚本双击一次即可）。`,
-      });
+      const outcome = await saveNgrokAuthtoken(action.token);
+      return outcome.ok
+        ? done({ info: outcome.info })
+        : { ok: false, state: await buildSettingsState(), error: outcome.error };
     }
 
     case "autoConfigureTunnel": {
@@ -461,10 +434,11 @@ async function armPublicLockAction(
   action: Extract<SettingsAction, { command: "armPublicLock" }>,
 ): Promise<SettingsActionResult> {
   const cfg = host().config;
-  if (authEnabled()) {
+  const gateWasEnabled = authEnabled();
+  const existing = await usableTokenCount();
+  if (gateWasEnabled && existing > 0) {
     return successWith({ info: "Bearer 门禁本来就已经开着：/mcp 要求 Bearer 令牌。" });
   }
-  const existing = await usableTokenCount();
   let secret: SecretPayload | undefined;
   let mintedId: string | undefined;
   if (existing === 0) {
@@ -477,19 +451,49 @@ async function armPublicLockAction(
     mintedId = minted.id;
     secret = secretPayload(minted, "minted");
   }
-  try {
-    await cfg.update("auth.enabled", true);
-  } catch (error) {
-    if (mintedId) await deleteToken(mintedId).catch(() => undefined);
-    throw error;
+  if (!gateWasEnabled) {
+    try {
+      await cfg.update("auth.enabled", true);
+    } catch (error) {
+      if (mintedId) await deleteToken(mintedId).catch(() => undefined);
+      throw error;
+    }
   }
   return successWith({
     secret,
     copyText: secret?.secret,
-    info: secret
-      ? "Bearer 门禁已启用：已签发 1 个令牌并打开门禁，客户端必须在请求头带 Authorization: Bearer <令牌>。"
-        + "只填 URL 的客户端（例如 ChatGPT 连接器）会立刻连不上；要恢复就在「安全」页关掉那个开关。"
+    info: gateWasEnabled && secret
+      ? "Bearer 门禁原本已开启但没有有效令牌；已补发 1 个令牌，客户端可再次使用 Bearer 方式接入。"
+      : secret
+        ? "Bearer 门禁已启用：已签发 1 个令牌并打开门禁，客户端必须在请求头带 Authorization: Bearer <令牌>。"
+          + "只填 URL 的客户端（例如 ChatGPT 连接器）会立刻连不上；要恢复就在「安全」页关掉那个开关。"
       : `Bearer 门禁已启用：复用了现有的 ${existing} 个有效令牌，客户端现在必须携带令牌（只填 URL 会连不上）。`,
+  });
+}
+
+/**
+ * Explicit compatibility-safe security preset: keep permissive defaults for
+ * existing users, but let an operator deliberately enable both the Bearer gate
+ * and restricted file access in one action.
+ */
+async function hardenWorkspaceAction(): Promise<SettingsActionResult> {
+  const gate = await armPublicLockAction({ command: "armPublicLock", label: "public-lock" });
+  try {
+    await host().config.update("unrestrictedFileAccess", false);
+  } catch (error) {
+    return {
+      ok: false,
+      state: await buildSettingsState().catch(() => gate.state),
+      secret: gate.secret,
+      copyText: gate.copyText,
+      error: "Bearer 门禁已处理，但文件访问范围没有保存成功："
+        + (error instanceof Error ? error.message : String(error)),
+    };
+  }
+  return successWith({
+    secret: gate.secret,
+    copyText: gate.copyText,
+    info: "安全预设已应用：Bearer 门禁已开启，文件访问已限制为当前工作区和「显式允许目录」。",
   });
 }
 

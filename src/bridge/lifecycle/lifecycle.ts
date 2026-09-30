@@ -126,13 +126,13 @@ async function teardownEverything(): Promise<void> {
   // The tunnel must die before any await: the hosting process can be killed
   // without warning (Ctrl-C, an IDE shutting down, a crash) and an
   // un-terminated ngrok keeps holding the domain.
-  killTunnelTree(activeTunnel);
+  await killTunnelTree(activeTunnel);
   // The tailscale funnel lives in the daemon, not in this child: killTunnelTree
   // cannot reach it. Provider is checked here, not inside teardown, so a
   // provider switch (tailscale -> ngrok) never erases a funnel that belongs to
   // a different - still running - bridge configuration.
   if (host().config.get<string>("tunnelProvider", CONFIG_DEFAULTS.tunnelProvider as string) === "tailscale") {
-    teardownTailscaleFunnel();
+    await teardownTailscaleFunnel();
   }
   // A crashed command with autoRestart may still hold a pending restart timer;
   // clear every one of them (not only live commands) so a timer cannot fire
@@ -203,8 +203,8 @@ export async function restartTunnelForProviderChange(): Promise<void> {
     stopReconnectChain();
     const oldTunnel = state.tunnel;
     state.tunnel = undefined;
-    killTunnelTree(oldTunnel);
-    teardownTailscaleFunnel();
+    await killTunnelTree(oldTunnel);
+    await teardownTailscaleFunnel();
     revertToLocalUrl();
     let tunnelError: string | undefined;
     try {

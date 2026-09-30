@@ -142,7 +142,7 @@ export interface SettingsState {
 }
 
 export type SettingsAction =
-  | { command: "copyPrompt" | "start" | "stop" | "rotateEndpoint" | "purgeTokens" | "revokeAll" }
+  | { command: "copyPrompt" | "start" | "stop" | "rotateEndpoint" | "purgeTokens" | "revokeAll" | "hardenWorkspace" }
   /**
    * 「一键自动配置」 and "look again": the first writes what detection found into
    * the fields that are still EMPTY (never over an operator's own value), the
@@ -190,7 +190,7 @@ export function normalizeSettingsMessage(raw: unknown): SettingsAction | null {
   const message = raw as Record<string, unknown>;
   const command = typeof message.command === "string" ? message.command : "";
   const allowed: ReadonlySet<string> = new Set([
-    "copyPrompt", "start", "stop", "rotateEndpoint", "saveDomain",
+    "copyPrompt", "start", "stop", "rotateEndpoint", "saveDomain", "hardenWorkspace",
     "setAuthEnabled", "setDefaultTtl", "createToken", "armPublicLock", "rotateToken",
     "revokeToken", "deleteToken", "purgeTokens", "revokeAll",
     "setConcurrency", "setConfig", "copyText",

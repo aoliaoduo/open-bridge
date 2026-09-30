@@ -180,6 +180,41 @@ test("saveService stores the definition with defaults and persists it", async ()
   assert.ok(persisted && persisted.web, "the service snapshot reaches the state store");
 });
 
+test("saveService reports persistence failure and rolls the in-memory definition back", async () => {
+  const originalUpdate = store.update.bind(store);
+  store.update = async (): Promise<void> => {
+    throw new Error("disk full");
+  };
+
+  await assert.rejects(
+    () => saveService({ name: "web", command: KEEP_ALIVE }),
+    /was not saved: disk full/,
+  );
+  assert.equal(state.services.has("web"), false, "a refused write must not leave a memory-only service behind");
+
+  store.update = originalUpdate;
+  const retry = await saveService({ name: "web", command: KEEP_ALIVE }) as Record<string, unknown>;
+  assert.equal(retry.saved, true, "one failed write must not poison later saves");
+});
+
+test("deleteService reports persistence failure and restores the definition", async () => {
+  await saveService({ name: "web", command: KEEP_ALIVE });
+  const originalUpdate = store.update.bind(store);
+  store.update = async (): Promise<void> => {
+    throw new Error("read-only filesystem");
+  };
+
+  await assert.rejects(
+    () => deleteService({ name: "web" }),
+    /was not deleted from persistent state: read-only filesystem/,
+  );
+  assert.equal(state.services.has("web"), true, "a failed delete must leave the persisted definition visible in memory");
+
+  store.update = originalUpdate;
+  const retry = await deleteService({ name: "web" }) as Record<string, unknown>;
+  assert.equal(retry.deleted, true);
+});
+
 test("service batches honor the documented parallel default and sequential opt-out", async () => {
   let releaseParallel!: () => void;
   const parallelGate = new Promise<void>(resolve => { releaseParallel = resolve; });

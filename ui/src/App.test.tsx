@@ -427,6 +427,31 @@ describe("App shell", () => {
     expect(screen.getByText("ob_lock_value")).toBeTruthy();
   });
 
+  test("applies the compatibility-safe workspace hardening preset from 安全", async () => {
+    window.history.pushState({}, "", "/console/security");
+    mocks.settingsAction.mockResolvedValue({
+      ok: true,
+      state: settingsState({
+        authEnabled: true,
+        usableCount: 1,
+        config: {
+          ...settingsState().config,
+          unrestrictedFileAccess: false,
+        },
+      }),
+      info: "安全预设已应用：Bearer 门禁已开启，文件访问已限制为当前工作区和「显式允许目录」。",
+    } satisfies SettingsActionResult);
+
+    render(<App />);
+    await screen.findByText("个人令牌");
+
+    fireEvent.click(screen.getByRole("button", { name: "应用安全预设" }));
+    fireEvent.click(await screen.findByRole("button", { name: "确认？" }));
+
+    expect(mocks.settingsAction).toHaveBeenCalledWith({ command: "hardenWorkspace" });
+    expect(await screen.findByText(/安全预设已应用/)).toBeTruthy();
+  });
+
   test("shows the console path of the open page", async () => {
     render(<App />);
 
@@ -450,6 +475,27 @@ describe("App shell", () => {
     render(<App />);
 
     expect(await screen.findByText("GET /api/settings → HTTP 403")).toBeTruthy();
+  });
+
+  test("keeps retrying settings beyond the old five-attempt window and recovers", async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      mocks.settings.mockImplementation(async () => {
+        calls += 1;
+        if (calls <= 6) throw new Error("bridge restarting");
+        return settingsState();
+      });
+
+      render(<App />);
+      await act(async () => { await Promise.resolve(); });
+      for (const ms of [1500, 1500, 1500, 1500, 5000, 5000]) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+      }
+      expect(calls).toBeGreaterThanOrEqual(7);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("reports the running state in the header badge", async () => {
@@ -939,6 +985,27 @@ describe("App shell: in-page filtering and rails", () => {
     // The outcome is reported, not silently applied.
     expect(await screen.findByText(/已写入：ngrok 可执行文件/)).toBeTruthy();
     // …and the card asks the machine again instead of showing a stale summary.
+    await waitFor(() => expect(mocks.tunnel.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  test("changing tunnel provider re-reads detection after the setting lands", async () => {
+    const initial = withProvider("ngrok");
+    const changed = withProvider("tailscale");
+    mocks.settings.mockResolvedValue(initial);
+    mocks.settingsAction.mockResolvedValue({ ok: true, state: changed, info: "saved" });
+    render(<App />);
+    await screen.findByText("MCP 端点");
+    fireEvent.click(tabLink("设置"));
+    await screen.findByText(/隧道让公网上的客户端连到这台机器/);
+
+    const before = mocks.tunnel.mock.calls.length;
+    const providerField = screen.getByText("提供商").closest(".field");
+    const providerSelect = providerField?.querySelector("select") as HTMLSelectElement | null;
+    expect(providerSelect).toBeTruthy();
+    fireEvent.change(providerSelect!, { target: { value: "tailscale" } });
+    await waitFor(() => expect(mocks.settingsAction).toHaveBeenCalledWith({
+      command: "setConfig", key: "tunnelProvider", value: "tailscale",
+    }));
     await waitFor(() => expect(mocks.tunnel.mock.calls.length).toBeGreaterThan(before));
   });
 

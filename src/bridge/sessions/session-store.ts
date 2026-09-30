@@ -29,6 +29,7 @@ type TicketDoc = { tickets: SessionTicket[] };
 
 let cache: Map<string, SessionTicket> | undefined;
 let persistTail: Promise<void> = Promise.resolve();
+let latestPersist: Promise<void> = Promise.resolve();
 
 function docKey(): string {
   return `${TICKETS_PREFIX}${state.activeWorkspaceRoot || "unbound"}`;
@@ -57,12 +58,13 @@ function hydrate(): Map<string, SessionTicket> {
   return next;
 }
 
-function enqueuePersist(): void {
+function enqueuePersist(): Promise<void> {
   const snapshot: TicketDoc = { tickets: [...hydrate().values()] };
   const key = docKey();
-  persistTail = persistTail
-    .then(() => host().state.update(key, snapshot))
-    .catch(() => undefined);
+  const write = persistTail.then(() => host().state.update(key, snapshot));
+  persistTail = write.catch(() => undefined);
+  latestPersist = write;
+  return write;
 }
 
 /**
@@ -89,12 +91,15 @@ export function flushSessionTickets(): Promise<void> {
     touchFlushTimer = undefined;
     enqueuePersist();
   }
-  return persistTail;
+  return latestPersist;
 }
 
 /** Drop the in-memory cache (tests). The next read hydrates from the host again. */
 export function resetSessionTicketCache(): void {
   cache = undefined;
+  // Test-only reset: callers that deliberately swap the host should not inherit
+  // a previously observed persistence result from another fixture.
+  latestPersist = persistTail;
 }
 
 export function rememberSessionTicket(id: string, client?: string, now = Date.now()): void {
@@ -107,7 +112,7 @@ export function rememberSessionTicket(id: string, client?: string, now = Date.no
     createdAt: prev?.createdAt ?? now,
     lastUsed: now,
   });
-  enqueuePersist();
+  void enqueuePersist();
 }
 
 export function touchSessionTicket(id: string, now = Date.now()): void {
@@ -121,7 +126,7 @@ export function touchSessionTicket(id: string, now = Date.now()): void {
 export function forgetSessionTicket(id: string): void {
   const tickets = hydrate();
   if (!tickets.delete(id)) return;
-  enqueuePersist();
+  void enqueuePersist();
 }
 
 export function sessionTicket(id: string): SessionTicket | undefined {
@@ -150,6 +155,6 @@ export function pruneSessionTickets(now = Date.now()): number {
   // unconditional else-branch (flush lastUsed stamps) wrote the whole state
   // document on EVERY /mcp request; touch schedules its own debounced flush,
   // so a prune that removed nothing has nothing of its own to save.
-  if (removed > 0) enqueuePersist();
+  if (removed > 0) void enqueuePersist();
   return removed;
 }

@@ -10,8 +10,10 @@
  * probing the launcher: an instance whose console window was closed kept its
  * listener (and its child processes) while its shutdown was stuck.
  *
- * Armed before the first await, so nothing inside the graceful path can dodge
- * it. The happy path calls the returned cancel function and exits on its own.
+ * Armed before the first await, so asynchronous teardown work cannot dodge it.
+ * Shutdown code must not run synchronous external commands: a blocked event
+ * loop cannot deliver this timer. The happy path calls the returned cancel
+ * function and exits on its own.
  */
 export const SHUTDOWN_DEADLINE_MS = 10_000;
 

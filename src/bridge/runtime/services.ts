@@ -5,14 +5,17 @@ import { requireRestartKnob } from "./processes.js";
 let servicePersistTail: Promise<void> = Promise.resolve();
 
 /** Persist saved service definitions (without live command ids) to global state, per workspace. */
-export function persistServices(): void {
+export function persistServices(): Promise<void> {
   const snapshot = Object.fromEntries(
     [...state.services.entries()].map(([name, service]) => [name, { ...service, commandId: undefined }]),
   );
   const key = `${SERVICES_STATE_PREFIX}${state.activeWorkspaceRoot || "unbound"}`;
-  servicePersistTail = servicePersistTail
-    .then(() => host().state.update(key, snapshot))
-    .catch(() => undefined);
+  const write = servicePersistTail.then(() => host().state.update(key, snapshot));
+  // Recover the scheduling tail so one failed disk write never poisons every
+  // later save, but return THIS write's real promise to the caller so a
+  // save/delete cannot claim persistence succeeded when it did not.
+  servicePersistTail = write.catch(() => undefined);
+  return write;
 }
 
 /**

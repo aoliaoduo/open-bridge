@@ -34,7 +34,7 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
 
 /** Flags that are always bare booleans; registered so the drift alarm knows them. */
 export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
-  "help", "h", "no-tunnel", "open", "no-tui", "clear", "follow", "force",
+  "help", "h", "no-tunnel", "open", "open-existing", "no-tui", "clear", "follow", "force",
 ]);
 
 export function parseArgs(argv: string[]): ParsedArgs {

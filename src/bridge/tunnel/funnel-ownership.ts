@@ -25,7 +25,7 @@
  *     is how two instances end up trading the mount back and forth.
  */
 
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import net from "node:net";
 
 /** The backend a 443 mount points at, and whether it is exposed to the internet. */
@@ -133,19 +133,6 @@ export function readFunnelConfig(exe: string, domain: string | undefined, timeou
   });
 }
 
-/**
- * The synchronous twin, for teardown: `stopInternal` is synchronous down this
- * path, and the answer decides whether the `off` subcommand may run at all.
- */
-export function readFunnelConfigSync(exe: string, domain?: string, timeoutMs = 5_000): FunnelRead {
-  try {
-    const stdout = execFileSync(exe, funnelStatusArgs(), { timeout: timeoutMs, windowsHide: true, encoding: "utf8" });
-    return { kind: "config", backend: parseFunnelBackend(stdout, domain) };
-  } catch (error) {
-    return { kind: "unreadable", reason: `tailscale funnel status failed: ${error instanceof Error ? error.message : String(error)}` };
-  }
-}
-
 /** Is anything listening on this loopback port right now? */
 export function isPortServing(port: number, timeoutMs = 800): Promise<boolean> {
   return new Promise(resolve => {
@@ -177,8 +164,8 @@ export async function probeFunnelHolder(
 }
 
 /** May this instance run `funnel off`? Only when the 443 mount is its own. */
-export function funnelMountIsOurs(exe: string, ourPort: number): boolean {
-  const read = readFunnelConfigSync(exe);
+export async function funnelMountIsOurs(exe: string, ourPort: number): Promise<boolean> {
+  const read = await readFunnelConfig(exe, undefined);
   if (read.kind === "unreadable") return false;
   return read.backend?.port === ourPort;
 }
