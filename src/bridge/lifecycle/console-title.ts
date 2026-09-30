@@ -26,16 +26,16 @@
 
 import { processHasConsole } from "../../process/child-console.js";
 
-export const TITLE_PREFIX = "Open Bridge";
-
 /**
- * The launcher's title: what this window is, and which workspace it serves.
- * ASCII only on purpose — a console title is rendered in the console's codepage,
- * and a mojibake title is worse than a plain one.
+ * The launcher's title is exactly the workspace directory name.
+ *
+ * The caller already passes path.basename(root()), so a workspace rooted at
+ * `C:\Users\aolia\Desktop\open-bridge` is titled simply `open-bridge`.
+ * No product prefix or port is added: the directory name is the operator's
+ * shortest unambiguous identifier when several Bridge terminals are open.
  */
-export function buildServeTitle(workspaceName: string, port: number): string {
-  const name = workspaceName.trim() || "workspace";
-  return port > 0 ? `${TITLE_PREFIX} - ${name} (:${port})` : `${TITLE_PREFIX} - ${name}`;
+export function buildServeTitle(workspaceName: string): string {
+  return workspaceName.trim() || "workspace";
 }
 
 /** The title this instance wants the console to show; unset when it claims none. */

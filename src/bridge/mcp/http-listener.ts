@@ -442,7 +442,7 @@ export async function startHttpInternal(): Promise<void> {
   // (that is how closing the window stops the tunnel too), and cmd.exe/npm write
   // their own titles into it — see console-title.ts. cosmetic, but it is the
   // operator's only clue about which workspace this window is serving.
-  installServeConsoleTitle(buildServeTitle(path.basename(root()), state.port));
+  installServeConsoleTitle(buildServeTitle(path.basename(root())));
   notifyLocalServerReady();
   // Post-listen backstop: without these, a runtime failure (or unexpected
   // close) used to be swallowed after the one-shot listen error handler was

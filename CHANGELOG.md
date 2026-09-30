@@ -12,6 +12,7 @@
 
 ### Changed
 
+- TUI 所在终端窗口标题只显示当前工作目录名，不再附加 `Open Bridge` 前缀或监听端口；例如工作区 `C:\Users\aolia\Desktop\open-bridge` 的窗口名就是 `open-bridge`。
 - 所有「接入提示词」统一只保留 Agent 工作约定，不再嵌入 MCP URL、路由令牌、本地/公网可达性或 Bearer 连接说明；连接地址由控制台「复制 URL」或 `open-bridge url` 单独提供，避免把能力地址随提示词复制进聊天记录。
 
 ### Fixed
