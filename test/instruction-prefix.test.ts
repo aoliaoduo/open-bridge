@@ -28,7 +28,17 @@ import {
   serverInstructions,
 } from "../src/bridge/mcp/instruction-prefix.js";
 
-const MAX_FULL_CATALOG_BYTES = 72 * 1024;
+const MAX_FULL_CATALOG_BYTES = 68 * 1024;
+
+function withoutDescriptions(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutDescriptions);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => key !== "description")
+      .map(([key, item]) => [key, withoutDescriptions(item)]),
+  );
+}
 
 let dir: string;
 
@@ -93,19 +103,28 @@ test("catalog order and length follow the definition literal, not a collection",
   assert.deepEqual(advertised, TOOL_DEFINITIONS.map(tool => tool.name));
 });
 
-test("annotations are added and never overwrite a definition field", () => {
+test("wire compaction changes only output descriptions; annotations stay additive", () => {
   const advertised = listToolDefinitions();
 
   for (const tool of advertised) {
     const definition = TOOL_DEFINITIONS.find(entry => entry.name === tool.name);
     assert.ok(definition, `${tool.name} comes from the definition literal`);
     for (const [key, value] of Object.entries(definition)) {
+      if (key === "outputSchema") {
+        assert.deepEqual(
+          (tool as Record<string, unknown>)[key],
+          withoutDescriptions(value),
+          `${tool.name}.outputSchema keeps its validation shape but drops description annotations`,
+        );
+        continue;
+      }
       assert.deepEqual(
         (tool as Record<string, unknown>)[key],
         value,
         `${tool.name}.${key} is the definition's own value`,
       );
     }
+    assert.ok("annotations" in tool, `${tool.name} still carries behaviour annotations`);
   }
 });
 
