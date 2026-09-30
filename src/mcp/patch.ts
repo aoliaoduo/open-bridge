@@ -306,7 +306,14 @@ function applyHunksTracked(current: string, body: string, relative: string): { t
         continue;
       }
     }
-    if (occurrences.length === 0) throw new Error(`Patch context not found in ${relative}.`);
+    if (occurrences.length === 0) {
+      const targetHint = oldStart !== undefined ? ` near @@ target line ${oldStart}` : "";
+      throw new Error(
+        `Patch context not found in ${relative}${targetHint}. `
+        + "The file no longer matches this hunk (it may have changed since it was read, or the hunk context is stale). "
+        + "Re-read the current target range and regenerate this hunk; do not retry the unchanged patch.",
+      );
+    }
     // `!` is backed by the `occurrences.length === 0` throw just above and, in
     // the branch below, by `atTarget.length === 1`. Stating it keeps `chosen` a
     // plain number: an undefined offset would turn the slice arithmetic into

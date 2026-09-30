@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-  Install "Open Bridge Here" into the current user's Explorer context menu.
+  Install the Open Bridge launcher into the current user's Explorer context menu.
 
 .DESCRIPTION
   Writes only HKCU\Software\Classes; administrator privileges are not required.
@@ -9,22 +9,29 @@
     - right-click a folder
     - right-click the background inside a folder
 
-  Both call context-menu-launch.ps1. Re-running this script updates the existing
-  registration, which is useful after moving a development checkout.
+  Both call a windowless VBScript relay, which then runs context-menu-launch.ps1
+  hidden. Re-running this script updates the existing registration, which is
+  useful after moving a development checkout.
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-  [string]$MenuText = "Open Bridge Here"
+  [string]$MenuText = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+if ([string]::IsNullOrWhiteSpace($MenuText)) {
+  # Keep the script source ASCII so Windows PowerShell 5.1 does not depend on a
+  # UTF-8 BOM to decode the default Chinese label correctly.
+  $MenuText = (-join ([char[]](0x5728, 0x6B64, 0x542F, 0x52A8))) + " Open Bridge"
+}
+
 if ($env:OS -ne "Windows_NT") {
   throw "Open Bridge Explorer integration is available only on Windows."
 }
 
-$launcher = Join-Path $PSScriptRoot "context-menu-launch.ps1"
+$launcher = Join-Path $PSScriptRoot "context-menu-launch.vbs"
 if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
   throw "Context-menu launcher is missing: $launcher"
 }
@@ -47,13 +54,17 @@ foreach ($entry in $entries) {
   $key = [string]$entry.Key
   $commandKey = Join-Path $key "command"
   $placeholder = [string]$entry.Placeholder
-  $command = 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "' +
+  $command = 'wscript.exe "' +
     $launcher + '" "' + $placeholder + '"'
 
   if ($PSCmdlet.ShouldProcess($key, "Install Open Bridge Explorer verb for " + $entry.Description)) {
     New-Item -Path $key -Force | Out-Null
     Set-Item -Path $key -Value $MenuText
-    New-ItemProperty -Path $key -Name "Position" -Value "Top" -PropertyType String -Force | Out-Null
+    # Keep Open Bridge with the ordinary third-party/developer shell verbs
+    # (for example VS Code / Terminal) instead of forcing it into a singleton
+    # group at the very top of Explorer's classic context menu.
+    Remove-ItemProperty -Path $key -Name "Position" -ErrorAction SilentlyContinue
+    New-ItemProperty -Path $key -Name "SeparatorBefore" -Value "" -PropertyType String -Force | Out-Null
     New-Item -Path $commandKey -Force | Out-Null
     Set-Item -Path $commandKey -Value $command
   }

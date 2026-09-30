@@ -67,9 +67,12 @@ On Windows, the preferred launcher is an Explorer context menu:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/install-context-menu.ps1
 ```
 
-Then right-click a folder, or the background inside it, and choose **Open Bridge Here**.
+Then right-click a folder, or the background inside it, and choose **在此启动 Open Bridge**.
 It opens a new terminal and runs `open-bridge launch --root <that-folder>`: a missing
 instance starts its TUI, while an existing one is reused rather than duplicated.
+With Windows Terminal, Open Bridge is the tab's root process, so closing that TUI tab
+also ends the workspace instance and a later context-menu launch starts cleanly again.
+The entry is separated from Explorer's paste commands and is not forced to the top.
 Windows 11 may put this classic shell verb under **Show more options**. Remove it with
 `scripts/windows/uninstall-context-menu.ps1`; registration is per-user under
 `HKCU\Software\Classes`, so no administrator rights are needed.

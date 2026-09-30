@@ -103,7 +103,16 @@ test("missing context still fails clearly", () =>
       "*** End Patch",
       "",
     ].join("\n");
-    await assert.rejects(applyPatch(patch, ws), /Patch context not found/);
+    await assert.rejects(
+      applyPatch(patch, ws),
+      error => {
+        assert.match(String(error), /Patch context not found in c\.txt near @@ target line 1/);
+        assert.match(String(error), /may have changed since it was read|hunk context is stale/);
+        assert.match(String(error), /Re-read the current target range/);
+        assert.match(String(error), /do not retry the unchanged patch/);
+        return true;
+      },
+    );
   }));
 
 test("hunk without @@ markers is rejected", () =>

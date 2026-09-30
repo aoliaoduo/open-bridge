@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-  Remove the current user's "Open Bridge Here" Explorer context-menu entries.
+  Remove the current user's Open Bridge Explorer context-menu entries.
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param()

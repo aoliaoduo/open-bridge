@@ -4,14 +4,14 @@
   Launch Open Bridge for one Explorer-selected workspace.
 
 .DESCRIPTION
-  This is the stable target stored in the Explorer context-menu registry keys.
+  This is the PowerShell implementation behind the windowless Explorer relay.
   It opens a fresh terminal and runs "open-bridge launch --root <path>". The CLI,
-  not this script, owns instance detection and the one-workspace-one-instance rule.
+  not these launcher scripts, owns instance detection and the one-workspace-one-instance rule.
 
-  Windows Terminal is preferred when available; Windows PowerShell is the
-  dependency-free fallback. The command body is passed as -EncodedCommand so
-  spaces, ampersands, Unicode and quotes in workspace paths do not become shell
-  syntax.
+  Windows Terminal is preferred when available. Open Bridge itself is launched
+  as the terminal tab's root process instead of through an intermediate shell,
+  so closing the tab also terminates that workspace instance instead of leaving
+  an orphaned Bridge behind.
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -31,60 +31,41 @@ if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
 }
 $workspace = (Resolve-Path -LiteralPath $Path).ProviderPath
 
-function ConvertTo-PowerShellLiteral([string]$Value) {
-  return "'" + $Value.Replace("'", "''") + "'"
-}
-
-$workspaceLiteral = ConvertTo-PowerShellLiteral $workspace
-$titleLiteral = ConvertTo-PowerShellLiteral ("Open Bridge - " + (Split-Path -Leaf $workspace))
-
 $packageRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).ProviderPath
 $bridgeJs = Join-Path $packageRoot "bin\open-bridge.js"
 $node = Get-Command "node.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($null -ne $node -and (Test-Path -LiteralPath $bridgeJs -PathType Leaf)) {
-  # Prefer the CLI shipped beside this launcher so the registry entry and the
-  # launch command can never drift across package versions.
-  $bridgeInvoke = "& " + (ConvertTo-PowerShellLiteral $node.Source) + " " +
-    (ConvertTo-PowerShellLiteral $bridgeJs) + " launch --root " + $workspaceLiteral
-} else {
-  $bridgeShim = Get-Command "open-bridge.cmd" -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($null -eq $bridgeShim) {
-    throw "Cannot find this package's Node.js launcher or open-bridge.cmd. Install Open Bridge first."
-  }
-  $bridgeInvoke = "& " + (ConvertTo-PowerShellLiteral $bridgeShim.Source) + " launch --root " + $workspaceLiteral
+if ($null -eq $node -or -not (Test-Path -LiteralPath $bridgeJs -PathType Leaf)) {
+  throw "Cannot find Node.js or this package's bin/open-bridge.js. Install Open Bridge first."
 }
-
-$command = @"
-try { `$Host.UI.RawUI.WindowTitle = $titleLiteral } catch {}
-Set-Location -LiteralPath $workspaceLiteral
-$bridgeInvoke
-if (`$LASTEXITCODE -ne 0) {
-  Write-Host ""
-  Read-Host "Open Bridge failed. Press Enter to close" | Out-Null
-}
-"@
-$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+$title = "Open Bridge - " + (Split-Path -Leaf $workspace)
 
 $terminal = Get-Command "wt.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($null -ne $terminal) {
   if ($PSCmdlet.ShouldProcess($workspace, "Open Windows Terminal tab and launch Open Bridge")) {
-    Start-Process -FilePath $terminal.Source -ArgumentList @(
+    $terminalArgs = @(
       "new-tab",
-      "powershell.exe",
-      "-NoLogo",
-      "-NoProfile",
-      "-EncodedCommand",
-      $encoded
-    ) | Out-Null
+      "--title",
+      $title,
+      "--startingDirectory",
+      $workspace,
+      $node.Source,
+      $bridgeJs,
+      "launch",
+      "--root",
+      $workspace
+    )
+    & $terminal.Source @terminalArgs
+    if ($LASTEXITCODE -ne 0) {
+      throw "Windows Terminal failed to open the Open Bridge workspace."
+    }
   }
   return
 }
 
-if ($PSCmdlet.ShouldProcess($workspace, "Open Windows PowerShell and launch Open Bridge")) {
-  Start-Process -FilePath "powershell.exe" -ArgumentList @(
-    "-NoLogo",
-    "-NoProfile",
-    "-EncodedCommand",
-    $encoded
-  ) | Out-Null
+if ($PSCmdlet.ShouldProcess($workspace, "Open a console and launch Open Bridge")) {
+  # Start-Process opens console executables in a new window by default on
+  # Windows. Quote the two path arguments explicitly because ArgumentList is
+  # joined into one native command line by Windows PowerShell 5.1.
+  $nodeArgs = '"' + $bridgeJs + '" launch --root "' + $workspace + '"'
+  Start-Process -FilePath $node.Source -WorkingDirectory $workspace -ArgumentList $nodeArgs | Out-Null
 }

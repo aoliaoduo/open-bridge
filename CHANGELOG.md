@@ -13,6 +13,9 @@
 
 ### Fixed
 
+- Windows Explorer 右键启动改用无控制台的 `wscript.exe` 薄中继，再隐藏启动 PowerShell launcher；点击“在此启动 Open Bridge”时不再先闪出短命的 PowerShell 窗口，同时仍保持 Windows Terminal 直接承载 Node/Open Bridge。
+- Windows Explorer 启动器不再用中间 PowerShell 包住 `open-bridge launch`；Windows Terminal 现在直接以 Node/Open Bridge 作为标签页根进程，关闭 TUI 标签页时不会留下孤儿 Bridge，之后再次右键可以正常重新启动。
+- Windows Explorer 右键入口默认改为“在此启动 Open Bridge”，并通过 `SeparatorBefore` 与粘贴类系统命令分组；安装脚本保持 ASCII 源码，用 Unicode 码点生成中文名称以兼容 Windows PowerShell 5.1，同时不再强制 `Position=Top`。
 - Windows 下 MSYS/Git Bash 进程树终止的宿主保护改为单次进程表快照，并恢复原子的 `taskkill /T /F` 可见树清理；完整测试高负载时不再因保护检查耗尽预算而留下持有 stdio 的孤儿进程。
 - Windows 进程族终止现在保护调用者自身及其 Windows 祖先进程，集成测试里的 fixture Bridge 也使用独立 process group；从正在承载 MCP 会话的 Bridge 内执行完整自检时，破坏性进程清理不再有机会误伤宿主实例。
 - TUI 活动流改为「一次调用，一条主行」：主行直接显示真实 tool id 与语义目标；成功的 `tools/call` transport trace 折叠进 Enter 详情；前台 `run_command` 的底层 process start/exit 也不再重复占行，只有超时后转为受管进程、后台任务、服务、Shell 与 HTTP/中断等 transport 异常继续单独提升显示。审计日志与 `/api/activity` 仍保留底层事实，明文工具名只存在于有界的进程内显示映射。

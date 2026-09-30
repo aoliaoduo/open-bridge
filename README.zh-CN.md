@@ -55,7 +55,7 @@ Windows 推荐直接安装资源管理器右键菜单：
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/install-context-menu.ps1
 ```
 
-安装后，在文件夹本身或文件夹空白处右键 **Open Bridge Here**，会在新终端执行 `open-bridge launch --root <该目录>`：未运行就启动 TUI，已经运行则复用该实例、不重复启动。Windows 11 可能把这个经典 shell 菜单放在「显示更多选项」里。卸载运行 `scripts/windows/uninstall-context-menu.ps1`；脚本只写当前用户的 `HKCU\Software\Classes`，不需要管理员权限。
+安装后，在文件夹本身或文件夹空白处右键 **在此启动 Open Bridge**，会在新终端执行 `open-bridge launch --root <该目录>`：未运行就启动 TUI，已经运行则复用该实例、不重复启动。Windows Terminal 下 Open Bridge 会直接作为该标签页的根进程运行，因此关闭这个 TUI 标签页也会结束对应工作区实例，下次右键可以正常重新启动。该入口会和前面的粘贴类系统命令用分隔线隔开，不再强制置顶。Windows 11 可能把这个经典 shell 菜单放在「显示更多选项」里。卸载运行 `scripts/windows/uninstall-context-menu.ps1`；脚本只写当前用户的 `HKCU\Software\Classes`，不需要管理员权限。
 
 仓库里原有的 `scripts/start-open-bridge.cmd` 仍可双击后手工输入目录；`scripts/start-open-bridge-project.cmd` 则固定启动**本项目**，每次构建后提供控制台（不自动打开浏览器），并固定使用 **8123** 端口。
 
