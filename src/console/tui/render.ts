@@ -30,6 +30,8 @@ export type TuiSnapshot = {
   port: number;
   tunnel: "public" | "local" | "follower" | "blocked";
   tunnelProvider?: string;
+  /** Operator-facing exposure state; carries no token or endpoint. */
+  exposure: "local" | "public-open" | "public-authed";
   uptimeMs: number;
   calls: number;
   successes: number;
@@ -157,6 +159,12 @@ export function tunnelTag(snap: TuiSnapshot): { text: string; color: ColorName }
   if (snap.tunnel === "blocked") {
     return { text: "隧道受阻", color: "error" };
   }
+  return { text: "仅本机", color: "dim" };
+}
+
+export function exposureTag(snap: TuiSnapshot): { text: string; color: ColorName } {
+  if (snap.exposure === "public-open") return { text: "公网 · 未认证", color: "review" };
+  if (snap.exposure === "public-authed") return { text: "公网 · Bearer", color: "success" };
   return { text: "仅本机", color: "dim" };
 }
 
@@ -455,6 +463,8 @@ function renderSidebar(snap: TuiSnapshot, width: number, maxRows?: number): stri
   // No 状态 or 工作区 fields: the top-bar capsule and title already own those facts.
   const tag = tunnelTag(snap);
   sidebarField(lines, width, "隧道", tag.text, tag.color);
+  const exposure = exposureTag(snap);
+  sidebarField(lines, width, "访问", exposure.text, exposure.color);
   sidebarField(lines, width, "运行", formatDuration(snap.uptimeMs));
   sidebarField(lines, width, "调用", `${formatCount(snap.calls)} · ✓ ${formatCount(snap.successes)} ✕ ${formatCount(snap.failures)}`, snap.failures > 0 ? "review" : "text");
   // No /64 cap: the session ceiling is developer knowledge; the operator

@@ -427,6 +427,7 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
       rootName: path.basename(projectRoot),
       rootPath: projectRoot,
       logPath: nodeHost.bridgeLog.path(),
+      authEnabled: () => nodeHost.config.get<boolean>("auth.enabled", false) === true,
     });
   }
 

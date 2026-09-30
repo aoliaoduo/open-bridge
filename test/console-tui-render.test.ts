@@ -10,7 +10,7 @@ import { test } from "node:test";
 
 import { charAtColumn, fillVisualWidth, setAmbiguousWideForTests, stripAnsi, visualWidth, truncateVisual, padEndVisual } from "../src/console/tui/text.js";
 import { healthColor, paint } from "../src/console/tui/theme.js";
-import { advanceScroll, eventKeyOf, eventListRow, formatClock, formatDatedClock, formatDuration, formatBytes, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
+import { advanceScroll, eventKeyOf, eventListRow, exposureTag, formatClock, formatDatedClock, formatDuration, formatBytes, panelScrollMetrics, renderFrame } from "../src/console/tui/render.js";
 import { tuiView } from "./lib/tui-view.js";
 
 test("activity rows are single-line: the message truncates instead of wrapping", () => {
@@ -225,11 +225,24 @@ test("buildSnapshot counts live state without carrying connection secrets", () =
   });
   assert.deepEqual(clean.changes, { status: "ready", files: 0, insertions: 0, deletions: 0 }, "a clean tree carries an explicit ready all-zero summary");
   assert.equal(snap.tunnel, "local");
+  assert.equal(snap.exposure, "local");
   assert.equal("mcpUrl" in snap, false, "the TUI snapshot does not carry the tokenized MCP endpoint");
   // Counters are since-launch, not the persisted usage window.
   assert.equal(snap.calls, 7);
   assert.equal(snap.successes, 6);
   assert.equal(snap.failures, 1);
+});
+
+test("exposure state distinguishes local, public-open, and public-authed without credentials", () => {
+  const local = buildSnapshot(fixtureView(), { version: "v", rootName: "r", logPath: "l" });
+  const publicView = { ...fixtureView(), tunnelUrl: "https://example.invalid/mcp/synthetic" };
+  const open = buildSnapshot(publicView, { version: "v", rootName: "r", logPath: "l", authEnabled: false });
+  const authed = buildSnapshot(publicView, { version: "v", rootName: "r", logPath: "l", authEnabled: true });
+
+  assert.deepEqual(exposureTag(local), { text: "仅本机", color: "dim" });
+  assert.deepEqual(exposureTag(open), { text: "公网 · 未认证", color: "review" });
+  assert.deepEqual(exposureTag(authed), { text: "公网 · Bearer", color: "success" });
+  assert.equal("routeToken" in open, false);
 });
 
 test("modern stateless MCP is visible and makes an otherwise-idle TUI busy", () => {
@@ -521,6 +534,26 @@ test("sidebar displays specific tunnel provider (ngrok / tailscale)", () => {
   const tsTunnel = (tsLines.map(stripAnsi).find(l => l.includes("隧道")) ?? "").split("│")[0] ?? "";
   assert.match(tsTunnel, /隧道\s+tailscale\s*$/);
   assert.doesNotMatch(tsTunnel, /公网|●/);
+});
+
+test("sidebar makes public authentication state explicit", () => {
+  const view = {
+    ...fixtureView(),
+    tunnelUrl: "https://demo.ngrok-free.dev/mcp/synthetic",
+    tunnelProvider: "ngrok",
+  };
+  const open = buildSnapshot(view, {
+    version: "test", rootName: "open-bridge", logPath: "C:/x/bridge.log", now: 60_000, authEnabled: false,
+  });
+  const authed = buildSnapshot(view, {
+    version: "test", rootName: "open-bridge", logPath: "C:/x/bridge.log", now: 60_000, authEnabled: true,
+  });
+
+  const openText = renderFrame(open, { width: 110, height: 30, now: 60_000 }).map(stripAnsi).join("\n");
+  const authedText = renderFrame(authed, { width: 110, height: 30, now: 60_000 }).map(stripAnsi).join("\n");
+  assert.match(openText, /访问\s+公网 · 未认证/);
+  assert.match(authedText, /访问\s+公网 · Bearer/);
+  assert.doesNotMatch(openText, /synthetic/);
 });
 
 test("heading freshness time shares the completion-clock column", () => {

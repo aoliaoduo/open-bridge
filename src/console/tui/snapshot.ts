@@ -71,6 +71,8 @@ export interface SnapshotOptions {
   launchedAt?: number;
   /** Cached workspace-change probe. The driver passes loading before the first Git result. */
   workspaceChanges?: WorkspaceChangeState;
+  /** Current bearer-gate state, supplied by the composition root without credentials. */
+  authEnabled?: boolean;
   /** 累计 review diff，或变更页当前文件的工作树 diff。 */
   diff?: {
     loading: boolean;
@@ -297,6 +299,9 @@ export function buildSnapshot(view: TuiStateView, options: SnapshotOptions): Tui
           ? "blocked"
           : "local",
     tunnelProvider: inferredProvider,
+    exposure: view.tunnelUrl
+      ? (options.authEnabled === true ? "public-authed" : "public-open")
+      : "local",
     uptimeMs: Math.max(0, now - (options.launchedAt ?? now)),
     calls: view.runtimeUsage.calls,
     successes: view.runtimeUsage.successes,

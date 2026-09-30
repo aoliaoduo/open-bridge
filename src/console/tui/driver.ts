@@ -37,6 +37,8 @@ export interface ConsoleTuiOptions {
   /** Absolute workspace root — the git-change refresh runs against it. */
   rootPath: string;
   logPath: string;
+  /** Read live bearer-gate state without giving the TUI access to token material. */
+  authEnabled?: () => boolean;
 }
 
 const KEY_MAP: Record<string, ScrollKey> = {
@@ -186,8 +188,11 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
     // The dashboard is an observer of the work, never part of it: any
     // rendering failure is swallowed and the next tick tries again.
     try {
+      let authEnabled = false;
+      try { authEnabled = options.authEnabled?.() === true; } catch { /* unreadable config degrades to the safer warning state */ }
       const snapshot = buildSnapshot(state, {
         ...options,
+        authEnabled,
         launchedAt,
         workspaceChanges,
         diff: diffSnapshotInput(),
