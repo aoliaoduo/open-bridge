@@ -59,7 +59,10 @@
     "check:fast": "npm run security:check && npm run typecheck && npm run lint && npm run test:unit && npm run test:ui",
     "verify": "npm run security:check && npm run typecheck && npm run lint && npm run build && npm test",
     "package:check": "npm pack --dry-run --json --ignore-scripts | node scripts/package-check.mjs",
-    "release:check": "npm run verify && npm run package:check",
+    "release:notes": "node scripts/release-notes.mjs",
+    "release:audit": "node scripts/release-audit.mjs",
+    "release:publish": "node scripts/release-publish.mjs",
+    "release:check": "npm run verify && npm run package:check && npm run release:audit -- --local",
     "audit": "npm audit --registry=https://registry.npmjs.org",
     "start:local": "node bin/open-bridge.js serve --port 18080 --no-tunnel"
   },

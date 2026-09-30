@@ -67,6 +67,9 @@ jobs:
       - name: Package preflight
         run: npm run package:check
 
+      - name: Release metadata audit
+        run: npm run release:audit -- --local
+
       - name: CLI smoke test
         shell: bash
         run: |

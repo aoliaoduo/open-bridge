@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 发布工程新增 `release:notes`、`release:publish` 与 `release:audit`：GitHub Release 标题、正文、prerelease/latest 状态统一由 tag 与 CHANGELOG 生成；本地/CI 会检查 package/lock/CHANGELOG 一致性，发布后可一次审计历史 tag/Release 对应关系、正文漂移与旧仓库链接。
+
 ## [1.4.4] — 2026-09-30
 
 ### Added

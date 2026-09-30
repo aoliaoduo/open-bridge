@@ -11,8 +11,10 @@ npm ci
 npm run release:check
 ```
 
-The release check runs typechecking, lint, build, all test layers and the npm
-package preflight. Include the exact checks and outcomes in your PR; explain
+The release check runs typechecking, lint, build, all test layers, the npm
+package preflight and the local release-metadata audit. The maintainer-facing
+GitHub release procedure is documented in [docs/release.md](docs/release.md).
+Include the exact checks and outcomes in your PR; explain
 failures, skips or checks you could not run instead of implying they passed.
 
 [AGENTS.md](AGENTS.md) is the canonical source for implementation boundaries,
@@ -51,7 +53,8 @@ Follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Contributions are under
 [English](#contributing) · 中文
 
 使用 [package.json](package.json) 声明支持的 Node 版本，执行 `npm ci` 和
-`npm run release:check`。在 PR 中列出实际检查和结果；失败、跳过或未执行项都要说明。
+`npm run release:check`。发布者还应按 [docs/release.md](docs/release.md) 执行
+GitHub Release 一致性审计。在 PR 中列出实际检查和结果；失败、跳过或未执行项都要说明。
 
 实现边界、测试位置与回归证据只维护在 [AGENTS.md](AGENTS.md)，不要在这里复制。
 模块地图见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)；采用 Agent 协作时，选择、提交授权和
