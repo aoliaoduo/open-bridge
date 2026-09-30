@@ -133,6 +133,11 @@ export function spawnServe({ root, home, port = "0", tunnel = false, cwd, env, s
     "--home", home,
   ], {
     stdio,
+    // Windows destructive integration tests intentionally exercise taskkill and
+    // MSYS process-group cleanup. Give every fixture Bridge its own process
+    // group so a family kill cannot share a group with the test runner — or,
+    // when tests are launched through run_command, with the live host Bridge.
+    ...(process.platform === "win32" ? { detached: true, windowsHide: true } : {}),
     ...(cwd === undefined ? {} : { cwd }),
     ...(env === undefined ? {} : { env }),
   });
