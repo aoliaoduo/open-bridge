@@ -116,6 +116,7 @@ function spawnSessionShell(name: string, cwd: string): { id: string; child: Chil
       maxRestarts: 0,
       restartDelayMs: 0,
       lastEvent: "shell_open",
+      activityOwner: "process",
     },
     {
       onClose: (finalState, code) => {

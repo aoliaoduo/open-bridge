@@ -7,6 +7,7 @@
  */
 
 const HINT_CACHE_LIMIT = 256;
+const TRANSPORT_TOOL_HINT_LIMIT = 128;
 
 export type ActivitySubjectKind = "command" | "path" | "query" | "message" | "generic";
 
@@ -19,6 +20,7 @@ export type ActivityHint = {
 };
 
 const hints = new Map<string, ActivityHint>();
+const transportToolHints = new Map<string, string>();
 
 function textValue(value: unknown, redact: (text: string) => string): string | undefined {
   if (typeof value === "string") {
@@ -263,6 +265,31 @@ export function activityHint(invocationId: string | undefined): ActivityHint | u
   return hint ? { ...hint } : undefined;
 }
 
+/**
+ * Remember the plaintext tool label only in-process, keyed by the hashed value
+ * already present in the MCP transport trace. This keeps audit.log and
+ * /api/activity unchanged while letting the local TUI say which tool a
+ * `tools/call` exchange carried.
+ */
+export function rememberTransportToolHint(toolHash: string | undefined, toolName: string | undefined): void {
+  const hash = toolHash?.trim();
+  const name = toolName?.replace(/\s+/g, " ").trim().slice(0, 80);
+  if (!hash || !name) return;
+  if (transportToolHints.has(hash)) transportToolHints.delete(hash);
+  transportToolHints.set(hash, name);
+  while (transportToolHints.size > TRANSPORT_TOOL_HINT_LIMIT) {
+    const oldest = transportToolHints.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    transportToolHints.delete(oldest);
+  }
+}
+
+export function transportToolHint(toolHash: string | undefined): string | undefined {
+  if (!toolHash) return undefined;
+  return transportToolHints.get(toolHash);
+}
+
 export function clearActivityHints(): void {
   hints.clear();
+  transportToolHints.clear();
 }

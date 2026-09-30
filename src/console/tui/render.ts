@@ -345,7 +345,10 @@ export function eventListRow(
     : event.status === "error" ? "✕"
     : event.status === "warning" ? "⚠"
     : "◆";
-  const actionWidth = width < 56 ? 4 : 8;
+  // Wide workbench views name the actual MCP tool instead of squeezing every
+  // call into a generic 8-column verb. Keep narrow terminals compact, but give
+  // common 15–20 character tool ids enough room when the panel can afford it.
+  const actionWidth = width < 56 ? 4 : width < 70 ? 12 : 20;
   const actionCell = padEndVisual(truncateVisual(action, actionWidth), actionWidth);
   const prefixPlain = `${clock} ${mark} ${actionCell} `;
   const prefix = `${paint("dim", clock, bold)} ${icon} ${paint(event.subtle === true ? "dim" : "tool", actionCell, bold)} `;

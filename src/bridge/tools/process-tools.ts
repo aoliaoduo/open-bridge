@@ -194,7 +194,10 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
   const cwd = workspacePath(args.cwd);
   const id = randomBytes(8).toString("hex");
   const customEnv = stringEnv(args);
-  const commandState = spawnManaged(commandText, cwd, customEnv, id, 0, undefined);
+  const backgroundMode = name === "start_process" || Boolean(args.background);
+  const commandState = spawnManaged(commandText, cwd, customEnv, id, 0, undefined, {
+    activityOwner: backgroundMode ? "process" : "tool",
+  });
   state.commands.set(id, commandState);
   // Give the spawn a beat to succeed or fail so a missing shell / bad cwd is
   // reported right away instead of as a phantom "running" process.
@@ -202,7 +205,7 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
   throwIfSpawnFailed(commandState);
   const stripArg = args.strip_ansi;
 
-  if (name === "start_process" || args.background) {
+  if (backgroundMode) {
     if (patternText) {
       const readyTimeout = clampMs(args.ready_timeout_ms, 10_000);
       const until = Date.now() + readyTimeout;
@@ -286,6 +289,9 @@ export async function runOrStartProcess(args: Args, name: string): Promise<unkno
     const raceTimer = setTimeout(() => finish(true), timeout);
   });
   if (timedOut && !commandState.done) {
+    // The tool call is over but the process is not. Hand lifecycle ownership to
+    // the process surface so its continued running/exiting state remains visible.
+    commandState.activityOwner = "process";
     return {
       command_id: id,
       shell: shellSpec().file,
@@ -453,8 +459,10 @@ export async function restartProcess(args: Args): Promise<Record<string, unknown
   // The tee mirror travels with the record, exactly as the auto-restart path
   // carries it: a manual restart of a service process that stopped mirroring
   // its output silently froze read_service_log at pre-restart content.
-  const replacement = spawnManaged(s.command, s.cwd, s.env, s.id, s.restartCount + 1, policy,
-    s.teeLogPath ? { teeLogPath: s.teeLogPath } : undefined);
+  const replacement = spawnManaged(s.command, s.cwd, s.env, s.id, s.restartCount + 1, policy, {
+    ...(s.teeLogPath ? { teeLogPath: s.teeLogPath } : {}),
+    activityOwner: s.activityOwner,
+  });
   replacement.releaseResourceLocks = carriedLocks;
   state.commands.set(s.id, replacement);
   // Match start_process: a replacement is not honestly restarted until its

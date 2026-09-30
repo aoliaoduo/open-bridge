@@ -54,6 +54,8 @@ export type CommandState = {
   maxRestarts: number;
   restartDelayMs: number;
   lastEvent: string;
+  /** Which TUI surface owns the primary lifecycle row for this command. */
+  activityOwner: "tool" | "process";
   /** Set when the underlying spawn failed (ENOENT/EACCES/bad cwd); surfaces the real reason to callers. */
   spawnError?: string;
   requestedStop?: "cancelled" | "terminated" | "stopped" | "timed_out";

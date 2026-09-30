@@ -321,8 +321,8 @@ test("process lifecycle rows ride along, dimmed, with their real state", () => {
     ],
   };
   base.commands = new Map([
-    ["aaaa0000bbbb1111", { id: "aaaa0000bbbb1111", command: "live one", done: false, startedAt: 1000, output: { state: () => ({ totalBytes: 1, capacityBytes: 1 }) } }],
-    ["aaaa0000bbbb2222", { id: "aaaa0000bbbb2222", command: "finished one", done: true, startedAt: 1000, endedAt: 3500, output: { state: () => ({ totalBytes: 1, capacityBytes: 1 }) } }],
+    ["aaaa0000bbbb1111", { id: "aaaa0000bbbb1111", command: "live one", done: false, activityOwner: "process" as const, startedAt: 1000, output: { state: () => ({ totalBytes: 1, capacityBytes: 1 }) } }],
+    ["aaaa0000bbbb2222", { id: "aaaa0000bbbb2222", command: "finished one", done: true, activityOwner: "process" as const, startedAt: 1000, endedAt: 3500, output: { state: () => ({ totalBytes: 1, capacityBytes: 1 }) } }],
   ]);
   const snap = buildSnapshot(base, { version: "v", rootName: "r", logPath: "l", now: 60_000 });
   assert.equal(snap.events.length, 3, "nothing is dropped: the lifecycle stays visible");
@@ -330,6 +330,55 @@ test("process lifecycle rows ride along, dimmed, with their real state", () => {
   const states = snap.events.map(event => event.status).sort().join(",");
   assert.match(states, /completed/, "the finished process keeps its finished state");
   assert.match(states, /running/, "the live process keeps its live state");
+});
+
+test("foreground run_command owns its lifecycle row instead of duplicating process start/exit", () => {
+  const view = fixtureView();
+  view.activity = [
+    { at: "1970-01-01T00:00:04.000Z", ts: 4000, tool: "process", status: "completed", message: "aaaa0000bbbb4444 exited with code 0" },
+    { at: "1970-01-01T00:00:04.000Z", ts: 4000, tool: "run_command", status: "completed", message: "Completed in 3000 ms.", invocation_id: "run-1" },
+    { at: "1970-01-01T00:00:01.000Z", ts: 1000, tool: "process", status: "running", message: "Started aaaa0000bbbb4444: git status --short" },
+    { at: "1970-01-01T00:00:01.000Z", ts: 1000, tool: "run_command", status: "running", message: "Request received.", args_summary: "{command:\"git status --short\"}", invocation_id: "run-1" },
+  ];
+  view.commands = new Map([
+    ["aaaa0000bbbb4444", {
+      id: "aaaa0000bbbb4444",
+      command: "git status --short",
+      done: true,
+      activityOwner: "tool" as const,
+      startedAt: 1000,
+      endedAt: 4000,
+      output: { state: () => ({ totalBytes: 1, capacityBytes: 1 }) },
+    }],
+  ]);
+
+  const snap = buildSnapshot(view, { version: "v", rootName: "r", logPath: "l", now: 60_000 });
+  assert.equal(snap.events.length, 1);
+  assert.equal(snap.events[0]?.tool, "run_command");
+  assert.equal(snap.events[0]?.durationMs, 3000);
+});
+
+test("a supervised continuation keeps process lifecycle rows after run_command hands ownership back", () => {
+  const view = fixtureView();
+  view.activity = [
+    { at: "1970-01-01T00:00:04.000Z", ts: 4000, tool: "run_command", status: "completed", message: "Completed in 2000 ms.", invocation_id: "run-2" },
+    { at: "1970-01-01T00:00:01.000Z", ts: 1000, tool: "process", status: "running", message: "Started aaaa0000bbbb5555: node slow.mjs" },
+    { at: "1970-01-01T00:00:01.000Z", ts: 1000, tool: "run_command", status: "running", message: "Request received.", args_summary: "{command:\"node slow.mjs\"}", invocation_id: "run-2" },
+  ];
+  view.commands = new Map([
+    ["aaaa0000bbbb5555", {
+      id: "aaaa0000bbbb5555",
+      command: "node slow.mjs",
+      done: false,
+      activityOwner: "process" as const,
+      startedAt: 1000,
+      output: { state: () => ({ totalBytes: 1, capacityBytes: 1 }) },
+    }],
+  ]);
+
+  const snap = buildSnapshot(view, { version: "v", rootName: "r", logPath: "l", now: 60_000 });
+  assert.equal(snap.events.some(event => event.tool === "run_command"), true);
+  assert.equal(snap.events.some(event => event.tool === "process" && event.status === "running"), true);
 });
 
 test("renderFrame fills the exact geometry and shows the dashboard vocabulary", () => {
@@ -672,7 +721,7 @@ test("workbench panel follows the tail and reports history when scrolled", () =>
   });
   const tail = renderFrame(snap, { width: 110, height: 30, now: 60_000 });
   const tailText = tail.map(stripAnsi).join("\n");
-  assert.match(tailText, /Shell\s+probe/, "the newest event is visible as an operator-facing action in tail mode");
+  assert.match(tailText, /send_to_shell\s+probe/, "the newest event names the actual tool id in tail mode");
   assert.doesNotMatch(tailText, /Home 回顶/, "no history indicator while following the head");
 
   // 30 events, 25 visible rows: the history below the head starts five rows

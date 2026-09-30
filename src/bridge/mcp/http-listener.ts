@@ -16,6 +16,7 @@ import { bridgeTokenFromPath, findPeerIn, proxyToPeer } from "../../http/peers.j
 import { bridgeAllowedHosts, isAllowedBridgeHost } from "../../http/request-policy.js";
 import { authorizeRequest } from "../../http/auth.js";
 import { CONFIG_DEFAULTS } from "../config/config-defaults.js";
+import { rememberTransportToolHint } from "../activity-presentation.js";
 import { record, state } from "../state.js";
 import { exchangeLine, isNoteworthy, traceActivityStatus, traceId, tracedFormat, tracedHttpMethod, tracedMethod, type TracedEra } from "./request-trace.js";
 import { root } from "../paths.js";
@@ -245,6 +246,7 @@ export async function startHttpInternal(): Promise<void> {
     // The modern era names its target in a header; the legacy era names it in
     // `params.name`. Seed from the header and let the body fill the gap below.
     let toolNameHint = headerValue(req.headers["mcp-name"]);
+    rememberTransportToolHint(traceId(toolNameHint), toolNameHint);
     res.once("close", () => {
       const outcome = {
         method: tracedMethod(methodHint),
@@ -289,6 +291,7 @@ export async function startHttpInternal(): Promise<void> {
         const body = parsedBody as { method?: unknown; params?: { name?: unknown } } | undefined;
         if (body && typeof body === "object" && body.method === "tools/call" && typeof body.params?.name === "string") {
           toolNameHint = body.params.name;
+          rememberTransportToolHint(traceId(toolNameHint), toolNameHint);
         }
       }
       // Two protocol eras share this one endpoint, and the request itself

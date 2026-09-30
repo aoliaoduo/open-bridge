@@ -168,7 +168,7 @@ export function spawnManaged(
   id: string,
   restartCount = 0,
   policy?: Partial<CommandState>,
-  options?: { teeLogPath?: string },
+  options?: { teeLogPath?: string; activityOwner?: CommandState["activityOwner"] },
 ): CommandState {
   const spec = shellSpec();
   // Service mode appends merged output to a persisted service log (tee -a) that
@@ -210,11 +210,19 @@ export function spawnManaged(
       maxRestarts: policy?.maxRestarts ?? 3,
       restartDelayMs: policy?.restartDelayMs ?? 1000,
       lastEvent: "started",
+      activityOwner: options?.activityOwner ?? "process",
     },
     {
       logSpawnError: true,
       crashOnNonZeroExit: true,
       onClose: (finalState, code) => {
+        if (finalState.activityOwner === "tool" && (code !== 0 || finalState.requestedStop)) {
+          // A foreground command that does not end normally needs its process
+          // lifecycle surfaced: the generic tool completion row does not carry
+          // exit_code/termination_reason, so hiding the process row would make
+          // a crash or external stop look like an ordinary success in the TUI.
+          finalState.activityOwner = "process";
+        }
         record("process", "completed", `${id} ${finalState.lastEvent} with code ${String(code)}`);
         // P1-1: best-effort push so a connected client hears about the exit
         // without polling; only non-zero, unrequested exits notify as errors.
@@ -247,7 +255,7 @@ export function spawnManaged(
               finalState.id,
               finalState.restartCount + 1,
               finalState,
-              { teeLogPath: finalState.teeLogPath },
+              { teeLogPath: finalState.teeLogPath, activityOwner: finalState.activityOwner },
             );
             // The resource stays claimed across a restart: hand the lock handle to
             // the replacement so its own exit still releases it.
@@ -391,7 +399,7 @@ export async function spawnServiceProcess(service: ServiceDefinition, serviceNam
       maxRestarts: service.maxRestarts,
       restartDelayMs: service.restartDelayMs,
     },
-    logPath ? { teeLogPath: logPath } : undefined,
+    { ...(logPath ? { teeLogPath: logPath } : {}), activityOwner: "process" },
   );
   state.commands.set(id, commandState);
   return id;

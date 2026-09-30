@@ -9,6 +9,7 @@
 import { FAILURE_LINE_PATTERN } from "../../bridge/failure-line.js";
 import {
   activityHintFromFields,
+  transportToolHint,
   type ActivityHint,
   type ActivitySubjectKind,
 } from "../../bridge/activity-presentation.js";
@@ -106,7 +107,19 @@ const MCP_METHOD_LABELS: Record<string, string> = {
   other: "其他请求",
 };
 
-function mcpPresentation(entry: ActivityLike, raw: string): ActivityPresentation | undefined {
+export type McpTransportInfo = {
+  method: string;
+  toolName?: string;
+  httpStatus?: number;
+  durationMs?: number;
+  formatLabel?: string;
+  aborted: boolean;
+  failure?: string;
+};
+
+export function tuiMcpTransportInfo(entry: ActivityLike): McpTransportInfo | undefined {
+  if (entry.tool !== "mcp") return undefined;
+  const raw = full(entry.message);
   const parts = raw.split(" · ").map(part => part.trim()).filter(Boolean);
   const route = /^([^/]+)\/(.+)$/.exec(parts[0] ?? "");
   if (!route) return undefined;
@@ -117,20 +130,41 @@ function mcpPresentation(entry: ActivityLike, raw: string): ActivityPresentation
   const durationMs = durationPart ? Number.parseFloat(durationPart.slice(0, -2)) : undefined;
   const format = parts.find(part => part === "json" || part === "sse" || part === "no-body");
   const formatLabel = format === "json" ? "JSON" : format === "sse" ? "SSE" : format === "no-body" ? "无正文" : undefined;
+  const toolHashPart = parts.find(part => part.startsWith("tool "));
+  const toolName = method === "tools/call"
+    ? transportToolHint(toolHashPart?.slice("tool ".length).trim())
+    : undefined;
   const aborted = parts.includes("client-aborted");
-  const qualifier = [httpPart, formatLabel].filter(Boolean).join(" · ") || undefined;
   const failure = aborted ? "客户端中断"
     : httpStatus !== undefined && httpStatus >= 400 ? `HTTP ${httpStatus}`
     : entry.status === "warning" ? "传输警告"
     : entry.status === "error" ? "传输失败"
     : undefined;
   return {
+    method,
+    ...(toolName ? { toolName } : {}),
+    ...(httpStatus !== undefined ? { httpStatus } : {}),
+    ...(durationMs !== undefined && Number.isFinite(durationMs) ? { durationMs } : {}),
+    ...(formatLabel ? { formatLabel } : {}),
+    aborted,
+    ...(failure ? { failure } : {}),
+  };
+}
+
+function mcpPresentation(entry: ActivityLike, _raw: string): ActivityPresentation | undefined {
+  const info = tuiMcpTransportInfo(entry);
+  if (!info) return undefined;
+  const qualifier = [
+    info.httpStatus !== undefined ? `HTTP ${info.httpStatus}` : undefined,
+    info.formatLabel,
+  ].filter(Boolean).join(" · ") || undefined;
+  return {
     action: "MCP",
-    subject: MCP_METHOD_LABELS[method] ?? method,
+    subject: info.toolName ?? MCP_METHOD_LABELS[info.method] ?? info.method,
     ...(qualifier ? { qualifier } : {}),
     subjectKind: "generic",
-    ...(failure ? { failure } : {}),
-    ...(durationMs !== undefined && Number.isFinite(durationMs) ? { durationMs } : {}),
+    ...(info.failure ? { failure: info.failure } : {}),
+    ...(info.durationMs !== undefined ? { durationMs: info.durationMs } : {}),
   };
 }
 

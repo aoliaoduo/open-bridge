@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- TUI 活动流改为「一次调用，一条主行」：主行直接显示真实 tool id 与语义目标；成功的 `tools/call` transport trace 折叠进 Enter 详情；前台 `run_command` 的底层 process start/exit 也不再重复占行，只有超时后转为受管进程、后台任务、服务、Shell 与 HTTP/中断等 transport 异常继续单独提升显示。审计日志与 `/api/activity` 仍保留底层事实，明文工具名只存在于有界的进程内显示映射。
+
 ## [1.4.3] — 2026-09-30
 
 ### Added
