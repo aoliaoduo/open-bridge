@@ -42,12 +42,12 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { installNodeHost, localUtcOffset, normalizeTimezone, resolveDefaultHome } from "./host/node-host.js";
 import { t } from "./cli/cli-i18n.js";
-import { state } from "./bridge/state.js";
+import { clientMcpUrl, state } from "./bridge/state.js";
 import { currentWorkspaceRoot } from "./bridge/paths.js";
 import { loadServices } from "./bridge/runtime/services.js";
 import { loadUsageStats } from "./bridge/usage-store.js";
 import { loadTodoStore } from "./bridge/todo-store.js";
-import { start, stop } from "./bridge/lifecycle/lifecycle.js";
+import { start, stop, webAiPrompt } from "./bridge/lifecycle/lifecycle.js";
 import { setExtraRouteHandler, setLocalServerReadyHook } from "./bridge/mcp/route-hooks.js";
 import { markHostProcess } from "./bridge/lifecycle/stop-guard.js";
 import { armShutdownDeadline } from "./bridge/lifecycle/shutdown-deadline.js";
@@ -428,6 +428,8 @@ async function cmdServe(parsed: ParsedArgs): Promise<void> {
       rootPath: projectRoot,
       logPath: nodeHost.bridgeLog.path(),
       authEnabled: () => nodeHost.config.get<boolean>("auth.enabled", false) === true,
+      mcpUrl: clientMcpUrl,
+      onboardingPrompt: webAiPrompt,
     });
   }
 

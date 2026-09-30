@@ -6,8 +6,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- TUI 新增全局快捷键：`u` 一键复制当前 MCP URL，`p` 一键复制接入提示词；URL 不在面板正文回显，复制成功/失败只显示短暂状态，并使用系统原生剪贴板命令而不引入额外依赖。
+
 ### Fixed
 
+- Windows 下 MSYS/Git Bash 进程树终止的宿主保护改为单次进程表快照，并恢复原子的 `taskkill /T /F` 可见树清理；完整测试高负载时不再因保护检查耗尽预算而留下持有 stdio 的孤儿进程。
 - Windows 进程族终止现在保护调用者自身及其 Windows 祖先进程，集成测试里的 fixture Bridge 也使用独立 process group；从正在承载 MCP 会话的 Bridge 内执行完整自检时，破坏性进程清理不再有机会误伤宿主实例。
 - TUI 活动流改为「一次调用，一条主行」：主行直接显示真实 tool id 与语义目标；成功的 `tools/call` transport trace 折叠进 Enter 详情；前台 `run_command` 的底层 process start/exit 也不再重复占行，只有超时后转为受管进程、后台任务、服务、Shell 与 HTTP/中断等 transport 异常继续单独提升显示。审计日志与 `/api/activity` 仍保留底层事实，明文工具名只存在于有界的进程内显示映射。
 

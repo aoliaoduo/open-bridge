@@ -120,13 +120,18 @@ async function terminateMsysGroups(
   // reparents children. Never signal a group containing this CLI/Bridge or any
   // of its ancestors: a self-hosted release check may legitimately be testing
   // a child Bridge from inside the Bridge that is carrying the current MCP call.
+  //
+  // Take ONE ps snapshot. The first protected implementation ran `ps -W` once
+  // per candidate-group × ancestor pair; under the full integration suite that
+  // could burn the helper's entire 5 s budget before any group received SIGKILL,
+  // leaking an orphan that kept the child's stdio open and prevented `close`.
   const script =
-    `for w in ${list}; do ps -W | awk -v w="$w" '$4==w && $3>0 {print $3}'; done | sort -u ` +
-    `| while read -r g; do ` +
-    `if [ "$g" -le 0 ] 2>/dev/null; then continue; fi; blocked=0; ` +
-    `for p in ${protectedList || "0"}; do ` +
-    `if ps -W | awk -v g="$g" -v p="$p" '$3==g && $4==p {found=1} END {exit found ? 0 : 1}'; then blocked=1; break; fi; ` +
-    `done; if [ "$blocked" -eq 0 ]; then kill -9 -- -"$g" 2>/dev/null; fi; done`;
+    `ps -W | awk -v targets="${list}" -v protected="${protectedList || "0"}" '` +
+    `BEGIN { nt=split(targets,a," "); for(i=1;i<=nt;i++) target[a[i]]=1; ` +
+    `np=split(protected,a," "); for(i=1;i<=np;i++) guard[a[i]]=1 } ` +
+    `$3>0 { if(target[$4]) candidate[$3]=1; if(guard[$4]) blocked[$3]=1 } ` +
+    `END { for(g in candidate) if(!blocked[g]) print g }' ` +
+    `| while read -r g; do kill -9 -- -"$g" 2>/dev/null; done`;
   try {
     await execFileAsync(shellFile, ["-c", script], { windowsHide: true, timeout: 5000 });
   } catch { /* family already gone, ps unavailable, or the helper refused — taskkill follows */ }
@@ -156,13 +161,29 @@ export async function killWindowsProcessFamily(pid: number, shellFile: string): 
   }
   if (isBashLikeShell(shellFile)) {
     await terminateMsysGroups(pids, protectedPids, shellFile);
-    for (const targetPid of pids) {
-      try {
-        await execFileAsync("taskkill.exe", ["/pid", String(targetPid), "/f"], {
-          windowsHide: true,
-          timeout: 3000,
-        });
-      } catch { /* taskkill refuses an already-dead pid */ }
+    // The group kill handles MSYS-orphaned jobs. For the Windows-visible tree,
+    // prefer one atomic /T kill over the old sequential pid loop: under load a
+    // long list can otherwise spend the close budget killing descendants one by
+    // one while the shell continues to spawn replacements. If the group kill
+    // already removed the root, /T naturally refuses; in that case kill the
+    // pre-snapshotted members concurrently as a best-effort cleanup.
+    let rootTreeKilled = false;
+    try {
+      await execFileAsync("taskkill.exe", ["/pid", String(pid), "/T", "/F"], {
+        windowsHide: true,
+        timeout: 3000,
+      });
+      rootTreeKilled = true;
+    } catch { /* group kill may already have removed the root */ }
+    if (!rootTreeKilled) {
+      await Promise.all(pids.map(async targetPid => {
+        try {
+          await execFileAsync("taskkill.exe", ["/pid", String(targetPid), "/f"], {
+            windowsHide: true,
+            timeout: 3000,
+          });
+        } catch { /* taskkill refuses an already-dead pid */ }
+      }));
     }
   } else {
     try {

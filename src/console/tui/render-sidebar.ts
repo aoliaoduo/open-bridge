@@ -9,7 +9,12 @@ function sidebarField(lines: string[], width: number, label: string, value: stri
   lines.push(`${labelPart} ${paint(color, truncateVisual(value, Math.max(4, width - 10)))}`);
 }
 
-export function renderSidebar(snap: TuiSnapshot, width: number, maxRows?: number): string[] {
+export function renderSidebar(
+  snap: TuiSnapshot,
+  width: number,
+  maxRows?: number,
+  actionNotice?: { text: string; tone: "success" | "error" },
+): string[] {
   const lines: string[] = [];
   const section = (title: string): void => {
     lines.push(paint("dim", padEndVisual(`─ ${title} `, width)));
@@ -90,15 +95,20 @@ export function renderSidebar(snap: TuiSnapshot, width: number, maxRows?: number
 
   const addrLines = wrapVisual(`控制台 http://127.0.0.1:${snap.port}/console`, width)
     .map(line => paint("muted", line));
+  const utilityLines = [
+    ...(actionNotice ? [paint(actionNotice.tone, truncateVisual(actionNotice.text, width))] : []),
+    paint("muted", truncateVisual("快捷 u URL · p 接入提示词", width)),
+    ...addrLines,
+  ];
 
   if (maxRows !== undefined) {
-    if (lines.length + addrLines.length <= maxRows) {
-      const padCount = maxRows - lines.length - addrLines.length;
-      return [...lines, ...Array.from({ length: padCount }, () => ""), ...addrLines];
+    if (lines.length + utilityLines.length <= maxRows) {
+      const padCount = maxRows - lines.length - utilityLines.length;
+      return [...lines, ...Array.from({ length: padCount }, () => ""), ...utilityLines];
     }
-    const allowedTop = Math.max(0, maxRows - addrLines.length);
-    return [...lines.slice(0, allowedTop), ...addrLines];
+    const allowedTop = Math.max(0, maxRows - utilityLines.length);
+    return [...lines.slice(0, allowedTop), ...utilityLines];
   }
 
-  return [...lines, ...addrLines];
+  return [...lines, ...utilityLines];
 }

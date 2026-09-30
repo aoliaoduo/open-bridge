@@ -605,6 +605,27 @@ test("sidebar makes public authentication state explicit", () => {
   assert.doesNotMatch(openText, /synthetic/);
 });
 
+test("TUI exposes clipboard shortcut hints and status without rendering the MCP URL", () => {
+  const snap = buildSnapshot(fixtureView(), {
+    version: "test",
+    rootName: "open-bridge",
+    logPath: "C:/x/bridge.log",
+    now: 60_000,
+  });
+  const wide = renderFrame(snap, {
+    width: 110,
+    height: 30,
+    now: 60_000,
+    actionNotice: { text: "✓ 已复制 MCP URL", tone: "success" },
+  }).map(stripAnsi).join("\n");
+  assert.match(wide, /u URL · p 接入提示词/);
+  assert.match(wide, /已复制 MCP URL/);
+  assert.doesNotMatch(wide, /\/mcp\/[0-9a-z-]{8,}/i, "the tokenized endpoint remains clipboard-only");
+
+  const narrow = renderFrame(snap, { width: 60, height: 20, now: 60_000 }).map(stripAnsi).join("\n");
+  assert.match(narrow, /u URL · p 接入提示词/);
+});
+
 test("heading freshness time shares the completion-clock column", () => {
   const todos = [
     { id: "1", title: "写补丁", status: "completed", completedAt: "2026-09-22T06:00:00Z" },

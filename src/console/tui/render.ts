@@ -122,12 +122,17 @@ function renderProcessRows(snap: TuiSnapshot, width: number, maxRows: number): s
   return rows;
 }
 
-function renderFooter(snap: TuiSnapshot, width: number): string[] {
+function renderFooter(
+  snap: TuiSnapshot,
+  width: number,
+  actionNotice?: { text: string; tone: "success" | "error" },
+): string[] {
   // The TUI is an observability surface, not a connection-secret surface. The
   // local Web Console address is safe and useful here; the tokenized MCP URL is
   // intentionally left to the startup banner and `open-bridge url`.
+  const status = actionNotice ? `${actionNotice.text} · ` : "";
   return [padEndVisual(
-    paint("muted", truncateVisual(`控制台 http://127.0.0.1:${snap.port}/console`, width)),
+    paint(actionNotice?.tone ?? "muted", truncateVisual(`${status}控制台 http://127.0.0.1:${snap.port}/console · u URL · p 接入提示词`, width)),
     width,
   )];
 }
@@ -306,12 +311,13 @@ function renderWorkbench(
     firstVisible: number; taskFirstVisible: number; changeFirstVisible: number; diffFirstVisible: number; panelView: PanelView;
     expandFirstVisible: number;
     activityCursor: number; changeCursor: number; eventDetailKey?: string;
+    actionNotice?: { text: string; tone: "success" | "error" };
   },
 ): string[] {
   const { layout, spin, now, busy, panelView } = options;
   const { width, height, sidebarWidth, panelWidth, panelRows } = layout;
   const bodyRows = panelRows + 1;
-  const sidebar = renderSidebar(snap, sidebarWidth, bodyRows);
+  const sidebar = renderSidebar(snap, sidebarWidth, bodyRows, options.actionNotice);
   const first = panelView === "tasks" ? options.taskFirstVisible
     : panelView === "changes" ? options.changeFirstVisible
     : panelView === "diff" ? options.diffFirstVisible
@@ -341,6 +347,7 @@ export function renderFrame(
     firstVisible?: number; taskFirstVisible?: number; changeFirstVisible?: number; diffFirstVisible?: number; panelView?: PanelView;
     expandFirstVisible?: number;
     activityCursor?: number; changeCursor?: number; eventDetailKey?: string;
+    actionNotice?: { text: string; tone: "success" | "error" };
   },
 ): string[] {
   const panelView = options.panelView ?? "activity";
@@ -356,7 +363,7 @@ export function renderFrame(
   const activityCursor = options.activityCursor ?? 0;
   const changeCursor = options.changeCursor ?? 0;
   if (layout.sidebarWidth > 0) {
-    return renderWorkbench(snap, { layout, spin, now, busy, firstVisible, taskFirstVisible, changeFirstVisible, diffFirstVisible, panelView, expandFirstVisible: options.expandFirstVisible ?? 0, activityCursor, changeCursor, eventDetailKey: options.eventDetailKey });
+    return renderWorkbench(snap, { layout, spin, now, busy, firstVisible, taskFirstVisible, changeFirstVisible, diffFirstVisible, panelView, expandFirstVisible: options.expandFirstVisible ?? 0, activityCursor, changeCursor, eventDetailKey: options.eventDetailKey, actionNotice: options.actionNotice });
   }
   const first = panelView === "tasks" ? taskFirstVisible
     : panelView === "changes" ? changeFirstVisible
@@ -367,7 +374,7 @@ export function renderFrame(
     renderTopBar(snap, width, busy, spin), paint("dim", fillVisualWidth("─", width)),
     ...layout.overview, ...layout.processes,
     ...renderPanel(snap, width, panelRows, spin, now, panelView, first, activityCursor, options.eventDetailKey, changeCursor),
-    ...renderFooter(snap, width),
+    ...renderFooter(snap, width, options.actionNotice),
   ];
   return fitFrame(lines, width, height);
 }

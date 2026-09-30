@@ -167,6 +167,7 @@ async function withTerminal(
     press: (name: string, ctrl?: boolean) => string;
     resize: (width: number, height: number) => string;
     killCalls: () => unknown[][];
+    copies: () => string[];
   }) => void | Promise<void>,
   options: { rootPath?: string; mockGit?: boolean } = {},
 ): Promise<void> {
@@ -190,11 +191,20 @@ async function withTerminal(
     return {} as ChildProcess;
   });
   const killMock = mock.method(process, "kill", () => true);
+  const copied: string[] = [];
   syncBuiltinESMExports();
   Object.defineProperty(process, "stdout", { configurable: true, value: output });
   Object.defineProperty(process, "stdin", { configurable: true, value: input });
   try {
-    assert.equal(startConsoleTui({ version: "test", rootName: "fixture", rootPath: options.rootPath ?? process.cwd(), logPath: "synthetic.log" }), true);
+    assert.equal(startConsoleTui({
+      version: "test",
+      rootName: "fixture",
+      rootPath: options.rootPath ?? process.cwd(),
+      logPath: "synthetic.log",
+      mcpUrl: () => "https://example.invalid/mcp/synthetic-route-secret",
+      onboardingPrompt: () => "SYNTHETIC_ONBOARDING_PROMPT",
+      copyText: async text => { copied.push(text); },
+    }), true);
     assert.equal(input.isRaw, true);
     await run({
       output,
@@ -210,6 +220,7 @@ async function withTerminal(
         return output.frame;
       },
       killCalls: () => killMock.mock.calls.map(call => call.arguments),
+      copies: () => [...copied],
     });
   } finally {
     stopConsoleTui();
@@ -243,6 +254,22 @@ async function waitForFrame(
   }
   assert.fail(`timed out waiting for TUI frame; last frame:\n${output.frame.slice(-2000)}`);
 }
+
+test("u/p copy endpoint and onboarding prompt without exposing the endpoint in the frame", async () => {
+  await withTerminal(async ({ output, press, copies }) => {
+    press("u");
+    await waitForFrame(output, screen => screen.includes("已复制 MCP URL"));
+    assert.deepEqual(copies(), ["https://example.invalid/mcp/synthetic-route-secret"]);
+    assert.doesNotMatch(output.frame, /synthetic-route-secret/, "copying the URL never renders it into the TUI");
+
+    press("p");
+    await waitForFrame(output, screen => screen.includes("已复制接入提示词"));
+    assert.deepEqual(copies(), [
+      "https://example.invalid/mcp/synthetic-route-secret",
+      "SYNTHETIC_ONBOARDING_PROMPT",
+    ]);
+  });
+});
 
 test("real driver routes scroll keys to the visible panel and only Tab switches views", async () => {
   await withTerminal(({ press, killCalls }) => {

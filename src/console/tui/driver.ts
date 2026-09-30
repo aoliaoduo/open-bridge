@@ -1,9 +1,9 @@
 /**
- * Serve-console TUI driver (stage 3): alternate screen, 500 ms repaint, and
- * view-local scrolling with Tab as the only view-switching key.
+ * Serve-console TUI driver (stage 3): alternate screen, 500 ms repaint,
+ * view-local scrolling, and a small set of global operator shortcuts.
  *
- * The TUI is a viewing surface by design (settings and background operations
- * live in the web console), so no command input exists. Scroll keys are read
+ * The TUI does not mutate Bridge settings or run commands: its only direct
+ * actions are safe local clipboard copies. Scroll keys are read
  * through raw mode; inside raw mode Ctrl+C no longer raises SIGINT by itself,
  * so \x03 is translated into a real SIGINT against ourselves and the existing
  * graceful shutdown path runs unchanged (it calls stopConsoleTui, which
@@ -20,6 +20,7 @@ import type { ReadStream } from "node:tty";
 import { state } from "../../bridge/state.js";
 import { collectFileDiffPreview, collectReviewDiffPreview, collectWorkspaceChanges, type FileDiffPreview, type ReviewDiffPreview, type WorkspaceChangeState } from "./changes.js";
 import { todoFreshness, todoProgress } from "../../bridge/todo-store.js";
+import { copyTextToClipboard } from "./clipboard.js";
 import { buildSnapshot } from "./snapshot.js";
 import { renderFrame, panelScrollMetrics, type ScrollKey } from "./render.js";
 import {
@@ -39,6 +40,12 @@ export interface ConsoleTuiOptions {
   logPath: string;
   /** Read live bearer-gate state without giving the TUI access to token material. */
   authEnabled?: () => boolean;
+  /** Current endpoint text for the local clipboard shortcut. */
+  mcpUrl?: () => string;
+  /** Ready-made onboarding prompt for the local clipboard shortcut. */
+  onboardingPrompt?: () => string;
+  /** Injectable clipboard writer; defaults to the system clipboard adapter. */
+  copyText?: (text: string) => Promise<void>;
 }
 
 const KEY_MAP: Record<string, ScrollKey> = {
@@ -69,6 +76,10 @@ let diffState: LoadedDiff | undefined;
 let diffLoading = false;
 /** 最近一帧快照：controller 的 Enter/reanchor 只依赖这一份只读事实。 */
 let lastSnapshot: ReturnType<typeof buildSnapshot> | undefined;
+type ActionNotice = { text: string; tone: "success" | "error" };
+let actionNotice: ActionNotice | undefined;
+let actionNoticeTimer: ReturnType<typeof setTimeout> | undefined;
+const ACTION_NOTICE_MS = 2200;
 
 export function consoleTuiActive(): boolean {
   return active;
@@ -98,6 +109,11 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
   workspaceChanges = { status: "loading" };
   diffState = undefined;
   diffLoading = false;
+  actionNotice = undefined;
+  if (actionNoticeTimer !== undefined) {
+    clearTimeout(actionNoticeTimer);
+    actionNoticeTimer = undefined;
+  }
   // 上一次会话的帧快照不能带进新会话：Enter 与历史事件 reanchor
   // 都必须基于这一轮真实画过的帧。
   lastSnapshot = undefined;
@@ -212,6 +228,7 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
       const lines = renderFrame(snapshot, {
         ...dimensions,
         spinnerFrame: frameIndex++,
+        actionNotice,
         ...controllerRenderOptions(controller),
       });
       // A full-width write leaves the cursor on the last cell (wrap pending).
@@ -232,12 +249,61 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
       readline.emitKeypressEvents(stdin);
       stdin.setRawMode(true);
       stdin.resume();
+      const showNotice = (notice: ActionNotice): void => {
+        actionNotice = notice;
+        if (actionNoticeTimer !== undefined) clearTimeout(actionNoticeTimer);
+        actionNoticeTimer = setTimeout(() => {
+          if (session !== sessionGeneration) return;
+          actionNotice = undefined;
+          actionNoticeTimer = undefined;
+          paint();
+        }, ACTION_NOTICE_MS);
+        actionNoticeTimer.unref();
+        paint();
+      };
+      const copyShortcut = (kind: "url" | "prompt"): void => {
+        let text = "";
+        try {
+          text = kind === "url" ? (options.mcpUrl?.() ?? "") : (options.onboardingPrompt?.() ?? "");
+        } catch {
+          showNotice({ text: kind === "url" ? "✕ MCP URL 不可用" : "✕ 接入提示词不可用", tone: "error" });
+          return;
+        }
+        if (text === "") {
+          showNotice({ text: kind === "url" ? "✕ MCP URL 不可用" : "✕ 接入提示词不可用", tone: "error" });
+          return;
+        }
+        const writer = options.copyText ?? copyTextToClipboard;
+        void writer(text)
+          .then(() => {
+            if (session !== sessionGeneration) return;
+            showNotice({
+              text: kind === "url" ? "✓ 已复制 MCP URL" : "✓ 已复制接入提示词",
+              tone: "success",
+            });
+          })
+          .catch(() => {
+            if (session !== sessionGeneration) return;
+            showNotice({
+              text: kind === "url" ? "✕ 复制 MCP URL 失败" : "✕ 复制接入提示词失败",
+              tone: "error",
+            });
+          });
+      };
       keyListener = (ch, key) => {
         try {
           if (ch === "\x03" || (key?.ctrl === true && key.name === "c")) {
             // Raw mode swallows the terminal's SIGINT; raise the real one so
             // the graceful shutdown path (and its cleanup) runs as before.
             process.kill(process.pid, "SIGINT");
+            return;
+          }
+          if (key?.ctrl !== true && key?.name === "u") {
+            copyShortcut("url");
+            return;
+          }
+          if (key?.ctrl !== true && key?.name === "p") {
+            copyShortcut("prompt");
             return;
           }
           let action: TuiControllerAction | undefined;
@@ -289,6 +355,11 @@ export function stopConsoleTui(): void {
     clearInterval(changesTimer);
     changesTimer = undefined;
   }
+  if (actionNoticeTimer !== undefined) {
+    clearTimeout(actionNoticeTimer);
+    actionNoticeTimer = undefined;
+  }
+  actionNotice = undefined;
   if (resizeHandler !== undefined) {
     process.stdout.off("resize", resizeHandler);
     resizeHandler = undefined;
