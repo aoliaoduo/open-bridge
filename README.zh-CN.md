@@ -126,9 +126,9 @@ open-bridge serve
 open-bridge serve --port 18080
 ```
 
-### 启动它的终端拥有这个实例
+### 本机操作者拥有这个实例
 
-Open Bridge 运行在启动它的终端进程里。关闭这个终端，实例就会停止并释放资源。
+有可见 TUI 时，按 **Ctrl+C** 或关闭承载它的终端即可停止实例。若当前只有 Web 控制台可见，可在 **状态 → 关闭 Bridge** 中执行同一套优雅关闭。
 
 完整命令和配置说明见 **[docs/configuration.md](docs/configuration.md)**。
 
@@ -148,7 +148,7 @@ open-bridge explorer install
 - 已有实例时直接复用，不重复启动；
 - 新实例会在 Windows Terminal 中打开**可见 TUI**；
 - 同一工作区已经运行时，再次右键会打开现有 Web 控制台；
-- Windows Terminal 不可用时会改为打开 Web 控制台，不会留下“后台已启动但什么都看不到”的实例；
+- Windows Terminal 不可用时会改为打开 Web 控制台，不会留下“后台已启动但什么都看不到”的实例；状态页可以直接关闭这个 Bridge；
 - 只写当前用户的 `HKCU\Software\Classes`，不需要管理员权限。
 
 卸载：
@@ -164,13 +164,22 @@ Windows 11 可能把这个经典 shell 菜单放在 **显示更多选项** 中�
 
 旧的 PowerShell 安装/卸载脚本继续保留为兼容 wrapper，实际仍委托给同一个 Node/TypeScript CLI。
 
-`scripts/start-open-bridge.cmd` 与 `scripts/start-open-bridge-project.cmd` 现在刻意保持为很薄的双击 bootstrap。目录选择、上次目录持久化、构建/启动策略以及本仓库固定的 **8123** 开发端口，都由 Node/TypeScript 处理。
+`scripts/start-open-bridge.cmd` 与 `scripts/start-open-bridge-project.cmd` 现在刻意保持为很薄的双击 bootstrap。目录选择、上次目录持久化、构建/启动策略以及本仓库固定的 **8123** 开发端口，都由 Node/TypeScript 处理。项目启动器会对生产构建输入计算内容指纹；只要当前源码与上次 launcher build 后记录的指纹不完全一致，就会先重新构建再启动。
 
 通用 `.cmd` 刻意不再接收 workspace/flag 参数，因为 `cmd.exe` 会在批处理逻辑有机会保护之前先展开合法路径里的字面 `%NAME%`。自动化应直接调用 CLI：
 
 ```bash
 open-bridge launch --root DIR
 ```
+
+源码仓库本身不会自动把 `open-bridge` 安装成全局命令。如果 PowerShell 提示“无法识别 open-bridge”，请从仓库里直接调用入口：
+
+```powershell
+node .\bin\open-bridge.js instances
+node .\bin\open-bridge.js stop --pid 12345
+```
+
+如果当前不在仓库目录，就把 `bin\open-bridge.js` 换成绝对路径。
 
 </details>
 

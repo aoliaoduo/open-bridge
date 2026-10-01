@@ -89,6 +89,6 @@ npm run release:check   # verify 全流程 + npm 实际打包清单检查
 
 集成测试启动 `bin/open-bridge.js` 并读取 `dist/`，所以必须先构建。源码、测试和 UI 测试的放置约定见仓库的 `AGENTS.md`；一批修改完成后还需审阅差异、检查工作树并只提交相关文件。
 
-Windows 双击入口是薄 bootstrap：`scripts/windows/launcher-bootstrap.mjs` 只负责在尚无可运行 `dist/` 时安装/构建，然后进入隐藏的 `windows-launch` CLI；workspace 选择、持久化、Explorer/Terminal 参数与本项目固定端口 `8123` 都由 TypeScript 处理。重启后先确认 `state: "running"` 与 `build_stale: false`，再做与改动对应的真实 MCP 验证；源码测试通过不能代替这一步。
+Windows 双击入口是薄 bootstrap：`scripts/windows/launcher-bootstrap.mjs` 负责依赖首次安装、构建新鲜度判定和进入隐藏的 `windows-launch` CLI；项目模式通过 `scripts/windows/launcher-build.mjs` 对生产构建输入做 SHA-256 内容指纹，只有 `dist` 存在且与上次成功 launcher build 写入的本地 stamp 完全匹配时才直接复用；`package.json` / `package-lock.json` 指纹变化还会先同步 `node_modules`，避免 mtime 回拨导致漏构建，也避免无变化重启反复改写 `dist`。workspace 选择、持久化、Explorer/Terminal 参数与本项目固定端口 `8123` 都由 TypeScript 处理。重启后先确认 `state: "running"` 与 `build_stale: false`，再做与改动对应的真实 MCP 验证；源码测试通过不能代替这一步。
 
 维护时优先保持一个配置/契约真源、最小直接的改动、可恢复且诚实的异步结果。不要恢复行为教练层，也不要把已完成的迁移报告当成新的待办任务。

@@ -15,8 +15,9 @@
 
 ### Fixed
 
+- 本机 Web 控制台的「状态」页新增两步确认的「关闭 Bridge」操作：Windows Terminal 不可用、只剩 Web 界面时也能走与 TUI/CLI 相同的优雅 shutdown，不再需要靠隐藏终端或全局 CLI 才能结束实例。
+- `start-open-bridge-project.cmd` 的构建新鲜度从 mtime 启发式升级为 SHA-256 内容指纹 + 成功构建 stamp：源码内容即使带着更旧时间戳也不会漏构建；`package.json` / `package-lock.json` 变化会先同步依赖；内容未变化的普通重启继续复用现有 `dist`，不会把其他工作区无故标成 `build_stale`。
 - Windows Explorer 右键首次启动不再把 Windows Terminal 隐藏：新工作区会显示可交互 TUI；Windows Terminal 不可用时 fallback 会主动打开 Web 控制台，避免 Bridge 已在后台运行但用户看不到任何界面。
-- `start-open-bridge-project.cmd` 不再每次重启都无条件重写 `dist`；只有构建缺失或源码/UI/构建配置比现有产物更新时才重新 build，避免无实际代码变化的开发实例重启把其他已运行工作区误标成 `build_stale`。
 - TUI 在 Windows/WSL 下复制 MCP URL 或接入提示词时，`clip.exe` 输入改为无 BOM 的 UTF-16LE，不再受控制台代码页影响而把中文复制成 `杩炴帴...` 一类乱码。
 - 进程输出、持久 Shell 与服务日志的字节分页会在 UTF-8 字符边界对齐；中文、emoji 等多字节字符跨 `max_bytes` / 保留窗口边界时不再被解码成 `�`，同时 `offset` / `next_offset` 继续保持绝对字节游标语义。
 - Windows 打开 Web 控制台改为直接调用 `explorer.exe` argv，不再通过 `cmd /c start` 让 URL 中的 `&` 等字符进入 shell parser。

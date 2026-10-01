@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { projectBuildRequired } from "../scripts/windows/launcher-build.mjs";
+import { projectBuildRequired, projectDependencyInstallRequired, writeProjectBuildStamp } from "../scripts/windows/launcher-build.mjs";
 
 function file(root, relative, seconds) {
   const target = path.join(root, relative);
@@ -25,6 +25,7 @@ function fixture() {
   file(root, "package.json", 10);
   file(root, "dist/cli.js", 20);
   file(root, "dist/ui/console.html", 20);
+  writeProjectBuildStamp(root);
   return root;
 }
 
@@ -53,6 +54,18 @@ test("new core or UI build inputs require a rebuild", () => {
   }
 });
 
+test("content changes cannot hide behind an older filesystem timestamp", () => {
+  const root = fixture();
+  try {
+    file(root, "src/cli.ts", 5);
+    writeFileSync(path.join(root, "src", "cli.ts"), "changed content with backdated mtime");
+    utimesSync(path.join(root, "src", "cli.ts"), 5, 5);
+    assert.equal(projectBuildRequired(root), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("UI test-only edits do not rebuild the production launcher", () => {
   const root = fixture();
   try {
@@ -68,6 +81,29 @@ test("missing core or UI output always requires a build", () => {
   try {
     rmSync(path.join(root, "dist", "cli.js"));
     assert.equal(projectBuildRequired(root), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("missing build stamp forces one rebuild before the project launcher trusts dist", () => {
+  const root = fixture();
+  try {
+    rmSync(path.join(root, ".open-bridge-project-build.json"));
+    assert.equal(projectBuildRequired(root), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("dependency manifest changes require npm install before the next project build", () => {
+  const root = fixture();
+  try {
+    mkdirSync(path.join(root, "node_modules"), { recursive: true });
+    assert.equal(projectDependencyInstallRequired(root), false);
+
+    writeFileSync(path.join(root, "package-lock.json"), "{\"lockfileVersion\":3,\"changed\":true}\n");
+    assert.equal(projectDependencyInstallRequired(root), true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

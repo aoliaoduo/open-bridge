@@ -126,9 +126,9 @@ Without `--port`, Open Bridge chooses an available port. Use a fixed port when y
 open-bridge serve --port 18080
 ```
 
-### The terminal owns the instance
+### The local operator owns the instance
 
-The process runs in the terminal that launched it. Closing that terminal stops the instance and releases its resources.
+With a visible TUI, press **Ctrl+C** or close its terminal to stop the instance. If the Web console is the only visible surface, **Status → Shut down Bridge** performs the same graceful local shutdown.
 
 For the full command and configuration reference, see **[docs/configuration.md](docs/configuration.md)**.
 
@@ -148,7 +148,7 @@ The launcher:
 - reuses an existing workspace instance instead of starting a duplicate;
 - opens a **visible TUI in Windows Terminal** when starting a new instance;
 - opens the existing Web console on a later click when that workspace is already running;
-- falls back to opening the Web console rather than leaving an invisible background Bridge when Windows Terminal is unavailable;
+- falls back to opening the Web console rather than leaving an invisible background Bridge when Windows Terminal is unavailable; the Status page can shut that process down;
 - registers per-user under `HKCU\Software\Classes`, so administrator rights are not required.
 
 Remove the menu with:
@@ -164,13 +164,22 @@ Windows 11 may place the classic shell verb under **Show more options**.
 
 The historical PowerShell install/uninstall scripts remain as compatibility wrappers and delegate to the same Node/TypeScript CLI.
 
-`scripts/start-open-bridge.cmd` and `scripts/start-open-bridge-project.cmd` are intentionally thin double-click bootstraps. Workspace selection, persistence, build/start policy, and the repository's fixed **8123** development port live in Node/TypeScript.
+`scripts/start-open-bridge.cmd` and `scripts/start-open-bridge-project.cmd` are intentionally thin double-click bootstraps. Workspace selection, persistence, build/start policy, and the repository's fixed **8123** development port live in Node/TypeScript. The project launcher fingerprints its production build inputs; if the current source does not exactly match the fingerprint stamped after the last launcher build, it rebuilds before starting.
 
 The generic `.cmd` launcher intentionally accepts no workspace or flag arguments because `cmd.exe` expands literal `%NAME%` sequences before batch logic can preserve them. Automation should call the CLI directly:
 
 ```bash
 open-bridge launch --root DIR
 ```
+
+A source checkout does not automatically install the `open-bridge` command globally. If PowerShell says the command is not recognized, invoke the repository entry directly:
+
+```powershell
+node .\bin\open-bridge.js instances
+node .\bin\open-bridge.js stop --pid 12345
+```
+
+From another directory, use the absolute path to `bin\open-bridge.js`.
 
 </details>
 

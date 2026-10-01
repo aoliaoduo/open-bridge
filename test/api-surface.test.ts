@@ -10,12 +10,10 @@
  * or add it to SERVER_OWNED_ROUTES below with a reason.
  *
  * SERVER_OWNED_ROUTES exists because "no console caller" is sometimes the design
- * rather than an omission. The clearest case is the lifecycle: the instance is
- * owned by the terminal that runs `serve` (open it, the bridge runs; close it,
- * everything stops), so the console deliberately has no start/stop/restart
- * buttons. `/api/bridge/*` stays as API surface for the CLI and scripts — and the
- * previous attempt to turn it into console buttons is exactly the mistake this
- * list documents.
+ * rather than an omission. Bridge start/stop remains an external launcher/CLI
+ * concern, but shutdown is intentionally available to the loopback Web console:
+ * on Windows the Web console can be the only visible surface when Terminal is
+ * unavailable, so a local operator must still have a graceful way to exit.
  *
  * It is deliberately a source-text check, like `tool-call-shape.test.ts` reading
  * the dispatcher's handler table: importing the router would initialize the host,
@@ -36,11 +34,9 @@ const repoRoot = path.resolve(here, "..");
  *
  * Empty today: every route currently has one (the console, the CLI, or a suite),
  * and the second assertion below keeps this list from rotting when that changes.
- * The expected future entry is the lifecycle pair — `/bridge/start` and
- * `/bridge/stop` exist for the CLI and scripts, while the console deliberately
- * has no buttons for them (the terminal owns the process; see this file's
- * header). Today the integration and UI suites still exercise them, so they are
- * not orphaned and do not belong here yet.
+ * The expected future entries, if any, are server surfaces with deliberately
+ * external callers. Today every route is exercised by the console, CLI, or
+ * integration suites, so none belongs here.
  */
 const SERVER_OWNED_ROUTES: Readonly<Record<string, string>> = {};
 
@@ -95,18 +91,19 @@ test("every /api route has a caller, or a written reason it does not", () => {
   assert.deepEqual(stale, [], `these routes are listed as server-owned but do have a caller: ${stale.join(", ")}`);
 });
 
-test("the console drives the routes it owns and leaves the lifecycle alone", () => {
+test("the console owns local shutdown but not Bridge start/stop", () => {
   const client = readFileSync(path.join(repoRoot, "ui", "src", "api.ts"), "utf8");
   // The panel's own verbs: reading state, acting on settings (endpoint rotation
   // is an in-process token flip done through the settings action channel — the
   // standalone /api/bridge/rotate remains script API, not a console verb),
   // closing a session, and acting on a project service.
-  for (const route of ["/api/status", "/api/settings/action", "/api/sessions/close", "/api/services/action"]) {
+  for (const route of ["/api/status", "/api/settings/action", "/api/sessions/close", "/api/services/action", "/api/shutdown"]) {
     assert.ok(client.includes(route), `ui/src/api.ts must call ${route}`);
   }
-  // The lifecycle routes are the terminal's: the page must not grow buttons that
-  // stop the very listener serving it (that mistake is in the git history).
-  for (const route of ["/api/bridge/start", "/api/bridge/stop", "/api/shutdown"]) {
-    assert.ok(!client.includes(route), `ui/src/api.ts must not call ${route}: the terminal owns the lifecycle`);
+  // Starting/stopping the Bridge subsystem in-place remains script/API surface.
+  // Full process shutdown is different: it is the exit path for a Web-only local
+  // console and therefore intentionally has a UI caller.
+  for (const route of ["/api/bridge/start", "/api/bridge/stop"]) {
+    assert.ok(!client.includes(route), `ui/src/api.ts must not call ${route}: launchers own Bridge start/stop`);
   }
 });

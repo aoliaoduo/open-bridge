@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { projectBuildRequired } from "./launcher-build.mjs";
+import { projectBuildRequired, projectDependencyInstallRequired, writeProjectBuildStamp } from "./launcher-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "../..");
@@ -41,6 +41,10 @@ if (!existsSync(path.join(ROOT, "node_modules"))) {
   console.log("[open-bridge] installing dependencies (first run)...");
   const code = await runNpm(["install"]);
   if (code !== 0) process.exit(code);
+} else if (mode === "project" && projectDependencyInstallRequired(ROOT)) {
+  console.log("[open-bridge] dependency manifests changed; syncing node_modules...");
+  const code = await runNpm(["install"]);
+  if (code !== 0) process.exit(code);
 }
 
 const distReady = existsSync(path.join(ROOT, "dist", "cli.js"))
@@ -50,6 +54,7 @@ if (buildRequired) {
   console.log("[open-bridge] building CLI and console...");
   const code = await runNpm(["run", "build"]);
   if (code !== 0) process.exit(code);
+  writeProjectBuildStamp(ROOT);
 }
 
 const entry = path.join(ROOT, "bin", "open-bridge.js");

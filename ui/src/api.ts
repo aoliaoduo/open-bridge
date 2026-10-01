@@ -248,6 +248,8 @@ export const api = {
   oauth: () => getJson<{ oauth: OAuthConsoleView }>("/api/oauth").then(r => r.oauth),
   serviceAction: (action: "start" | "stop" | "restart", name: string) =>
     postJson<{ result: unknown; services: ServiceView[] }>("/api/services/action", { action, name }),
+  /** Local-console process shutdown. The server replies before closing itself. */
+  shutdown: () => postJson<{ ok: boolean; message: string }>("/api/shutdown"),
 };
 
 /** Copy via the async clipboard API with a textarea fallback (non-secure contexts). */

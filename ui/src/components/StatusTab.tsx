@@ -39,6 +39,8 @@ function TunnelRole({ role }: { role?: string }) {
 export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
   const [status, setStatus] = useState<BridgeStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [shutdownArmed, setShutdownArmed] = useState(false);
+  const [shutdownBusy, setShutdownBusy] = useState(false);
   // The last poll failure, cleared by the next success. Both polls used to
   // swallow errors silently, so a dead or restarting server froze the page on
   // its last snapshot — the capsule kept saying 运行中 while the logs page
@@ -79,6 +81,22 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
       setStatus(await api.status());
     } catch { /* the settings action already toasted */ }
     setBusy(false);
+  };
+
+  const requestShutdown = async (): Promise<void> => {
+    if (!shutdownArmed) {
+      setShutdownArmed(true);
+      return;
+    }
+    setShutdownBusy(true);
+    try {
+      await api.shutdown();
+      notify?.(t("关闭指令已发送；本页即将断开。", "Shutdown requested; this page will disconnect shortly."));
+    } catch (error) {
+      setShutdownBusy(false);
+      setShutdownArmed(false);
+      notify?.(errorMessage(error), true);
+    }
   };
 
   const [locks, setLocks] = useState<LockSnapshot>({ held: [], waiting: [] });
@@ -141,8 +159,8 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
           <Card
             title={t("MCP 端点", "MCP endpoint")}
             desc={t(
-              "把这个 URL 填进 MCP 客户端（ChatGPT 连接器、Claude、Cursor 等）就能连上。公网可达时，拿到它的人就能读写文件、执行命令 —— 请配合安全页的门禁。",
-              "Paste this URL into an MCP client (ChatGPT connectors, Claude, Cursor…) and it connects. While it is publicly reachable, whoever has it can read your files and run commands — pair it with the gate on the Security page.",
+              "把这个 URL 填进远程 MCP 客户端（如 ChatGPT 连接器、Claude）就能连上。公网可达时，拿到它的人就能读写文件、执行命令 —— 请配合安全页的门禁。",
+              "Paste this URL into a remote MCP client such as ChatGPT connectors or Claude. While it is publicly reachable, whoever has it can read your files and run commands — pair it with the gate on the Security page.",
             )}
             actions={
               <button
@@ -210,33 +228,36 @@ export function StatusTab({ act, onRefresh, notify, onOpen }: Props) {
             </div>
           </Card>
 
-          {/* This card used to spend two of its three paragraphs explaining
-              that it has no start/stop/restart buttons — a card whose main
-              content was a description of its own absence. The reason is real
-              (stopping would close the page that holds the button) but it
-              belongs in the docs, not in permanent screen space on the page
-              every operator opens first. What survives is what acts: the
-              stale-build warning, and the way to the checks. */}
           <Card
             title={t("运行中的这份构建", "The build that is running")}
             desc={t(
-              "实例由启动它的终端窗口掌握：关掉窗口就停，再运行一次启动脚本就起来。",
-              "The terminal window that started this instance owns it: close the window to stop, run the start script again to bring it back.",
+              "有 TUI 时可用 Ctrl+C 或关闭承载窗口；只有 Web 控制台时，也可以在这里安全关闭当前 Bridge。",
+              "With a TUI, use Ctrl+C or close its terminal. If the Web console is your only visible surface, you can safely shut down this Bridge here too.",
             )}
           >
             {status?.build_stale && (
               <div className="section-note note-warn">
                 {t(
-                  "⚠️ 磁盘上的构建比本实例新：现在跑的仍是启动时加载的代码。要换成新构建，请关掉承载本实例的终端窗口，再双击一次一键启动脚本（或在该窗口 Ctrl+C 后重新运行 ",
-                  "⚠️ The build on disk is newer than this instance: it is still running the code loaded at startup. To pick up the new build, close the terminal window hosting it and run the one-click script again (or Ctrl+C in that window and rerun ",
+                  "⚠️ 磁盘上的构建比本实例新：现在跑的仍是启动时加载的代码。请先关闭当前 Bridge，再重新运行你的启动脚本以加载新构建。",
+                  "⚠️ The build on disk is newer than this instance: it is still running the code loaded at startup. Shut down this Bridge, then run your launcher again to load the new build.",
                 )}
-                <code>open-bridge serve</code>
-                {t("）。", ").")}
               </div>
             )}
             <div className="btn-group">
               <button type="button" className="small" disabled={!running} onClick={() => onOpen?.("health")}>
                 {t("去体检页", "Open Health")}
+              </button>
+              <button
+                type="button"
+                className={`small danger${shutdownArmed ? " armed" : ""}`}
+                disabled={!running || shutdownBusy}
+                onClick={() => { void requestShutdown(); }}
+              >
+                {shutdownBusy
+                  ? t("关闭中…", "Shutting down…")
+                  : shutdownArmed
+                    ? t("确认关闭", "Confirm shutdown")
+                    : t("关闭 Bridge", "Shut down Bridge")}
               </button>
             </div>
             <div className="section-note" style={{ marginBottom: 0 }}>

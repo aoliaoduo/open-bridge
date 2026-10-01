@@ -1053,7 +1053,7 @@ describe("App shell: card detail layer", () => {
 
     // The sentence used to live in the tab's title attribute; a card header puts
     // it on screen.
-    expect(await screen.findByText(/把这个 URL 填进 MCP 客户端/)).toBeTruthy();
+    expect(await screen.findByText(/把这个 URL 填进远程 MCP 客户端/)).toBeTruthy();
     // Property rows: the reachability answer sits next to the URL it describes.
     expect(await screen.findByText("客户端可达")).toBeTruthy();
     expect(screen.getByText("仅本机")).toBeTruthy();

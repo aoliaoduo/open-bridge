@@ -3,20 +3,22 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { StatusTab } from "./StatusTab";
 import type { BridgeStatus, LockSnapshot } from "../api";
 
-const { statusMock, sessionsMock, copyTextMock } = vi.hoisted(() => ({
+const { statusMock, sessionsMock, shutdownMock, copyTextMock } = vi.hoisted(() => ({
   statusMock: vi.fn(),
   sessionsMock: vi.fn(),
+  shutdownMock: vi.fn(async () => ({ ok: true })),
   copyTextMock: vi.fn(async () => undefined),
 }));
 
 vi.mock("../api", () => ({
-  api: { status: statusMock, sessions: sessionsMock },
+  api: { status: statusMock, sessions: sessionsMock, shutdown: shutdownMock },
   copyText: copyTextMock,
 }));
 
 afterEach(() => {
   cleanup();
   statusMock.mockReset();
+  shutdownMock.mockClear();
   copyTextMock.mockClear();
 });
 
@@ -149,6 +151,23 @@ describe("StatusTab copy feedback and warnings", () => {
       expect(warning.className).toContain("note-warn");
       expect((warning as HTMLElement).style.color).toBe("");
     });
+});
+
+describe("StatusTab lifecycle", () => {
+  test("offers a deliberate two-step Bridge shutdown from the local Web console", async () => {
+    statusMock.mockResolvedValue(bridgeStatus());
+    const { notify } = renderTab();
+
+    const shutdown = await screen.findByRole("button", { name: "关闭 Bridge" });
+    fireEvent.click(shutdown);
+    expect(shutdownMock).not.toHaveBeenCalled();
+
+    const confirm = await screen.findByRole("button", { name: "确认关闭" });
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(shutdownMock).toHaveBeenCalledTimes(1));
+    expect(notify).toHaveBeenCalledWith("关闭指令已发送；本页即将断开。");
+  });
 });
 
 describe("StatusTab build freshness", () => {

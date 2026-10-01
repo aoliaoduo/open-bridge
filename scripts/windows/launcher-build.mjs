@@ -1,5 +1,9 @@
-import { readdirSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
+
+const STAMP_VERSION = 2;
+const STAMP_FILE = ".open-bridge-project-build.json";
 
 function statOrUndefined(file) {
   try {
@@ -14,62 +18,123 @@ function isBuildInput(file) {
   return !name.includes(".test.") && !name.includes(".spec.");
 }
 
-export function newestInputMtimeMs(paths) {
-  let newest = 0;
+function visitBuildInputs(root, current, out) {
+  const stat = statOrUndefined(current);
+  if (!stat) {
+    out.push({ relative: path.relative(root, current), missing: true });
+    return;
+  }
 
-  const visit = current => {
-    const stat = statOrUndefined(current);
-    if (!stat) return;
-
-    if (stat.isDirectory()) {
-      let entries = [];
-      try {
-        entries = readdirSync(current, { withFileTypes: true });
-      } catch {
-        return;
-      }
-      for (const entry of entries) visit(path.join(current, entry.name));
+  if (stat.isDirectory()) {
+    let entries = [];
+    try {
+      entries = readdirSync(current, { withFileTypes: true })
+        .sort((a, b) => a.name.localeCompare(b.name));
+    } catch {
+      out.push({ relative: path.relative(root, current), missing: true });
       return;
     }
+    for (const entry of entries) visitBuildInputs(root, path.join(current, entry.name), out);
+    return;
+  }
 
-    if (!stat.isFile() || !isBuildInput(current)) return;
-    if (stat.mtimeMs > newest) newest = stat.mtimeMs;
-  };
-
-  for (const input of paths) visit(input);
-  return newest;
+  if (!stat.isFile() || !isBuildInput(current)) return;
+  out.push({ relative: path.relative(root, current), file: current });
 }
 
-function outputMtimeMs(file) {
-  const stat = statOrUndefined(file);
-  return stat?.isFile() ? stat.mtimeMs : 0;
+function fingerprintEntries(root, inputs) {
+  const entries = [];
+  for (const input of inputs) visitBuildInputs(root, input, entries);
+  entries.sort((a, b) => a.relative.localeCompare(b.relative));
+
+  const hash = createHash("sha256");
+  for (const entry of entries) {
+    hash.update(entry.relative.replaceAll("\\", "/"));
+    hash.update("\0");
+    if (entry.missing) hash.update("<missing>");
+    else hash.update(readFileSync(entry.file));
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
+function projectBuildInputs(root) {
+  return [
+    path.join(root, "src"),
+    path.join(root, "ui"),
+    path.join(root, "config", "vite.config.ts"),
+    path.join(root, "scripts", "clean.mjs"),
+    path.join(root, "tsconfig.json"),
+    path.join(root, "tsconfig.ui.json"),
+    path.join(root, "package.json"),
+    path.join(root, "package-lock.json"),
+  ];
+}
+
+function dependencyInputs(root) {
+  return [
+    path.join(root, "package.json"),
+    path.join(root, "package-lock.json"),
+  ];
+}
+
+export function projectBuildFingerprint(root) {
+  return fingerprintEntries(root, projectBuildInputs(root));
+}
+
+export function projectDependencyFingerprint(root) {
+  return fingerprintEntries(root, dependencyInputs(root));
+}
+
+function stampPath(root) {
+  return path.join(root, STAMP_FILE);
+}
+
+export function writeProjectBuildStamp(root) {
+  const payload = {
+    version: STAMP_VERSION,
+    fingerprint: projectBuildFingerprint(root),
+    dependencies: projectDependencyFingerprint(root),
+  };
+  writeFileSync(stampPath(root), JSON.stringify(payload) + "\n", "utf8");
+  return payload;
+}
+
+function readProjectBuildStamp(root) {
+  try {
+    const parsed = JSON.parse(readFileSync(stampPath(root), "utf8"));
+    if (
+      parsed?.version !== STAMP_VERSION
+      || typeof parsed?.fingerprint !== "string"
+      || typeof parsed?.dependencies !== "string"
+    ) return undefined;
+    return parsed;
+  } catch {
+    return undefined;
+  }
+}
+
+export function projectDependencyInstallRequired(root) {
+  if (!statOrUndefined(path.join(root, "node_modules"))?.isDirectory()) return true;
+  const stamp = readProjectBuildStamp(root);
+  if (!stamp) return true;
+  return stamp.dependencies !== projectDependencyFingerprint(root);
 }
 
 /**
  * Does the source-checkout project launcher need a full rebuild?
  *
- * The old launcher rebuilt on every project restart. That rewrote dist even
- * when source was unchanged, so every other workspace instance using this
- * checkout immediately reported build_stale=true. Compare the build inputs to
- * representative core/UI outputs instead: a normal restart does not mutate
- * dist, while a real source/UI/config change still rebuilds before launch.
+ * This is content-based, not timestamp-based. Files restored from archives,
+ * copied from another checkout, or checked out with older mtimes can still
+ * contain different source. The local stamp records the exact production inputs
+ * that produced dist; only an exact match is accepted as current.
  */
 export function projectBuildRequired(root) {
-  const coreOutput = outputMtimeMs(path.join(root, "dist", "cli.js"));
-  const uiOutput = outputMtimeMs(path.join(root, "dist", "ui", "console.html"));
-  if (coreOutput === 0 || uiOutput === 0) return true;
+  const coreOutput = statOrUndefined(path.join(root, "dist", "cli.js"));
+  const uiOutput = statOrUndefined(path.join(root, "dist", "ui", "console.html"));
+  if (!coreOutput?.isFile() || !uiOutput?.isFile()) return true;
 
-  const coreInput = newestInputMtimeMs([
-    path.join(root, "src"),
-    path.join(root, "tsconfig.json"),
-    path.join(root, "package.json"),
-  ]);
-  const uiInput = newestInputMtimeMs([
-    path.join(root, "ui"),
-    path.join(root, "config", "vite.config.ts"),
-    path.join(root, "tsconfig.ui.json"),
-    path.join(root, "package.json"),
-  ]);
-
-  return coreInput > coreOutput || uiInput > uiOutput;
+  const stamp = readProjectBuildStamp(root);
+  if (!stamp) return true;
+  return stamp.fingerprint !== projectBuildFingerprint(root);
 }
