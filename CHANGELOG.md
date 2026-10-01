@@ -8,6 +8,7 @@
 
 ### Changed
 
+- 项目对外门面统一整理：中英文 README 重做首屏与快速开始，目标场景聚焦 ChatGPT/Claude 等远程 MCP 客户端并以 ngrok/Tailscale 公网隧道作为常规连接路径；新增 `docs/README.md` 文档中心和 `docs/tunnels.md` 小白入门教程，核心 Security/配置/工具/架构/诊断/发布文档统一导航与速查，npm 描述与关键词同步到当前产品定位；同时修正 ngrok 自动配置在无可发现域名时误导“随机地址”的提示，明确域名留空只会保持本机模式。
 - 发布工程新增 `release:notes`、`release:publish` 与 `release:audit`：GitHub Release 标题、正文、prerelease/latest 状态统一由 tag 与 CHANGELOG 生成；本地/CI 会检查 package/lock/CHANGELOG 一致性，发布后可一次审计历史 tag/Release 对应关系、正文漂移与旧仓库链接。
 - Windows 启动与 Explorer 集成迁移到 TS-first platform adapters：新增 `open-bridge explorer install/uninstall`，注册表通过 `reg.exe` 结构化 argv 管理，Explorer workspace 经环境变量、argv 与 cwd 传递；`.cmd` / `.ps1` / `.vbs` 只保留 bootstrap、GUI relay 或兼容入口，不再承载路径和启动业务逻辑。通用双击 `.cmd` 不再接受 workspace/flag 参数，脚本化启动改用 `open-bridge launch --root DIR`，从机制上避开 cmd 对合法路径中 `%NAME%` 文本的预展开。
 - Windows 启动链补强路径边界：Explorer 与两个 `.cmd` launcher 不再把 workspace 重复编码进 native `--root` 参数，驱动器根目录、Unicode、空格、`&`、括号和 UNC/cwd 语义统一由工作目录承载；右键菜单默认标签按 Windows UI 语言在中文/英文之间选择。

@@ -159,7 +159,7 @@ function planNgrok({ current, authtokenStored, facts }: AutoConfigInput): AutoCo
   } else {
     notes.push(ngrok.domainsError
       ? `读不到你账号下的保留域名：${ngrok.domainsError}`
-      : "账号下还没有保留域名：在 ngrok 后台建一个，或留空，用 ngrok 分配的随机地址。");
+      : "账号下没有可自动选择的域名：去 ngrok 后台复制 development/reserved domain 并填到「公网地址」；留空会保持仅本机。");
   }
 
   const blocked = !ngrok.installed && ngrok.authtokenSource === "none"

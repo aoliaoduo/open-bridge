@@ -1,7 +1,8 @@
 # Configuration and reference
 
-Everything the README deliberately leaves out. The README answers "what is
-this and how do I start it"; this file answers "what are all the knobs".
+[Documentation](README.md) · [Tool reference](tools.md) · [Architecture](ARCHITECTURE.md) · [Security](../SECURITY.md)
+
+> **Canonical operations manual.** The README gets you started; this document owns the CLI, console, authentication, tunnels, notifications, data directory, and operational settings.
 
 > 这份参考文档目前只有英文版。中文 README 链到这里是有意的：把它翻译一遍，
 > 就等于让两份文档各自漂移 —— 设置项改了而翻译没跟上，比只有一种语言更糟。
@@ -12,6 +13,7 @@ this and how do I start it"; this file answers "what are all the knobs".
 - [The workspace is the directory you started in](#the-workspace-is-the-directory-you-started-in)
 - [Commands](#commands)
 - [Web console](#web-console)
+- [Beginner tunnel setup](tunnels.md)
 - [Choosing a tunnel](#choosing-a-tunnel-the-settings-page-does-the-choosing-for-you)
 - [Public tunnel (ngrok)](#public-tunnel-ngrok)
 - [Public tunnel (Tailscale Funnel)](#public-tunnel-tailscale-funnel)
@@ -118,6 +120,8 @@ The settings page does the same thing. Once on, a client discovers the server at
 
 ## Choosing a tunnel (the settings page does the choosing for you)
 
+> First time setting up remote access? Follow [Public tunnel quick start](tunnels.md) first. This section is the detailed reference after you already understand the basic flow.
+
 Both providers publish the same thing — `https://<host>/mcp/<route-token>` — and
 the console renders them as **one card with three parts**, in the same order,
 whichever provider is selected:
@@ -129,11 +133,11 @@ whichever provider is selected:
 [3] 高级设置       可执行文件 ▾ / 手填的公网地址 / Authtoken / 系统代理 / 自动重连   （默认收起）
 ```
 
-| 你想让谁访问 | 选哪个 | 你需要准备什么 |
+| 你想怎么连接 | 选哪个 | 你需要准备什么 |
 | --- | --- | --- |
-| 只有这台机器 | `none` | 什么都不用；不做隧道 |
-| 公网、有自己的域名 | ngrok | 一个 ngrok 账号 + authtoken（本机跑过一次 `ngrok config add-authtoken` 就够） |
-| 公网、已经有 Tailscale | Tailscale Funnel | 装好并登录 Tailscale、启用 Funnel；本实现使用 HTTPS 443 |
+| 常规公网访问 | ngrok | 一个 ngrok 账号 + authtoken（本机跑过一次 `ngrok config add-authtoken` 就够） |
+| 公网访问，且已经在用 Tailscale | Tailscale Funnel | 装好并登录 Tailscale、启用 Funnel；本实现使用 HTTPS 443 |
+| 仅本机开发 / 明确不要远程访问 | `none` | 什么都不用；不做隧道 |
 
 - **一键自动配置** is one click and it says what it will do *before* you press it:
   the line under the button lists the exact writes (`ngrokExecutable=…`,
@@ -179,7 +183,7 @@ whichever provider is selected:
 
 ## Public tunnel (ngrok)
 
-Local-only access? Add `--no-tunnel` and skip ngrok entirely. The built-in listener binds to loopback; this does not expose a LAN listener.
+For the common remote setup, publish the workspace through ngrok. The built-in listener itself still binds only to loopback; the public endpoint comes from the tunnel, not from opening a LAN listener.
 
 To let an external client such as ChatGPT on the web reach you:
 

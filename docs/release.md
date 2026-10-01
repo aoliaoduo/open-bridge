@@ -1,5 +1,9 @@
 # Release process
 
+[Documentation](README.md) · [Changelog](../CHANGELOG.md) · [Contributing](../CONTRIBUTING.md)
+
+> **Maintainer workflow.** Git tags, `CHANGELOG.md`, package versions, and GitHub Releases are one release contract; release scripts render and verify that contract rather than relying on manual copy/paste.
+
 Git tags, `CHANGELOG.md` and GitHub Releases are one release contract. Do not
 edit GitHub Release titles or bodies by hand: `scripts/release-notes.mjs` is the
 canonical renderer and `scripts/release-publish.mjs` is the canonical publisher.

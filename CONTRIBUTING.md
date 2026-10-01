@@ -1,5 +1,7 @@
 # Contributing
 
+[README](README.md) · [Documentation](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md)
+
 English · [中文](#贡献指南)
 
 ## Prepare and verify

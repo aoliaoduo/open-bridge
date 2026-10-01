@@ -102,6 +102,25 @@ test("one reserved domain is chosen; several are left to the operator", () => {
   assert.match(many.notes.join(" "), /3 个保留域名/);
 });
 
+test("ngrok with no discoverable domain says that blank remains local-only", () => {
+  const facts = emptyTunnelFacts();
+  facts.ngrok = {
+    ...facts.ngrok,
+    installed: true,
+    executable: "C:\\tools\\ngrok.exe",
+    executableLabel: "PATH",
+    authtokenSource: "stored",
+    domains: [],
+    domainsError: null,
+  };
+
+  const plan = planTunnelAutoConfig(input({ facts }));
+  const notes = plan.notes.join(" ");
+  assert.match(notes, /development\/reserved domain/);
+  assert.match(notes, /留空会保持仅本机/);
+  assert.doesNotMatch(notes, /随机地址/);
+});
+
 test("a stored authtoken is kept; ngrok's own file is imported when there is none", () => {
   const facts = emptyTunnelFacts();
   facts.ngrok = { ...facts.ngrok, installed: true, executable: "C:\\tools\\ngrok.exe", executableLabel: "PATH", authtokenSource: "ngrok-config" };

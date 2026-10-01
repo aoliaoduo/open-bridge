@@ -1,152 +1,275 @@
 # Open Bridge
 
-**Give ChatGPT, Claude or Cursor real access to one folder on your machine — files, commands, processes — over a standard MCP endpoint.**
+<div align="center">
+
+**Give ChatGPT, Claude, or any remote MCP-capable client controlled access to a real workspace on your machine.**
+
+Files, commands, long-running processes, services, and automation — exposed through one standard MCP endpoint.
 
 [![CI](https://github.com/aoliaoduo/open-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/aoliaoduo/open-bridge/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](package.json)
 
-English | [简体中文](README.zh-CN.md)
+**English** · [简体中文](README.zh-CN.md)
 
-One Node process, one port. No editor, no extension, no web framework.
+[Quick start](#quick-start) · [Highlights](#highlights) · [Windows](#windows) · [Security](#security) · [Documentation](#documentation)
+
+</div>
+
+---
+
+## What is Open Bridge?
+
+Open Bridge is a standalone MCP bridge that lets remote AI clients work against a real directory on your machine.
+
+Run it inside a directory and that directory becomes available through MCP. The common path is a public HTTPS tunnel via ngrok or Tailscale Funnel; `--no-tunnel` is there for local-only development or private use.
+
+```text
+ChatGPT / Claude / remote MCP client
+                    │
+              HTTPS + MCP
+                    ▼
+          ngrok / Tailscale Funnel
+                    │
+          forwards to loopback
+                    ▼
+             Open Bridge
+          one Node process
+                    │
+        ┌───────────┼────────────┐
+        ▼           ▼            ▼
+      Files      Commands     Processes
+        │           │            │
+        └───────────┼────────────┘
+                    ▼
+               Your workspace
+
+        Web console stays local:
+      sessions · logs · health · settings
+```
+
+One process. One port. No web framework. No editor lock-in.
+
+## Quick start
+
+From a checkout of this repository:
 
 ```bash
-npm ci                 # once, from a checkout of this repo
+npm ci
 npm run build
 npm install -g .
+
 cd your-project
 open-bridge serve
 ```
 
-That prints an MCP URL. Paste it into your client and the AI is working in
-that directory.
+Open Bridge prints an MCP URL. Add that URL to your MCP client and the client is connected to the directory you started it from.
 
+Typical endpoints:
+
+```text
+Public MCP URL: https://<your-domain>/mcp/<route-token>   ← normal client connection
+Web console:    http://127.0.0.1:18080/console/           ← local administration
+Local MCP URL:  http://127.0.0.1:18080/mcp/<route-token>  ← local/debug use
 ```
-Web console:    http://127.0.0.1:18080/console/
-Local MCP URL:  http://127.0.0.1:18080/mcp/<route token>
-Public MCP URL: https://<your-domain>/mcp/<route token>      ← with a public tunnel configured
+
+> **Treat the MCP URL as a credential.** The normal remote setup publishes the MCP endpoint through ngrok or Tailscale Funnel, so protect the full URL. When your client supports credentials, enable the bearer gate or OAuth from the console's **Security** page.
+
+For the usual remote workflow, open the Web console after startup and use **Settings → Tunnel → Auto-configure** to publish the workspace. First time using ngrok or Tailscale? Follow the **[public tunnel quick start](docs/tunnels.md)**. For a stable local listener port:
+
+```bash
+open-bridge serve --port 18080
 ```
 
-> **The URL is the key.** While it is publicly reachable, whoever has it can
-> read your files and run commands. Start with `--no-tunnel` if you only need
-> it locally, or turn on the bearer gate from the console's Security page.
+For local-only development or a machine that should not be reachable remotely:
 
----
+```bash
+open-bridge serve --no-tunnel
+```
 
-## Why this exists
+## Highlights
 
-Editor extensions tie the AI to the editor. This does not: the bridge is a
-plain HTTP server, so the same workspace is reachable from a browser tab, a
-phone, or any other MCP-capable client.
+| Capability | What it gives you |
+| --- | --- |
+| **Complete MCP toolset** | Read, write, patch, search, run commands, supervise processes, manage services, inspect activity, and compose work with `run_script`. |
+| **Modern + legacy MCP** | Two MCP protocol generations share one endpoint and are selected per request. Older clients keep working without a second server. |
+| **Real process supervision** | Long-running commands have IDs, output buffers, lifecycle controls, restart policy, and cleanup semantics. |
+| **Named services** | Define and operate reusable workspace services with health checks, logs, ports, and restart behavior. |
+| **Web console** | Sessions, tools, logs, locks, health, exposure, tunnel state, OAuth, tokens, notifications, and settings. |
+| **OAuth 2.1 + PKCE** | Optional standards-based authorization for clients that support a full OAuth flow. |
+| **Bearer gate** | Optional individually issued tokens for clients that can send credentials directly. |
+| **Public HTTPS tunnels** | The primary remote transport: ngrok and Tailscale Funnel with detection, health checks, ownership, and reconnect behavior. |
+| **Code Mode** | `run_script` composes Bridge tools inside an isolated Worker/VM sandbox to reduce roundtrips and return only the data you need. |
+| **Operator notifications** | Bark push notifications or local sounds when the AI is waiting for input or a conversation finishes. |
+| **Auditable behavior** | Activity history, usage statistics, logs, exposure state, diagnostics, and resource-lock visibility. |
 
-- **39 tools** — read, write, patch, search, run commands, supervise
-  long-running processes, orchestrate named services.
-- **Two MCP protocol generations on one endpoint**, chosen per request. Old
-  clients keep working; nothing to configure.
-- **A real console** at `/console/` — sessions, tools, logs, locks, health,
-  every setting. Not a status page: things are actually operated from it.
-- **It tells you when it needs you.** Phone push (Bark) or a sound on this
-  machine, when the AI is blocked on an answer or the conversation ends.
+## How workspaces behave
 
-## Getting started
+Three rules explain most day-to-day behavior.
 
-Three things worth knowing on day one:
+### The current directory is the workspace
 
-**The workspace is the directory you started in.** No config file, no
-dropdown. Run it in another folder to get a second, independent instance.
+Start Open Bridge inside a directory:
 
-**Ports move unless you pin them.** Without `--port` the bridge takes a random
-free port, so the URL changes each start. `--port 18080` keeps it stable.
+```bash
+cd my-project
+open-bridge serve
+```
 
-**Closing the terminal stops the bridge.** That window owns the instance —
-which is also why the console has no start/stop buttons.
+That directory becomes the project root. Starting another instance in another directory gives you another independent workspace.
 
-On Windows, the preferred launcher is an Explorer context menu managed by the Node/TypeScript CLI:
+### Ports are dynamic unless pinned
+
+Without `--port`, Open Bridge chooses an available port. Use a fixed port when you need a stable URL:
+
+```bash
+open-bridge serve --port 18080
+```
+
+### The terminal owns the instance
+
+The process runs in the terminal that launched it. Closing that terminal stops the instance and releases its resources.
+
+For the full command and configuration reference, see **[docs/configuration.md](docs/configuration.md)**.
+
+## Windows
+
+The recommended Windows workflow is the Explorer context menu:
 
 ```bash
 open-bridge explorer install
 ```
 
-Then right-click a folder, or the background inside it, and choose
-**Start Open Bridge Here** (Chinese Windows uses **在此启动 Open Bridge**).
-It opens a terminal in that folder and runs `open-bridge launch --open-existing`:
-a missing instance starts its TUI, while an existing one is reused rather than duplicated
-and its Web console opens directly.
-With Windows Terminal, Open Bridge is the tab's root process, so closing that TUI tab
-also ends the workspace instance and a later context-menu launch starts cleanly again.
-The entry is separated from Explorer's paste commands and is not forced to the top.
-Windows 11 may put this classic shell verb under **Show more options**. Remove it with
-`open-bridge explorer uninstall`; registration is per-user under `HKCU\Software\Classes`,
-so no administrator rights are needed. The old PowerShell install/uninstall files remain
-only as compatibility wrappers and delegate to the same CLI.
+Then right-click a folder, or the background inside it, and choose **Start Open Bridge Here**. On Chinese Windows the label is **在此启动 Open Bridge**.
 
-`scripts/start-open-bridge.cmd` and `scripts/start-open-bridge-project.cmd` are now thin
-double-click bootstraps: workspace selection, persistence, build/start policy and fixed
-port **8123** for this repository live in Node/TypeScript rather than cmd logic. The generic
-`.cmd` intentionally accepts no workspace/flag arguments, because `cmd.exe` expands literal
-`%NAME%` text before a batch file can preserve it; scripted shortcuts should call
-`open-bridge launch --root DIR` directly.
+The launcher:
 
-Everything else — every command, every setting, the console tour, the tunnel,
-notifications, the data directory — is in
-**[docs/configuration.md](docs/configuration.md)**.
+- passes the workspace to Node without interpolating the path through PowerShell or `cmd.exe`;
+- reuses an existing workspace instance instead of starting a duplicate;
+- opens the existing Web console when the instance is already running;
+- uses Windows Terminal when available;
+- registers per-user under `HKCU\Software\Classes`, so administrator rights are not required.
+
+Remove the menu with:
+
+```bash
+open-bridge explorer uninstall
+```
+
+<details>
+<summary><strong>Windows launcher and compatibility details</strong></summary>
+
+Windows 11 may place the classic shell verb under **Show more options**.
+
+The historical PowerShell install/uninstall scripts remain as compatibility wrappers and delegate to the same Node/TypeScript CLI.
+
+`scripts/start-open-bridge.cmd` and `scripts/start-open-bridge-project.cmd` are intentionally thin double-click bootstraps. Workspace selection, persistence, build/start policy, and the repository's fixed **8123** development port live in Node/TypeScript.
+
+The generic `.cmd` launcher intentionally accepts no workspace or flag arguments because `cmd.exe` expands literal `%NAME%` sequences before batch logic can preserve them. Automation should call the CLI directly:
+
+```bash
+open-bridge launch --root DIR
+```
+
+</details>
 
 ## Connecting a client
 
+Open Bridge keeps the transport URL and the operating prompt separate.
+
+Get the MCP URL:
+
 ```bash
-open-bridge prompt      # prints operating instructions; no MCP URL inside
+open-bridge url
 ```
 
-Configure the MCP URL separately (use the console's “Copy URL” or `open-bridge url`),
-then paste the prompt into the connected client. For
-clients that only accept a standard authorization flow, OAuth 2.1 with PKCE is
-available and off by default — see
-[docs/configuration.md](docs/configuration.md#web-console).
+Get the operating prompt:
 
-## Security in one paragraph
+```bash
+open-bridge prompt
+```
 
-`/api` and `/console` answer loopback only. The public side serves the
-tokenized MCP and health routes, plus authorization/discovery routes when
-OAuth is enabled. The bearer gate ships **off** to support URL-only clients;
-turn it on from the Security page when you need individually issued tokens.
-The app never quietly narrows your permissions, but it does state your exposure level (`local`, `public-open`,
-`public-authed`) in `status`, in `health`, in the console and at startup.
+Configure the URL in your MCP client, connect it, then give the client the prompt.
 
-Threat model, the three exposure levels, and **what is deliberately left
-unlocked** are in [SECURITY.md](SECURITY.md), which is also where to report a
-vulnerability.
+Clients that require a standard authorization flow can use OAuth 2.1 + PKCE. OAuth is off by default. Configuration details are in [docs/configuration.md](docs/configuration.md#web-console).
+
+## Security
+
+Open Bridge deliberately exposes powerful local capabilities, so its security model is explicit rather than hidden.
+
+- `/api` and `/console` are loopback-only.
+- Public access uses the tokenized MCP route.
+- OAuth discovery/authorization routes are exposed only when OAuth is enabled.
+- The bearer gate is optional and off by default for URL-only client compatibility.
+- Exposure is reported as `local`, `public-open`, or `public-authed` in status, health, startup output, and the console.
+- File and process operations retain the permissions of the user running Open Bridge.
+
+Read **[SECURITY.md](SECURITY.md)** before exposing an instance to the public internet. It documents the threat model, the three exposure levels, deliberate non-goals, and vulnerability reporting.
+
+## Architecture
+
+Open Bridge is a modular Node.js application rather than a web-framework application.
+
+```text
+CLI / TUI / Web console
+          │
+          ▼
+   Bridge subsystems
+ tools · runtime · sessions
+ tunnel · auth · lifecycle
+          │
+          ▼
+  explicit external boundaries
+ filesystem · processes · network
+ Windows adapters · MCP transport
+```
+
+The design favors:
+
+- a modular monolith over service fragmentation;
+- explicit subsystem boundaries over framework layers;
+- Ports & Adapters only where an external boundary actually exists;
+- structured argv/cwd/env process launches instead of shell interpolation;
+- behavior-preserving compatibility facades where migration requires them;
+- architecture tests for boundaries that should not regress.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the current module map.
 
 ## Documentation
 
-| | |
+| Document | Contents |
 | --- | --- |
-| [docs/configuration.md](docs/configuration.md) | Commands, console, tunnel, notifications, data directory, FAQ |
-| [docs/tools.md](docs/tools.md) | All 39 tools and their exact behaviour |
-| [SECURITY.md](SECURITY.md) | Threat model and reporting |
-| [AGENTS.md](https://github.com/aoliaoduo/open-bridge/blob/main/AGENTS.md) | Conventions for changing this repo — read before a PR |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Current module ownership, execution and state boundaries |
-| [docs/observability.md](docs/observability.md) | Which surface to diagnose with, the data-dir artifact table, and the redacted export |
-| [Agent workflow](https://github.com/aoliaoduo/open-bridge/blob/main/docs/agent-collaboration-workflow.md) | Repository collaboration, verification and handoff |
-| [CHANGELOG.md](CHANGELOG.md) | What changed and why |
+| [docs/README.md](docs/README.md) | Documentation hub and source-of-truth map |
+| [docs/tunnels.md](docs/tunnels.md) | Beginner ngrok / Tailscale Funnel setup |
+| [docs/configuration.md](docs/configuration.md) | CLI commands, console, tunnel, notifications, data directory, FAQ |
+| [docs/tools.md](docs/tools.md) | Complete tool reference and exact behavior |
+| [SECURITY.md](SECURITY.md) | Threat model, exposure levels, vulnerability reporting |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module ownership, execution paths, state and security boundaries |
+| [docs/observability.md](docs/observability.md) | Diagnostics, data-directory artifacts, logs, redacted exports |
+| [AGENTS.md](AGENTS.md) | Repository engineering conventions |
+| [docs/agent-collaboration-workflow.md](docs/agent-collaboration-workflow.md) | Verification, collaboration, and handoff workflow |
+| [CHANGELOG.md](CHANGELOG.md) | User-visible changes and rationale |
 
 ## Development
 
 ```bash
 npm ci
-npm run dev -- serve --no-tunnel   # run from source, no build step
-npm run verify                     # typecheck + lint + build + every test
+npm run dev -- serve --no-tunnel
+npm run verify
 ```
 
-`npm run verify` must be green before a commit. Integration tests really start
-`bin/open-bridge.js` and speak HTTP, so **build before running them** or they
-will report the old behaviour.
+Useful checks:
 
-Run `npm run release:check` for the complete verification plus npm package
-preflight. The module map lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): core
-modules depend on the `Host` interface, not its concrete implementation;
-using Node built-ins is intentional. Runtime dependencies are three official
-MCP packages (the v1 SDK, v2 server and Node adapter), not a web framework;
-MCP, API and console routes all sit directly on `node:http`.
+```bash
+npm run check:fast      # security check + typecheck + lint + unit/UI tests
+npm run verify          # build + complete test suite
+npm run package:check   # inspect the npm package payload
+npm run release:check   # complete release preflight
+```
+
+Integration tests start the built `bin/open-bridge.js` and speak real HTTP, so rebuild `dist` before running integration tests when source code has changed.
+
+Runtime dependencies are the official MCP packages used for the supported protocol generations and Node transport. MCP, API, OAuth, and console routes are served directly on `node:http`.
 
 ## License
 

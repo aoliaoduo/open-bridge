@@ -1,4 +1,8 @@
-# 工具详解（每个工具的完整说明）
+# 工具参考
+
+[文档中心](README.md) · [配置与运维](configuration.md) · [架构](ARCHITECTURE.md) · [Security](../SECURITY.md)
+
+> **这是工具行为的正本。** 想知道“该用哪个工具、参数边界是什么、结果怎么解析”，以这里和运行时 `tools/list` 的 schema 为准。
 
 `tools/list` 里每个工具的描述只留**一句做什么 + 现场必须知道的规则**（≤200 字符）。为控制每次连接都要携带的 catalog 体积，`outputSchema` 在网络目录中还会去掉纯文档性的 `description` 注解，但 `type`、`required`、`enum`、字段名等验证契约完整保留。完整的行为、边界、结果字段说明，以及在相似工具之间怎么选，都在这里。
 

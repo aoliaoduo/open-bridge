@@ -1,12 +1,19 @@
 # Security
 
-## What this tool is
+[← README](README.md) · [Documentation](docs/README.md) · [Configuration](docs/configuration.md) · [Report a vulnerability](https://github.com/aoliaoduo/open-bridge/security/advisories/new)
 
-Open Bridge gives an AI client read/write access to files, a shell, and
-long-running processes on the machine it runs on. That is the feature, not a
-side effect. Everything below describes where the boundaries actually are, so
-you can decide whether those boundaries suit you before you point it at
-anything you care about.
+> Open Bridge deliberately gives an AI client powerful access to the machine it runs on: files, commands, and long-running processes. That capability is the product, not a side effect. This document defines the boundaries you should understand before pointing it at anything you care about.
+
+## Before exposing a workspace
+
+| Situation | Recommended posture |
+| --- | --- |
+| A remote MCP client needs access | Use ngrok or Tailscale Funnel. Protect the full MCP URL; add Bearer auth or OAuth when the client supports it. |
+| This machine is the only client | Run with `--no-tunnel`; exposure should read `local`. |
+| You are sharing logs or diagnostics | Use `open-bridge diagnostics`; never paste a live MCP URL, token, `secrets.json`, or unreviewed log. |
+| You suspect credential exposure | Stop public exposure first, rotate/revoke credentials, then investigate. |
+
+The three runtime exposure labels are intentionally simple: `local`, `public-open`, and `public-authed`. Public tunnel access is a normal operating mode; `public-open` means the tokenized URL itself is the credential, while `public-authed` adds an explicit Bearer gate.
 
 ## Threat model
 

@@ -1,10 +1,14 @@
 # Open Bridge 架构说明
 
+[文档中心](README.md) · [配置与运维](configuration.md) · [工具参考](tools.md) · [观测与诊断](observability.md) · [Security](../SECURITY.md)
+
+> **当前实现的模块地图，而不是未来蓝图。** 本文描述现在的职责、依赖和安全边界；历史迁移过程留在 Git 历史，不把已完成工作重新包装成待办。
+
 本文描述当前源码的职责边界。运行配置见 [配置与运维](configuration.md)，工具契约见 [工具参考](tools.md)；历史设计过程保留在 Git 历史，不作为未完成任务清单。
 
 ## 1. 产品边界
 
-Open Bridge 是用户主动启动的本地工作区 MCP 服务：一个 Node 进程提供 CLI、Streamable HTTP MCP、Web 控制台、审计和可选公网隧道。
+Open Bridge 是用户主动启动的工作区 MCP 服务：一个 Node 进程在本机执行文件、命令和进程操作，并通常通过 ngrok 或 Tailscale Funnel 的公网 HTTPS 地址供远程 MCP 客户端连接；`--no-tunnel` 保留给本机模式。
 
 AI 客户端负责推理、选择工具与编排工作；Bridge 负责真实执行、结果契约、资源锁和可观察状态。它不是模型代理、Agent 调度平台或命令沙箱，也不会根据工具的 `readOnlyHint` / `destructiveHint` 自动增加确认步骤。
 
@@ -56,7 +60,7 @@ AI 客户端负责推理、选择工具与编排工作；Bridge 负责真实执�
 
 ## 5. 安全与网络边界
 
-- 默认监听回环地址；公网隧道显式可选。公网可提供令牌化 MCP 和健康路由；启用 OAuth 时还有授权与发现端点，并非“只公开 `/mcp`”。
+- Bridge 自身始终监听回环地址；远程访问通常由 ngrok 或 Tailscale Funnel 把公网 HTTPS 流量转发进来，`--no-tunnel` 才是纯本机模式。公网可提供令牌化 MCP 和健康路由；启用 OAuth 时还有授权与发现端点，并非“只公开 `/mcp`”。
 - `/api` 与 `/console` 是本机管理面，不向跨来源网页开放 CORS；变更 API 还要求控制台令牌头。
 - Bearer 门禁和 OAuth 默认关闭。公开模式下应把完整 MCP URL 当作访问凭据保护；开启认证是操作者的选择，不在清理或升级中自动改变。
 - `unrestrictedFileAccess` 默认开启：工作区固定相对路径的含义，但不是文件系统沙箱。关闭该设置时才按允许目录限制访问；删除/移动工作区根、数据目录或盘根的自毁护栏另行存在。
