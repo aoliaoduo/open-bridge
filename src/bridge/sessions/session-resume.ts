@@ -21,7 +21,7 @@ import {
   sessionTicket,
   touchSessionTicket,
 } from "./session-store.js";
-import { state, type SessionState } from "../state.js";
+import { type SessionState, state } from "../runtime-state.js";
 
 type InnerTransport = {
   sessionId?: string;

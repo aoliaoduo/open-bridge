@@ -18,7 +18,7 @@
  */
 
 import type { JsonArgs } from "./json-args.js";
-import type { SessionState } from "../state.js";
+import type { SessionState } from "../runtime-state.js";
 import { listToolDefinitions } from "./tool-catalog.js";
 import {
   clampScriptCalls,

@@ -1,5 +1,5 @@
 import { host } from "../host/host.js";
-import { state } from "./state.js";
+import { state } from "./runtime-state.js";
 import {
   isProgressCategory,
   isProgressPhase,

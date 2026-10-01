@@ -14,13 +14,14 @@ import { host } from "../../host/host.js";
  */
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { record, state, type CommandState } from "../state.js";
+import { record } from "../activity.js";
+import { type CommandState, MAX_CAPTURED_OUTPUT, state } from "../runtime-state.js";
 import { workspacePath } from "../paths.js";
 import { killWindowsProcessFamily, shellSpec, wireSpawnedChild } from "./processes.js";
 import { isBashLikeShell } from "../../process/tee-capture.js";
 import { ProcessOutputBuffer, type ProcessOutputRead } from "../../process/output-buffer.js";
 import { decodeUtf8Page } from "../../process/utf8-page.js";
-import { MAX_CAPTURED_OUTPUT } from "../state.js";
+
 import { windowsHideForChild } from "../../process/child-console.js";
 import { createMarker, stripMarkerLines } from "../../shell/session-marker.js";
 import {

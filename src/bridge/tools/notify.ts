@@ -13,7 +13,8 @@ import { host } from "../../host/host.js";
 import { playAlertSound, soundFileForEvent } from "./sound-alert.js";
 import { CONFIG_DEFAULTS } from "../config/config-defaults.js";
 import { canonicalBarkOrigin, parseBarkKeyInput } from "../config/config-values.js";
-import { record, state } from "../state.js";
+import { record } from "../activity.js";
+import { state } from "../runtime-state.js";
 import type { JsonArgs } from "./json-args.js";
 
 export const NOTIFY_EVENT_VALUES = ["waiting", "finished"] as const;

@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { host } from "../../host/host.js";
 import { writeFileAtomic } from "../../workspace/persist.js";
 import { applyPatch as applyPatchFile, resolvePatchSource } from "../../mcp/patch.js";
-import { workspaceContext } from "../state.js";
+import { workspaceContext } from "../runtime-state.js";
 import { securePath, root } from "../paths.js";
 import type { JsonArgs } from "./json-args.js";
 import { requiredFileArg } from "./file-tool-args.js";

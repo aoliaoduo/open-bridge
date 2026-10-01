@@ -15,17 +15,9 @@ import { isBashLikeShell, wrapWithTeeAppend } from "../../process/tee-capture.js
 import { requireValidOffset, requireValidStream } from "../../mcp/argument-checks.js";
 import { windowsHideForChild } from "../../process/child-console.js";
 import { reassertServeConsoleTitle } from "../lifecycle/console-title.js";
-import {
-  MAX_CAPTURED_OUTPUT,
-  MAX_INLINE_OUTPUT,
-  COMMAND_RETENTION_MS,
-  notifyLatestLogging,
-  record,
-  redactSensitiveText,
-  state,
-  type CommandState,
-  type ServiceDefinition,
-} from "../state.js";
+import { notifyLatestLogging, record } from "../activity.js";
+import { redactSensitiveText } from "../endpoint.js";
+import { COMMAND_RETENTION_MS, type CommandState, MAX_CAPTURED_OUTPUT, MAX_INLINE_OUTPUT, type ServiceDefinition, state } from "../runtime-state.js";
 import { workspacePath, workspaceStateSuffix } from "../paths.js";
 import { prepareServiceLog, serviceLogFilePath } from "./service-log.js";
 

@@ -1,9 +1,11 @@
-import { createActivityId, record, state, redactSensitiveText, type SessionState } from "./state.js";
+import { createActivityId, record } from "./activity.js";
+import { redactSensitiveText } from "./endpoint.js";
+import { type SessionState, state, workspaceContext } from "./runtime-state.js";
 import { host } from "../host/host.js";
 import { persistUsageStats } from "./usage-store.js";
 import { deriveLockPlan, type LockPlanContext } from "./tools/lock-plan.js";
 import { acquireLocks, DEFAULT_HOLD_TIMEOUT_MS, DEFAULT_WAIT_TIMEOUT_MS, type LockRelease } from "./runtime/resource-locks.js";
-import { workspaceContext } from "./state.js";
+
 import { patchTargetPaths } from "../mcp/patch.js";
 import { normalizeServiceGroup } from "./tools/service-name.js";
 

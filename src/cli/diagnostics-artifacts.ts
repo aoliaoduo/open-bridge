@@ -3,7 +3,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { CONFIG_DEFAULTS } from "../bridge/config/config-defaults.js";
-import { MAX_AUDIT_LOG_BYTES, ROUTE_TOKEN_KEY } from "../bridge/state.js";
+import { MAX_AUDIT_LOG_BYTES } from "../bridge/activity.js";
+import { ROUTE_TOKEN_KEY } from "../bridge/runtime-state.js";
 import { pidAlive, RUNTIME_FILE, SERVE_LOCK_FILE } from "./registry.js";
 import type { ArtifactRow, ArtifactStatus } from "./diagnostics-model.js";
 

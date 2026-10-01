@@ -18,7 +18,7 @@ import * as path from "node:path";
 
 import { t } from "./cli-i18n.js";
 import { WORKSPACE_SUFFIX_PATTERN, workspaceSuffixFor } from "../bridge/paths.js";
-import { ROUTE_TOKEN_KEY } from "../bridge/state.js";
+import { ROUTE_TOKEN_KEY } from "../bridge/runtime-state.js";
 import type { ParsedArgs } from "./args.js";
 import { pidAlive as processPidAlive } from "../process/pid-alive.js";
 

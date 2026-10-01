@@ -29,7 +29,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { boundedText } from "../../mcp/line-diff.js";
 import { buildReviewFiles, parseNameStatus, parseNumstat, summarizeFiles, type ReviewFile, type ReviewSummary } from "../../mcp/review-parse.js";
-import { workspaceContext } from "../state.js";
+import { workspaceContext } from "../runtime-state.js";
 import type { JsonArgs } from "./json-args.js";
 
 const execFileAsync = promisify(execFile);

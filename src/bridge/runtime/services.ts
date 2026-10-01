@@ -1,5 +1,5 @@
 import { host } from "../../host/host.js";
-import { SERVICES_STATE_PREFIX, state } from "../state.js";
+import { SERVICES_STATE_PREFIX, state } from "../runtime-state.js";
 import { requireRestartKnob } from "./processes.js";
 
 let servicePersistTail: Promise<void> = Promise.resolve();

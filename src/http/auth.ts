@@ -30,7 +30,7 @@
  */
 
 import { host } from "../host/host.js";
-import { record } from "../bridge/state.js";
+import { record } from "../bridge/activity.js";
 import { oauthChallenge, oauthEnabled, verifyOAuthBearer } from "./oauth.js";
 import {
   AuthFailureLimiter,

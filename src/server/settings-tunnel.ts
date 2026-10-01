@@ -4,7 +4,7 @@ import { detectTunnelFacts, readNgrokConfigAuthtoken } from "../bridge/tunnel/tu
 import { planTunnelAutoConfig } from "../bridge/tunnel/tunnel-plan.js";
 import { NGROK_AUTHTOKEN_KEY, setCachedAuthtoken } from "../bridge/tunnel/ngrok-runtime.js";
 import { restartTunnelForProviderChange } from "../bridge/lifecycle/lifecycle.js";
-import { state } from "../bridge/state.js";
+import { state } from "../bridge/runtime-state.js";
 import { host } from "../host/host.js";
 import { normalizeNgrokDomainSetting } from "../http/request-policy.js";
 import { maskBarkKey } from "../bridge/config/config-values.js";

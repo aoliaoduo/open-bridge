@@ -1,13 +1,6 @@
 import { host } from "../../host/host.js";
 import { DEFAULT_PROBE_NETWORK_SCOPE, parseHttpProbeUrl, probeHttpHealth, probeTcpPort, type ProbeNetworkScope } from "../../network/safe-probe.js";
-import {
-  MAX_INLINE_OUTPUT,
-  SERVICE_HEALTH_TIMEOUT_MS,
-  SERVICE_PORT_PROBE_TIMEOUT_MS,
-  SERVICE_STATUS_DEFAULT_TIMEOUT_MS,
-  state,
-  type ServiceDefinition,
-} from "../state.js";
+import { MAX_INLINE_OUTPUT, SERVICE_HEALTH_TIMEOUT_MS, SERVICE_PORT_PROBE_TIMEOUT_MS, SERVICE_STATUS_DEFAULT_TIMEOUT_MS, type ServiceDefinition, state } from "../runtime-state.js";
 import { terminateProcess, processSnapshot, spawnServiceProcess, requireRestartKnob, stringEnv, serviceLogPathFor } from "../runtime/processes.js";
 import { persistServices } from "../runtime/services.js";
 import { availableHint } from "./error-hints.js";

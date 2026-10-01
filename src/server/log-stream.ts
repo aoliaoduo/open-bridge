@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { redactSensitiveText } from "../bridge/state.js";
+import { redactSensitiveText } from "../bridge/endpoint.js";
 import { nodeHost } from "../host/node-host.js";
 
 interface SseClient { res: ServerResponse }

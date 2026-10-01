@@ -1,4 +1,4 @@
-import { state } from "../state.js";
+import { state } from "../runtime-state.js";
 
 export interface SessionActivityView {
   id: string;

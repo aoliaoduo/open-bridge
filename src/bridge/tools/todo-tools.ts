@@ -1,6 +1,6 @@
 import { host } from "../../host/host.js";
 import { applyCompletionTimes, persistTodos } from "../todo-store.js";
-import { state, type SessionState } from "../state.js";
+import { type SessionState, state } from "../runtime-state.js";
 import type { JsonArgs } from "./json-args.js";
 
 /** Same cap advertised by the set_todos schema. */

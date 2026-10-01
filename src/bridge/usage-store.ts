@@ -1,5 +1,5 @@
 import { host } from "../host/host.js";
-import { state, type UsageStats } from "./state.js";
+import { state, type UsageStats } from "./runtime-state.js";
 
 const USAGE_STATE_PREFIX = "openBridge.usage.";
 

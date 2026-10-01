@@ -4,7 +4,7 @@
  * redaction, and error semantics are inherited unchanged. The pure
  * planning/aggregation core lives in ./batch-plan.js (unit-tested).
  */
-import type { SessionState } from "../state.js";
+import type { SessionState } from "../runtime-state.js";
 import type { JsonArgs } from "./json-args.js";
 // dispatcher is imported lazily inside batchTool (F5): the static import would
 // create a top-level cycle (dispatcher imports batchTool at module load).

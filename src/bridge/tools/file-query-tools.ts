@@ -6,11 +6,8 @@ import { matchFile } from "../../mcp/glob.js";
 import { ripgrepAvailable, ripgrepPatternRejection, runRipgrep } from "../../mcp/search-ripgrep.js";
 import { matchLinesInWorker, SafeRegexError, SAFE_REGEX_BATCH_TIMEOUT_MS } from "../../mcp/regex-worker.js";
 import { searchFileStream, type BatchMatcher } from "../../mcp/stream-search.js";
-import {
-  DEFAULT_MAX_DIRECTORY_ENTRIES,
-  DEFAULT_MAX_SEARCH_RESULTS,
-  record,
-} from "../state.js";
+import { record } from "../activity.js";
+import { DEFAULT_MAX_DIRECTORY_ENTRIES, DEFAULT_MAX_SEARCH_RESULTS } from "../runtime-state.js";
 import { securePath, rejectSymlink, root } from "../paths.js";
 import type { JsonArgs } from "./json-args.js";
 

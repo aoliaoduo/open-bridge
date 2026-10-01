@@ -12,7 +12,9 @@
 import { host } from "../../host/host.js";
 import { randomBytes } from "node:crypto";
 import { CONFIG_DEFAULTS } from "../config/config-defaults.js";
-import { ROUTE_TOKEN_KEY, clientMcpUrl, record, state, redactedPublicUrl } from "../state.js";
+import { record } from "../activity.js";
+import { clientMcpUrl, redactedPublicUrl } from "../endpoint.js";
+import { ROUTE_TOKEN_KEY, state } from "../runtime-state.js";
 import { buildWebAiPrompt } from "../onboarding.js";
 import { workspaceStateSuffix } from "../paths.js";
 import { cancelAllPendingRestarts, terminateProcess } from "../runtime/processes.js";

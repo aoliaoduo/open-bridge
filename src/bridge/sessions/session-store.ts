@@ -11,7 +11,7 @@
  * explicit HTTP DELETE (onsessionclosed) or the idle sweep.
  */
 import { host } from "../../host/host.js";
-import { state } from "../state.js";
+import { state } from "../runtime-state.js";
 
 /** Idle MCP sessions (memory and tickets) expire after this long without activity. */
 export const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;

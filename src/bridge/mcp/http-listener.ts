@@ -17,7 +17,8 @@ import { bridgeAllowedHosts, isAllowedBridgeHost } from "../../http/request-poli
 import { authorizeRequest } from "../../http/auth.js";
 import { CONFIG_DEFAULTS } from "../config/config-defaults.js";
 import { rememberTransportToolHint } from "../activity-presentation.js";
-import { record, state } from "../state.js";
+import { record } from "../activity.js";
+import { state } from "../runtime-state.js";
 import { exchangeLine, isNoteworthy, traceActivityStatus, traceId, tracedFormat, tracedHttpMethod, tracedMethod, type TracedEra } from "./request-trace.js";
 import { root } from "../paths.js";
 import { buildServeTitle, clearServeConsoleTitle, installServeConsoleTitle } from "../lifecycle/console-title.js";

@@ -2,13 +2,7 @@ import { randomBytes } from "node:crypto";
 import { MAX_TIMER_MS } from "../../shared/timing.js";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { testReadyPattern, validateReadyPattern } from "../../mcp/regex-worker.js";
-import {
-  MAX_INLINE_OUTPUT,
-  READY_PATTERN_WINDOW_BYTES,
-  READY_PATTERN_TEST_TIMEOUT_MS,
-  state,
-  type CommandState,
-} from "../state.js";
+import { type CommandState, MAX_INLINE_OUTPUT, READY_PATTERN_TEST_TIMEOUT_MS, READY_PATTERN_WINDOW_BYTES, state } from "../runtime-state.js";
 
 /** Bytes of the previous ready-scan window re-examined by the next one (boundary split protection). */
 const READY_PATTERN_OVERLAP_BYTES = 4 * 1024;

@@ -24,7 +24,7 @@
 import { spawn } from "node:child_process";
 import * as fsSync from "node:fs";
 import { host } from "../../host/host.js";
-import { record } from "../state.js";
+import { record } from "../activity.js";
 
 /**
  * A backstop, not a cap.

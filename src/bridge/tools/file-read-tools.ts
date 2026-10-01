@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { streamReadLines, truncateToUtf8Bytes } from "../../mcp/stream-read.js";
 import { requireValidOffset } from "../../mcp/argument-checks.js";
-import { DEFAULT_MAX_READ_BYTES } from "../state.js";
+import { DEFAULT_MAX_READ_BYTES } from "../runtime-state.js";
 import { securePath } from "../paths.js";
 import { enrichFsError } from "./error-hints.js";
 import type { JsonArgs } from "./json-args.js";

@@ -6,7 +6,7 @@
  * because both ends need it without depending on each other: lifecycle.ts
  * (start/stop) and tunnel.ts (a scheduled reconnect).
  */
-import { state } from "../state.js";
+import { state } from "../runtime-state.js";
 
 /** Serialize bridge lifecycle transitions so start/stop/rotate cannot overlap. */
 export function enqueueLifecycle(task: () => Promise<void>): Promise<void> {

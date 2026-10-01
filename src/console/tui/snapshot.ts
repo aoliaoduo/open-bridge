@@ -8,7 +8,7 @@
  */
 
 import { isActivityStatus } from "../../mcp/activity-status.js";
-import { MAX_CAPTURED_OUTPUT } from "../../bridge/state.js";
+import { MAX_CAPTURED_OUTPUT } from "../../bridge/runtime-state.js";
 import { activityHint } from "../../bridge/activity-presentation.js";
 import type { TodoProgressEntry } from "../../bridge/todo-store.js";
 import {

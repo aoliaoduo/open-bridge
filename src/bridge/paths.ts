@@ -2,7 +2,7 @@ import { host } from "../host/host.js";
 import * as path from "node:path";
 import { sha256 } from "../workspace/file-version.js";
 import { rejectSymlinkChain } from "../workspace/workspace-path.js";
-import { state, workspaceContext } from "./state.js";
+import { state, workspaceContext } from "./runtime-state.js";
 
 export const root = (): string => workspaceContext.root();
 

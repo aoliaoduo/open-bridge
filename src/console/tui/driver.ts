@@ -17,7 +17,7 @@
 
 import * as readline from "node:readline";
 import type { ReadStream } from "node:tty";
-import { state } from "../../bridge/state.js";
+import { state } from "../../bridge/runtime-state.js";
 import { collectFileDiffPreview, collectReviewDiffPreview, collectWorkspaceChanges, type FileDiffPreview, type ReviewDiffPreview, type WorkspaceChangeState } from "./changes.js";
 import { todoFreshness, todoProgress } from "../../bridge/todo-store.js";
 import { copyTextToClipboard } from "./clipboard.js";

@@ -6,7 +6,7 @@
  * handled here. A session with an active request is never reclaimed.
  */
 import { host } from "../../host/host.js";
-import { MAX_SESSIONS, state } from "../state.js";
+import { MAX_SESSIONS, state } from "../runtime-state.js";
 import { pruneCommands } from "../runtime/processes.js";
 import { finishNoticeTick } from "../tools/notify.js";
 import { forgetSessionTicket, pruneSessionTickets, SESSION_IDLE_TIMEOUT_MS } from "./session-store.js";

@@ -9,10 +9,12 @@ import { lockSnapshot } from "../runtime/resource-locks.js";
 import { CONFIG_DEFAULTS } from "../config/config-defaults.js";
 import { isConfigKey, type ConfigKey } from "../config/config-spec.js";
 import { SETTING_VALUE_REQUIRED, maskBarkKey, validateConfigValue } from "../config/config-values.js";
-import { auditLogPath, clientMcpUrl, localMcpUrl, record, state } from "../state.js";
+import { auditLogPath, notifyLogging, record } from "../activity.js";
+import { clientMcpUrl, localMcpUrl } from "../endpoint.js";
+import { type SessionState, state } from "../runtime-state.js";
 import type { JsonArgs } from "./json-args.js";
-import { notifyLogging } from "../state.js";
-import type { SessionState } from "../state.js";
+
+
 import { root, allowedRoots, currentWorkspaceRoot } from "../paths.js";
 import { persistProgress, loadTodoStore } from "../todo-store.js";
 import { clearActivityHints } from "../activity-presentation.js";
