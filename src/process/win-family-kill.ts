@@ -59,6 +59,29 @@ export function ancestorPidsFromRows(startPid: number, rows: WindowsProcessRow[]
   return result;
 }
 
+/**
+ * Caller ancestry used by destructive Windows tree cleanup.
+ *
+ * If the caller itself is absent from the process snapshot, the snapshot is
+ * not trustworthy enough to prove that a target is outside caller ancestry.
+ * Failing open here is dangerous because taskkill /T against an ancestor also
+ * kills the current Bridge/test runner. The immediate parent is added again as
+ * an independent guard against a stale parent chain.
+ */
+export function protectedCallerPidsFromRows(
+  callerPid: number,
+  callerParentPid: number,
+  rows: WindowsProcessRow[],
+): number[] {
+  if (!rows.some(row => Number(row.ProcessId) === callerPid)) {
+    throw new Error("Cannot safely terminate a Windows process family: caller is missing from the process snapshot.");
+  }
+  const protectedPids = new Set(ancestorPidsFromRows(callerPid, rows));
+  protectedPids.add(callerPid);
+  if (Number.isSafeInteger(callerParentPid) && callerParentPid > 0) protectedPids.add(callerParentPid);
+  return [...protectedPids];
+}
+
 async function windowsProcessRows(): Promise<WindowsProcessRow[]> {
   if (process.platform !== "win32") return [];
   const script =
@@ -151,9 +174,19 @@ async function terminateMsysGroups(
  */
 export async function killWindowsProcessFamily(pid: number, shellFile: string): Promise<void> {
   let rows: WindowsProcessRow[] = [];
-  try { rows = await windowsProcessRows(); } catch { /* process table is best-effort; direct self-protection remains */ }
-  const protectedPids = new Set(ancestorPidsFromRows(process.pid, rows));
-  protectedPids.add(process.pid);
+  try {
+    rows = await windowsProcessRows();
+  } catch (error) {
+    if (process.platform === "win32") {
+      throw new Error(
+        `Cannot safely terminate Windows process family ${pid}: process snapshot failed: `
+        + (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
+  const protectedPids = process.platform === "win32"
+    ? new Set(protectedCallerPidsFromRows(process.pid, process.ppid, rows))
+    : new Set([process.pid, process.ppid].filter(value => value > 0));
   const pids = await descendantPids(pid, rows.length > 0 ? rows : undefined);
   const protectedTarget = pids.find(targetPid => protectedPids.has(targetPid));
   if (protectedTarget !== undefined) {

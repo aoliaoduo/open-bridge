@@ -85,16 +85,12 @@ export function stopAlertSound(): boolean {
 export { SOUND_EXTENSIONS } from "../config/config-values.js";
 
 /**
- * Quote one argv entry for a cmd command line.
+ * Quote one fixed argv entry for the cmd `start` command line.
  *
- * Going through `shell: true` means the whole thing is re-parsed by cmd, so
- * the careful argv array has to survive being flattened back into a string.
- * The PowerShell script contains spaces, quotes and semicolons; without this
- * cmd would split it and hand PowerShell fragments.
+ * User-controlled path text never reaches this layer on Windows: the entire
+ * PowerShell program is UTF-16LE Base64 and passed through -EncodedCommand.
  */
 function quoteForCmd(value: string): string {
-  // Inner double quotes are escaped for cmd by doubling them; the script
-  // itself only ever uses single quotes, so this is belt and braces.
   return `"${value.replace(/"/g, "\"\"")}"`;
 }
 
@@ -117,19 +113,19 @@ export interface SoundAlertResult {
  * project is developed on Windows -- so they are attempted rather than
  * promised, and a missing binary reports itself like any other failure.
  */
-function playerCommand(file: string): { command: string; args: string[] } | undefined {
-  if (process.platform === "win32") {
+export function playerCommand(
+  file: string,
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[] } | undefined {
+  if (platform === "win32") {
     // Launched through cmd's `start`, which is the part that actually creates
     // a window. Measured, because the obvious approaches do not work: a plain
     // spawn of powershell with stdio "ignore" has no console to attach to and
     // exits immediately (code 0, no window, no sound), and `start` without
     // shell:true is not a program -- it is a cmd builtin. Both were tried
     // here before this shape was settled on.
-    return {
-      command: "powershell",
-      args: [
-        "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-        "$Host.UI.RawUI.WindowTitle = 'Open Bridge 提示音 — 关闭此窗口即停止';"
+    const script =
+      "$Host.UI.RawUI.WindowTitle = 'Open Bridge 提示音 — 关闭此窗口即停止';"
         + "Add-Type -AssemblyName presentationCore;"
         + "$p = New-Object System.Windows.Media.MediaPlayer;"
         // Single quotes inside a PowerShell single-quoted string are escaped by
@@ -171,14 +167,19 @@ function playerCommand(file: string): { command: string; args: string[] } | unde
         + "    Start-Sleep -Milliseconds 150"
         + "  }"
         + "};"
-        + "$p.Stop(); $p.Close()",
+        + "$p.Stop(); $p.Close()";
+    return {
+      command: "powershell",
+      args: [
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
       ],
     };
   }
   // afplay and paplay run in the foreground of whatever launched them, so the
   // terminal they open in is the equivalent affordance. Untested here: this
   // project is developed on Windows, so they are attempted, not promised.
-  if (process.platform === "darwin") return { command: "afplay", args: [file] };
+  if (platform === "darwin") return { command: "afplay", args: [file] };
   return { command: "paplay", args: [file] };
 }
 

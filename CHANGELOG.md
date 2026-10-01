@@ -18,6 +18,8 @@
 - 进程输出、持久 Shell 与服务日志的字节分页会在 UTF-8 字符边界对齐；中文、emoji 等多字节字符跨 `max_bytes` / 保留窗口边界时不再被解码成 `�`，同时 `offset` / `next_offset` 继续保持绝对字节游标语义。
 - Windows 打开 Web 控制台改为直接调用 `explorer.exe` argv，不再通过 `cmd /c start` 让 URL 中的 `&` 等字符进入 shell parser。
 - Windows PowerShell 5.1 fallback 过去会把 `C:\` 这类结尾反斜杠路径与闭合引号错误合并，导致 `--root` 和后续参数损坏；Explorer relay 现在对 trailing backslash 做安全 quoting，注册表占位符也用 `\.` 避开驱动器根目录陷阱。
+- Windows process-family 清理在 CIM 进程快照失败或缺失 caller 时改为 fail-closed，并额外保护 `process.ppid`，避免 destructive `taskkill /T` 在无法证明 ancestry 安全时误伤承载当前 Bridge/MCP 会话的祖先进程。
+- Windows 本机提示音的 PowerShell 播放程序改用 `-EncodedCommand`：合法音频路径中的 `%VAR%`、`&`、括号等字符不再经过 `cmd.exe` 二次展开或解释。
 
 ## [1.4.4] — 2026-09-30
 

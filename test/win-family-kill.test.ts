@@ -16,6 +16,7 @@ import {
   ancestorPidsFromRows,
   descendantPidsFromRows,
   killWindowsProcessFamily,
+  protectedCallerPidsFromRows,
   type WindowsProcessRow,
 } from "../src/process/win-family-kill.js";
 
@@ -37,6 +38,24 @@ test("descendant projection is post-order and cannot escape its Windows tree", (
 test("ancestor projection protects the caller chain only", () => {
   assert.deepEqual(ancestorPidsFromRows(900, ROWS), [900, 800, 700, 1]);
   assert.deepEqual(ancestorPidsFromRows(30, ROWS), [30, 20, 10, 1]);
+});
+
+test("destructive cleanup fails closed when the caller is absent from a Windows snapshot", () => {
+  assert.throws(
+    () => protectedCallerPidsFromRows(999, 800, ROWS),
+    /caller is missing from the process snapshot/,
+  );
+});
+
+test("the immediate parent stays protected even when the snapshot parent chain is stale", () => {
+  const rows: WindowsProcessRow[] = [
+    { ProcessId: 900, ParentProcessId: 12345 },
+    { ProcessId: 50, ParentProcessId: 1 },
+  ];
+  assert.deepEqual(
+    new Set(protectedCallerPidsFromRows(900, 800, rows)),
+    new Set([900, 12345, 800]),
+  );
 });
 
 test("malformed cycles terminate instead of looping forever", () => {
