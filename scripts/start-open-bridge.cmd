@@ -1,131 +1,35 @@
 @echo off
-rem =====================================================================
-rem  Open Bridge - one-click launcher (double-click this file)
-rem
-rem  1) it ASKS WHICH WORKSPACE DIRECTORY to serve. That directory is the
-rem     boundary the AI sees - not the folder this launcher sits in.
-rem     Quotes are harmless, Enter reuses the last directory, and a
-rem     directory can also be passed as the first argument (handy in a
-rem     desktop shortcut or a scheduled task):
-rem         scripts\start-open-bridge.cmd "D:\work\my-project"
-rem  2) it keeps a visible console: the server's own log and its three URLs.
-rem
-rem  * CLOSING THIS WINDOW STOPS THE SERVER AND WHAT IT STARTED. The ngrok
-rem    tunnel, the background services and the persistent shells all share
-rem    this console, and Windows terminates the processes attached to a
-rem    console when its window closes.
-rem  * Ctrl+C is the clean stop: it removes the serve lock and runtime file.
-rem
-rem  ASCII-only source; switch the runtime console to UTF-8 so workspace paths
-rem  and the remembered last directory preserve Unicode.
-rem =====================================================================
 setlocal
-chcp 65001 >nul
-cd /d "%~dp0.."
+rem Thin Windows double-click bootstrap. This cmd file intentionally accepts no
+rem workspace/flag arguments: cmd expands %NAME% before a batch file can preserve
+rem a legal Windows path containing literal percent pairs. Use the Node CLI for
+rem programmatic launch: open-bridge launch --root "C:\path" [flags].
 title Open Bridge
-set "REPO_DIR=%CD%"
-set "LAST_DIR_FILE=%REPO_DIR%\start-open-bridge.last-dir"
-
-echo.
-echo  Open Bridge - one-click launcher
-echo  ================================
-echo.
-
 where node >nul 2>nul
-if errorlevel 1 goto nonode
-
-rem ---- which directory? ------------------------------------------------------
-set "PREVIOUS="
-if exist "%LAST_DIR_FILE%" for /f "usebackq delims=" %%P in ("%LAST_DIR_FILE%") do set "PREVIOUS=%%P"
-if defined PREVIOUS if not exist "%PREVIOUS%\" set "PREVIOUS="
-
-set "WORKSPACE=%~1"
-if defined WORKSPACE goto :have_dir
-
-echo  Workspace directory the AI may work in - for example:
-echo    "D:\work\my-project"     (quotes only needed for paths with spaces)
-if defined PREVIOUS (echo  Press Enter to reuse: "%PREVIOUS%") else (echo  Press Enter to use this repository's folder.)
-echo.
-set /p "WORKSPACE= > "
-
-:have_dir
-rem Order matters here. `set "X=%X:"=%"` cannot run on an EMPTY value: cmd
-rem rewrites that line with unbalanced quotes and the rest of the file dies on
-rem the parse error, which is exactly what a bare Enter used to do. So the
-rem fallbacks run first and the quote strip always sees something defined.
-if not defined WORKSPACE set "WORKSPACE=%PREVIOUS%"
-if not defined WORKSPACE set "WORKSPACE=%REPO_DIR%"
-if not defined WORKSPACE goto :quit
-set "WORKSPACE=%WORKSPACE:"=%"
-for %%I in ("%WORKSPACE%") do set "WORKSPACE=%%~fI"
-
-if not exist "%WORKSPACE%\" (
-  echo.
-  echo  [!] Not a directory: "%WORKSPACE%"
-  set /p "CREATE=      create it now? [Y/n] "
-  if /i "%CREATE%"=="n" goto :quit
-  mkdir "%WORKSPACE%" 2>nul
-  if not exist "%WORKSPACE%\" (
-    echo.
-    echo  [X] Could not create "%WORKSPACE%" - check the path and the permissions.
-    echo.
-    pause
-    exit /b 1
-  )
-)
-> "%LAST_DIR_FILE%" <nul set /p "=%WORKSPACE%"
-
-echo.
-echo  workspace : "%WORKSPACE%"
-echo  stop      : Ctrl+C ^(clean^) or close this window
-echo.
-
-if not exist "node_modules" (
-  echo  [1/3] installing dependencies - first run only, this takes a while ...
-  call npm install
-  if errorlevel 1 goto failed
-)
-
-set NEED_BUILD=0
-if not exist "dist\cli.js" set NEED_BUILD=1
-if not exist "dist\ui\console.html" set NEED_BUILD=1
-if "%NEED_BUILD%"=="1" (
-  echo  [2/3] building the CLI and the console ...
-  call npm run build
-  if errorlevel 1 goto failed
-)
-
-echo  [3/3] starting the server - the console URL is printed below.
-echo        Nothing opens by itself; add --open if you want the browser to.
-echo.
-pushd "%WORKSPACE%"
-node "%REPO_DIR%\bin\open-bridge.js" serve %*
-set EXITCODE=%ERRORLEVEL%
-popd
+if errorlevel 1 goto :nonode
+if not "%~1"=="" goto :unsupported_args
+node "%~dp0windows\launcher-bootstrap.mjs" one-click
+set "EXITCODE=%ERRORLEVEL%"
 if not "%EXITCODE%"=="0" (
   echo.
-  echo  open-bridge serve exited with code %EXITCODE% - the log above says why.
-  echo  This window stays open so the message can be read.
+  echo  Open Bridge launcher exited with code %EXITCODE%.
+  echo  This window stays open so the message above can be read.
   echo.
   pause
 )
 endlocal
 exit /b %EXITCODE%
 
-:quit
+:unsupported_args
+echo  [X] This double-click wrapper does not accept workspace paths or flags.
+echo      cmd.exe cannot preserve every legal Windows path, including literal %%NAME%% text.
+echo      Use: open-bridge launch --root "C:\path\to\workspace" [flags]
 endlocal
-exit /b 0
+exit /b 2
 
 :nonode
 echo  [X] Node.js was not found in PATH.
-echo      Install Node 22 or newer from https://nodejs.org and double-click again.
-echo.
-pause
-exit /b 1
-
-:failed
-echo.
-echo  [X] The step above failed; the window stays open so it can be read.
+echo      Install Node 22 or newer from https://nodejs.org and try again.
 echo.
 pause
 endlocal

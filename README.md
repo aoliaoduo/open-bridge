@@ -61,10 +61,10 @@ free port, so the URL changes each start. `--port 18080` keeps it stable.
 **Closing the terminal stops the bridge.** That window owns the instance —
 which is also why the console has no start/stop buttons.
 
-On Windows, the preferred launcher is an Explorer context menu:
+On Windows, the preferred launcher is an Explorer context menu managed by the Node/TypeScript CLI:
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/install-context-menu.ps1
+```bash
+open-bridge explorer install
 ```
 
 Then right-click a folder, or the background inside it, and choose
@@ -76,13 +76,16 @@ With Windows Terminal, Open Bridge is the tab's root process, so closing that TU
 also ends the workspace instance and a later context-menu launch starts cleanly again.
 The entry is separated from Explorer's paste commands and is not forced to the top.
 Windows 11 may put this classic shell verb under **Show more options**. Remove it with
-`scripts/windows/uninstall-context-menu.ps1`; registration is per-user under
-`HKCU\Software\Classes`, so no administrator rights are needed.
+`open-bridge explorer uninstall`; registration is per-user under `HKCU\Software\Classes`,
+so no administrator rights are needed. The old PowerShell install/uninstall files remain
+only as compatibility wrappers and delegate to the same CLI.
 
-The older `scripts/start-open-bridge.cmd` still asks for a folder manually. For this
-repository itself, `scripts/start-open-bridge-project.cmd` always uses this project as
-the workspace, rebuilds it, and serves the console on fixed port **8123** (without
-opening a browser).
+`scripts/start-open-bridge.cmd` and `scripts/start-open-bridge-project.cmd` are now thin
+double-click bootstraps: workspace selection, persistence, build/start policy and fixed
+port **8123** for this repository live in Node/TypeScript rather than cmd logic. The generic
+`.cmd` intentionally accepts no workspace/flag arguments, because `cmd.exe` expands literal
+`%NAME%` text before a batch file can preserve it; scripted shortcuts should call
+`open-bridge launch --root DIR` directly.
 
 Everything else — every command, every setting, the console tour, the tunnel,
 notifications, the data directory — is in

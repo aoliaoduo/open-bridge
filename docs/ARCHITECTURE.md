@@ -24,11 +24,12 @@ AI 客户端负责推理、选择工具与编排工作；Bridge 负责真实执�
 | `src/http/` | 个人令牌与 OAuth、请求体/响应、安全策略和对等实例通信。 |
 | `src/workspace/` | 工作区上下文、路径、换行、文件版本和持久化辅助。 |
 | `src/shell/`、`src/process/` | Shell 选择/参数/标记，以及进程输出缓冲、游标、ANSI 和捕获，子进程控制台隐藏；工具入口在 `src/bridge/tools/`。 |
+| `src/platform/` | OS 边界 adapter。Windows Explorer/Terminal/Registry 等集成以 Node 的结构化 argv、cwd、环境变量为主；PowerShell/cmd 只允许留在固定、无用户文本插值的兼容/系统桥接点。 |
 | `src/network/` | 安全网络探测与网络/ngrok 错误分类；隧道生命周期在 `src/bridge/tunnel/`。 |
 | `src/server/` | 本机控制台 API、设置处理与静态 UI 路由。 |
 | `ui/src/` | React 控制台及其 UI 测试；Vite 产物进入 `dist/ui/`。 |
 | `test/` | 核心单元测试和会启动真实进程的协议/集成测试，不包含 UI 测试。 |
-| `scripts/`、`bin/` | 构建清理、npm 发布清单检查和安装后的 CLI 启动器。 |
+| `scripts/`、`bin/` | 构建/发布 bootstrap 与兼容入口；Windows `.cmd/.ps1/.vbs` 不承载业务逻辑，实际行为委托给 CLI 与 `src/platform/windows/`。 |
 
 “核心只依赖 Host 接口”不等于“核心不能使用 Node 内置模块”。文件、Shell 和网络工具本来就直接使用 Node 能力；不要为消除这些依赖增加第二套宿主抽象。
 
@@ -83,6 +84,6 @@ npm run release:check   # verify 全流程 + npm 实际打包清单检查
 
 集成测试启动 `bin/open-bridge.js` 并读取 `dist/`，所以必须先构建。源码、测试和 UI 测试的放置约定见仓库的 `AGENTS.md`；一批修改完成后还需审阅差异、检查工作树并只提交相关文件。
 
-Windows 项目启动器 `scripts/start-open-bridge-project.cmd` 从项目目录构建并启动，固定端口 `8123`，不自动打开浏览器。重启后先确认 `state: "running"` 与 `build_stale: false`，再做与改动对应的真实 MCP 验证；源码测试通过不能代替这一步。
+Windows 双击入口是薄 bootstrap：`scripts/windows/launcher-bootstrap.mjs` 只负责在尚无可运行 `dist/` 时安装/构建，然后进入隐藏的 `windows-launch` CLI；workspace 选择、持久化、Explorer/Terminal 参数与本项目固定端口 `8123` 都由 TypeScript 处理。重启后先确认 `state: "running"` 与 `build_stale: false`，再做与改动对应的真实 MCP 验证；源码测试通过不能代替这一步。
 
 维护时优先保持一个配置/契约真源、最小直接的改动、可恢复且诚实的异步结果。不要恢复行为教练层，也不要把已完成的迁移报告当成新的待办任务。

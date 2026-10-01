@@ -1,43 +1,28 @@
 Option Explicit
 
-' Explorer invokes this GUI-subsystem relay so the short-lived PowerShell
-' launcher never allocates a visible console window before Windows Terminal
-' opens the real Open Bridge tab.
+' Explorer enters through this GUI-subsystem relay so no console flashes before
+' Windows Terminal opens. Workspace data is carried in the child environment,
+' never interpolated into a PowerShell/cmd program or native command string.
 
 If WScript.Arguments.Count < 1 Then
   WScript.Quit 2
 End If
 
-Dim fso, shell, scriptDir, launcher, workspace, command, exitCode
+Dim fso, shell, processEnv, scriptDir, packageRoot, workspace, command, exitCode
 Set fso = CreateObject("Scripting.FileSystemObject")
 Set shell = CreateObject("WScript.Shell")
+Set processEnv = shell.Environment("PROCESS")
 
 scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
-launcher = fso.BuildPath(scriptDir, "context-menu-launch.ps1")
+packageRoot = fso.GetParentFolderName(fso.GetParentFolderName(scriptDir))
 workspace = WScript.Arguments(0)
+processEnv("OPEN_BRIDGE_EXPLORER_WORKSPACE") = workspace
+shell.CurrentDirectory = packageRoot
 
-command = "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " _
-  & QuoteArg(launcher) & " -Path " & QuoteArg(workspace)
-
-' Window style 0 is hidden. PowerShell exits as soon as it hands the tab to
-' Windows Terminal, so waiting here is short and lets us surface launch errors.
+' The command is deliberately fixed ASCII. Neither the selected workspace nor
+' the package path is serialized into command text; cwd + environment carry data.
+command = "node.exe bin\open-bridge.js windows-launch explorer"
 exitCode = shell.Run(command, 0, True)
 If exitCode <> 0 Then
-  MsgBox "Open Bridge failed to launch. Reinstall the Explorer integration or run the launcher from a terminal for details.", 16, "Open Bridge"
+  MsgBox "Open Bridge failed to launch. Reinstall the Explorer integration or run open-bridge from a terminal for details.", 16, "Open Bridge"
 End If
-
-Function QuoteArg(value)
-  Dim i, trailingBackslashes
-  trailingBackslashes = 0
-  For i = Len(value) To 1 Step -1
-    If Mid(value, i, 1) = "\" Then
-      trailingBackslashes = trailingBackslashes + 1
-    Else
-      Exit For
-    End If
-  Next
-  ' Windows' argv parser treats backslashes immediately before a closing quote
-  ' as quote escapes. Double that trailing run so C:\ arrives as C:\, not as a
-  ' quote-consuming malformed argument. Windows paths cannot contain a quote.
-  QuoteArg = Chr(34) & value & String(trailingBackslashes, "\") & Chr(34)
-End Function

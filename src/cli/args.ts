@@ -29,12 +29,12 @@ export class UsageError extends Error {}
  * here would reintroduce exactly the swallowed-as-boolean class above.
  */
 export const VALUE_FLAGS: ReadonlySet<string> = new Set([
-  "home", "root", "port", "label", "ttl", "pid", "out", "tail",
+  "home", "root", "port", "label", "ttl", "pid", "out", "tail", "menu-text",
 ]);
 
 /** Flags that are always bare booleans; registered so the drift alarm knows them. */
 export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
-  "help", "h", "no-tunnel", "open", "open-existing", "no-tui", "clear", "follow", "force",
+  "help", "h", "no-tunnel", "open", "open-existing", "no-tui", "clear", "follow", "force", "dry-run",
 ]);
 
 export function parseArgs(argv: string[]): ParsedArgs {

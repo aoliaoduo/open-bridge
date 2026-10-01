@@ -41,6 +41,7 @@
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { installNodeHost, localUtcOffset, normalizeTimezone, resolveDefaultHome } from "./host/node-host.js";
 import { t } from "./cli/cli-i18n.js";
 import { clientMcpUrl, state } from "./bridge/state.js";
@@ -65,8 +66,11 @@ import { cmdPrompt, cmdStatus, cmdStop, cmdUrl } from "./cli/query-commands.js";
 import { cmdHealth, cmdInstances, cmdLogs } from "./cli/inspect-commands.js";
 import { cmdConfig, cmdDoctor, cmdToken, setHostInstaller } from "./cli/local-commands.js";
 import { cmdDiagnostics } from "./cli/diagnostics.js";
+import { cmdExplorer, cmdWindowsLaunch } from "./cli/windows-commands.js";
+import { openExternal } from "./platform/open-external.js";
 import { VERSION } from "./cli/version.js";
 
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // A function, not a const: the language is resolved from the environment at
 // call time, and a module-level template literal would freeze whatever the
@@ -82,6 +86,7 @@ const HELP = (): string => t(`open-bridge ${VERSION} — standalone MCP bridge f
   open-bridge token create [--label L] [--ttl SEC] | list | revoke ID | delete ID | rotate ID
   open-bridge doctor
   open-bridge diagnostics [--out FILE]
+  open-bridge explorer install [--menu-text TEXT] [--dry-run] | uninstall [--dry-run]
   open-bridge version
 
 说明:
@@ -97,6 +102,7 @@ const HELP = (): string => t(`open-bridge ${VERSION} — standalone MCP bridge f
   prompt    打印给已连接 MCP 的 AI 客户端使用的接入提示词（不含 URL）
   config    配置文件位于 ~/.open-bridge/config.json（OPEN_BRIDGE_HOME 可改）
   token     管理 Bearer 令牌；明文只在 create/rotate 时显示一次
+  explorer  安装/卸载当前用户的 Windows 资源管理器右键菜单；业务逻辑由 Node/TS 执行
   diagnostics
             生成可直接贴进 issue 的脱敏诊断（数据目录工件清单 + 行为骨架 + 阈值发现）
             白名单投影：不含审计行原文、参数、工作区路径、命令文本、日志内容与任何密钥
@@ -117,6 +123,7 @@ Usage:
   open-bridge token create [--label L] [--ttl SEC] | list | revoke ID | delete ID | rotate ID
   open-bridge doctor
   open-bridge diagnostics [--out FILE]
+  open-bridge explorer install [--menu-text TEXT] [--dry-run] | uninstall [--dry-run]
   open-bridge version
 
 Commands:
@@ -133,6 +140,7 @@ Commands:
   prompt    Print the onboarding prompt for an already-connected AI client (no URL)
   config    The config file lives at ~/.open-bridge/config.json (OPEN_BRIDGE_HOME moves it)
   token     Manage Bearer tokens; the plaintext is shown once, at create/rotate
+  explorer  Install/remove the current user's Windows Explorer menu; Node/TS owns the behaviour
   diagnostics
             Write the redacted diagnostic you can paste into an issue: artifact
             inventory, behaviour skeleton, threshold findings. A whitelist
@@ -210,10 +218,7 @@ Behaviour:
 `);
 
 async function openConsoleUrl(url: string): Promise<void> {
-  const { spawn } = await import("node:child_process");
-  const cmd = process.platform === "win32" ? "cmd" : "xdg-open";
-  const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
-  spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
+  await openExternal(url);
 }
 
 // --- serve ------------------------------------------------------------------
@@ -508,6 +513,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
     case "token": return cmdToken(parsed);
     case "doctor": return cmdDoctor(parsed);
     case "diagnostics": return cmdDiagnostics(parsed);
+    case "explorer": return cmdExplorer(parsed, PACKAGE_ROOT);
+    case "windows-launch": {
+      const handoff = await cmdWindowsLaunch(parsed, PACKAGE_ROOT);
+      if (handoff) return cmdServe(handoff.parsed);
+      return;
+    }
     case "version": case "--version": case "-v":
       console.log(VERSION);
       return;

@@ -37,7 +37,7 @@ open-bridge serve                     # a second instance, serving project-b, in
 - `open-bridge instances` lists every instance with pid, port and workspace, and marks which one matches the current directory.
 - `stop` / `status` / `url` / `prompt` / `health` **default to the instance for the current directory**. With no instance here but exactly one running machine-wide, that one is used and the output says so. With several running and none here, you are asked to pick with `instances` — it never guesses.
 - `--root DIR` overrides the default; `--home DIR` changes the data directory.
-- `open-bridge launch --root DIR` is the idempotent external-launcher form: it starts the workspace when absent and exits successfully with the existing console address when that workspace is already running. Add `--open-existing` when an external launcher should open that already-running instance's Web console, without opening a browser for a newly started TUI. The Windows Explorer integration sets the selected folder as the terminal working directory and runs `launch --open-existing` instead of re-encoding the path into a native Windows command line; this keeps drive roots and trailing-backslash paths lossless.
+- `open-bridge launch --root DIR` is the idempotent external-launcher form: it starts the workspace when absent and exits successfully with the existing console address when that workspace is already running. Add `--open-existing` when an external launcher should open that already-running instance's Web console, without opening a browser for a newly started TUI. On Windows, `open-bridge explorer install` writes the per-user Explorer verbs through the TypeScript `reg.exe` adapter. The GUI relay passes the selected folder through the child environment, and Node launches Windows Terminal/Open Bridge with argv + `cwd`; the workspace is never interpolated into PowerShell/cmd source text. `scripts/start-open-bridge.cmd` is therefore a no-argument double-click wrapper; automation that needs a workspace/flags must call the Node CLI directly instead of asking cmd to preserve arbitrary path text.
 
 > **Ports**: without `--port` the default is `0`, a random free port each start, so the address changes. Pass `--port 18080` to pin it. An explicitly requested port that is busy is an error with a suggested alternative; a port **from the config file** that is busy falls back to a free one with a notice. Starting twice in the same directory is refused, naming the pid that holds it.
 
@@ -59,6 +59,7 @@ open-bridge serve                     # a second instance, serving project-b, in
 | `open-bridge config list / get KEY / set KEY VALUE / path` | Read and write configuration |
 | `open-bridge token create / list / revoke / delete / rotate` | Manage bearer tokens |
 | `open-bridge doctor` | Diagnose the environment, including every running instance |
+| `open-bridge explorer install [--menu-text TEXT] [--dry-run] / uninstall [--dry-run]` | Manage the current user's Windows Explorer context-menu integration through Node/TypeScript + `reg.exe` |
 | `open-bridge version / help` | Version and help |
 
 ---

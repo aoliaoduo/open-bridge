@@ -49,15 +49,15 @@ Web 控制台:   http://127.0.0.1:18080/console/
 
 **关掉终端就停。** 那个窗口掌握着实例 —— 这也是控制台没有启动/停止按钮的原因。
 
-Windows 推荐直接安装资源管理器右键菜单：
+Windows 推荐直接用 Node/TypeScript CLI 安装资源管理器右键菜单：
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/install-context-menu.ps1
+```bash
+open-bridge explorer install
 ```
 
-安装后，在文件夹本身或文件夹空白处右键 **在此启动 Open Bridge**，会把该目录设为新终端的工作目录并执行 `open-bridge launch --open-existing`：未运行就启动 TUI；已经运行则复用该实例、不重复启动，并直接打开现有 Web 控制台。Windows Terminal 下 Open Bridge 会直接作为该标签页的根进程运行，因此关闭这个 TUI 标签页也会结束对应工作区实例，下次右键可以正常重新启动。该入口会和前面的粘贴类系统命令用分隔线隔开，不再强制置顶。Windows 11 可能把这个经典 shell 菜单放在「显示更多选项」里。卸载运行 `scripts/windows/uninstall-context-menu.ps1`；脚本只写当前用户的 `HKCU\Software\Classes`，不需要管理员权限。
+安装后，在文件夹本身或文件夹空白处右键 **在此启动 Open Bridge**，会把该目录通过子进程环境交给 Node，再以结构化 argv/cwd 启动 `open-bridge launch --open-existing`：未运行就启动 TUI；已经运行则复用该实例、不重复启动，并直接打开现有 Web 控制台。Windows Terminal 下 Open Bridge 会直接作为该标签页的根进程运行，因此关闭这个 TUI 标签页也会结束对应工作区实例。该入口会和粘贴类系统命令用分隔线隔开。Windows 11 可能把这个经典 shell 菜单放在「显示更多选项」里。卸载用 `open-bridge explorer uninstall`；注册只写当前用户的 `HKCU\Software\Classes`，不需要管理员权限。原 PowerShell 安装/卸载文件只保留为兼容 wrapper，并委托给同一个 CLI。
 
-仓库里原有的 `scripts/start-open-bridge.cmd` 仍可双击后手工输入目录；`scripts/start-open-bridge-project.cmd` 则固定启动**本项目**，每次构建后提供控制台（不自动打开浏览器），并固定使用 **8123** 端口。
+`scripts/start-open-bridge.cmd` 与 `scripts/start-open-bridge-project.cmd` 现在也只是双击 bootstrap：目录选择、上次目录持久化、构建/启动策略以及本项目固定 **8123** 端口都由 Node/TypeScript 承担，不再放在 cmd 业务逻辑里。通用 `.cmd` 刻意不再接收 workspace/flag 参数，因为 `cmd.exe` 会在批处理逻辑有机会保护之前先展开合法路径里的字面 `%NAME%`；脚本化快捷方式统一直接调用 `open-bridge launch --root DIR`。
 
 其余的 —— 每条命令、每项设置、控制台各页、隧道、通知、数据目录 —— 都在 **[docs/configuration.md](docs/configuration.md)**。
 
