@@ -16,6 +16,7 @@ import { availableHint } from "./error-hints.js";
 import { maybeStripAnsi } from "../../process/ansi.js";
 import { hasUnreadOutput, resolveReadOffset } from "../../process/output-cursor.js";
 import type { ProcessOutputBuffer } from "../../process/output-buffer.js";
+import { decodeUtf8Page } from "../../process/utf8-page.js";
 import { requireValidOffset, requireValidStream } from "../../mcp/argument-checks.js";
 import {
   cancelScheduledRestart,
@@ -165,8 +166,13 @@ function refuseRunCommandOnlyTimeout(args: Args, name: string): void {
  */
 function outputFields(commandState: CommandState, stripAnsiValue: unknown): Record<string, unknown> {
   const snapshot = commandState.output.tail(MAX_INLINE_OUTPUT);
-  const streamText = (buffer: ProcessOutputBuffer): string =>
-    maybeStripAnsi(buffer.tail(MAX_INLINE_OUTPUT).data.toString("utf8"), stripAnsiValue);
+  const streamText = (buffer: ProcessOutputBuffer): string => {
+    const page = buffer.tail(MAX_INLINE_OUTPUT);
+    return maybeStripAnsi(
+      decodeUtf8Page(page.data, page.offset, page.endOffset, page.totalBytes, !commandState.done).text,
+      stripAnsiValue,
+    );
+  };
   return {
     output: streamText(commandState.output),
     stdout: streamText(commandState.stdoutOutput),

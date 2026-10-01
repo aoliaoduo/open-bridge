@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import type { ProcessOutputRead } from "../../process/output-buffer.js";
 import { ProcessOutputBuffer } from "../../process/output-buffer.js";
+import { decodeUtf8Page } from "../../process/utf8-page.js";
 import { resolveShell, type ShellSpec } from "../../shell/shell-provider.js";
 import { killWindowsProcessFamily } from "../../process/win-family-kill.js";
 
@@ -515,18 +516,19 @@ export function outputRead(
   requireValidOffset(offset);
   if (!Number.isSafeInteger(requested) || requested < 0) throw new Error("max_bytes must be a non-negative safe integer.");
   const read: ProcessOutputRead = buffer.read(offset, Math.min(requested, MAX_CAPTURED_OUTPUT));
+  const page = decodeUtf8Page(read.data, read.offset, read.endOffset, read.totalBytes, !s.done);
   return {
     command_id: s.id,
     stream,
-    output: maybeStripAnsi(read.data.toString("utf8"), stripAnsiValue),
-    offset: read.offset,
-    next_offset: read.endOffset,
+    output: maybeStripAnsi(page.text, stripAnsiValue),
+    offset: page.offset,
+    next_offset: page.nextOffset,
     status: s.done ? "completed" : "running",
     exit_code: s.requestedStop ? null : s.exitCode,
     termination_reason: s.requestedStop,
     output_bytes: read.totalBytes,
     output_available_bytes: read.availableBytes,
     dropped_bytes: read.droppedBytes,
-    truncated: read.truncated,
+    truncated: page.offset > 0 || page.nextOffset < read.totalBytes,
   };
 }

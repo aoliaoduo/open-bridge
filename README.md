@@ -67,8 +67,9 @@ On Windows, the preferred launcher is an Explorer context menu:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/install-context-menu.ps1
 ```
 
-Then right-click a folder, or the background inside it, and choose **在此启动 Open Bridge**.
-It opens a new terminal and runs `open-bridge launch --root <that-folder> --open-existing`:
+Then right-click a folder, or the background inside it, and choose
+**Start Open Bridge Here** (Chinese Windows uses **在此启动 Open Bridge**).
+It opens a terminal in that folder and runs `open-bridge launch --open-existing`:
 a missing instance starts its TUI, while an existing one is reused rather than duplicated
 and its Web console opens directly.
 With Windows Terminal, Open Bridge is the tab's root process, so closing that TUI tab

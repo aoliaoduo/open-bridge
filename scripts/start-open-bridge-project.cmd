@@ -7,9 +7,11 @@ rem  port 8123. It never asks for a folder and it never accepts arguments:
 rem  the root and port are intentionally stable for a desktop shortcut.
 rem
 rem  Closing this window stops the server. Ctrl+C is the clean stop.
-rem  ASCII-only: cmd.exe reads batch files in the console codepage.
+rem  ASCII-only source; use UTF-8 at runtime so a Unicode repository path is
+rem  displayed and passed through child processes without codepage loss.
 rem =====================================================================
 setlocal
+chcp 65001 >nul
 cd /d "%~dp0.."
 set "ROOT=%CD%"
 set "PORT=8123"
@@ -18,7 +20,7 @@ title Open Bridge - this project :%PORT%
 echo.
 echo  Open Bridge - this project
 echo  ===========================
-echo  workspace : %ROOT%
+echo  workspace : "%ROOT%"
 echo  port      : %PORT%
 echo  console   : http://127.0.0.1:%PORT%/console/
 echo  stop      : Ctrl+C or close this window
@@ -46,7 +48,7 @@ if errorlevel 1 goto failed
 echo  [3/3] starting the server ...
 echo  Open the console yourself at http://127.0.0.1:%PORT%/console/
 echo.
-node bin\open-bridge.js serve --root "%ROOT%" --port %PORT%
+node bin\open-bridge.js serve --port %PORT%
 set "EXITCODE=%ERRORLEVEL%"
 if not "%EXITCODE%"=="0" (
   echo.

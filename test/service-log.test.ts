@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   prepareServiceLog,
+  readServiceLogRange,
   sanitizeServiceLogName,
   serviceLogFilePath,
   SERVICE_LOG_MAX_BYTES,
@@ -34,6 +35,31 @@ test("default path is <storage>/service-logs/<wsHash8>/<sanitized>.log", () => {
 
 test("SERVICE_LOG_MAX_BYTES is 5 MiB", () => {
   assert.equal(SERVICE_LOG_MAX_BYTES, 5 * 1024 * 1024);
+});
+
+test("service-log byte pages do not split UTF-8 characters", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "ob-svclog-utf8-"));
+  try {
+    const file = path.join(dir, "api.log");
+    await writeFile(file, "A🙂中B", "utf8");
+
+    const first = await readServiceLogRange(file, 0, 4);
+    assert.equal(first.output, "A");
+    assert.equal(first.offset, 0);
+    assert.equal(first.next_offset, 1);
+
+    const second = await readServiceLogRange(file, first.next_offset, 4);
+    assert.equal(second.output, "🙂");
+    assert.equal(second.next_offset, 5);
+    await assert.rejects(readServiceLogRange(file, 1, 3), /max_bytes.*at least 4 bytes/);
+
+    const middle = await readServiceLogRange(file, 2, 6);
+    assert.equal(middle.output, "中");
+    assert.equal(middle.offset, 5);
+    assert.equal(middle.next_offset, 8);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("a service log whose rotation fails keeps its bytes", async () => {

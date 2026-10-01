@@ -9,6 +9,13 @@
 ### Changed
 
 - 发布工程新增 `release:notes`、`release:publish` 与 `release:audit`：GitHub Release 标题、正文、prerelease/latest 状态统一由 tag 与 CHANGELOG 生成；本地/CI 会检查 package/lock/CHANGELOG 一致性，发布后可一次审计历史 tag/Release 对应关系、正文漂移与旧仓库链接。
+- Windows 启动链补强路径边界：Explorer 与两个 `.cmd` launcher 不再把 workspace 重复编码进 native `--root` 参数，驱动器根目录、Unicode、空格、`&`、括号和 UNC/cwd 语义统一由工作目录承载；右键菜单默认标签按 Windows UI 语言在中文/英文之间选择。
+
+### Fixed
+
+- TUI 在 Windows/WSL 下复制 MCP URL 或接入提示词时，`clip.exe` 输入改为无 BOM 的 UTF-16LE，不再受控制台代码页影响而把中文复制成 `杩炴帴...` 一类乱码。
+- 进程输出、持久 Shell 与服务日志的字节分页会在 UTF-8 字符边界对齐；中文、emoji 等多字节字符跨 `max_bytes` / 保留窗口边界时不再被解码成 `�`，同时 `offset` / `next_offset` 继续保持绝对字节游标语义。
+- Windows PowerShell 5.1 fallback 过去会把 `C:\` 这类结尾反斜杠路径与闭合引号错误合并，导致 `--root` 和后续参数损坏；Explorer relay 现在对 trailing backslash 做安全 quoting，注册表占位符也用 `\.` 避开驱动器根目录陷阱。
 
 ## [1.4.4] — 2026-09-30
 
@@ -43,7 +50,7 @@
 ### Changed
 
 - MCP `tools/list` 不再重复携带 `outputSchema` 内纯文档性的 `description` 注解，验证结构与行为 annotations 保持不变；完整结果说明继续由 `docs/tools.md` 承担，并把 full catalog 的硬预算从 72 KiB 收紧到 68 KiB，为后续工具演进重新留出余量。
-- TUI 所在终端窗口标题只显示当前工作目录名，不再附加 `Open Bridge` 前缀或监听端口；例如工作区 `C:\Users\aolia\Desktop\open-bridge` 的窗口名就是 `open-bridge`。
+- TUI 所在终端窗口标题只显示当前工作目录名，不再附加 `Open Bridge` 前缀或监听端口；例如工作区 `C:\work\open-bridge` 的窗口名就是 `open-bridge`。
 - 所有「接入提示词」统一只保留 Agent 工作约定，不再嵌入 MCP URL、路由令牌、本地/公网可达性或 Bearer 连接说明；连接地址由控制台「复制 URL」或 `open-bridge url` 单独提供，避免把能力地址随提示词复制进聊天记录。
 
 ### Fixed

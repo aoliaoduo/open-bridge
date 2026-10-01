@@ -16,10 +16,11 @@ rem    this console, and Windows terminates the processes attached to a
 rem    console when its window closes.
 rem  * Ctrl+C is the clean stop: it removes the serve lock and runtime file.
 rem
-rem  ASCII-only on purpose: cmd.exe reads a batch file in the console's
-rem  current codepage, so anything else here would come out as mojibake.
+rem  ASCII-only source; switch the runtime console to UTF-8 so workspace paths
+rem  and the remembered last directory preserve Unicode.
 rem =====================================================================
 setlocal
+chcp 65001 >nul
 cd /d "%~dp0.."
 title Open Bridge
 set "REPO_DIR=%CD%"
@@ -43,7 +44,7 @@ if defined WORKSPACE goto :have_dir
 
 echo  Workspace directory the AI may work in - for example:
 echo    "D:\work\my-project"     (quotes only needed for paths with spaces)
-if defined PREVIOUS (echo  Press Enter to reuse: %PREVIOUS%) else (echo  Press Enter to use this repository's folder.)
+if defined PREVIOUS (echo  Press Enter to reuse: "%PREVIOUS%") else (echo  Press Enter to use this repository's folder.)
 echo.
 set /p "WORKSPACE= > "
 
@@ -56,7 +57,6 @@ if not defined WORKSPACE set "WORKSPACE=%PREVIOUS%"
 if not defined WORKSPACE set "WORKSPACE=%REPO_DIR%"
 if not defined WORKSPACE goto :quit
 set "WORKSPACE=%WORKSPACE:"=%"
-if "%WORKSPACE:~-1%"=="\" set "WORKSPACE=%WORKSPACE:~0,-1%"
 for %%I in ("%WORKSPACE%") do set "WORKSPACE=%%~fI"
 
 if not exist "%WORKSPACE%\" (
@@ -73,10 +73,10 @@ if not exist "%WORKSPACE%\" (
     exit /b 1
   )
 )
-echo %WORKSPACE%>"%LAST_DIR_FILE%" 2>nul
+> "%LAST_DIR_FILE%" <nul set /p "=%WORKSPACE%"
 
 echo.
-echo  workspace : %WORKSPACE%
+echo  workspace : "%WORKSPACE%"
 echo  stop      : Ctrl+C ^(clean^) or close this window
 echo.
 
@@ -98,8 +98,10 @@ if "%NEED_BUILD%"=="1" (
 echo  [3/3] starting the server - the console URL is printed below.
 echo        Nothing opens by itself; add --open if you want the browser to.
 echo.
-node bin\open-bridge.js serve --root "%WORKSPACE%" %*
+pushd "%WORKSPACE%"
+node "%REPO_DIR%\bin\open-bridge.js" serve %*
 set EXITCODE=%ERRORLEVEL%
+popd
 if not "%EXITCODE%"=="0" (
   echo.
   echo  open-bridge serve exited with code %EXITCODE% - the log above says why.

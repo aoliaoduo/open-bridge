@@ -19,6 +19,7 @@ import { workspacePath } from "../paths.js";
 import { killWindowsProcessFamily, shellSpec, wireSpawnedChild } from "./processes.js";
 import { isBashLikeShell } from "../../process/tee-capture.js";
 import { ProcessOutputBuffer, type ProcessOutputRead } from "../../process/output-buffer.js";
+import { decodeUtf8Page } from "../../process/utf8-page.js";
 import { MAX_CAPTURED_OUTPUT } from "../state.js";
 import { windowsHideForChild } from "../../process/child-console.js";
 import { createMarker, stripMarkerLines } from "../../shell/session-marker.js";
@@ -285,16 +286,18 @@ async function sendToShellInner(args: Args): Promise<Record<string, unknown>> {
     buffer.read(Math.max(start, buffer.state().bufferStartOffset), MAX_CAPTURED_OUTPUT);
   const read = fromStart(cmd.output, startOffset);
   const outputDropped = read.offset > startOffset;
-  let raw = read.data.toString("utf8");
+  const decode = (page: ProcessOutputRead): string =>
+    decodeUtf8Page(page.data, page.offset, page.endOffset, page.totalBytes, !cmd.done).text;
+  let raw = decode(read);
   // Strip the sentinel line(s) from the returned output.
   raw = stripMarkerLines(raw, marker);
   const stripArg = args.strip_ansi;
   const stdoutText = maybeStripAnsi(
-    stripMarkerLines(fromStart(cmd.stdoutOutput, startStdoutOffset).data.toString("utf8"), marker),
+    stripMarkerLines(decode(fromStart(cmd.stdoutOutput, startStdoutOffset)), marker),
     stripArg,
   );
   const stderrText = maybeStripAnsi(
-    fromStart(cmd.stderrOutput, startStderrOffset).data.toString("utf8"),
+    decode(fromStart(cmd.stderrOutput, startStderrOffset)),
     stripArg,
   );
   raw = maybeStripAnsi(raw, stripArg);

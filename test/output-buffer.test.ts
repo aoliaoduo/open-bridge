@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ProcessOutputBuffer } from "../src/process/output-buffer.js";
+import { decodeUtf8Page } from "../src/process/utf8-page.js";
+import { outputRead } from "../src/bridge/runtime/processes.js";
+import type { CommandState } from "../src/bridge/state.js";
 
 test("retains only the configured trailing byte window", () => {
   const output = new ProcessOutputBuffer(6);
@@ -63,6 +66,64 @@ test("uses UTF-8 byte offsets without decoding process output", () => {
   assert.deepEqual(cjk.data, Buffer.from("中", "utf8"));
   assert.equal(cjk.offset, 5);
   assert.equal(cjk.endOffset, 8);
+});
+
+test("text pages rewind at UTF-8 boundaries instead of returning replacement characters", () => {
+  const output = new ProcessOutputBuffer(64);
+  output.append(Buffer.from("A🙂中B", "utf8"));
+
+  const firstRaw = output.read(0, 4); // A + three of the emoji's four bytes.
+  const first = decodeUtf8Page(firstRaw.data, firstRaw.offset, firstRaw.endOffset, firstRaw.totalBytes);
+  assert.equal(first.text, "A");
+  assert.equal(first.offset, 0);
+  assert.equal(first.nextOffset, 1, "the emoji is re-read whole by the next page");
+
+  const secondRaw = output.read(first.nextOffset, 4);
+  const second = decodeUtf8Page(secondRaw.data, secondRaw.offset, secondRaw.endOffset, secondRaw.totalBytes);
+  assert.equal(second.text, "🙂");
+  assert.equal(second.nextOffset, 5);
+
+  const middleRaw = output.read(2, 6); // Deliberately start inside the emoji.
+  const middle = decodeUtf8Page(middleRaw.data, middleRaw.offset, middleRaw.endOffset, middleRaw.totalBytes);
+  assert.equal(middle.text, "中");
+  assert.equal(middle.offset, 5, "leading continuation bytes are never exposed as U+FFFD");
+  assert.equal(middle.nextOffset, 8);
+
+  const tooSmall = output.read(1, 3);
+  assert.throws(
+    () => decodeUtf8Page(tooSmall.data, tooSmall.offset, tooSmall.endOffset, tooSmall.totalBytes),
+    /max_bytes.*at least 4 bytes/,
+    "a hard byte cap must fail clearly instead of returning U+FFFD or silently exceeding the cap",
+  );
+
+  const growing = decodeUtf8Page(Buffer.from([0xf0, 0x9f, 0x99]), 0, 3, 3, true);
+  assert.deepEqual(growing, { text: "", offset: 0, nextOffset: 0 },
+    "a live stream that currently ends mid-character keeps the cursor until the final byte arrives");
+});
+
+test("read_process_output pagination applies the UTF-8 boundary alignment", () => {
+  const output = new ProcessOutputBuffer(64);
+  output.append(Buffer.from("A🙂中B", "utf8"));
+  const command = {
+    id: "utf8-page",
+    output,
+    stdoutOutput: output,
+    stderrOutput: new ProcessOutputBuffer(64),
+    done: true,
+    requestedStop: undefined,
+    exitCode: 0,
+  } as unknown as CommandState;
+
+  const first = outputRead(command, 0, 4, "merged", false);
+  assert.equal(first.output, "A");
+  assert.equal(first.offset, 0);
+  assert.equal(first.next_offset, 1);
+
+  const second = outputRead(command, first.next_offset, 4, "merged", false);
+  assert.equal(second.output, "🙂");
+  assert.equal(second.offset, 1);
+  assert.equal(second.next_offset, 5);
+  assert.throws(() => outputRead(command, 1, 3, "merged", false), /max_bytes.*at least 4 bytes/);
 });
 
 test("validates byte offsets and read limits", () => {

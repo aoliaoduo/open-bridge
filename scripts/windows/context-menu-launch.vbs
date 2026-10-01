@@ -27,5 +27,17 @@ If exitCode <> 0 Then
 End If
 
 Function QuoteArg(value)
-  QuoteArg = Chr(34) & value & Chr(34)
+  Dim i, trailingBackslashes
+  trailingBackslashes = 0
+  For i = Len(value) To 1 Step -1
+    If Mid(value, i, 1) = "\" Then
+      trailingBackslashes = trailingBackslashes + 1
+    Else
+      Exit For
+    End If
+  Next
+  ' Windows' argv parser treats backslashes immediately before a closing quote
+  ' as quote escapes. Double that trailing run so C:\ arrives as C:\, not as a
+  ' quote-consuming malformed argument. Windows paths cannot contain a quote.
+  QuoteArg = Chr(34) & value & String(trailingBackslashes, "\") & Chr(34)
 End Function

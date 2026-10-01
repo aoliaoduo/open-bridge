@@ -9,6 +9,7 @@
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { decodeUtf8Page } from "../../process/utf8-page.js";
 
 /** Service log files rotate to a single .1 generation at this size. */
 export const SERVICE_LOG_MAX_BYTES = 5 * 1024 * 1024;
@@ -90,11 +91,12 @@ export async function readServiceLogRange(filePath: string, offset: number | und
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
   const end = start + data.length;
+  const page = decodeUtf8Page(data, start, end, size, true);
   return {
-    offset: start,
-    next_offset: end,
-    output: data.toString("utf8"),
+    offset: page.offset,
+    next_offset: page.nextOffset,
+    output: page.text,
     output_bytes: size,
-    truncated: start > 0 || end < size,
+    truncated: page.offset > 0 || page.nextOffset < size,
   };
 }

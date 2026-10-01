@@ -21,14 +21,28 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-if ([string]::IsNullOrWhiteSpace($MenuText)) {
-  # Keep the script source ASCII so Windows PowerShell 5.1 does not depend on a
-  # UTF-8 BOM to decode the default Chinese label correctly.
-  $MenuText = (-join ([char[]](0x5728, 0x6B64, 0x542F, 0x52A8))) + " Open Bridge"
-}
-
 if ($env:OS -ne "Windows_NT") {
   throw "Open Bridge Explorer integration is available only on Windows."
+}
+
+if ([string]::IsNullOrWhiteSpace($MenuText)) {
+  # PowerShell's CurrentUICulture can be overridden by the host process and may
+  # disagree with Explorer (observed: CurrentUICulture=en-US while Explorer and
+  # InstalledUICulture are zh-CN). Prefer the Windows UI override when present,
+  # then the installed Windows UI language.
+  $uiOverride = Get-WinUILanguageOverride -ErrorAction SilentlyContinue
+  $uiLanguage = if ($null -ne $uiOverride) {
+    [string]$uiOverride
+  } else {
+    [Globalization.CultureInfo]::InstalledUICulture.Name
+  }
+  if ($uiLanguage -like "zh*") {
+    # Keep the script source ASCII so Windows PowerShell 5.1 does not depend on
+    # a UTF-8 BOM to decode the default Chinese label correctly.
+    $MenuText = (-join ([char[]](0x5728, 0x6B64, 0x542F, 0x52A8))) + " Open Bridge"
+  } else {
+    $MenuText = "Start Open Bridge Here"
+  }
 }
 
 $launcher = Join-Path $PSScriptRoot "context-menu-launch.vbs"
@@ -40,12 +54,15 @@ $launcher = (Resolve-Path -LiteralPath $launcher).ProviderPath
 $entries = @(
   @{
     Key = "HKCU:\Software\Classes\Directory\shell\OpenBridge"
-    Placeholder = "%1"
+    # Appending \. prevents a drive root (C:\) from ending immediately before
+    # the command-line closing quote; Resolve-Path in the launcher canonicalizes
+    # both C:\. and ordinary C:older\. back to the selected directory.
+    Placeholder = "%1\."
     Description = "folder"
   },
   @{
     Key = "HKCU:\Software\Classes\Directory\Background\shell\OpenBridge"
-    Placeholder = "%V"
+    Placeholder = "%V\."
     Description = "folder background"
   }
 )

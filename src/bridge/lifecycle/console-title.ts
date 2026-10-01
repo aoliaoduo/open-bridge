@@ -30,7 +30,7 @@ import { processHasConsole } from "../../process/child-console.js";
  * The launcher's title is exactly the workspace directory name.
  *
  * The caller already passes path.basename(root()), so a workspace rooted at
- * `C:\Users\aolia\Desktop\open-bridge` is titled simply `open-bridge`.
+ * `C:\work\open-bridge` is titled simply `open-bridge`.
  * No product prefix or port is added: the directory name is the operator's
  * shortest unambiguous identifier when several Bridge terminals are open.
  */

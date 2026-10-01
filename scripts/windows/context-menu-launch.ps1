@@ -5,8 +5,9 @@
 
 .DESCRIPTION
   This is the PowerShell implementation behind the windowless Explorer relay.
-  It opens a fresh terminal and runs "open-bridge launch --root <path>". The CLI,
-  not these launcher scripts, owns instance detection and the one-workspace-one-instance rule.
+  It opens a fresh terminal in the selected folder and runs
+  "open-bridge launch --open-existing". The CLI, not these launcher scripts,
+  owns instance detection and the one-workspace-one-instance rule.
 
   Windows Terminal is preferred when available. Open Bridge itself is launched
   as the terminal tab's root process instead of through an intermediate shell,
@@ -30,6 +31,11 @@ if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
   throw "Workspace directory does not exist: $Path"
 }
 $workspace = (Resolve-Path -LiteralPath $Path).ProviderPath
+# PowerShell 5.1 rebuilds native argv as one command line. A quoted path ending
+# in \ can consume its closing quote, so Windows Terminal receives an equivalent
+# path ending in `.` instead (C:\. / C:\dir\.). The launched process still sees
+# the canonical selected directory as cwd.
+$terminalWorkingDirectory = Join-Path -Path $workspace -ChildPath "."
 
 $packageRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).ProviderPath
 $bridgeJs = Join-Path $packageRoot "bin\open-bridge.js"
@@ -47,12 +53,10 @@ if ($null -ne $terminal) {
       "--title",
       $title,
       "--startingDirectory",
-      $workspace,
+      $terminalWorkingDirectory,
       $node.Source,
       $bridgeJs,
       "launch",
-      "--root",
-      $workspace,
       "--open-existing"
     )
     & $terminal.Source @terminalArgs
@@ -65,8 +69,11 @@ if ($null -ne $terminal) {
 
 if ($PSCmdlet.ShouldProcess($workspace, "Open a console and launch Open Bridge")) {
   # Start-Process opens console executables in a new window by default on
-  # Windows. Quote the two path arguments explicitly because ArgumentList is
-  # joined into one native command line by Windows PowerShell 5.1.
-  $nodeArgs = '"' + $bridgeJs + '" launch --root "' + $workspace + '" --open-existing'
+  # Windows. Do NOT pass the workspace through ArgumentList: Windows PowerShell
+  # 5.1 joins that list into one native command line, where a quoted root path
+  # like "C:\" consumes the closing quote. WorkingDirectory already gives the
+  # CLI the exact workspace through cwd, so launch can resolve it without a
+  # second, lossy command-line representation.
+  $nodeArgs = '"' + $bridgeJs + '" launch --open-existing'
   Start-Process -FilePath $node.Source -WorkingDirectory $workspace -ArgumentList $nodeArgs | Out-Null
 }

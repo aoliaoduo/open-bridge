@@ -4,6 +4,8 @@ import { spawn } from "node:child_process";
 export type ClipboardCommand = {
   file: string;
   args: string[];
+  /** stdin encoding expected by the helper; clip.exe needs UTF-16LE regardless of the console code page. */
+  inputEncoding: BufferEncoding;
 };
 
 export type ClipboardRunner = (command: ClipboardCommand, text: string) => Promise<void>;
@@ -12,19 +14,23 @@ export function clipboardCommands(
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
 ): ClipboardCommand[] {
-  if (platform === "win32") return [{ file: "clip.exe", args: [] }];
-  if (platform === "darwin") return [{ file: "pbcopy", args: [] }];
+  if (platform === "win32") return [{ file: "clip.exe", args: [], inputEncoding: "utf16le" }];
+  if (platform === "darwin") return [{ file: "pbcopy", args: [], inputEncoding: "utf8" }];
   if (platform === "linux") {
     const commands: ClipboardCommand[] = [];
-    if (env.WSL_DISTRO_NAME || env.WSL_INTEROP) commands.push({ file: "clip.exe", args: [] });
+    if (env.WSL_DISTRO_NAME || env.WSL_INTEROP) commands.push({ file: "clip.exe", args: [], inputEncoding: "utf16le" });
     commands.push(
-      { file: "wl-copy", args: [] },
-      { file: "xclip", args: ["-selection", "clipboard"] },
-      { file: "xsel", args: ["--clipboard", "--input"] },
+      { file: "wl-copy", args: [], inputEncoding: "utf8" },
+      { file: "xclip", args: ["-selection", "clipboard"], inputEncoding: "utf8" },
+      { file: "xsel", args: ["--clipboard", "--input"], inputEncoding: "utf8" },
     );
     return commands;
   }
   return [];
+}
+
+export function clipboardInput(command: ClipboardCommand, text: string): Buffer {
+  return Buffer.from(text, command.inputEncoding);
 }
 
 async function runClipboardCommand(command: ClipboardCommand, text: string): Promise<void> {
@@ -48,7 +54,7 @@ async function runClipboardCommand(command: ClipboardCommand, text: string): Pro
       else finish(new Error(stderr.trim() || `${command.file} exited with code ${String(code)}`));
     });
     child.stdin?.on("error", error => finish(error));
-    child.stdin?.end(text, "utf8");
+    child.stdin?.end(clipboardInput(command, text));
   });
 }
 
