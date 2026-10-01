@@ -22,7 +22,7 @@ AI 客户端负责推理、选择工具与编排工作；Bridge 负责真实执�
 | `src/bridge/tools/script-sandbox.ts`、`script-sandbox-contract.ts`、`script-sandbox-worker-source.ts` | `run_script` 安全子系统：parent 侧工具编排、纯 limits/envelope/diagnostics contract，以及受信任的 Worker/VM bootstrap source 分层；公开工具行为仍由 `script-sandbox.ts` 统一暴露。 |
 | `src/bridge/` | 子目录按子系统划分：`tools/` 工具执行与编排、`runtime/` 受监管进程与服务、`sessions/` 会话、`tunnel/` 隧道、`lifecycle/` 启停、`mcp/` 协议接入、`config/` 配置；根下共享能力按职责拆为 `runtime-state.ts`、`activity.ts`、`endpoint.ts`、`mcp-result.ts` 等。`state.ts` 仅保留旧 import surface 的兼容 facade；仓库内部源码不再依赖它，并由架构测试保证新增代码直接依赖职责所属模块。 |
 | `src/mcp/` | 工具 schema，以及 glob、搜索、流式读取、补丁、diff 等算法；不是 HTTP 协议入口。 |
-| `src/http/` | 个人令牌与 OAuth、请求体/响应、安全策略和对等实例通信。OAuth 的 `oauth.ts` 只做路由/Bearer/console facade；discovery/resource、短期授权码与 register/authorize/token/revoke handler 分别在 `oauth-common.ts`、`oauth-code-store.ts` 和 `oauth-*.ts`。 |
+| `src/http/` | 个人令牌与 OAuth、请求体/响应、安全策略和对等实例通信。`auth.ts` 只做 request gate、OAuth/Bearer 决策与兼容导出，个人令牌持久化/CRUD/usage flush 在 `auth-tokens.ts`；OAuth 的 `oauth.ts` 只做路由/Bearer/console facade，discovery/resource、短期授权码与 register/authorize/token/revoke handler 分别在 `oauth-common.ts`、`oauth-code-store.ts` 和 `oauth-*.ts`。 |
 | `src/workspace/` | 工作区上下文、路径、换行、文件版本和持久化辅助。 |
 | `src/shell/`、`src/process/` | Shell 选择/参数/标记，以及进程输出缓冲、游标、ANSI 和捕获，子进程控制台隐藏；工具入口在 `src/bridge/tools/`。 |
 | `src/platform/` | OS 边界 adapter。Windows Explorer/Terminal/Registry 等集成以 Node 的结构化 argv、cwd、环境变量为主；PowerShell/cmd 只允许留在固定、无用户文本插值的兼容/系统桥接点。 |
