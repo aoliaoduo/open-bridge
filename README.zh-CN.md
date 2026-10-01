@@ -146,8 +146,9 @@ open-bridge explorer install
 
 - 直接把工作区交给 Node，不把用户路径拼进 PowerShell 或 `cmd.exe` 源码；
 - 已有实例时直接复用，不重复启动；
-- 已运行时直接打开现有 Web 控制台；
-- 有 Windows Terminal 时优先使用；
+- 新实例会在 Windows Terminal 中打开**可见 TUI**；
+- 同一工作区已经运行时，再次右键会打开现有 Web 控制台；
+- Windows Terminal 不可用时会改为打开 Web 控制台，不会留下“后台已启动但什么都看不到”的实例；
 - 只写当前用户的 `HKCU\Software\Classes`，不需要管理员权限。
 
 卸载：

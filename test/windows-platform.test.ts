@@ -98,6 +98,25 @@ test("Windows Terminal launch keeps workspace as one argv item and never synthes
   assert.deepEqual(args.slice(-2), ["launch", "--open-existing"]);
 });
 
+test("Explorer launches Windows Terminal visibly so the TUI is actually reachable", async () => {
+  const runner = new FakeRunner();
+  const workspace = String.raw`C:\work\visible-tui`;
+  const result = await launchExplorerWorkspace({
+    workspace,
+    packageRoot: String.raw`C:\pkg`,
+    platform: "win32",
+    terminalPath: String.raw`C:\WindowsApps\wt.exe`,
+    nodeExecutable: String.raw`C:\Node\node.exe`,
+    directoryExists: () => true,
+    runner,
+  });
+
+  assert.equal(result.mode, "windows-terminal");
+  assert.equal(runner.runs.length, 1);
+  assert.equal(runner.runs[0]?.options?.windowsHide, false);
+  assert.equal(runner.launches.length, 0);
+});
+
 test("Explorer launcher falls back to a detached Node console without a shell", async () => {
   const runner = new FakeRunner();
   runner.runResult = { code: 1, stdout: "", stderr: "terminal failed" };
@@ -114,7 +133,12 @@ test("Explorer launcher falls back to a detached Node console without a shell", 
   assert.equal(result.mode, "console");
   assert.equal(runner.runs.length, 1);
   assert.equal(runner.launches.length, 1);
-  assert.deepEqual(runner.launches[0]?.args, [String.raw`C:\pkg\bin\open-bridge.js`, "launch", "--open-existing"]);
+  assert.deepEqual(runner.launches[0]?.args, [
+    String.raw`C:\pkg\bin\open-bridge.js`,
+    "launch",
+    "--open-existing",
+    "--open",
+  ]);
   assert.equal(runner.launches[0]?.options?.cwd, workspace);
 });
 

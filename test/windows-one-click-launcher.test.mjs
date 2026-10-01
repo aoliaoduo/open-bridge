@@ -35,6 +35,10 @@ test("Node bootstrap forwards direct argv without cmd expansion", async () => {
     path.join(scripts, "launcher-bootstrap.mjs"),
     readFileSync(path.join(ROOT, "scripts", "windows", "launcher-bootstrap.mjs")),
   );
+  writeFileSync(
+    path.join(scripts, "launcher-build.mjs"),
+    readFileSync(path.join(ROOT, "scripts", "windows", "launcher-build.mjs")),
+  );
   writeFileSync(path.join(bin, "open-bridge.js"), [
     "const fs = require('node:fs');",
     "fs.writeFileSync(process.env.OB_PROBE_OUT, JSON.stringify(process.argv.slice(2)));",

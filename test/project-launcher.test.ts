@@ -18,7 +18,8 @@ test("the project cmd is only a thin Node bootstrap", () => {
 });
 
 test("project build/start policy lives behind the Node bootstrap and TS command", () => {
-  assert.match(bootstrap, /mode === "project" \|\| !distReady/);
+  assert.doesNotMatch(bootstrap, /mode === "project" \|\| !distReady/, "a project restart must not rewrite a fresh dist unconditionally");
+  assert.match(bootstrap, /projectBuildRequired\(ROOT\)/);
   assert.match(bootstrap, /runNpm\(\["run", "build"\]\)/);
   assert.match(bootstrap, /"windows-launch", mode/);
   assert.match(commands, /mode === "project"/);

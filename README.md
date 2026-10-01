@@ -146,8 +146,9 @@ The launcher:
 
 - passes the workspace to Node without interpolating the path through PowerShell or `cmd.exe`;
 - reuses an existing workspace instance instead of starting a duplicate;
-- opens the existing Web console when the instance is already running;
-- uses Windows Terminal when available;
+- opens a **visible TUI in Windows Terminal** when starting a new instance;
+- opens the existing Web console on a later click when that workspace is already running;
+- falls back to opening the Web console rather than leaving an invisible background Bridge when Windows Terminal is unavailable;
 - registers per-user under `HKCU\Software\Classes`, so administrator rights are not required.
 
 Remove the menu with:

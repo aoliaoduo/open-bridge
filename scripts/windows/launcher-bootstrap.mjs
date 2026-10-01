@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { projectBuildRequired } from "./launcher-build.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "../..");
@@ -44,7 +45,8 @@ if (!existsSync(path.join(ROOT, "node_modules"))) {
 
 const distReady = existsSync(path.join(ROOT, "dist", "cli.js"))
   && existsSync(path.join(ROOT, "dist", "ui", "console.html"));
-if (mode === "project" || !distReady) {
+const buildRequired = !distReady || (mode === "project" && projectBuildRequired(ROOT));
+if (buildRequired) {
   console.log("[open-bridge] building CLI and console...");
   const code = await runNpm(["run", "build"]);
   if (code !== 0) process.exit(code);

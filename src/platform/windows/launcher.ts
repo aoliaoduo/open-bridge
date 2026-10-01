@@ -79,7 +79,11 @@ export async function launchExplorerWorkspace(options: ExplorerLaunchOptions): P
       const result = await runner.run(
         terminalPath,
         windowsTerminalLaunchArgs(workspace, options.packageRoot, nodeExecutable),
-        { cwd: workspace, windowsHide: true, timeoutMs: 5_000 },
+        // Windows Terminal is the user's TUI surface. Hiding wt.exe here
+        // successfully starts the Bridge but makes the entire terminal/TUI
+        // invisible, so a second Explorer click only appears to "open a web
+        // page". Keep the GUI terminal visible; paths remain structured argv.
+        { cwd: workspace, windowsHide: false, timeoutMs: 5_000 },
       );
       if (result.code === 0) return { mode: "windows-terminal" };
     } catch {
@@ -88,9 +92,13 @@ export async function launchExplorerWorkspace(options: ExplorerLaunchOptions): P
     }
   }
 
+  // Without Windows Terminal there is no reliable interactive TTY for a
+  // detached Node child launched from wscript. Do not leave a healthy Bridge
+  // running invisibly: open the Web console for a new fallback instance, while
+  // --open-existing covers the reuse case.
   await runner.launch(
     nodeExecutable,
-    [entry, "launch", "--open-existing"],
+    [entry, "launch", "--open-existing", "--open"],
     { cwd: workspace, windowsHide: false },
   );
   return { mode: "console" };
