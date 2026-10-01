@@ -5,7 +5,8 @@
  * its route token and loopback port in a shared registry (file format and proxy
  * live in http/peers.ts). This module owns the policy: which registries we write,
  * when we may advertise ourselves at all, and the periodic re-publish that heals
- * a lost read-merge-write race.
+ * external/legacy registry loss. Current writers serialize mutations in peers.ts,
+ * so ordinary concurrent Bridge processes do not rely on this timer for correctness.
  */
 import { host } from "../../host/host.js";
 import * as fsSync from "node:fs";
@@ -134,10 +135,12 @@ export function stopRepublishLoop(): void {
 }
 
 /**
- * Re-assert our peer registry entry periodically. The shared file is a plain
- * read-merge-write JSON blob: two windows publishing concurrently can lose a
- * row (last writer wins), which would leave the loser unreachable through the
- * shared tunnel until it republishes. A 30 s re-publish heals that quickly.
+ * Re-assert our peer registry entry periodically.
+ *
+ * Current standalone writers serialize read-merge-write mutations with a
+ * cross-process lock, so concurrent windows preserve one another immediately.
+ * Keep this loop as defense in depth for manual edits, legacy writers that do
+ * not participate in the lock protocol, and transient registry replacement.
  */
 export function startRepublishLoop(): void {
   stopRepublishLoop();

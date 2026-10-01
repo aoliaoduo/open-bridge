@@ -15,6 +15,7 @@
 
 ### Fixed
 
+- 多实例共享公网隧道时的 `bridge-peers.json` 更新改为跨进程互斥的原子 read-merge-write：两个 Bridge 同时启动或 30 秒重发不再因 last-writer-wins 丢失 peer 行，避免公网 owner 暂时找不到目标工作区而让 MCP 工具统一报内部错误；死进程遗留的锁会自动回收，周期性 republish 继续作为异常兜底。
 - 本机 Web 控制台的「状态」页新增两步确认的「关闭 Bridge」操作：Windows Terminal 不可用、只剩 Web 界面时也能走与 TUI/CLI 相同的优雅 shutdown，不再需要靠隐藏终端或全局 CLI 才能结束实例。
 - `start-open-bridge-project.cmd` 的构建新鲜度从 mtime 启发式升级为 SHA-256 内容指纹 + 成功构建 stamp：源码内容即使带着更旧时间戳也不会漏构建；`package.json` / `package-lock.json` 变化会先同步依赖；内容未变化的普通重启继续复用现有 `dist`，不会把其他工作区无故标成 `build_stale`。
 - Windows Explorer 右键首次启动不再把 Windows Terminal 隐藏：新工作区会显示可交互 TUI；Windows Terminal 不可用时 fallback 会主动打开 Web 控制台，避免 Bridge 已在后台运行但用户看不到任何界面。

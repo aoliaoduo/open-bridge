@@ -118,6 +118,22 @@ test("two directories run two Bridges against one shared data dir", async () => 
   assert.equal(b.runtime.root, path.resolve(dirB));
 });
 
+test("concurrently started instances both survive in the shared peer registry", async () => {
+  const rows = await waitFor(() => {
+    try {
+      const parsed = JSON.parse(readFileSync(path.join(home, "bridge-peers.json"), "utf8"));
+      if (!Array.isArray(parsed)) return undefined;
+      const pids = new Set(parsed.map(row => row?.pid));
+      return pids.has(instances.A.child.pid) && pids.has(instances.B.child.pid) ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }, "both peer registry rows", 5_000);
+
+  assert.equal(rows.filter(row => row.pid === instances.A.child.pid).length, 1);
+  assert.equal(rows.filter(row => row.pid === instances.B.child.pid).length, 1);
+});
+
 test("each instance reports the directory it was started in", async () => {
   const a = await statusFor("A");
   const b = await statusFor("B");

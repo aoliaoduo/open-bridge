@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -13,6 +13,9 @@ export type PeerRecord = { hash: string; port: number; pid: number; root: string
 export type PeerInput = { token: string; port: number; pid: number; root: string; at: number };
 
 const HOP_BY_HOP_HEADERS = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"]);
+const PEER_LOCK_WAIT_MS = 20;
+const PEER_LOCK_TIMEOUT_MS = 5_000;
+const PEER_LOCK_STALE_MS = 10_000;
 
 export function peerHash(token: string): string {
   return createHash("sha256").update(token).digest("hex").slice(0, 32);
@@ -62,21 +65,99 @@ async function writePeers(filePath: string, rows: PeerRecord[]): Promise<void> {
   }
 }
 
+async function unlinkIfPresent(filePath: string): Promise<void> {
+  try { await unlink(filePath); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
+/**
+ * Serialize read-merge-write mutations across Bridge processes.
+ *
+ * Atomic rename keeps readers from seeing torn JSON, but it does not make the
+ * preceding read+merge atomic: two instances could both read the same snapshot
+ * and then overwrite each other's row. An exclusive lock file closes that gap.
+ * Dead-process locks are reclaimed immediately; an empty/corrupt lock is only
+ * reclaimed after a grace period so a process that created it but has not yet
+ * written its pid is never stolen from.
+ */
+async function withPeerMutationLock<T>(filePath: string, mutate: () => Promise<T>): Promise<T> {
+  const lockPath = `${filePath}.lock`;
+  const deadline = Date.now() + PEER_LOCK_TIMEOUT_MS;
+  await mkdir(dirname(filePath), { recursive: true });
+
+  for (;;) {
+    try {
+      const handle = await open(lockPath, "wx");
+      let released = false;
+      try {
+        await handle.writeFile(String(process.pid), "utf8");
+      } catch (error) {
+        await handle.close().catch(() => undefined);
+        await unlinkIfPresent(lockPath).catch(() => undefined);
+        throw error;
+      }
+
+      const release = async (): Promise<void> => {
+        if (released) return;
+        released = true;
+        await handle.close().catch(() => undefined);
+        await unlinkIfPresent(lockPath);
+      };
+
+      try { return await mutate(); }
+      finally { await release(); }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+
+      let stale = false;
+      try {
+        const [raw, meta] = await Promise.all([
+          readFile(lockPath, "utf8").catch(() => ""),
+          stat(lockPath).catch(() => undefined),
+        ]);
+        const ownerPid = Number.parseInt(raw.trim(), 10);
+        const ageMs = meta ? Date.now() - meta.mtimeMs : 0;
+        if (Number.isInteger(ownerPid) && ownerPid > 0) {
+          stale = !isPidAlive(ownerPid) || ageMs > PEER_LOCK_STALE_MS;
+        } else if (meta) {
+          stale = ageMs > PEER_LOCK_STALE_MS;
+        }
+      } catch {
+        // A concurrent owner may be between create/write/rename states. Waiting
+        // is safer than guessing that the lock is stale.
+      }
+
+      if (stale) {
+        await unlinkIfPresent(lockPath).catch(() => undefined);
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for peer registry lock: ${filePath}`);
+      }
+      await new Promise(resolve => setTimeout(resolve, PEER_LOCK_WAIT_MS));
+    }
+  }
+}
+
 export async function publishPeer(filePath: string, input: PeerInput): Promise<void> {
   const record: PeerRecord = { hash: peerHash(input.token), port: input.port, pid: input.pid, root: input.root, at: input.at };
-  // One row per live instance. A rotation mints a new token — hence a new digest
-  // — so the old row can never match a token again, and keying the merge on the
-  // hash alone left one dead digest behind per rotation until the process
-  // exited (`withdrawPeer` can only drop the row it knows the hash of). Rows for
-  // other instances are preserved; a re-publish of the same token stays
-  // idempotent because the row it replaces carries the same pid.
-  const rows = (await readPeers(filePath)).filter(row => row.pid !== input.pid);
-  await writePeers(filePath, [...rows, record]);
+  await withPeerMutationLock(filePath, async () => {
+    // One row per live instance. A rotation mints a new token — hence a new
+    // digest — so the old row can never match a token again. Rows for other
+    // instances are preserved; a re-publish of the same token stays idempotent
+    // because the row it replaces carries the same pid.
+    const rows = (await readPeers(filePath)).filter(row => row.pid !== input.pid);
+    await writePeers(filePath, [...rows, record]);
+  });
 }
 
 export async function withdrawPeer(filePath: string, token: string): Promise<void> {
   const hash = peerHash(token);
-  await writePeers(filePath, (await readPeers(filePath)).filter(row => row.hash !== hash));
+  await withPeerMutationLock(filePath, async () => {
+    await writePeers(filePath, (await readPeers(filePath)).filter(row => row.hash !== hash));
+  });
 }
 
 export type PeerWriteResult = { file: string; ok: boolean; error?: string };

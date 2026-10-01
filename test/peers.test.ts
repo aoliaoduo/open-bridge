@@ -73,6 +73,37 @@ test("a rotation replaces the instance row instead of leaving a dead digest behi
   } finally { peer.stop(); }
 });
 
+test("concurrent peer publishes preserve every live row", async () => {
+  const file = await registryPath();
+  const peer = await liveChild();
+  try {
+    for (let round = 0; round < 12; round += 1) {
+      await writeFile(file, "[]", "utf8");
+      await Promise.all([
+        publishPeer(file, { token: TOKEN_A, port: 41_101, pid: process.pid, root: "C:/self", at: Date.now() }),
+        publishPeer(file, { token: TOKEN_B, port: 41_102, pid: peer.pid, root: "C:/peer", at: Date.now() }),
+      ]);
+      assert.deepEqual(
+        (await readPeers(file)).map(row => row.port).sort(),
+        [41_101, 41_102],
+        `round ${round}: concurrent read-merge-write must not lose a peer row`,
+      );
+    }
+  } finally { peer.stop(); }
+});
+
+test("a dead process cannot strand the peer registry lock", async () => {
+  const file = await registryPath();
+  const peer = await liveChild();
+  const exited = new Promise<void>(resolve => peer.child.once("exit", () => resolve()));
+  peer.stop();
+  await exited;
+
+  await writeFile(`${file}.lock`, String(peer.pid), "utf8");
+  await publishPeer(file, { token: TOKEN_A, port: 41_103, pid: process.pid, root: "C:/self", at: Date.now() });
+  assert.deepEqual((await readPeers(file)).map(row => row.port), [41_103]);
+});
+
 test("registries are discovered per platform, and only when they already exist", () => {
   const own = path.join("C:", "home", ".open-bridge", "bridge-peers.json");
   const appData = path.join("C:", "Users", "x", "AppData", "Roaming");
