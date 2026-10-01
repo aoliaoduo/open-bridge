@@ -3,8 +3,8 @@
  *
  * The console is the operator's main surface, so a route nobody calls is either a
  * missing control or dead code — and the difference is worth knowing rather than
- * assuming. This test reads the route table out of `src/server/api-router.ts` and
- * looks for the path anywhere it could legitimately be used: the console
+ * assuming. This test reads the HTTP boundary plus its `src/server/api/*`
+ * domain handlers and looks for the path anywhere it could legitimately be used: the console
  * (`ui/src`), the CLI, and the integration suites. A route with no caller fails
  * the test until someone decides which of the three it is: wire it up, delete it,
  * or add it to SERVER_OWNED_ROUTES below with a reason.
@@ -54,10 +54,17 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-/** The route table, read the way the server declares it. */
+/** The route table, read from the thin boundary and its domain handlers. */
 function routes(): string[] {
-  const source = readFileSync(path.join(repoRoot, "src", "server", "api-router.ts"), "utf8");
-  const found = [...source.matchAll(/case "(\/[a-z0-9/_-]*)":/g)].map(match => match[1]!);
+  const serverDir = path.join(repoRoot, "src", "server");
+  const files = [
+    path.join(serverDir, "api-router.ts"),
+    ...sourceFiles(path.join(serverDir, "api")),
+  ];
+  const found = files.flatMap(file => {
+    const source = readFileSync(file, "utf8");
+    return [...source.matchAll(/case "(\/[a-z0-9/_-]*)":/g)].map(match => match[1]!);
+  });
   return [...new Set(found)].sort();
 }
 

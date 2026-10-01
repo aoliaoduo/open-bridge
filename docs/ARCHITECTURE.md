@@ -14,20 +14,20 @@ AI 客户端负责推理、选择工具与编排工作；Bridge 负责真实执�
 | --- | --- |
 | `src/cli.ts`、`src/cli/` | CLI 入口、参数、语言、实例定位、检查和本地管理命令。 |
 | `src/host/host.ts` | 唯一的宿主接口：配置、持久化、日志、UI 通知等共享能力。 |
-| `src/host/node-host.ts` | 文件版宿主实现；仅由 CLI 和控制台 API 安装或访问具体实现。 |
+| `src/host/node-host.ts`、`src/host/file-store.ts`、`src/host/file-log.ts`、`src/host/timezone.ts` | Node 宿主 composition root 与文件存储、日志、时区 infrastructure adapters；核心只依赖 `host.ts` 契约。 |
 | `src/bridge/mcp/http-listener.ts` | HTTP 监听、Host/CORS/认证边界、健康路由、对等转发，以及两代 MCP 请求分流。 |
 | `src/bridge/mcp/mcp-endpoint.ts` | 两代 MCP 的发现/初始化、说明注入、工具调用适配及共享结果构造。 |
 | `src/bridge/tools/tool-catalog.ts`、`src/bridge/tools/tool-families.ts` | 工具档过滤、规范工具名和兼容别名归一化。 |
 | `src/bridge/dispatcher.ts`、`src/bridge/tools/lock-plan.ts` | 调用分发、输入检查、资源锁计划、审计和统计。 |
-| `src/bridge/` | 子目录按子系统划分：`tools/` 工具执行与编排、`runtime/` 受监管进程与服务、`sessions/` 会话、`tunnel/` 隧道、`lifecycle/` 启停、`mcp/` 协议接入、`config/` 配置；根下只留共享内核（`state.ts`、`dispatcher.ts`、`paths.ts` 等）。 |
+| `src/bridge/` | 子目录按子系统划分：`tools/` 工具执行与编排、`runtime/` 受监管进程与服务、`sessions/` 会话、`tunnel/` 隧道、`lifecycle/` 启停、`mcp/` 协议接入、`config/` 配置；根下共享能力按职责拆为 `runtime-state.ts`、`activity.ts`、`endpoint.ts`、`mcp-result.ts` 等。`state.ts` 仅保留旧 import surface 的兼容 facade，新代码应直接依赖职责所属模块。 |
 | `src/mcp/` | 工具 schema，以及 glob、搜索、流式读取、补丁、diff 等算法；不是 HTTP 协议入口。 |
-| `src/http/` | 个人令牌与 OAuth、请求体/响应、安全策略和对等实例通信。 |
+| `src/http/` | 个人令牌与 OAuth、请求体/响应、安全策略和对等实例通信。OAuth 的 `oauth.ts` 只做路由/Bearer/console facade；discovery/resource、短期授权码与 register/authorize/token/revoke handler 分别在 `oauth-common.ts`、`oauth-code-store.ts` 和 `oauth-*.ts`。 |
 | `src/workspace/` | 工作区上下文、路径、换行、文件版本和持久化辅助。 |
 | `src/shell/`、`src/process/` | Shell 选择/参数/标记，以及进程输出缓冲、游标、ANSI 和捕获，子进程控制台隐藏；工具入口在 `src/bridge/tools/`。 |
 | `src/platform/` | OS 边界 adapter。Windows Explorer/Terminal/Registry 等集成以 Node 的结构化 argv、cwd、环境变量为主；PowerShell/cmd 只允许留在固定、无用户文本插值的兼容/系统桥接点。 |
-| `src/network/` | 安全网络探测与网络/ngrok 错误分类；隧道生命周期在 `src/bridge/tunnel/`。 |
-| `src/server/` | 本机控制台 API、设置处理与静态 UI 路由。 |
-| `ui/src/` | React 控制台及其 UI 测试；Vite 产物进入 `dist/ui/`。 |
+| `src/network/` | 安全网络探测与网络/ngrok 错误分类；IP 地址分类/访问策略在 `network-address.ts`，稳定 probe 错误契约在 `network-probe-error.ts`，DNS/HTTP/TCP I/O 由 `safe-probe.ts` 编排。隧道生命周期在 `src/bridge/tunnel/`。 |
+| `src/server/` | 本机控制台 HTTP 安全边界在 `api-router.ts`；具体读/写 route handlers 位于 `server/api/`。设置 action 同样由 `settings-handler.ts` 做薄分发，领域行为位于 `server/settings/`。 |
+| `ui/src/` | React 控制台及其 UI 测试；Vite 产物进入 `dist/ui/`。页面级组件负责组装，复杂设置交互按领域子组件拆分（例如 tunnel provider/domain、状态动作、advanced knobs）。 |
 | `test/` | 核心单元测试和会启动真实进程的协议/集成测试，不包含 UI 测试。 |
 | `scripts/`、`bin/` | 构建/发布 bootstrap 与兼容入口；Windows `.cmd/.ps1/.vbs` 不承载业务逻辑，实际行为委托给 CLI 与 `src/platform/windows/`。 |
 

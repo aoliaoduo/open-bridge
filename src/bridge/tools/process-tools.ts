@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { MAX_TIMER_MS } from "../../shared/timing.js";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { testReadyPattern, validateReadyPattern } from "../../mcp/regex-worker.js";
 import {
@@ -115,11 +116,7 @@ export function throwIfSpawnFailed(commandState: { spawnError?: string }): void 
  * refuse, because a stored setting should never silently mean something other
  * than what it says.
  */
-export const MAX_TIMER_MS = 2_147_483_647;
-// The canonical copy of the 2^31-1 ceiling. Two siblings keep their own literal
-// on purpose: src/bridge/config/config-values.ts must stay dependency-free (the React
-// console bundles it), and src/network/safe-probe.ts does not import bridge
-// modules. If you change one, change all three.
+export { MAX_TIMER_MS };
 
 export function clampMs(value: unknown, fallback: number, max = MAX_TIMER_MS): number {
   if (value === undefined || value === null) return Math.min(fallback, MAX_TIMER_MS);

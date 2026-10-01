@@ -2,67 +2,30 @@ import { lookup as lookupDns } from "node:dns/promises";
 import * as http from "node:http";
 import * as https from "node:https";
 import { createConnection, isIP } from "node:net";
+import { MAX_TIMER_MS } from "../shared/timing.js";
+import {
+  DEFAULT_PROBE_NETWORK_SCOPE,
+  classifyIpAddress,
+  isAddressAllowed,
+  stripIpv6Brackets,
+  type NetworkAddressKind,
+  type ProbeNetworkScope,
+} from "./network-address.js";
+import { NetworkProbeError } from "./network-probe-error.js";
 
-/**
- * The network locations a health probe may reach. The default keeps the two
- * normal uses of these tools (a local development server and a public health
- * endpoint), while refusing LAN, cloud-metadata, and other special addresses.
- *
- * `any` is intentionally an explicit opt-in and it is LITERAL: it applies no
- * address-class filtering at all, so RFC1918/ULA, link-local (the cloud-metadata
- * range) and every other reachable address pass. It is not "the permissive
- * default with the dangerous classes still blocked" — a caller that wants the
- * LAN/metadata guard must ask for `loopback-and-public` or `loopback`.
- */
-export type ProbeNetworkScope = "loopback" | "public" | "loopback-and-public" | "any";
+export {
+  DEFAULT_PROBE_NETWORK_SCOPE,
+  classifyIpAddress,
+  isAddressAllowed,
+  type NetworkAddressKind,
+  type ProbeNetworkScope,
+} from "./network-address.js";
+export { NetworkProbeError, type NetworkProbeErrorCode } from "./network-probe-error.js";
 
-/**
- * What a caller that did not name a scope gets: the two normal uses of a health
- * probe (a local development server, a public health endpoint) with LAN, cloud
- * metadata and special addresses refused.
- *
- * Exported so `connectivity` can fall back to it. It used to fall back to `any`
- * — the most permissive scope — which silently disabled this classifier on the
- * tool's ordinary path: `connectivity {target:"http", url:"http://169.254.169.254/…"}`
- * reached the metadata address whenever `scope` was simply omitted, which is the
- * default a model produces. A security default must fail closed.
- */
-export const DEFAULT_PROBE_NETWORK_SCOPE: ProbeNetworkScope = "loopback-and-public";
 const DEFAULT_HTTP_PROBE_TIMEOUT_MS = 5_000;
 const DEFAULT_TCP_PROBE_TIMEOUT_MS = 2_000;
 /** Redirects are opt-in: a 3xx response is a useful health result on its own. */
 const DEFAULT_MAX_REDIRECTS = 0;
-
-export type NetworkAddressKind =
-  | "loopback"
-  | "private"
-  | "link-local"
-  | "unspecified"
-  | "multicast"
-  | "reserved"
-  | "public";
-
-export type NetworkProbeErrorCode =
-  | "INVALID_URL"
-  | "INVALID_HOST"
-  | "INVALID_PORT"
-  | "UNSAFE_TARGET"
-  | "DNS_LOOKUP_FAILED"
-  | "REQUEST_FAILED"
-  | "TIMEOUT"
-  | "TOO_MANY_REDIRECTS";
-
-/** A predictable error type lets the MCP layer distinguish bad input from an unavailable service. */
-export class NetworkProbeError extends Error {
-  constructor(
-    readonly code: NetworkProbeErrorCode,
-    message: string,
-    readonly cause?: unknown,
-  ) {
-    super(message);
-    this.name = "NetworkProbeError";
-  }
-}
 
 export interface ResolvedAddress {
   address: string;
@@ -117,36 +80,6 @@ export interface HttpProbeResult {
 }
 
 const HTTP_PROTOCOLS = new Set(["http:", "https:"]);
-
-/**
- * Classify a literal IP address without performing DNS.  The result is used
- * both for direct literals and every answer returned from DNS.
- */
-export function classifyIpAddress(input: string): NetworkAddressKind {
-  const address = stripIpv6Brackets(input);
-  const family = isIP(address);
-  if (family === 4) return classifyIpv4(address);
-  if (family === 6) return classifyIpv6(address);
-  throw new NetworkProbeError("INVALID_HOST", `Invalid IP address: ${input}`);
-}
-
-/** Return whether an address category can be reached under a selected policy. */
-export function isAddressAllowed(kind: NetworkAddressKind, scope: ProbeNetworkScope = DEFAULT_PROBE_NETWORK_SCOPE): boolean {
-  switch (scope) {
-    case "loopback":
-      return kind === "loopback";
-    case "public":
-      return kind === "public";
-    case "loopback-and-public":
-      return kind === "loopback" || kind === "public";
-    case "any":
-      // "any" is literal: no address-class filtering at all — RFC1918/ULA,
-      // link-local (cloud metadata), and every other reachable address pass.
-      // Callers that want the LAN/metadata guard must pass loopback-and-public
-      // or loopback.
-      return true;
-  }
-}
 
 /**
  * Parse an HTTP target before a network request is made.  URL's canonical host
@@ -339,129 +272,6 @@ export function displayProbeUrl(input: URL): string {
   return `${input.protocol}//${input.host}${input.pathname}${input.search ? "?<redacted>" : ""}`;
 }
 
-function classifyIpv4(address: string): NetworkAddressKind {
-  const octets = address.split(".").map(Number);
-  const [a, b] = octets;
-  // Callers only reach here once isIP() said 4, so both are numbers. The guard
-  // is fail-CLOSED on purpose: this classifier decides which addresses may be
-  // probed, and falling through to "public" would wave a malformed target
-  // through instead of refusing it.
-  if (a === undefined || b === undefined) return "reserved";
-  if (a === 127) return "loopback";
-  if (a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) return "private";
-  if (a === 169 && b === 254) return "link-local";
-  if (a === 0) return "unspecified";
-  // RFC 1918 is not exhaustive: these special-purpose ranges are likewise
-  // unsuitable probe targets. 100.64.0.0/10 is shared address space; its
-  // coverage already includes Alibaba Cloud's metadata address 100.100.100.200.
-  if (a === 100 && b >= 64 && b <= 127) return "reserved";
-  // 192.0.0.0/16 covers IETF protocol assignments (192.0.0.0/24) and
-  // TEST-NET-1 (192.0.2.0/24); 192.88.0.0/16 includes the deprecated
-  // 192.88.99.0/24 relay anycast. The narrower sub-clauses used to restate
-  // both and could never fire.
-  if (a === 192 && b === 0) return "reserved";
-  if (a === 192 && b === 88) return "reserved";
-  if (a === 192 && b === 31 && octets[2] === 196) return "reserved";
-  if (a === 192 && b === 52 && octets[2] === 193) return "reserved";
-  if (a === 192 && b === 175 && octets[2] === 48) return "reserved";
-  if (a === 198 && (b === 18 || b === 19)) return "reserved";
-  if ((a === 198 && b === 51 && octets[2] === 100) || (a === 203 && b === 0 && octets[2] === 113)) return "reserved";
-  if (a >= 224 && a <= 239) return "multicast";
-  if (a >= 240) return "reserved";
-  return "public";
-}
-
-function classifyIpv6(address: string): NetworkAddressKind {
-  const bytes = ipv6Bytes(address);
-  if (!bytes) throw new NetworkProbeError("INVALID_HOST", `Invalid IP address: ${address}`);
-  if (bytes.every(byte => byte === 0)) return "unspecified";
-  if (bytes.slice(0, 15).every(byte => byte === 0) && bytes[15] === 1) return "loopback";
-
-  // IPv4-mapped and IPv4-compatible forms must inherit the IPv4 policy.  This
-  // prevents ::ffff:127.0.0.1 and ::127.0.0.1 from bypassing loopback checks.
-  if (bytes.slice(0, 10).every(byte => byte === 0) && bytes[10] === 0xff && bytes[11] === 0xff) {
-    return classifyIpv4([...bytes.slice(12)].join("."));
-  }
-  if (bytes.slice(0, 12).every(byte => byte === 0)) return classifyIpv4([...bytes.slice(12)].join("."));
-
-  // ipv6Bytes() returns 16 bytes or undefined, and the undefined case already
-  // threw above, so both are numbers. Same fail-closed reasoning as
-  // classifyIpv4: refuse an address we cannot read rather than guess at it.
-  const b0 = bytes[0];
-  const b1 = bytes[1];
-  if (b0 === undefined || b1 === undefined) {
-    throw new NetworkProbeError("INVALID_HOST", `Invalid IP address: ${address}`);
-  }
-  if (b0 === 0xfe && (b1 & 0xc0) === 0x80) return "link-local"; // fe80::/10
-  if (b0 === 0xfe && (b1 & 0xc0) === 0x00) return "reserved"; // fe00::/9
-  if (b0 === 0xfe && (b1 & 0xc0) === 0xc0) return "reserved"; // fec0::/10 (deprecated site-local)
-  if ((b0 & 0xfe) === 0xfc) return "private"; // fc00::/7 (ULA)
-  if (bytes[0] === 0xff) return "multicast";
-
-  // IETF-reserved/documentation/tunnel prefixes are not globally-routable
-  // endpoints for a health probe.  Block them instead of guessing where they
-  // will be translated by the host network.
-  if (isPrefix(bytes, [0x00])) return "reserved";
-  if (isPrefix(bytes, [0x00, 0x64, 0xff, 0x9b])) return "reserved"; // 64:ff9b::/96
-  if (isPrefix(bytes, [0x01, 0x00])) return "reserved"; // 100::/64 discard-only
-  if (isPrefix(bytes, [0x20, 0x01, 0x0d, 0xb8])) return "reserved"; // 2001:db8::/32 docs
-  if (isPrefix(bytes, [0x20, 0x02])) return "reserved"; // 6to4 encodes an IPv4 route
-  if (isPrefix(bytes, [0x3f, 0xff])) return "reserved"; // 3fff::/20 docs
-  if (isPrefix(bytes, [0x5f, 0x00])) return "reserved"; // SRv6 special purpose
-  return "public";
-}
-
-function ipv6Bytes(address: string): number[] | undefined {
-  const value = address.toLowerCase();
-  if (value.includes("%")) return undefined;
-  const doubleColon = value.indexOf("::");
-  if (doubleColon !== -1 && doubleColon !== value.lastIndexOf("::")) return undefined;
-
-  const parseSide = (side: string): number[] | undefined => {
-    if (!side) return [];
-    const parts = side.split(":");
-    const output: number[] = [];
-    for (let index = 0; index < parts.length; index += 1) {
-      const part = parts[index];
-      // Unreachable (index < parts.length). Returning undefined means "not a
-      // valid address", which is this parser's fail-closed answer everywhere
-      // else too.
-      if (part === undefined) return undefined;
-      if (part.includes(".")) {
-        if (index !== parts.length - 1) return undefined;
-        if (isIP(part) !== 4) return undefined;
-        const octets = part.split(".").map(Number);
-        // isIP() just confirmed a dotted quad, so all four are numbers. `!` and
-        // not `?? 0`: a silent zero here would forge a DIFFERENT address, and
-        // this parser feeds the classifier that decides what may be probed.
-        output.push((octets[0]! << 8) | octets[1]!, (octets[2]! << 8) | octets[3]!);
-      } else {
-        if (!/^[0-9a-f]{1,4}$/i.test(part)) return undefined;
-        output.push(Number.parseInt(part, 16));
-      }
-    }
-    return output;
-  };
-
-  const left = parseSide(doubleColon === -1 ? value : value.slice(0, doubleColon));
-  const right = parseSide(doubleColon === -1 ? "" : value.slice(doubleColon + 2));
-  if (!left || !right) return undefined;
-  const words = doubleColon === -1
-    ? left
-    : [...left, ...Array<number>(8 - left.length - right.length).fill(0), ...right];
-  if (words.length !== 8) return undefined;
-  return words.flatMap(word => [(word >> 8) & 0xff, word & 0xff]);
-}
-
-function isPrefix(bytes: readonly number[], prefix: readonly number[]): boolean {
-  return prefix.every((value, index) => bytes[index] === value);
-}
-
-function stripIpv6Brackets(input: string): string {
-  if (input.startsWith("[") && input.endsWith("]")) return input.slice(1, -1);
-  return input;
-}
-
 async function defaultResolver(hostname: string): Promise<readonly ResolvedAddress[]> {
   const records = await lookupDns(hostname, { all: true, verbatim: true });
   return records.map(record => ({ address: record.address, family: record.family as 4 | 6 }));
@@ -474,22 +284,7 @@ function normalizePort(port: number): number {
   return port;
 }
 
-/**
- * The upper bound matters as much as the finite check. setTimeout keeps its
- * delay in a 32-bit signed int and silently uses 1ms beyond 2147483647, so a
- * probe asked to wait 1e18 ms against an unreachable address came back in
- * 17ms saying "timed out" -- a caller reading that would conclude the port is
- * closed, having never actually waited. Capping is right for a probe: the
- * intent behind an enormous timeout is "be patient", and 24.8 days delivers
- * that better than 1ms does.
- *
- * Kept local on purpose: 2^31-1 is the setTimeout cap, and the canonical copy
- * lives in src/bridge/tools/process-tools.ts (MAX_TIMER_MS) — but src/network does
- * not import src/bridge modules, so this file restates the literal instead.
- * The third copy is src/bridge/config/config-values.ts, browser-bundle-bound and
- * therefore dependency-free by design. Change all three together.
- */
-const MAX_TIMER_MS = 2_147_483_647;
+/** The timer ceiling is shared without creating a network -> bridge dependency. */
 
 function normalizeTimeout(value: number | undefined, fallback: number): number {
   const timeout = value ?? fallback;

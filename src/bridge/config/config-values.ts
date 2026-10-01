@@ -31,6 +31,7 @@
  * value well-formed", and their behavior is pinned by tests.
  */
 
+import { MAX_TIMER_MS } from "../../shared/timing.js";
 import { isConfigKey } from "./config-spec.js";
 
 export type ConfigValidation = { ok: true; value: unknown } | { ok: false; error: string };
@@ -72,21 +73,8 @@ const MAX_STRING_CHARS = 500;
 /** Longest possible DNS name: a longer "host" can never match anything. */
 const MAX_HOST_CHARS = 253;
 const LOG_MAX_BYTES_MAX = 1024 * 1024 * 1024;
-/**
- * setTimeout stores its delay in a 32-bit signed int. Past 2147483647 Node
- * warns and silently uses 1ms, so "hold this lock for essentially ever"
- * (1e18) becomes "release it next tick" -- the exact inversion of what was
- * asked for, and the kind that only shows up as a lock mysteriously handed to
- * a second caller. Refuse at the edit instead of accepting a number that
- * cannot mean what it says. Same family as the Math.max(0, NaN) rule in
- * AGENTS.md: a bad number must be refused, never quietly reinterpreted.
- *
- * This module keeps its own literal on purpose: it must stay browser-bundle-safe
- * (see the header), so it cannot import the node-oriented copy exported by
- * process-tools.ts (MAX_TIMER_MS) — and src/network/safe-probe.ts keeps a
- * third for the mirror-image reason. Change all three together.
- */
-const MAX_TIMER_MS = 2_147_483_647;
+// Shared/timing is dependency-free and browser-safe, so timer semantics have a
+// single source of truth across config validation, process waits and probes.
 
 const isInt = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n);
 

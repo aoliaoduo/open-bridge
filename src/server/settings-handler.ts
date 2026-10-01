@@ -1,555 +1,83 @@
 /**
- * Settings actions (orchestration layer, HTTP edition).
+ * Settings action orchestration.
  *
- * Direct port of the VS Code settings page's createSettingsMessageHandler:
- * same validation gates, same action set, same one-time-secret semantics.
- * The transport changed — instead of postMessage round-trips the handler
- * returns one structured result per action, which the /api router serializes.
- * Clipboard copies are client-side now: the handler returns the text and the
- * React console writes it to the clipboard itself.
+ * Input validation stays in the shared settings model; page-state assembly and
+ * domain actions live under ./settings/. This file is deliberately only the
+ * transport-independent dispatcher and common error envelope.
  */
-
-import { clientMcpUrl, state } from "../bridge/state.js";
 import {
-  authEnabled,
-  authStatus,
-  deleteToken,
-  mintToken,
-  purgeInactiveTokens,
-  revokeAllTokens,
-  revokeToken,
-  rotateToken,
-  tokenTtlSeconds,
-  usableTokenCount,
-  type MintedToken,
-} from "../http/auth.js";
-import {
-  authToggleVerdict,
   normalizeSettingsMessage,
-  type SecretPayload,
   type SettingsAction,
   type SettingsActionResult,
-  type SettingsDetectedView,
-  type SettingsState,
-  type SettingsTokenRow,
 } from "../bridge/config/settings-model.js";
-import { CONFIG_DEFAULTS } from "../bridge/config/config-defaults.js";
-import { settingsConfigFrom } from "../bridge/config/config-spec.js";
-import { detectShells } from "../shell/shell-provider.js";
-import { detectNgrok } from "../bridge/tunnel/ngrok-locate.js";
-import { NGROK_AUTHTOKEN_KEY } from "../bridge/tunnel/ngrok-runtime.js";
-import { playAlertSound, stopAlertSound } from "../bridge/tools/sound-alert.js";
-import { existsSync } from "node:fs";
-import { maskBarkKey, validateConfigValue } from "../bridge/config/config-values.js";
-import { NOTIFY_DEFAULT_TITLE, pushNotification, resolveNotifySettings, type NotifyOutcome } from "../bridge/tools/notify.js";
-import * as path from "node:path";
-import { resetUsageStats } from "../bridge/usage-store.js";
-import { host } from "../host/host.js";
-import { start, rotateRouteToken, republishAfterRotate } from "../bridge/lifecycle/lifecycle.js";
-import { buildWebAiPrompt } from "../bridge/onboarding.js";
-import { enqueueLifecycle } from "../bridge/lifecycle/lifecycle-queue.js";
 import {
-  autoConfigureTunnel,
-  buildTunnelView,
-  saveNgrokAuthtoken,
-  saveTunnelDetectionSetting,
-  saveTunnelDomain,
-} from "./settings-tunnel.js";
+  buildSettingsState,
+  fallbackSettingsState,
+} from "./settings/state.js";
+import { handleGeneralSettingsAction } from "./settings/general-actions.js";
+import { handleAuthSettingsAction } from "./settings/auth-actions.js";
+import { handleTunnelSettingsAction } from "./settings/tunnel-actions.js";
+import { handleNotifySettingsAction } from "./settings/notify-actions.js";
 
-type AuthStatusView = { tokens: SettingsTokenRow[] };
+export { buildSettingsState } from "./settings/state.js";
 
-/** Assemble the full page state the console renders from. */
-export async function buildSettingsState(): Promise<SettingsState> {
-  // Narrowed to the rows the page renders; the rest of authStatus's shape is
-  // an internal detail of the auth module.
-  const status: AuthStatusView = await authStatus();
-  const cfg = host().config;
-  const running = Boolean(state.server);
-  return {
-    running,
-    version: host().version(),
-    status: running
-      ? state.sessions.size
-        ? { kind: "connected", sessions: state.sessions.size }
-        : state.modernInFlight > 0
-          ? { kind: "active" }
-          : { kind: "ready" }
-      : { kind: "offline" },
-    mcpUrl: clientMcpUrl(),
-    configuredDomain: cfg.get("ngrokDomain", ""),
-    // Only whether one is stored and a masked hint -- never the token. The
-    // console has to be able to say "configured" without being able to leak it.
-    ngrokAuthtokenMask: maskBarkKey((await host().secrets.get(NGROK_AUTHTOKEN_KEY).catch(() => "")) ?? ""),
-    authEnabled: authEnabled(),
-    defaultTtlSeconds: tokenTtlSeconds(),
-    usableCount: await usableTokenCount(),
-    deadCount: status.tokens.filter(token => token.revoked || token.expired).length,
-    tokens: status.tokens,
-    concurrency: {
-      enabled: cfg.get("concurrency.enabled", true),
-      holdTimeoutMs: cfg.get("concurrency.holdTimeoutMs", CONFIG_DEFAULTS["concurrency.holdTimeoutMs"] as number),
-      waitTimeoutMs: cfg.get("concurrency.waitTimeoutMs", CONFIG_DEFAULTS["concurrency.waitTimeoutMs"] as number),
-    },
-    // The page projection is derived from the canonical config catalog; adding
-    // a generic-console setting changes the type, defaults and read path once.
-    config: settingsConfigFrom((key, fallback) => cfg.get(key, fallback)),
-    notify: notifyView(),
-    detected: detectedView(),
-  };
-}
-
-/**
- * Probe for the executables the two "type a path here" settings need.
- *
- * Done on every state read rather than cached at startup: this is a handful of
- * existsSync calls, and an operator who installs ngrok specifically because
- * the page told them it was missing should see it appear on reload rather than
- * after a restart. Failures collapse to empty lists — detection is a
- * convenience, and the free-text input behind it still works.
- */
-function detectedView(): SettingsDetectedView {
-  try {
-    return { shells: detectShells(), ngrok: detectNgrok() };
-  } catch {
-    return { shells: [], ngrok: [] };
-  }
-}
-
-/**
- * The masked notification view — resolve through the SAME reader the send path
- * uses, so what the page shows and what actually pushes cannot disagree (a
- * garbage hand-edited key means "not configured" in both places).
- */
-function notifyView() {
-  const settings = resolveNotifySettings();
-  return {
-    enabled: settings.enabled,
-    configured: Boolean(settings.key),
-    keyMask: maskBarkKey(settings.key),
-    serverUrl: settings.serverUrl,
-  };
-}
-
-function secretPayload(minted: MintedToken, kind: "minted" | "rotated"): SecretPayload {
-  return {
-    kind,
-    id: minted.id,
-    label: minted.label,
-    secret: minted.secret,
-    ttl_seconds: minted.permanent ? 0 : secondsUntil(minted.expires_at),
-  };
-}
-
-/**
- * The shared success shape: one fresh state read plus the action's extras.
- * `dispatch` binds this as its `done`; the case bodies extracted into their own
- * functions below call it directly, so every success reply keeps the exact
- * same field construction.
- */
-async function successWith(extra: Partial<SettingsActionResult> = {}): Promise<SettingsActionResult> {
-  return { ok: true, state: await buildSettingsState(), ...extra };
-}
-
-/** Execute one settings action; returns the structured result for the API response. */
 export async function handleSettingsAction(raw: unknown): Promise<SettingsActionResult> {
-  const normalized = normalizeSettingsMessage(raw);
-  if (!normalized) {
+  const action = normalizeSettingsMessage(raw);
+  if (!action) {
     return { ok: false, state: await buildSettingsState(), error: "无法识别的操作。" };
   }
-  const action = normalized;
 
   try {
     return await dispatch(action);
   } catch (error) {
     return {
       ok: false,
-      state: await buildSettingsState().catch(() => fallbackState()),
+      state: await buildSettingsState().catch(() => fallbackSettingsState()),
       error: error instanceof Error ? error.message : String(error),
     };
   }
 }
 
 async function dispatch(action: SettingsAction): Promise<SettingsActionResult> {
-  const cfg = host().config;
-  const done = successWith;
-
   switch (action.command) {
-    case "clearStats": {
-      // The counters are cumulative and were previously un-resettable: the
-      // implementation existed (usage-store.resetUsageStats) but nothing could
-      // reach it - the VS Code command never got a console equivalent here.
-      // Operator-only, exactly like the extension's.
-      resetUsageStats();
-      return done({ info: "调用统计已清零（累计调用数与按工具明细）。" });
-    }
-    case "copyPrompt": {
-      // The endpoint has a dedicated copy control beside this button. Keep the
-      // setup prompt to operating instructions only, so copying it does not also
-      // copy the route-token capability URL into a chat transcript.
-      return done({
-        info: "接入提示词已复制，粘贴给已连接该 MCP 的 AI 客户端即可。",
-        copyText: buildWebAiPrompt(),
-      });
-    }
-
+    case "clearStats":
+    case "copyPrompt":
     case "copyText":
-      return done({ info: "已复制。", copyText: action.text });
+    case "start":
+    case "stop":
+    case "rotateEndpoint":
+    case "setConcurrency":
+    case "setConfig":
+      return handleGeneralSettingsAction(action);
 
-    case "start": {
-      await start();
-      return done();
-    }
-
-    case "stop": {
-      // Describe the outcome instead of awaiting it: stopping closes the
-      // listener that carries this response, so the router performs it once the
-      // response is on the wire (see SettingsActionResult.deferStop). The state
-      // is therefore composed here rather than read back after the fact.
-      const before = await buildSettingsState();
-      return {
-        ok: true,
-        state: { ...before, running: false, status: { kind: "stopped" }, mcpUrl: "" },
-        info: "Bridge 已停止：本地服务关闭、端口释放，这个控制台也随之失效。重新启动请运行 open-bridge serve。",
-        deferStop: true,
-      };
-    }
-
-    case "rotateEndpoint": {
-      // Flip the token — an in-process assignment, no socket teardown: every
-      // route compares state.routeToken per request — and then re-point the
-      // surfaces that carried the old one. The listener is deliberately NOT
-      // rebound; that only interrupted traffic and relaunched the tunnel for no
-      // gain. The page's injected console token is stale now, hence
-      // reloadRequired: without the reload every later action would 403.
-      await enqueueLifecycle(async () => { await rotateRouteToken(); });
-      await republishAfterRotate();
-      return {
-        ...(await done({ info: "MCP URL 已更新，旧链接立即失效。控制台正在重新加载。" })),
-        reloadRequired: true,
-      };
-    }
-
-    case "setConfig": {
-      // Mirror the MCP write path: stored directories are resolved, so both
-      // entries persist the same canonical form (reads resolve again anyway).
-      const value =
-        action.key === "allowedDirectories" && Array.isArray(action.value)
-          ? (action.value as string[]).map(item => path.resolve(item))
-          : action.value;
-      if (
-        (action.key === "tunnelProvider" || action.key === "ngrokExecutable" || action.key === "tailscaleExecutable")
-        && typeof value === "string"
-      ) {
-        const outcome = await saveTunnelDetectionSetting(action.key, value);
-        return done({ info: outcome.info });
-      }
-      await cfg.update(action.key, value);
-      return done({ info: "已保存。" });
-    }
-
-    case "saveDomain": {
-      const outcome = await saveTunnelDomain(action.domain);
-      return outcome.ok
-        ? done({ info: outcome.info })
-        : { ok: false, state: await buildSettingsState(), error: outcome.error };
-    }
-
-    case "setAuthEnabled": {
-      const verdict = authToggleVerdict(action.enabled, await usableTokenCount());
-      if (!verdict.allow) {
-        return { ok: false, state: await buildSettingsState(), error: verdict.reason ?? "无法开启鉴权。" };
-      }
-      await cfg.update("auth.enabled", action.enabled);
-      return done({
-        info: action.enabled
-          ? "鉴权已启用：客户端现在必须携带令牌。"
-          : "Bearer 门禁已关闭：只填 URL 即可访问。",
-      });
-    }
-
-    case "setDefaultTtl": {
-      await cfg.update("auth.tokenTtlSeconds", action.seconds);
-      return done();
-    }
-
-    case "createToken": {
-      const minted = await mintToken({ label: action.label, ttlSeconds: action.ttlSeconds });
-      return done({ secret: secretPayload(minted, "minted"), copyText: minted.secret });
-    }
-
+    case "setAuthEnabled":
+    case "setDefaultTtl":
+    case "createToken":
     case "armPublicLock":
-      return armPublicLockAction(action);
-
     case "hardenWorkspace":
-      return hardenWorkspaceAction();
+    case "rotateToken":
+    case "revokeToken":
+    case "deleteToken":
+    case "purgeTokens":
+    case "revokeAll":
+      return handleAuthSettingsAction(action);
 
-    case "rotateToken": {
-      const rotated = await rotateToken(action.id);
-      return done({ secret: secretPayload(rotated, "rotated"), copyText: rotated.secret });
-    }
+    case "saveDomain":
+    case "saveNgrokAuthtoken":
+    case "autoConfigureTunnel":
+    case "refreshTunnelDetect":
+      return handleTunnelSettingsAction(action);
 
-    case "revokeToken": {
-      const result = await revokeToken(action.id);
-      return done({ info: `已吊销 ${result.revoked.length} 个令牌。` });
-    }
-
-    case "deleteToken": {
-      await deleteToken(action.id);
-      const state_ = await buildSettingsState();
-      if (authEnabled() && (await usableTokenCount()) === 0) {
-        return {
-          ok: true,
-          state: state_,
-          error: "鉴权仍开启，但已没有任何有效令牌 — 端点正在拒绝所有请求。请新建令牌，或关闭鉴权开关。",
-        };
-      }
-      return { ok: true, state: state_, info: "令牌已删除。" };
-    }
-
-    case "purgeTokens": {
-      const result = await purgeInactiveTokens();
-      return done({ info: `已清理 ${result.deleted.length} 个失效令牌。` });
-    }
-
-    case "revokeAll": {
-      const result = await revokeAllTokens();
-      return done({
-        info: authEnabled()
-          ? `已吊销 ${result.revoked.length} 个令牌。端点现在拒绝所有请求，请新建令牌。`
-          : `已吊销 ${result.revoked.length} 个令牌。`,
-      });
-    }
-
-    case "setConcurrency": {
-      await cfg.update("concurrency.enabled", action.enabled);
-      await cfg.update("concurrency.holdTimeoutMs", action.holdTimeoutMs);
-      await cfg.update("concurrency.waitTimeoutMs", action.waitTimeoutMs);
-      return done({ info: "并发设置已保存。" });
-    }
-
-    case "saveNotifyKey": {
-      // The value arrives exactly as pasted; validateConfigValue owns BOTH the
-      // grammar and the full-URL → bare-key parsing, shared with the MCP write
-      // path so the two entries cannot drift. "" clears the channel.
-      const checked = validateConfigValue("notify.barkKey", action.key);
-      if (!checked.ok) {
-        return { ok: false, state: await buildSettingsState(), error: checked.error };
-      }
-      await cfg.update("notify.barkKey", checked.value);
-      const stored = checked.value as string;
-      if (!stored) return done({ info: "设备密钥已清除：推送停用（开关保持原样）。" });
-      const extracted = action.key.includes("/") || action.key.includes(":");
-      return done({
-        info: extracted
-          ? `设备密钥已保存（已从链接中摘出：${maskBarkKey(stored)}）。点「发送测试」验证手机。`
-          : `设备密钥已保存（${maskBarkKey(stored)}）。点「发送测试」验证手机。`,
-      });
-    }
-
-    case "testSound": {
-      const key = action.which === "finished" ? "sound.fileFinished" : "sound.fileWaiting";
-      const file = String(cfg.get<string>(key, "") ?? "").trim();
-      if (!file) return { ok: false, state: await buildSettingsState(), error: "这一项还没有设置音频文件。" };
-      // Plays regardless of sound.enabled: the operator pressing this button
-      // is asking "does this file work", not "would this fire right now".
-      // Same reasoning as the Bark test button bypassing the event switches.
-      if (!existsSync(file)) {
-        return { ok: false, state: await buildSettingsState(), error: `文件不存在：${file}` };
-      }
-      const result = playAlertSound(file);
-      return result.played
-        ? done({ info: "已弹出播放窗口，关闭它即停止。没听到就检查系统音量和默认输出设备。" })
-        : { ok: false, state: await buildSettingsState(), error: `播放失败：${result.reason}` };
-    }
-
-    case "stopSound": {
-      // Always reports success: "stop" on silence is not an error, it is the
-      // state the operator was asking for.
-      const stopped = stopAlertSound();
-      return done({ info: stopped ? "已停止。" : "当前没有在播放。" });
-    }
-
-    case "saveNgrokAuthtoken": {
-      const outcome = await saveNgrokAuthtoken(action.token);
-      return outcome.ok
-        ? done({ info: outcome.info })
-        : { ok: false, state: await buildSettingsState(), error: outcome.error };
-    }
-
-    case "autoConfigureTunnel": {
-      const outcome = await autoConfigureTunnel();
-      return outcome.ok
-        ? done({ info: outcome.info })
-        : { ok: false, state: await buildSettingsState(), error: outcome.error };
-    }
-
-    case "refreshTunnelDetect": {
-      // The operator installed ngrok (or enabled Funnel) and does not want to
-      // wait out the cache, let alone restart the instance.
-      await buildTunnelView(true);
-      return done({ info: "已重新检测本机的隧道环境。" });
-    }
-
-    case "testNotify": {
-      // A deliberate button press is a new diagnostic request, so it bypasses
-      // the automatic one-alert episode latch and tests only the phone channel.
-      const result = await pushNotification(
-        resolveNotifySettings(),
-        "waiting",
-        NOTIFY_DEFAULT_TITLE,
-        "Open Bridge 测试通知：配置已生效。实际提醒只会在等待回答或对话结束时发送一次。",
-        Date.now(),
-        // 人手动作绕过账本（重新按一次是因为没听见），并用时效性等级让
-        // 测试推送在专注模式下也可见——收不到测试是排查的第一现场。
-        // silentLocally: this button tests the phone. Letting it also play the
-        // desktop sound would mean a operator pressing it gets a music player
-        // they did not ask for, and cannot tell which channel actually worked.
-        { bypassEpisode: true, silentLocally: true },
-      );
-      return notifyActionVerdict(result, await buildSettingsState());
-    }
+    case "saveNotifyKey":
+    case "testSound":
+    case "stopSound":
+    case "testNotify":
+      return handleNotifySettingsAction(action);
   }
-  // Exhaustiveness, and a better guard than the no-op `ready` case that used
-  // to make this function fall through to a return by accident: adding a
-  // command to the allowlist without handling it here is now a type error,
-  // not a silently-undefined response.
+
   return assertHandled(action);
 }
 
 function assertHandled(action: never): never {
   throw new Error(`Unhandled console action: ${JSON.stringify(action)}`);
-}
-
-/**
- * 「签发令牌并启用门禁」: the operator sees the risk (public-open, no bearer
- * gate) on 体检 and wants it closed without a trip to 令牌 to mint, copy,
- * and then flip a switch on the same page.
- *
- * Order is not cosmetic: the gate is fail-closed, so enabling it with zero
- * usable tokens would refuse every client. Mint first, enable second, and
- * if enabling fails, delete the token minted for it — a stray secret with
- * no lock behind it is worse than nothing.
- */
-async function armPublicLockAction(
-  action: Extract<SettingsAction, { command: "armPublicLock" }>,
-): Promise<SettingsActionResult> {
-  const cfg = host().config;
-  const gateWasEnabled = authEnabled();
-  const existing = await usableTokenCount();
-  if (gateWasEnabled && existing > 0) {
-    return successWith({ info: "Bearer 门禁本来就已经开着：/mcp 要求 Bearer 令牌。" });
-  }
-  let secret: SecretPayload | undefined;
-  let mintedId: string | undefined;
-  if (existing === 0) {
-    // A second token would just be one more thing to lose; reuse is the
-    // point of a one-step action.
-    const minted = await mintToken({
-      label: action.label || "public-lock",
-      ttlSeconds: action.ttlSeconds ?? tokenTtlSeconds(),
-    });
-    mintedId = minted.id;
-    secret = secretPayload(minted, "minted");
-  }
-  if (!gateWasEnabled) {
-    try {
-      await cfg.update("auth.enabled", true);
-    } catch (error) {
-      if (mintedId) await deleteToken(mintedId).catch(() => undefined);
-      throw error;
-    }
-  }
-  return successWith({
-    secret,
-    copyText: secret?.secret,
-    info: gateWasEnabled && secret
-      ? "Bearer 门禁原本已开启但没有有效令牌；已补发 1 个令牌，客户端可再次使用 Bearer 方式接入。"
-      : secret
-        ? "Bearer 门禁已启用：已签发 1 个令牌并打开门禁，客户端必须在请求头带 Authorization: Bearer <令牌>。"
-          + "只填 URL 的客户端（例如 ChatGPT 连接器）会立刻连不上；要恢复就在「安全」页关掉那个开关。"
-      : `Bearer 门禁已启用：复用了现有的 ${existing} 个有效令牌，客户端现在必须携带令牌（只填 URL 会连不上）。`,
-  });
-}
-
-/**
- * Explicit compatibility-safe security preset: keep permissive defaults for
- * existing users, but let an operator deliberately enable both the Bearer gate
- * and restricted file access in one action.
- */
-async function hardenWorkspaceAction(): Promise<SettingsActionResult> {
-  const gate = await armPublicLockAction({ command: "armPublicLock", label: "public-lock" });
-  try {
-    await host().config.update("unrestrictedFileAccess", false);
-  } catch (error) {
-    return {
-      ok: false,
-      state: await buildSettingsState().catch(() => gate.state),
-      secret: gate.secret,
-      copyText: gate.copyText,
-      error: "Bearer 门禁已处理，但文件访问范围没有保存成功："
-        + (error instanceof Error ? error.message : String(error)),
-    };
-  }
-  return successWith({
-    secret: gate.secret,
-    copyText: gate.copyText,
-    info: "安全预设已应用：Bearer 门禁已开启，文件访问已限制为当前工作区和「显式允许目录」。",
-  });
-}
-
-/** Map a push outcome onto the console's ok/info/error shape. */
-function notifyActionVerdict(result: NotifyOutcome, freshState: SettingsState): SettingsActionResult {
-  if (result.delivered) {
-    return { ok: true, state: freshState, info: "测试通知已发出 — 手机该响了。没收到就检查 Bark App 与网络连接。" };
-  }
-  const why: Record<string, string> = {
-    disabled: "通知开关是关的：先打开本页的「启用通知」。",
-    no_key: "还没有设备密钥：粘贴 Bark 里的密钥并保存。",
-    send_failed: `推送失败：${result.error || `Bark 返回了 HTTP ${result.status || "0"}`}。密钥可能不对。`,
-    duplicate: "这一轮已经提醒过一次；恢复普通工作后才会开启新的提醒轮次。",
-  };
-  return { ok: false, state: freshState, error: `测试未送达：${why[result.reason] ?? result.reason}` };
-}
-
-function fallbackState(): SettingsState {
-  return {
-    running: Boolean(state.server),
-    version: host().version(),
-    status: { kind: "error" },
-    mcpUrl: clientMcpUrl(),
-    configuredDomain: "",
-    // The fallback runs when state could not be built; claiming "no authtoken"
-    // is the safe direction -- it understates rather than inventing one.
-    ngrokAuthtokenMask: "",
-    authEnabled: false,
-    defaultTtlSeconds: 0,
-    usableCount: 0,
-    deadCount: 0,
-    tokens: [],
-    concurrency: {
-      enabled: CONFIG_DEFAULTS["concurrency.enabled"] as boolean,
-      holdTimeoutMs: CONFIG_DEFAULTS["concurrency.holdTimeoutMs"] as number,
-      waitTimeoutMs: CONFIG_DEFAULTS["concurrency.waitTimeoutMs"] as number,
-    },
-    // Canonical defaults from the shared list, not a restatement: a future
-    // default change propagates here instead of silently diverging. Arrays are
-    // copied — CONFIG_DEFAULTS must never be aliased into mutable state.
-    config: settingsConfigFrom((_key, value) => (Array.isArray(value) ? [...value] : value)),
-    // Detection needs no host — it reads the filesystem, not the config — so
-    // the pre-host view can still offer the picker instead of a bare box.
-    detected: detectedView(),
-    notify: {
-      // The canonical defaults, same as every other fallback field: with a
-      // possibly-broken config we report "no key", never a guess about one.
-      enabled: CONFIG_DEFAULTS["notify.enabled"] as boolean,
-      configured: false,
-      keyMask: "",
-      serverUrl: CONFIG_DEFAULTS["notify.serverUrl"] as string,
-    },
-  };
-}
-
-function secondsUntil(iso: string | null): number {
-  if (!iso) return 0;
-  return Math.max(0, Math.round((Date.parse(iso) - Date.now()) / 1000));
 }

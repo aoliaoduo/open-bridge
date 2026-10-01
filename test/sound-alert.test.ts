@@ -129,13 +129,12 @@ test("the console can stop a sound that is already playing", () => {
  */
 test("the Bark test button asks for a silent-locally push", () => {
   const handler = readFileSync(
-    path.join(process.cwd(), "src/server/settings-handler.ts"),
+    path.join(process.cwd(), "src/server/settings/notify-actions.ts"),
     "utf8",
   );
   const testNotify = handler.slice(handler.indexOf('case "testNotify"'));
-  const body = testNotify.slice(0, testNotify.indexOf("\n    }"));
   assert.match(
-    body,
+    testNotify,
     /silentLocally:\s*true/,
     "the phone test must not also play the desktop sound",
   );
