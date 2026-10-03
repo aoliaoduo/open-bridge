@@ -15,6 +15,8 @@
 
 ### Fixed
 
+- TUI 的 500 ms 刷新不再对每一行先执行整行清空再绘制；渲染层本就保证精确宽度，现改为直接覆盖，避免 Windows Terminal 中倒数第二行（快捷提示/活动行）持续闪烁，同时保留状态刷新与显式行定位。
+- Windows 上非优雅关闭 Bridge 后若遗留了 ngrok 子进程，下一次启动会只回收“父进程已不存在、保留域名一致且命令行符合 Bridge ngrok 启动形状”的遗留代理；即使上一轮使用的是不同随机本地端口也能安全重领公网域名，`mine` / `unknown` 探测结果也不再误报为“另一个窗口占用”，避免单实例被错误停在 `blocked/follower` 状态。
 - 多实例共享公网隧道时的 `bridge-peers.json` 更新改为跨进程互斥的原子 read-merge-write：两个 Bridge 同时启动或 30 秒重发不再因 last-writer-wins 丢失 peer 行，避免公网 owner 暂时找不到目标工作区而让 MCP 工具统一报内部错误；死进程遗留的锁会自动回收，周期性 republish 继续作为异常兜底。
 - 本机 Web 控制台的「状态」页新增两步确认的「关闭 Bridge」操作：Windows Terminal 不可用、只剩 Web 界面时也能走与 TUI/CLI 相同的优雅 shutdown，不再需要靠隐藏终端或全局 CLI 才能结束实例。
 - `start-open-bridge-project.cmd` 的构建新鲜度从 mtime 启发式升级为 SHA-256 内容指纹 + 成功构建 stamp：源码内容即使带着更旧时间戳也不会漏构建；`package.json` / `package-lock.json` 变化会先同步依赖；内容未变化的普通重启继续复用现有 `dist`，不会把其他工作区无故标成 `build_stale`。

@@ -231,12 +231,13 @@ export function startConsoleTui(options: ConsoleTuiOptions): boolean {
         actionNotice,
         ...controllerRenderOptions(controller),
       });
-      // A full-width write leaves the cursor on the last cell (wrap pending).
-      // Erasing there eats that cell — or the last half of a wide character.
-      // Address and clear each row BEFORE drawing, with no LF/autowrap path
-      // and no trailing erase that could remove newly painted content.
+      // renderFrame already pads every row to the terminal's exact visual width,
+      // so the new row overwrites every cell of the old one. Clearing each row
+      // first created a visible blank interval on Windows Terminal every 500 ms
+      // (most obvious on the penultimate shortcut/activity row). Address and
+      // overwrite directly: no LF/autowrap path and no erase-induced flash.
       write(lines.map((line, index) =>
-        `${index === 0 ? "\x1b[H" : `\x1b[${index + 1};1H`}\x1b[2K${line}`,
+        `${index === 0 ? "\x1b[H" : `\x1b[${index + 1};1H`}${line}`,
       ).join(""));
     } catch { /* see above */ }
   };

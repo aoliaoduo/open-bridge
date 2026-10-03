@@ -458,15 +458,19 @@ test("real narrow activity scrolling uses the rows left after overview cards", a
 });
 
 
-test("real driver clears before drawing and never erases the last painted cell", async () => {
+test("real driver overwrites exact-width rows without erase flashes", async () => {
   await withTerminal(({ output, press }) => {
     press("tab");
     const esc = String.fromCharCode(27);
-    assert.ok(output.payload.startsWith(`${esc}[H${esc}[2K`), "erase the row BEFORE its ink, not at the pending-wrap cursor");
-    assert.doesNotMatch(output.payload, new RegExp(`${esc}\\[(?:0)?[KJ]`), "erase-to-end after a full row deletes its last cell");
+    assert.ok(output.payload.startsWith(`${esc}[H`), "the first row is addressed directly");
+    assert.doesNotMatch(
+      output.payload,
+      new RegExp(`${esc}\\[[0-9;]*(?:K|J)`),
+      "exact-width frame rows already overwrite every visible cell; clearing them first causes visible flicker",
+    );
     assert.ok(!output.payload.includes("\n") && !output.payload.includes("\r"), "explicit row addresses do not rely on terminal newline modes");
     for (let row = 2; row <= output.rows; row += 1) {
-      assert.ok(output.payload.includes(`${esc}[${row};1H${esc}[2K`), `row ${row} is positioned and cleared before drawing`);
+      assert.ok(output.payload.includes(`${esc}[${row};1H`), `row ${row} is positioned directly before drawing`);
     }
   });
 });

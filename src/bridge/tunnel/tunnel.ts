@@ -24,7 +24,7 @@ import { RECONNECT_DELAYS_MS, state } from "../runtime-state.js";
 import { createWatchChain, nextFreeRounds, shouldClaimDomain, watchIntervalMs, type WatchChain } from "./tunnel-watch.js";
 import { enqueueLifecycle } from "../lifecycle/lifecycle-queue.js";
 import { publishSelf } from "./peer-registry.js";
-import { ngrokMissingMessage, ngrokProcessEnvironment } from "./ngrok-runtime.js";
+import { ngrokMissingMessage, ngrokProcessEnvironment, reapOrphanManagedNgrok } from "./ngrok-runtime.js";
 import { probeTailscaleDomain, resolveTailscaleExecutable } from "./tailscale-locate.js";
 import { funnelMountIsOurs, probeFunnelHolder, shouldClaimOnStartup } from "./funnel-ownership.js";
 
@@ -555,23 +555,48 @@ export async function startTunnelInternal(generation: number): Promise<void> {
     return;
   }
   const domain = validateNgrokDomain(configuredDomain);
-  if ((await probePublicBridge(domain, state.routeToken)) !== "free") {
+  let verdict = await probePublicBridge(domain, state.routeToken);
+  if (verdict === "mine" || verdict === "unknown") {
+    // An abruptly closed Windows terminal can leave the ngrok child alive even
+    // though its Bridge parent is gone. With a fixed local port that stale
+    // tunnel can answer as "mine"; with port 0 it normally still forwards the
+    // PREVIOUS process's now-dead ephemeral port, so the edge is "unknown".
+    // Reap only the exact Bridge-shaped orphan (dead parent + same domain and
+    // ngrok argv shape), then ask the edge again. Live peer tunnels are untouched.
+    const reaped = await reapOrphanManagedNgrok(domain);
+    if (reaped.length > 0) {
+      record(
+        "ngrok",
+        "progress",
+        `Recovered ${reaped.length} stale ngrok process(es) left by a closed Bridge; reclaiming the public domain.`,
+      );
+      verdict = await probePublicBridge(domain, state.routeToken, 1_000);
+    }
+  }
+  if (verdict !== "free") {
     state.tunnelRole = "blocked";
     startPublicWatch(domain);
-    // The domain is already held by another instance on this machine.
-    // Advertise ourselves FIRST: the adopt probe below
-    // can only succeed once the holder has a row to look our token up in, and
-    // without this publish it always timed out into local-only even though the
-    // running tunnel could have routed us the whole time.
+    // Advertise ourselves FIRST: if a live peer really owns the domain, the
+    // adopt probe below can only succeed once the holder has a row to route our
+    // token to. "mine" and "unknown" are intentionally kept distinct from
+    // "other" for diagnostics: neither proves that another window owns it.
     await publishSelf();
     const adopted = await adoptSharedTunnel(domain);
-    record(
-      "ngrok",
-      "completed",
-      adopted && state.tunnelUrl
+    let message: string;
+    if (adopted && state.tunnelUrl) {
+      message = verdict === "other"
         ? `Public domain belongs to another instance; serving through its tunnel: ${redactedPublicUrl(state.tunnelUrl)}`
-        : "Public domain belongs to another window; this Bridge stays local until that tunnel routes it.",
-    );
+        : verdict === "mine"
+          ? `Public domain already routes this Bridge; reusing the existing tunnel: ${redactedPublicUrl(state.tunnelUrl)}`
+          : `Public domain became reachable through an existing tunnel: ${redactedPublicUrl(state.tunnelUrl)}`;
+    } else if (verdict === "other") {
+      message = "Public domain belongs to another window; this Bridge stays local until that tunnel routes it.";
+    } else if (verdict === "mine") {
+      message = "Public domain already points at this Bridge, but no owned ngrok child is attached; waiting to reclaim the tunnel safely.";
+    } else {
+      message = "Public domain state is temporarily inconclusive; this Bridge stays local until it can safely reuse or claim the tunnel.";
+    }
+    record("ngrok", "completed", message);
     return;
   }
   state.tunnelRole = "owner";
